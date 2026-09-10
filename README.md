@@ -233,3 +233,7 @@ Time and logarithmic axes as described under [Axes](#axes), including calendar t
 ## 0.1.1 fixes
 
 SVG exports include a visible series legend (donut and heatmap already have labels). The legend footer adds 22 pixels per row to the SVG viewBox beyond the specified plot height. Pass `includeLegend: false` to `ChartSvg.Render` to omit it. Blazor keeps its interactive legend, and downloads include the static legend. Bubble areas share one size scale across series. SVG CSS uses prefixed selectors and per-chart color variables so mixed themes can coexist without styling unrelated host elements.
+
+## License
+
+MIT. See [LICENSE](LICENSE). The packages carry the same expression, so consumers see it in their dependency reports.
