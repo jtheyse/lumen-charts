@@ -3,6 +3,8 @@ name: Verify
 on:
   push:
     branches: [master]
+    # A release tag runs the whole suite again, so a tag is never published unverified.
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
