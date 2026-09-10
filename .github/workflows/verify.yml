@@ -1,0 +1,81 @@
+name: Verify
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Build, test and HTTP checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore Lumen.Charts.slnx
+
+      - name: Build
+        run: dotnet build Lumen.Charts.slnx -c Release --no-restore
+
+      - name: Regression suite
+        run: dotnet run --project tests/Lumen.Charts.Tests -c Release --no-build
+
+      - name: Start the gallery
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+        run: |
+          nohup dotnet run --project samples/Lumen.Gallery -c Release --no-build \
+            --urls http://localhost:5188 > gallery.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -sf http://localhost:5188/health > /dev/null; then
+              echo "Gallery answered after ${attempt} attempts."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "The gallery never answered on http://localhost:5188."
+          cat gallery.log
+          exit 1
+
+      - name: HTTP checks
+        shell: pwsh
+        run: ./tests/verify-api.ps1
+
+      - name: Gallery log
+        if: failure()
+        run: cat gallery.log
+
+      - name: Pack
+        run: |
+          for project in src/Lumen.Charts src/Lumen.Charts.Blazor src/Lumen.Charts.AspNetCore; do
+            dotnet pack "$project" -c Release -o artifacts/packages --no-build
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: artifacts/packages/*.nupkg
+
+  webassembly:
+    name: WebAssembly host builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install the WebAssembly workload
+        run: dotnet workload install wasm-tools
+
+      # Guards the defect fixed in 0.6.0: a framework reference to the ASP.NET Core shared
+      # framework makes the component library impossible to reference from a WebAssembly host.
+      - name: Build the WebAssembly sample
+        run: dotnet build samples/Lumen.Wasm -c Release
