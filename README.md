@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.6.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.6.1. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -22,6 +22,16 @@ dotnet pack src/Lumen.Charts -c Release -o artifacts/packages
 dotnet pack src/Lumen.Charts.Blazor -c Release -o artifacts/packages
 dotnet pack src/Lumen.Charts.AspNetCore -c Release -o artifacts/packages
 ```
+
+With a host running, `tests/Lumen.Charts.BrowserTests` drives it in a real browser:
+
+```powershell
+dotnet build tests/Lumen.Charts.BrowserTests -c Release
+pwsh tests/Lumen.Charts.BrowserTests/bin/Release/net10.0/playwright.ps1 install chromium
+dotnet run --project tests/Lumen.Charts.BrowserTests -c Release --no-build -- http://localhost:5188
+```
+
+It uses component selectors only, so the same thirteen checks run against the gallery and against the WebAssembly host on port 5199. It stays outside the solution so the ordinary build needs no browser download.
 
 The repository NuGet.Config restores from nuget.org for one dependency: `Lumen.Charts.Blazor` references `Microsoft.AspNetCore.Components.Web` (8.0.0) rather than the ASP.NET Core shared framework, because a WebAssembly host has no shared framework to reference. `Lumen.Charts` and `Lumen.Charts.AspNetCore` add no packages of their own. With the gallery running, execute `./tests/verify-api.ps1` for HTTP integration checks.
 
@@ -209,6 +219,10 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md) and [verification](docs/VERIFICATION.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.6.1 fixes
+
+Marks on the first and last value of a line, area, scatter or bubble chart were drawn exactly on the plot's clipping boundary, so half of each was cut off and a pointer at the mark's own centre missed it. The clipping viewport is now inset by one marker radius. Found by the new browser suite, and covered by both it and the executable suite.
 
 ## 0.6.0 additions
 

@@ -542,6 +542,24 @@ Test("Published libraries carry no host-specific dependency",()=>{
     // Anything server-only would keep the component library out of a WebAssembly host.
     Check(!components.Any(name=>name.Contains("Server")||name.Contains("Http")||name.Contains("Hosting")));
 });
+Test("Marks on the first and last values are drawn whole",()=>{
+    foreach(var kind in (ChartKind[])[ChartKind.Line,ChartKind.Area,ChartKind.Scatter])
+    {
+        var doc=Svg(Spec(kind));
+        var clip=doc.Descendants(ns+"svg").Single(e=>e.Attribute("x") is not null);
+        double left=double.Parse(clip.Attribute("x")!.Value,CultureInfo.InvariantCulture);
+        double width=double.Parse(clip.Attribute("width")!.Value,CultureInfo.InvariantCulture);
+        var circles=doc.Descendants(ns+"g").Where(e=>e.Attribute("data-point") is not null).Select(e=>e.Element(ns+"circle")!).ToArray();
+        Check(circles.Length==3,$"{kind} drew {circles.Length} marks");
+        foreach(var circle in circles)
+        {
+            double cx=double.Parse(circle.Attribute("cx")!.Value,CultureInfo.InvariantCulture);
+            double r=double.Parse(circle.Attribute("r")!.Value,CultureInfo.InvariantCulture);
+            // A mark clipped in half is half invisible and cannot be hovered at its own centre.
+            Check(cx-r>=left&&cx+r<=left+width,$"{kind} mark at {cx} is clipped by the plot viewport");
+        }
+    }
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

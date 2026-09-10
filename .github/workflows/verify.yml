@@ -51,6 +51,17 @@ jobs:
         if: failure()
         run: cat gallery.log
 
+      - name: Build the browser suite
+        run: dotnet build tests/Lumen.Charts.BrowserTests -c Release
+
+      - name: Install Chromium
+        run: pwsh tests/Lumen.Charts.BrowserTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      # Tooltips, exports, selection, zoom and node dragging exist only in a browser; nothing else
+      # in this workflow can see them.
+      - name: Browser behavior on the gallery
+        run: dotnet run --project tests/Lumen.Charts.BrowserTests -c Release --no-build -- http://localhost:5188
+
       - name: Pack
         run: |
           for project in src/Lumen.Charts src/Lumen.Charts.Blazor src/Lumen.Charts.AspNetCore; do
@@ -79,3 +90,31 @@ jobs:
       # framework makes the component library impossible to reference from a WebAssembly host.
       - name: Build the WebAssembly sample
         run: dotnet build samples/Lumen.Wasm -c Release
+
+      - name: Build the browser suite
+        run: dotnet build tests/Lumen.Charts.BrowserTests -c Release
+
+      - name: Install Chromium
+        run: pwsh tests/Lumen.Charts.BrowserTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Start the WebAssembly host
+        run: |
+          nohup dotnet run --project samples/Lumen.Wasm -c Release --no-build \
+            --urls http://localhost:5199 > wasm.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -sf http://localhost:5199/ > /dev/null; then
+              echo "WebAssembly host answered after ${attempt} attempts."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "The WebAssembly host never answered on http://localhost:5199."
+          cat wasm.log
+          exit 1
+
+      - name: Browser behavior on WebAssembly
+        run: dotnet run --project tests/Lumen.Charts.BrowserTests -c Release --no-build -- http://localhost:5199
+
+      - name: WebAssembly host log
+        if: failure()
+        run: cat wasm.log

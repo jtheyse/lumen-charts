@@ -135,8 +135,10 @@ public static class ChartSvg
         }
         w.Text((left + right) / 2, bottom + 44, horizontal ? s.YLabel : s.XLabel, "text-anchor='middle' class='lumen-muted'");
         w.Text(20, (top + bottom) / 2, horizontal ? s.XLabel : s.YLabel, $"text-anchor='middle' transform='rotate(-90 20 {N((top + bottom) / 2)})' class='lumen-muted'");
-        // Nested SVG provides a local clipping viewport without global clip-path IDs.
-        w.Add($"<svg x='{N(left)}' y='{N(top)}' width='{N(right-left)}' height='{N(bottom-top)}' viewBox='{N(left)} {N(top)} {N(right-left)} {N(bottom-top)}' overflow='hidden'>");
+        // Nested SVG provides a local clipping viewport without global clip-path IDs. It is inset by
+        // one marker radius so a mark on the first or last value is drawn whole and stays hoverable.
+        const double bleed = 6;
+        w.Add($"<svg x='{N(left-bleed)}' y='{N(top-bleed)}' width='{N(right-left+2*bleed)}' height='{N(bottom-top+2*bleed)}' viewBox='{N(left-bleed)} {N(top-bleed)} {N(right-left+2*bleed)} {N(bottom-top+2*bleed)}' overflow='hidden'>");
         var positive = cats.ToDictionary(x => x, _ => 0d); var negative = cats.ToDictionary(x => x, _ => 0d);
         for (var si = 0; si < s.Series.Count; si++)
         {
