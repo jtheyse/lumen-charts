@@ -1,0 +1,2 @@
+# Normalize every text file to LF in the repository, whatever the clone platform does locally.
+* text=auto eol=lf
