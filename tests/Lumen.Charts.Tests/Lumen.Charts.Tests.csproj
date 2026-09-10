@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><IsPackable>false</IsPackable></PropertyGroup>
+ <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App"/><ProjectReference Include="../../src/Lumen.Charts.Blazor/Lumen.Charts.Blazor.csproj"/><ProjectReference Include="../../src/Lumen.Charts.AspNetCore/Lumen.Charts.AspNetCore.csproj"/></ItemGroup>
+</Project>

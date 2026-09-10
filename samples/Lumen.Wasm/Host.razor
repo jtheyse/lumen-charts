@@ -1,0 +1,74 @@
+<main>
+    <h1>Lumen Charts on WebAssembly</h1>
+    <p>The same components as the server gallery, running entirely in the browser. Every chart below is rendered by <code>Lumen.Charts</code> inside WebAssembly, with tooltips, exports, point selection and node dragging supplied by the shared static assets of the Razor class library.</p>
+
+    <h2 id="charts">Chart families</h2>
+    <div class="kinds" role="group" aria-labelledby="charts">
+        @foreach(var kind in kinds)
+        {
+            var choice=kind;
+            <button type="button" aria-pressed="@(selected==kind ? "true" : "false")" @onclick="()=>Select(choice)">@kind</button>
+        }
+    </div>
+    <div class="card"><LumenChart @key="selected" Spec="Current" PointSelected="OnPoint"/></div>
+    <p class="state" role="status">@(point ?? "Select a mark to report its original series and point index.")</p>
+
+    <h2 id="graph">Network</h2>
+    <div class="card"><LumenGraph Spec="graph" NodeSelected="OnNode"/></div>
+    <p class="state" role="status">@(node ?? "Drag a node, or focus one and press Enter to select it.")</p>
+</main>
+@code {
+    private static readonly ChartKind[] kinds=[ChartKind.Line,ChartKind.Column,ChartKind.Candlestick,ChartKind.Histogram,ChartKind.Box,ChartKind.Donut];
+    private ChartKind selected=ChartKind.Line;
+    private string? point,node;
+    private void Select(ChartKind kind){selected=kind;point=null;}
+    private void OnPoint(PointSelection selection)=>point=$"Selected series {selection.SeriesIndex+1}, observation {selection.PointIndex+1}";
+    private void OnNode(string id)=>node=$"Selected node \"{id}\"";
+
+    private static readonly string[] months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    private static readonly Random random=new(7);
+    private static readonly double[] samples=Enumerable.Range(0,180).Select(_=>Math.Round(40-Math.Log(1-random.NextDouble())*22,1)).ToArray();
+
+    private ChartSpec Current=>selected switch
+    {
+        ChartKind.Candlestick=>new(){Kind=selected,Title="Simulated prices",Description="Thirty daily candles on a UTC time axis",XAxis=AxisKind.Time,
+            XLabel="Trading day (UTC)",YLabel="Price",Series=[new("ACME",Candles())],Source="Source: generated sample data"},
+        ChartKind.Histogram=>new(){Kind=selected,Title="Response times",Description="180 sampled requests, bin count chosen from the data",
+            XLabel="Response time (ms)",YLabel="Requests",Series=[new("Latency",samples.Select(ChartPoint.Observation).ToArray())],Source="Source: generated sample data"},
+        ChartKind.Box=>new(){Kind=selected,Title="Latency by region",Description="Quartiles, Tukey whiskers and outliers",YLabel="Latency (ms)",
+            Series=[new("Europe",samples.Take(60).Select(ChartPoint.Observation).ToArray()),
+                    new("Africa",samples.Skip(60).Take(60).Select(v=>ChartPoint.Observation(v*1.3)).ToArray()),
+                    new("Americas",samples.Skip(120).Select(v=>ChartPoint.Observation(v*.8)).ToArray())],Source="Source: generated sample data"},
+        ChartKind.Donut=>new(){Kind=selected,Title="Acquisition mix",Description="Share of 100 sample accounts",
+            Series=[new("Acquisition",[new(0,42,"Organic"),new(1,28,"Direct"),new(2,18,"Referral"),new(3,12,"Campaigns")])],Source="Source: generated sample data"},
+        _=>new(){Kind=selected,Title="Monthly activity",Description="Three product plans across one year",XLabel="Month",YLabel="Active accounts (thousands)",
+            Series=[Plan("Workspace",34),Plan("Enterprise",21),Plan("Community",11)],Source="Source: generated sample data"}
+    };
+
+    private static ChartSeries Plan(string name,double baseline)=>
+        new(name,Enumerable.Range(0,12).Select(i=>new ChartPoint(i,Math.Round(baseline+i*1.8+Math.Sin(i+baseline)*6,1),months[i])).ToArray());
+
+    private static ChartPoint[] Candles()
+    {
+        var day=new DateTimeOffset(2026,3,2,0,0,0,TimeSpan.Zero);var open=118.0;var candles=new List<ChartPoint>();
+        var walk=new Random(11);
+        for(var i=0;i<30;i++)
+        {
+            var close=Math.Round(open*(1+(walk.NextDouble()-.47)*.06),2);
+            candles.Add(ChartPoint.Candle(TimeAxis.Value(day.AddDays(i)),open,
+                Math.Round(Math.Max(open,close)*(1+walk.NextDouble()*.018),2),
+                Math.Round(Math.Min(open,close)*(1-walk.NextDouble()*.018),2),close));
+            open=close;
+        }
+        return candles.ToArray();
+    }
+
+    private readonly GraphSpec graph=new()
+    {
+        Title="From source to insight",
+        Nodes=[new("sources","Sources"),new("ingest","Ingestion"),new("validate","Validation"),new("transform","Transform"),
+               new("charts","Charts"),new("api","Chart API"),new("reports","Reports")],
+        Edges=[new("sources","ingest"),new("ingest","validate"),new("validate","transform"),new("transform","charts"),
+               new("transform","api"),new("charts","reports"),new("api","reports"),new("ingest","reports","audit trail")]
+    };
+}

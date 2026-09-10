@@ -1,0 +1,111 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+<div class="lumen-chart" @ref="root">
+    <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart">@((MarkupString)svg)</div>
+    <div class="lumen-legend" aria-label="Chart series">
+        @for(var i=0;i<Spec.Series.Count;i++)
+        {
+            var index=i;
+            <button type="button" aria-pressed="@(!hidden.Contains(i) ? "true" : "false")" @onclick="()=>Toggle(index)">
+                <span style="background:@ChartSvg.SeriesColor(Spec.Series[i],i)"></span>@Spec.Series[i].Name
+            </button>
+        }
+    </div>
+    <div class="lumen-tools">
+        @if(CanZoom)
+        {
+            <button type="button" @onclick="()=>Zoom(.5)" aria-label="Zoom in">+</button>
+            <button type="button" @onclick="()=>Zoom(2)" aria-label="Zoom out">−</button>
+            <button type="button" @onclick="()=>Pan(-1)" aria-label="Pan left">←</button>
+            <button type="button" @onclick="()=>Pan(1)" aria-label="Pan right">→</button>
+            <button type="button" @onclick="ResetView">Reset view</button>
+        }
+        <button type="button" @onclick='()=>Download("svg")'>Export SVG</button>
+        <button type="button" @onclick='()=>Download("png")'>Export PNG</button>
+        <button type="button" @onclick='()=>Download("csv")'>Export CSV</button>
+        <button type="button" @onclick="()=>showData=!showData" aria-expanded="@(showData ? "true" : "false")">@(showData ? "Hide data" : "View data")</button>
+        <span class="lumen-status" role="status">@status</span>
+    </div>
+    @if(showData)
+    {
+        <div class="lumen-table"><table><caption>@Spec.Title — original data (@Spec.Series.Sum(s=>s.Points.Count) observations)</caption>
+        <thead><tr><th scope="col">Series</th><th scope="col">X / Category</th><th scope="col">Value</th></tr></thead><tbody>
+        @foreach(var series in Spec.Series)
+        {
+            @foreach(var point in series.Points.Take(500))
+            { <tr><td>@series.Name</td><td>@(point.Label ?? xAxis.Format(point.X))</td><td>@Value(point)</td></tr> }
+        }
+        </tbody></table><p>Table shows up to 500 observations per series. CSV contains all original observations.</p></div>
+    }
+</div>
+@code {
+    [Parameter, EditorRequired] public ChartSpec Spec { get; set; } = new();
+    [Parameter] public EventCallback<PointSelection> PointSelected { get; set; }
+    private readonly HashSet<int> hidden=[];
+    private string svg="",status="";
+    private bool showData;
+    private ElementReference root;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<LumenChart>? reference;
+    private int[] visible=[];
+    private Axis xAxis;
+    private double? viewMin, viewMax;
+    private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Band;
+    private string Value(ChartPoint point) => Spec.Kind switch
+    {
+        ChartKind.Candlestick=>$"O {LinearScale.Label(point.Open ?? 0)} · H {LinearScale.Label(point.High ?? 0)} · L {LinearScale.Label(point.Low ?? 0)} · C {LinearScale.Label(point.Close ?? 0)}",
+        _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{LinearScale.Label(point.Y.Value)} ({LinearScale.Label(point.Low.Value)} to {LinearScale.Label(point.High.Value)})",
+        _=>point.Y.HasValue?LinearScale.Label(point.Y.Value):"Missing"
+    };
+    private Axis FullRange => Axis.Create(Spec.XAxis,Spec.Series.SelectMany(s=>s.Points).Select(p=>p.X), min:Spec.XMin, max:Spec.XMax);
+    // The view is tracked as a fraction of the full axis so log and time domains zoom in their own space.
+    private (double Min,double Max) View { get { var full=FullRange;return (viewMin.HasValue?full.Map(viewMin.Value,0,1):0,viewMax.HasValue?full.Map(viewMax.Value,0,1):1); } }
+    private void Zoom(double factor)
+    {
+        var (min,max)=View;var span=Math.Clamp((max-min)*factor,.01,1);
+        SetView((min+max)/2-span/2,span);
+    }
+    private void Pan(int direction)
+    {
+        var (min,max)=View;SetView(min+direction*(max-min)*.25,max-min);
+    }
+    private void SetView(double start,double span)
+    {
+        var full=FullRange;var from=Math.Clamp(start,0,1-span);
+        viewMin=full.Invert(from,0,1);viewMax=full.Invert(from+span,0,1);Render();
+    }
+    private void ResetView() { viewMin=null;viewMax=null;Render(); }
+    protected override void OnParametersSet() { hidden.RemoveWhere(i=>i>=Spec.Series.Count);viewMin=null;viewMax=null;Render(); }
+    private ChartSpec VisibleSpec() => Spec with { XMin=CanZoom ? viewMin ?? Spec.XMin : Spec.XMin, XMax=CanZoom ? viewMax ?? Spec.XMax : Spec.XMax, Series=Spec.Series.Select((s,i)=>(s,i)).Where(p=>!hidden.Contains(p.i)).Select(p=>p.s with {Color=ChartSvg.SeriesColor(p.s,p.i)}).ToArray() };
+    // The component draws its own tooltips, so marks render without the native SVG title.
+    private void Render() { xAxis=FullRange;visible=Enumerable.Range(0,Spec.Series.Count).Where(i=>!hidden.Contains(i)).ToArray();svg=ChartSvg.Render(VisibleSpec(), includeLegend:false, includeTitles:false); }
+    private void Toggle(int index) { if(!hidden.Add(index))hidden.Remove(index);Render(); }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if(firstRender) { module=await JS.InvokeAsync<IJSObjectReference>("import","./_content/Lumen.Charts.Blazor/lumen.js");reference=DotNetObjectReference.Create(this);await module.InvokeVoidAsync("attach",root,reference); }
+    }
+    [JSInvokable] public async Task SelectPoint(int series,int point)
+    {
+        if(series<0||series>=visible.Length)return;
+        var index=visible[series];if(point<0||point>=Spec.Series[index].Points.Count)return;
+        var p=Spec.Series[index].Points[point];status=$"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {p.Y}";
+        await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
+    }
+    private async Task Download(string format)
+    {
+        if(module is null)return;
+        try
+        {
+            if(format=="png")await module.InvokeVoidAsync("png",ChartSvg.Render(VisibleSpec()),"chart.png",2);
+            else await module.InvokeVoidAsync("download",format=="svg"?ChartSvg.Render(VisibleSpec()):ChartExport.Csv(Spec),$"chart.{format}",format=="svg"?"image/svg+xml":"text/csv");
+            status=$"Exported chart.{format}";
+        }
+        catch(JSException error) { status=$"Export failed: {error.Message}"; }
+    }
+    public async ValueTask DisposeAsync()
+    {
+        try { if(module is not null) { await module.InvokeVoidAsync("detach",root);await module.DisposeAsync(); } }
+        catch(JSDisconnectedException) { }
+        finally { reference?.Dispose(); }
+    }
+}

@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><TargetFramework>net8.0</TargetFramework><PackageReadmeFile>README.md</PackageReadmeFile><Description>ASP.NET Core chart rendering endpoints.</Description></PropertyGroup>
+ <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App"/><ProjectReference Include="../Lumen.Charts/Lumen.Charts.csproj"/></ItemGroup>
+ <ItemGroup><None Include="../../README.md" Pack="true" PackagePath="/" /></ItemGroup>
+</Project>

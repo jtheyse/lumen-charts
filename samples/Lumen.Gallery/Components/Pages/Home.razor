@@ -1,0 +1,65 @@
+@page "/"
+<PageTitle>Lumen — Charts & Graphs for .NET</PageTitle>
+<div class="app @(dark ? "dark" : "")">
+    <aside class="sidebar">
+        <a class="brand" href="/"><span class="brand-icon">◒</span> lumen<span class="brand-dot">.</span></a>
+        <div class="workspace">VISUALIZATION LIBRARY <span>0.1</span></div>
+        <a class="nav-item active" href="#playground"><span>▦</span> Chart explorer <b>14</b></a>
+        <a class="nav-item" href="#network"><span>⌘</span> Network graphs <b>2</b></a>
+        <a class="nav-item" href="#integration"><span>⌁</span> Developer API</a>
+        <div class="nav-label">EXPLORE BY PURPOSE</div>
+        @foreach(var item in new[]{("Change over time",ChartKind.Line),("Compare categories",ChartKind.Bar),("Find relationships",ChartKind.Scatter),("Parts of a whole",ChartKind.Donut),("Patterns & density",ChartKind.Heatmap)})
+        { <button class="purpose" @onclick="()=>Select(item.Item2)">@item.Item1<span>↗</span></button> }
+        <div class="sidebar-bottom"><span class="live-dot"></span> Built for Blazor<p>Clear data. Thoughtful defaults.</p><a href="#integration">Start building →</a></div>
+    </aside>
+    <main>
+        <header class="topbar"><div>Library <span>/</span> <strong>Chart explorer</strong></div><div class="top-actions"><span class="version">.NET 8+ compatible</span><button @onclick="ToggleTheme" aria-label="Toggle color theme">@(dark ? "☀ Light mode" : "☾ Dark mode")</button></div></header>
+        <section class="intro"><div class="eyebrow"><span></span> A NEW PERSPECTIVE ON YOUR DATA</div><h1>Make the numbers<br/><em>mean something.</em></h1><p>A native .NET charting toolkit for clear comparisons, meaningful<br class="desktop"/> relationships, and the stories hiding in your data.</p><a class="primary-link" href="#integration">Build your first chart <span>↗</span></a><a class="secondary-link" href="#network">Explore graph layouts →</a><div class="intro-art" aria-hidden="true"><div class="art-grid"></div><svg viewBox="0 0 330 155"><path d="M0 140 L45 112 L85 122 L130 66 L172 87 L220 28 L263 42 L315 5" fill="none" stroke="#5675e7" stroke-width="3"/><path d="M0 148 L45 132 L85 135 L130 105 L172 112 L220 75 L263 84 L315 48" fill="none" stroke="#69bbaa" stroke-width="2" stroke-dasharray="5 5"/></svg><span>LESS NOISE. MORE SIGNAL.</span></div></section>
+        <div class="feature-strip"><div><b>14</b><span>Chart types</span></div><div><b>02</b><span>Graph layouts</span></div><div><b>SVG</b><span>Resolution independent</span></div><div><b>C#</b><span>From data to display</span></div></div>
+        <section id="playground" class="explorer">
+            <div class="section-heading"><div><div class="eyebrow">THE PLAYGROUND</div><h2>Your data, a different angle.</h2></div><span class="quiet">Choose a chart. Explore the possibilities.</span></div>
+            <div class="chart-tabs" role="group" aria-label="Chart type">
+                @foreach(var kind in Enum.GetValues<ChartKind>())
+                { <button class="@(selected==kind ? "selected" : "")" aria-pressed="@(selected==kind ? "true" : "false")" @onclick="()=>Select(kind)">@Name(kind)</button> }
+            </div>
+            <div class="segmented axis-choice" role="group" aria-label="Axis type">
+                <button class="@(axisDemo==AxisDemo.Numeric ? "selected" : "")" aria-pressed="@(axisDemo==AxisDemo.Numeric ? "true" : "false")" @onclick="()=>axisDemo=AxisDemo.Numeric">Numeric axes</button>
+                @if(DemoData.TimeCapable(selected)) { <button class="@(axisDemo==AxisDemo.Time ? "selected" : "")" aria-pressed="@(axisDemo==AxisDemo.Time ? "true" : "false")" @onclick="()=>axisDemo=AxisDemo.Time">Time X</button> }
+                @if(DemoData.LogCapable(selected)) { <button class="@(axisDemo==AxisDemo.Log ? "selected" : "")" aria-pressed="@(axisDemo==AxisDemo.Log ? "true" : "false")" @onclick="()=>axisDemo=AxisDemo.Log">Log Y</button> }
+            </div>
+            <div class="chart-card"><div class="card-meta"><span><i></i> LIVE COMPONENT <span class="divider">/</span> @Name(selected)</span><button @onclick="()=>revision++">↻ Refresh sample</button></div>
+                <LumenChart @key="(selected,axisDemo)" Spec="Current" PointSelected="OnPoint"/>
+            </div>
+            <div class="under-chart"><span>↳ @Hint</span><span>@(selection ?? "Select a point to inspect its value")</span></div>
+        </section>
+        <section class="lower-grid">
+            <article class="small-card"><div class="eyebrow">DESIGNED TO COMMUNICATE</div><h3>Good defaults.<br/>Honest comparisons.</h3><p>Zero baselines for bars. Explicit gaps for missing data. Readable labels and an underlying data table.</p><div class="mini-tags"><span>No charting JS dependencies</span><span>Typed data binding</span></div></article>
+            <article class="small-card accent"><div class="eyebrow">TAKE YOUR WORK WITH YOU</div><h3>Ready for the<br/>next conversation.</h3><p>Export crisp SVG graphics for reports or the original observations as CSV. Your data stays yours.</p><a href="#integration">Explore the rendering API ↗</a></article>
+        </section>
+        <section id="network"><div class="section-heading"><div><div class="eyebrow">BEYOND THE AXES</div><h2>See how everything connects.</h2></div><div class="segmented"><button class="@(layout==GraphLayout.Layered?"selected":"")" @onclick="()=>SetLayout(GraphLayout.Layered)">Layered</button><button class="@(layout==GraphLayout.Circular?"selected":"")" @onclick="()=>SetLayout(GraphLayout.Circular)">Circular</button></div></div><div class="chart-card"><LumenGraph Spec="Graph" NodeSelected="OnNode"/></div><p class="quiet">@(node ?? "Drag a node to move it, or focus one and press Enter to select it and the arrow keys to nudge it. Layered layouts order each level to reduce edge crossings and require an acyclic graph.")</p></section>
+        <section id="integration" class="integration"><div><div class="eyebrow">SMALL API. REAL POSSIBILITIES.</div><h2>From C# to clarity.</h2><p>Share one chart specification between your Blazor interface, your reports, and your HTTP API.</p><a href="/api/charts/types" target="_blank">View supported API chart types ↗</a></div><pre><code>@Snippet</code></pre></section>
+        <footer><span class="brand">lumen.</span><span>Charts that help you see.</span><span>Preview 0.1 · Built with Blazor</span></footer>
+    </main>
+</div>
+@code {
+    private ChartKind selected=ChartKind.Area;
+    private AxisDemo axisDemo=AxisDemo.Numeric;
+    private GraphLayout layout=GraphLayout.Layered;
+    private bool dark;private int revision;private string? selection;private string? node;private GraphSpec? graphCache;
+    private GraphSpec Graph=>graphCache ??= DemoData.Graph(layout,Theme);
+    private void SetLayout(GraphLayout value){layout=value;graphCache=null;node=null;}
+    private void ToggleTheme(){dark=!dark;graphCache=null;}
+    private void OnNode(string id)=>node=$"Selected node \"{id}\" — drag it, or press Reset layout to restore the computed position.";
+    private ChartTheme Theme=>dark?ChartTheme.Dark:ChartTheme.Light;
+    private ChartSpec Current=>DemoData.Create(selected,Theme,revision,axisDemo);
+    private void Select(ChartKind kind)
+    {
+        selected=kind;selection=null;
+        if(axisDemo==AxisDemo.Time&&!DemoData.TimeCapable(kind))axisDemo=AxisDemo.Numeric;
+        if(axisDemo==AxisDemo.Log&&!DemoData.LogCapable(kind))axisDemo=AxisDemo.Numeric;
+    }
+    private void OnPoint(PointSelection p)=>selection=$"Selected series {p.SeriesIndex+1}, observation {p.PointIndex+1}";
+    private static string Name(ChartKind kind)=>kind switch {ChartKind.StackedColumn=>"Stacked",ChartKind.Candlestick=>"Candles",_=>kind.ToString()};
+    private string Hint=>selected switch {ChartKind.Area or ChartKind.Line=>"Follow change over time. Missing observations remain gaps.",ChartKind.Bar or ChartKind.Column or ChartKind.StackedColumn=>"Compare magnitude with a consistent zero baseline.",ChartKind.Donut=>"Compare parts of a whole. Values must be nonnegative.",ChartKind.Bubble=>"Bubble area represents the third measure.",ChartKind.Candlestick=>"Each candle spans open to close; the wick shows the day's range.",ChartKind.Band=>"The shaded interval carries the uncertainty around the projection.",ChartKind.Histogram=>"Bars count observations per bin, not one bar per record.",ChartKind.Box=>"Box shows the quartiles; circles are observations beyond 1.5 interquartile ranges.",_=>"Hover or focus a mark for details. Toggle series in the legend."};
+    private const string Snippet="@using Lumen.Charts\n@using Lumen.Charts.Blazor\n\n<LumenChart Spec=\"chart\" />\n\n@code {\n    ChartSpec chart = new() {\n        Title = \"A clearer view\",\n        Kind = ChartKind.Line,\n        Series = [new(\"Revenue\", [\n            new(1, 24), new(2, 38), new(3, 52)\n        ])]\n    };\n}";
+}

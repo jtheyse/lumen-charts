@@ -1,0 +1,6 @@
+**/bin/
+**/obj/
+tmp/
+artifacts/
+.vs/
+RESEARCH/

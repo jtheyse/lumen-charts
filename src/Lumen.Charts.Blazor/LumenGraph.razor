@@ -1,0 +1,51 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+<div class="lumen-chart" @ref="root">
+    <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable graph">@((MarkupString)svg)</div>
+    <div class="lumen-tools">
+        <button type="button" @onclick="ResetLayout" disabled="@(moved.Count==0)">Reset layout</button>
+        <span class="lumen-status" role="status">@status</span>
+    </div>
+    <details class="lumen-table"><summary>View connections</summary><ul>
+    @foreach(var edge in Spec.Edges) { <li>@edge.Source → @edge.Target @edge.Label</li> }
+    </ul></details>
+</div>
+@code {
+    [Parameter, EditorRequired] public GraphSpec Spec { get; set; } = new();
+    [Parameter] public EventCallback<string> NodeSelected { get; set; }
+    private readonly Dictionary<string,GraphPoint> moved=new(StringComparer.Ordinal);
+    private string svg="",status="",signature="";
+    private ElementReference root;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<LumenGraph>? reference;
+    // Dragged positions survive a re-render of the same graph and are dropped when the nodes change.
+    protected override void OnParametersSet()
+    {
+        var current=string.Join("\u0001",Spec.Nodes.Select(n=>n.Id))+"|"+Spec.Layout;
+        if(current!=signature) { signature=current;moved.Clear();status=""; }
+        Render();
+    }
+    private void Render()=>svg=GraphEngine.Render(Spec,moved);
+    private void ResetLayout() { moved.Clear();status="Layout reset";Render(); }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if(firstRender) { module=await JS.InvokeAsync<IJSObjectReference>("import","./_content/Lumen.Charts.Blazor/lumen.js");reference=DotNetObjectReference.Create(this);await module.InvokeVoidAsync("attachGraph",root,reference); }
+    }
+    [JSInvokable] public async Task MoveNode(string id,double x,double y)
+    {
+        var node=Spec.Nodes.FirstOrDefault(n=>n.Id==id);if(node is null)return;
+        moved[id]=new(Math.Clamp(x,40,Spec.Width-40),Math.Clamp(y,40,Spec.Height-52));
+        status=$"Moved {node.Label}";Render();await InvokeAsync(StateHasChanged);
+    }
+    [JSInvokable] public async Task SelectNode(string id)
+    {
+        var node=Spec.Nodes.FirstOrDefault(n=>n.Id==id);if(node is null)return;
+        status=$"Selected {node.Label}";await NodeSelected.InvokeAsync(id);await InvokeAsync(StateHasChanged);
+    }
+    public async ValueTask DisposeAsync()
+    {
+        try { if(module is not null) { await module.InvokeVoidAsync("detach",root);await module.DisposeAsync(); } }
+        catch(JSDisconnectedException) { }
+        finally { reference?.Dispose(); }
+    }
+}

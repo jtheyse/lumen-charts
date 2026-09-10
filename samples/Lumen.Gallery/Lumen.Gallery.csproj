@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+ <PropertyGroup><TargetFramework>net10.0</TargetFramework><IsPackable>false</IsPackable></PropertyGroup>
+ <ItemGroup><ProjectReference Include="../../src/Lumen.Charts.Blazor/Lumen.Charts.Blazor.csproj"/><ProjectReference Include="../../src/Lumen.Charts.AspNetCore/Lumen.Charts.AspNetCore.csproj"/></ItemGroup>
+</Project>

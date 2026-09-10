@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/Lumen.Gallery/Lumen.Gallery.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Lumen.Charts.AspNetCore/Lumen.Charts.AspNetCore.csproj" />
+    <Project Path="src/Lumen.Charts.Blazor/Lumen.Charts.Blazor.csproj" />
+    <Project Path="src/Lumen.Charts/Lumen.Charts.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lumen.Charts.Tests/Lumen.Charts.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+ <PropertyGroup><TargetFramework>net8.0</TargetFramework><PackageReadmeFile>README.md</PackageReadmeFile><Description>Interactive Blazor SVG chart and graph components.</Description></PropertyGroup>
+ <!-- A package reference, not a framework reference: the ASP.NET Core shared framework is absent in a WebAssembly host. -->
+ <ItemGroup><PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.0"/><ProjectReference Include="../Lumen.Charts/Lumen.Charts.csproj"/></ItemGroup>
+ <ItemGroup><None Include="../../README.md" Pack="true" PackagePath="/" /></ItemGroup>
+</Project>
