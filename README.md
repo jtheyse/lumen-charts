@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.6.1. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.6.2. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -220,10 +220,13 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 
 See [research and architecture](docs/RESEARCH.md) and [verification](docs/VERIFICATION.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
 
-## 0.6.1 fixes
+## 0.6.2 accessibility
 
 An axe-core sweep of both sample hosts now runs on every continuous-integration run. Its first pass reported 62 serious colour-contrast failures in the gallery's own chrome and 4 on the WebAssembly page, all from sample styling rather than the library: muted text at 3.7:1, section labels at 3.2:1, accent links at 3.9:1, a caption dimmed further by a container opacity, and a bare `button` rule on the WebAssembly page that restyled the component's own legend. The sample palettes were darkened and that rule scoped; both hosts now report no WCAG A or AA violation.
 
+The library binaries are unchanged from 0.6.1: every fix in this version is in the sample hosts and in the test suite.
+
+## 0.6.1 fixes
 
 Marks on the first and last value of a line, area, scatter or bubble chart were drawn exactly on the plot's clipping boundary, so half of each was cut off and a pointer at the mark's own centre missed it. The clipping viewport is now inset by one marker radius. Found by the new browser suite, and covered by both it and the executable suite.
 
