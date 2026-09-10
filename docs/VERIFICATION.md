@@ -7,7 +7,7 @@ Final checks: 10 September 2026. Windows x64; .NET SDK 10.0.400. Reusable packag
 - Release solution build: passed, zero warnings and zero errors.
 - Executable library/component regression suite: **131 passed, 0 failed**.
 - HTTP integration script against the running gallery: **57 passed, 0 failed**.
-- Browser suite driving a headless Chromium: **13 passed, 0 failed against the server gallery** and **13 passed, 0 failed against the WebAssembly host**. It covers tooltips on hover and on keyboard focus, Escape dismissal, point selection, SVG, CSV and PNG downloads verified by their bytes, series hiding, the data table, zoom and reset, and graph node dragging, selection and layout reset.
+- Browser suite driving a headless Chromium: **14 passed, 0 failed against the server gallery** and **14 passed, 0 failed against the WebAssembly host**, the last check being an axe-core sweep restricted to the WCAG 2.0 and 2.1 A and AA rules, which reports no violation on either host. It covers tooltips on hover and on keyboard focus, Escape dismissal, point selection, SVG, CSV and PNG downloads verified by their bytes, series hiding, the data table, zoom and reset, and graph node dragging, selection and layout reset.
 - Local NuGet installation smoke test: restored all three 0.6.1 packages from `artifacts/packages`, compiled a consuming application, rendered SVG using the installed core package, and loaded the Blazor component and endpoint-extension types successfully.
 - Package contents include library binaries and the Blazor static assets. Research files and extraction scratch files are excluded.
 
@@ -35,6 +35,8 @@ Verified in the Codex in-app browser:
 - A 390-pixel viewport exposed overly small labels in the initial proportional layout. The final component uses a focusable horizontal scrolling viewport; the final mobile screenshot confirmed the scrollbar and larger labels without page-wide horizontal overflow. Desktop viewport override was restored afterward.
 
 ## Issues found and corrected
+
+- The first axe-core sweep reported colour-contrast failures on both sample hosts: 62 serious nodes in the gallery and 4 on the WebAssembly page. Every one came from sample styling, not from the library, whose own palette was already measured against both chart backgrounds. The gallery's muted text measured 3.73:1 on the page background, its section labels 3.23:1 on the accent card, its accent links 3.90:1, and its intro caption 2.72:1 because a container opacity composited the token into a lighter grey. The tokens were darkened to `#626D80`, `#636D80` and `#4B66CA`, and the opacity moved from the container onto the drawing it was meant to soften. On the WebAssembly page an unscoped `button` rule was colouring the component's own legend buttons; it is now scoped to that page's controls.
 
 - The first browser-automated run failed on hover with `<svg> intercepts pointer events`. Marks on the first and last value sat exactly on the plot's clipping boundary, so half of each mark was clipped away and a pointer at its own centre landed on the boundary and missed. The clipping viewport is now inset by one marker radius, which also caps how far an out-of-range value can bleed when zoomed. Two of that run's three failures were faults in the new tests rather than the product: a drag aimed at a node group's centre, which falls in the gap between the circle and its label, and a mouse drag at viewport coordinates without scrolling the target into view first.
 

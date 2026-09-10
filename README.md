@@ -31,7 +31,7 @@ pwsh tests/Lumen.Charts.BrowserTests/bin/Release/net10.0/playwright.ps1 install 
 dotnet run --project tests/Lumen.Charts.BrowserTests -c Release --no-build -- http://localhost:5188
 ```
 
-It uses component selectors only, so the same thirteen checks run against the gallery and against the WebAssembly host on port 5199. It stays outside the solution so the ordinary build needs no browser download.
+It uses component selectors only, so the same fourteen checks, the axe sweep included, run against the gallery and against the WebAssembly host on port 5199. It stays outside the solution so the ordinary build needs no browser download.
 
 The repository NuGet.Config restores from nuget.org for one dependency: `Lumen.Charts.Blazor` references `Microsoft.AspNetCore.Components.Web` (8.0.0) rather than the ASP.NET Core shared framework, because a WebAssembly host has no shared framework to reference. `Lumen.Charts` and `Lumen.Charts.AspNetCore` add no packages of their own. With the gallery running, execute `./tests/verify-api.ps1` for HTTP integration checks.
 
@@ -185,9 +185,9 @@ Measured by the regression suite, so a change that breaks one of these fails the
 - No element takes a positive tab index. The toolbar status is a live region, legend buttons expose `aria-pressed`, the data toggle exposes `aria-expanded`, and the data table has a caption with scoped column headers.
 - Keyboard: Tab reaches marks, legend, toolbar and graph nodes; Enter or Space selects a mark or node; Escape hides the tooltip; arrow keys nudge a focused graph node.
 
-Confirmed in a browser accessibility tree, not by a certification tool: each mark appears as a named button, the chart appears as a named group, and both status regions announce.
+Confirmed in a browser accessibility tree: each mark appears as a named button, the chart appears as a named group, and both status regions announce. Every continuous-integration run also sweeps both sample hosts with axe-core, restricted to the WCAG 2.0 and 2.1 A and AA rules, and fails on any violation.
 
-Not done, and not claimed: no screen-reader run (NVDA, JAWS or VoiceOver), no audit-tool sweep such as axe, no WCAG conformance statement, and no testing with speech or magnification software. One known rough edge: a chart with many marks produces many tab stops — 1,200 at the default sampling budget — so keyboard users reaching content past a chart may prefer the data table, which stays a single stop and holds the original observations.
+Not done, and not claimed: no screen-reader run (NVDA, JAWS or VoiceOver), no WCAG conformance statement, and no testing with speech or magnification software. An automated sweep catches only what automation can see — roughly a third of the success criteria — so a clean axe run is a floor, not a certificate. One known rough edge: a chart with many marks produces many tab stops — 1,200 at the default sampling budget — so keyboard users reaching content past a chart may prefer the data table, which stays a single stop and holds the original observations.
 
 ## WebAssembly
 
@@ -221,6 +221,9 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 See [research and architecture](docs/RESEARCH.md) and [verification](docs/VERIFICATION.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
 
 ## 0.6.1 fixes
+
+An axe-core sweep of both sample hosts now runs on every continuous-integration run. Its first pass reported 62 serious colour-contrast failures in the gallery's own chrome and 4 on the WebAssembly page, all from sample styling rather than the library: muted text at 3.7:1, section labels at 3.2:1, accent links at 3.9:1, a caption dimmed further by a container opacity, and a bare `button` rule on the WebAssembly page that restyled the component's own legend. The sample palettes were darkened and that rule scoped; both hosts now report no WCAG A or AA violation.
+
 
 Marks on the first and last value of a line, area, scatter or bubble chart were drawn exactly on the plot's clipping boundary, so half of each was cut off and a pointer at the mark's own centre missed it. The clipping viewport is now inset by one marker radius. Found by the new browser suite, and covered by both it and the executable suite.
 

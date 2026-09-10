@@ -1,4 +1,6 @@
 using System.Globalization;
+using Deque.AxeCore.Commons;
+using Deque.AxeCore.Playwright;
 using Microsoft.Playwright;
 
 // Drives a running host in a real browser. The selectors below belong to the components, not to a
@@ -160,6 +162,24 @@ if (await graph.CountAsync() > 0 && await graph.Locator("[data-node]").CountAsyn
         Check(true);
     });
 }
+
+// A fresh load, so the sweep sees the page as a visitor first meets it rather than mid-interaction.
+await page.ReloadAsync(new() { WaitUntil = WaitUntilState.NetworkIdle });
+await page.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });
+
+await Test("axe-core reports no WCAG A or AA violation", async () =>
+{
+    var result = await page.RunAxe(new AxeRunOptions
+    {
+        RunOnly = new RunOnlyOptions { Type = "tag", Values = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] }
+    });
+    foreach (var violation in result.Violations)
+    {
+        Console.WriteLine($"  {violation.Impact} - {violation.Id}: {violation.Help} ({violation.Nodes.Length} node(s))");
+        foreach (var node in violation.Nodes.Take(3)) Console.WriteLine($"      {node.Html}");
+    }
+    Check(result.Violations.Length == 0, string.Join("; ", result.Violations.Select(v => $"{v.Id} on {v.Nodes.Length} node(s)")));
+});
 
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed. ({address})");
 foreach (var failure in failures) Console.Error.WriteLine(failure);
