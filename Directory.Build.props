@@ -6,5 +6,12 @@
     <LangVersion>latest</LangVersion>
     <Version>0.6.0</Version>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Authors>Jacques Theyse</Authors>
+    <Copyright>Copyright (c) 2026 Jacques Theyse</Copyright>
+    <PackageProjectUrl>https://github.com/jtheyse/lumen-charts</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/jtheyse/lumen-charts</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>charts;graphs;svg;blazor;visualization;dataviz</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 </Project>
