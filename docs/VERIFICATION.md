@@ -53,6 +53,9 @@ Verified in the Codex in-app browser:
 
 ## Practical limits
 
+Browser timings now have their own record in [PERFORMANCE.md](PERFORMANCE.md), measured with `tests/Lumen.Charts.Profile` against headless Chromium. The profiler is deliberately outside continuous integration: a timing gate on a shared runner fails for reasons unrelated to the code.
+
+
 A diagnostic run generated an SVG from 100,000 line observations in approximately 60 ms with at most 1,200 rendered sample points on this machine. This measures SVG generation only, not network time, browser layout, interaction latency or memory, and is not a comparison with another library.
 
 WebAssembly hosting is exercised by the sample above but not under production load or on other browsers. Screen-reader conformance, production load, all operating systems, touch interaction, and very dense graphs have not been certified. Very large scatter/bubble inputs render every point. Dense graph layouts and extreme chart proportions still need application-level review. See README and RESEARCH.md for the exact scope and future capabilities.
