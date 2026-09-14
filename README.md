@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.6.2. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.7.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -108,6 +108,22 @@ ChartSpec latency = new() {
 
 `Statistics.Quantile`, `Statistics.Summarize` and `Statistics.Bins` are public, so the same numbers are available without rendering. Quantiles interpolate linearly between order statistics, matching NumPy's default and Excel's `PERCENTILE.INC`. CSV exports add `Open,High,Low,Close` for candlestick charts and `Low,High` for band charts.
 
+### Dense scatter charts
+
+A scatter chart draws every observation, which stops being readable long before it stops being fast: fifty thousand points saturate into solid shapes, and an overlapping series disappears underneath the one drawn after it. Setting `DensityCells` bins the plot into a square grid and shades one cell per occupied region instead:
+
+```csharp
+ChartSpec cloud = new() {
+    Kind = ChartKind.Scatter,
+    DensityCells = 90,           // cells across the plot; 8 to 200, null draws every point
+    Series = [new("Cohort A", observations)]
+};
+```
+
+Cell opacity follows the logarithm of the count, so a dense core does not flatten the sparse edges into invisibility. Each cell is an aggregate: it carries a label reading how many observations it holds and the range it covers, it is focusable, and — like a histogram bin — it reports no single observation, so `PointSelected` does not fire for it. The chart states the total it aggregated and the grid size, so a reader is never shown a thinned cloud that claims to be the whole. CSV export is unaffected and still contains every original observation.
+
+Series keep their own colour and bin independently, so overlapping cohorts stay distinguishable. The measured effect is in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
 ### Exports and tooltips
 
 The component toolbar exports SVG, PNG and CSV. PNG is produced in the browser: the same SVG is serialized to a blob, loaded as an image, drawn into a canvas at twice the chart's pixel size over the chart's own background, and saved. The scale is capped so the longest edge stays within 8192 pixels. Text is rasterized with the fonts the browser has, so a host that needs an exact typeface must install or embed it. There is no server-side PNG or PDF rendering — that needs a rasterizer dependency, and these packages have none.
@@ -209,7 +225,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Linear, base-10 logarithmic and UTC time axes; category labels on categorical charts. Time and log X axes apply to line, area, scatter and bubble charts; log Y applies to line, scatter and bubble charts, because magnitude and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999. Time zones, business calendars and irregular tick placement are not implemented.
 - Explicit limits via XMin/XMax/YMin/YMax. Bars and areas enforce a zero baseline. Null Y preserves gaps in lines/areas and is omitted elsewhere.
 - Line/area min/max sampling preserves original indices and extrema per continuous run; this is not a total chart-wide point budget. CSV always exports original observations.
-- Up to 100,000 input points, 32 series; 100 categories/slices. Sampling holds a line or area chart at its mark budget, so the browser cost is the same for 1,000 points as for 100,000: about 33 ms either way on the machine in [the measurements](docs/PERFORMANCE.md). Scatter and bubble render every point by design, which is comfortable to about 10,000; 50,000 points means 150,000 DOM elements and 12 MB of markup, and 100,000 means 300,000 elements and 25 MB. Aggregate larger clouds before charting them. There is no GPU acceleration and no million-point claim.
+- Up to 100,000 input points, 32 series; 100 categories/slices. Sampling holds a line or area chart at its mark budget, so the browser cost is the same for 1,000 points as for 100,000: about 33 ms either way on the machine in [the measurements](docs/PERFORMANCE.md). Scatter and bubble render every point by default, which is comfortable to about 10,000; 50,000 points means 150,000 DOM elements and 12 MB of markup, and 100,000 means 300,000 elements and 25 MB. A scatter chart can set `DensityCells` to aggregate instead, which takes 100,000 points to 6,504 elements and 33 ms. Bubble has no equivalent, because binning would destroy the size encoding. There is no GPU acceleration and no million-point claim.
 - Bubble area is proportional to Size across all series. Radar requires complete, nonnegative series on common categories. Donut accepts one nonnegative series.
 - Candlestick and histogram accept one series. Candlestick requires all four prices with High highest and Low lowest, and colors bodies by direction rather than by series. Band points need both bounds or neither. Histogram and box read observations from Y and ignore X; box computes its own quartiles, so precomputed five-number summaries are not accepted yet. Histogram bins and box glyphs are labelled, focusable aggregates that report no observation index, so they raise no point selection; candlesticks and box outliers do.
 - Layered graphs use longest-path levels, then barycenter sweeps that keep the ordering with the fewest crossings found. This is a heuristic, not minimal crossings. Edges spanning several levels bend once per level and are drawn as smooth curves; there is no orthogonal routing, no force simulation and no automatic node overlap removal. Self-loops are allowed in layered graphs and draw as a loop on their node; longer cycles still need the circular layout. Nodes can be dragged or nudged with the arrow keys in the component, which needs an interactive render mode. At most 250 nodes / 2,000 edges; dense graphs can still overlap.
@@ -219,6 +235,10 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.7.0 additions
+
+`DensityCells` for scatter charts, described under [Dense scatter charts](#dense-scatter-charts), and `tests/Lumen.Charts.Profile` with the measurements that motivated it. Also fixes a caption that grouped its counts with the host's culture rather than invariantly, so a chart rendered on a French or South African machine read `50 000` where every other number in the library reads `50,000`.
 
 ## 0.6.2 accessibility
 

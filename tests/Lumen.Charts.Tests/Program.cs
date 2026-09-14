@@ -82,6 +82,18 @@ Test("Stacked positive and negative sums",()=>{
     var labels=doc.Descendants(ns+"text").Select(e=>e.Value).ToArray();Check(labels.Contains("10")&&labels.Contains("-10"));
     Check(doc.Descendants(ns+"rect").All(e=>double.Parse(e.Attribute("height")!.Value,CultureInfo.InvariantCulture)>=0));
 });
+Test("Chart captions group numbers invariantly",()=>{
+    var previous=CultureInfo.CurrentCulture;
+    try {
+        CultureInfo.CurrentCulture=new("fr-FR");
+        var doc=Svg(Spec(ChartKind.Scatter) with{DensityCells=40,Series=[new("Cloud",
+            Enumerable.Range(0,5000).Select(i=>new ChartPoint(i%320,Math.Sin(i*.03)*40+i%17)).ToArray())]});
+        // A host culture that groups with spaces must not change what the chart reads.
+        Check(doc.Descendants(ns+"text").Any(t=>t.Value.Contains("5,000 observations aggregated into 40 cells")));
+        Check(doc.Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-datum")
+            .All(e=>!e.Attribute("aria-label")!.Value.Contains(' ')&&!e.Attribute("aria-label")!.Value.Contains(' ')));
+    } finally {CultureInfo.CurrentCulture=previous;}
+});
 Test("Invariant SVG decimal formatting",()=>{
     var previous=CultureInfo.CurrentCulture;try {CultureInfo.CurrentCulture=new("fr-FR");var doc=Svg(Spec());Check(doc.Descendants(ns+"circle").All(e=>!e.Attribute("cx")!.Value.Contains(',')));}finally{CultureInfo.CurrentCulture=previous;}
 });
@@ -559,6 +571,41 @@ Test("Marks on the first and last values are drawn whole",()=>{
             Check(cx-r>=left&&cx+r<=left+width,$"{kind} mark at {cx} is clipped by the plot viewport");
         }
     }
+});
+ChartSpec Cloud(int points,int? cells)=>Spec(ChartKind.Scatter) with{DensityCells=cells,Series=[new("Cloud",
+    Enumerable.Range(0,points).Select(i=>new ChartPoint(i%320,Math.Sin(i*.03)*40+i%17)).ToArray())]};
+Test("Density cells replace one mark per observation",()=>{
+    var every=Svg(Cloud(5000,null));
+    var binned=Svg(Cloud(5000,40));
+    Check(every.Descendants(ns+"g").Count(e=>(string?)e.Attribute("class")=="lumen-datum")==5000);
+    var cells=binned.Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-datum").ToArray();
+    Check(cells.Length is >0 and <1000,$"{cells.Length} cells drawn");
+    // Cells are aggregates, so they carry no observation index, exactly like histogram bins.
+    Check(cells.All(c=>c.Attribute("data-point") is null&&(string?)c.Attribute("role")=="img"));
+    Check(binned.Descendants(ns+"text").Any(t=>t.Value.Contains("5,000 observations aggregated into 40 cells")));
+});
+Test("Every observation lands in exactly one cell",()=>{
+    var doc=Svg(Cloud(5000,40));
+    var counted=doc.Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-datum")
+        .Select(e=>int.Parse(e.Attribute("aria-label")!.Value.Split(": ")[1].Split(' ')[0].Replace(",",""),CultureInfo.InvariantCulture)).Sum();
+    Check(counted==5000,$"cells account for {counted} of 5000 observations");
+});
+Test("Density cells are square and shaded by count",()=>{
+    var doc=Svg(Cloud(5000,40));
+    var rects=doc.Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-datum").Select(e=>e.Element(ns+"rect")!).ToArray();
+    Check(rects.All(r=>r.Attribute("width")!.Value==r.Attribute("height")!.Value),"cells are not square");
+    var weights=rects.Select(r=>double.Parse(r.Attribute("fill-opacity")!.Value,CultureInfo.InvariantCulture)).ToArray();
+    Check(weights.Min()>=.2&&weights.Max()<=.9);
+    Check(weights.Distinct().Count()>1,"every cell has the same shading");
+});
+Test("Density leaves the exported observations untouched",()=>{
+    Check(ChartExport.Csv(Cloud(500,40)).Split('\n',StringSplitOptions.RemoveEmptyEntries).Length==501);
+});
+Test("Reject density cells where they would misrepresent the chart",()=>{
+    Reject(()=>ChartSvg.Render(Spec(ChartKind.Line) with{DensityCells=40}));
+    Reject(()=>ChartSvg.Render(Spec(ChartKind.Bubble) with{DensityCells=40}));
+    Reject(()=>ChartSvg.Render(Cloud(100,4)));
+    Reject(()=>ChartSvg.Render(Cloud(100,400)));
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

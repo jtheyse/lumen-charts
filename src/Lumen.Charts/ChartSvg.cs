@@ -44,6 +44,9 @@ public static class ChartSvg
         else if (spec.Kind == ChartKind.Histogram) Histogram(w, spec);
         else if (spec.Kind == ChartKind.Box) Box(w, spec);
         else Cartesian(w, spec);
+        if (spec.Kind == ChartKind.Scatter && spec.DensityCells is not null)
+            w.Text(spec.Width - 30, 64, $"{Count(spec.Series.Sum(series => series.Points.Count(p => p.Y.HasValue)))} observations aggregated into {spec.DensityCells} cells across",
+                "text-anchor='end' class='lumen-muted' font-size='11'");
         w.Text(24, spec.Height - 12, spec.Source, "class='lumen-muted' font-size='11'");
         if (legendRows > 0)
             for (var i = 0; i < spec.Series.Count; i++)
@@ -79,6 +82,8 @@ public static class ChartSvg
         ? spec.Series.Any(s => s.Points.Count > 0)
         : spec.Series.Any(s => s.Points.Any(p => p.Y.HasValue));
     private static string N(double n) => SvgWriter.N(n);
+    /// <summary>Counts are grouped invariantly, so a host's culture cannot change what the chart reads.</summary>
+    private static string Count(int value) => value.ToString("N0", CultureInfo.InvariantCulture);
 
     private static void Cartesian(SvgWriter w, ChartSpec s)
     {
@@ -143,7 +148,8 @@ public static class ChartSvg
         for (var si = 0; si < s.Series.Count; si++)
         {
             var series = s.Series[si]; var color = SeriesColor(series, si);
-            if (s.Kind == ChartKind.Candlestick) Candles(w, series, X, Y, xs, ys);
+            if (s.Kind == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, Y, xs, ys, cells, left, right, top, bottom);
+            else if (s.Kind == ChartKind.Candlestick) Candles(w, series, X, Y, xs, ys);
             else if (s.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Band)
             {
                 if (s.Kind == ChartKind.Band) Bands(w, series, color, X, Y, s.MaxRenderedPoints);
@@ -200,6 +206,32 @@ public static class ChartSvg
             }
         }
         w.Add("</svg>");
+    }
+
+    /// <summary>One shaded cell per occupied region. Cells are square in pixels, and a cell's opacity
+    /// follows the logarithm of its count so a dense core does not flatten everything around it.</summary>
+    private static void Density(SvgWriter w, ChartSeries series, string color, Func<double, double> X, Func<double, double> Y,
+        Axis xs, Axis ys, int cells, double left, double right, double top, double bottom)
+    {
+        var size = (right - left) / cells;
+        var counts = new Dictionary<(int Column, int Row), int>();
+        foreach (var p in series.Points)
+        {
+            if (!p.Y.HasValue) continue;
+            var key = ((int)Math.Floor((X(p.X) - left) / size), (int)Math.Floor((Y(p.Y.Value) - top) / size));
+            counts[key] = counts.TryGetValue(key, out var count) ? count + 1 : 1;
+        }
+        if (counts.Count == 0) return;
+        var busiest = counts.Values.Max();
+        foreach (var ((column, row), count) in counts.OrderBy(c => c.Key.Column).ThenBy(c => c.Key.Row))
+        {
+            double x = left + column * size, y = top + row * size;
+            var weight = .22 + .68 * Math.Log(1 + count) / Math.Log(1 + busiest);
+            var label = $"{series.Name}: {Count(count)} observation{(count == 1 ? "" : "s")}, " +
+                        $"{xs.Format(xs.Invert(x, left, right))} to {xs.Format(xs.Invert(x + size, left, right))}, " +
+                        $"{ys.Format(ys.Invert(y + size, bottom, top))} to {ys.Format(ys.Invert(y, bottom, top))}";
+            Aggregate(w, label, $"<rect x='{N(x)}' y='{N(y)}' width='{N(size)}' height='{N(size)}' fill='{color}' fill-opacity='{N(Math.Round(weight, 3))}'/>");
+        }
     }
 
     private static void Candles(SvgWriter w, ChartSeries series, Func<double, double> X, Func<double, double> Y, Axis xs, Axis ys)

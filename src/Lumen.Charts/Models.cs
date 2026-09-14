@@ -50,6 +50,9 @@ public sealed record ChartSpec
     public int MaxRenderedPoints { get; init; } = 1200;
     /// <summary>Histogram bin count. Null selects a count from the data.</summary>
     public int? Bins { get; init; }
+    /// <summary>Scatter only. Set a cell count across the plot to draw one shaded cell per occupied
+    /// region instead of one mark per observation. Null draws every point, which is the default.</summary>
+    public int? DensityCells { get; init; }
 }
 
 public sealed record GraphNode(string Id, string Label, string? Color = null);

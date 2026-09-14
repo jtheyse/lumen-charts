@@ -9,11 +9,12 @@ using Microsoft.Playwright;
 const int repeats = 5;
 
 var random = new Random(12);
-ChartSpec Spec(ChartKind kind, int points, int budget) => new()
+ChartSpec Spec(ChartKind kind, int points, int budget, int? cells = null) => new()
 {
     Kind = kind,
     Title = $"{kind} with {points:N0} points",
     MaxRenderedPoints = budget,
+    DensityCells = cells,
     Series = [new("Signal", Enumerable.Range(0, points)
         .Select(i => new ChartPoint(i, Math.Sin(i * .01) * 50 + random.NextDouble() * 10)).ToArray())]
 };
@@ -32,15 +33,16 @@ static double Median(List<double> values)
 Console.WriteLine("| Chart | Input points | Budget | Rendered marks | SVG generation | SVG size | Browser render | DOM nodes |");
 Console.WriteLine("|---|---:|---:|---:|---:|---:|---:|---:|");
 
-foreach (var (kind, points, budget) in new (ChartKind, int, int)[]
+foreach (var (kind, points, budget, cells) in new (ChartKind, int, int, int?)[]
 {
-    (ChartKind.Line, 1_000, 1200), (ChartKind.Line, 10_000, 1200), (ChartKind.Line, 100_000, 1200),
-    (ChartKind.Line, 100_000, 5000), (ChartKind.Line, 100_000, 16),
-    (ChartKind.Scatter, 1_000, 1200), (ChartKind.Scatter, 10_000, 1200), (ChartKind.Scatter, 50_000, 1200),
-    (ChartKind.Scatter, 100_000, 1200)
+    (ChartKind.Line, 1_000, 1200, null), (ChartKind.Line, 10_000, 1200, null), (ChartKind.Line, 100_000, 1200, null),
+    (ChartKind.Line, 100_000, 5000, null), (ChartKind.Line, 100_000, 16, null),
+    (ChartKind.Scatter, 1_000, 1200, null), (ChartKind.Scatter, 10_000, 1200, null), (ChartKind.Scatter, 50_000, 1200, null),
+    (ChartKind.Scatter, 100_000, 1200, null),
+    (ChartKind.Scatter, 50_000, 1200, 80), (ChartKind.Scatter, 100_000, 1200, 80), (ChartKind.Scatter, 100_000, 1200, 160)
 })
 {
-    var spec = Spec(kind, points, budget);
+    var spec = Spec(kind, points, budget, cells);
     ChartSvg.Render(spec); // warm the code paths before timing
     var generation = new List<double>();
     string svg = "";
@@ -72,7 +74,7 @@ foreach (var (kind, points, budget) in new (ChartKind, int, int)[]
         measurement = new { marks = result.GetProperty("marks").GetInt32(), nodes = result.GetProperty("nodes").GetInt32(), ms = result.GetProperty("ms").GetDouble() };
     }
 
-    Console.WriteLine($"| {kind} | {points:N0} | {budget:N0} | {measurement.marks:N0} | {Median(generation):0.0} ms | {svg.Length / 1024.0:N0} KB | {Median(render):0.0} ms | {measurement.nodes:N0} |");
+    Console.WriteLine($"| {kind}{(cells is null ? "" : $" ({cells} cells)")} | {points:N0} | {budget:N0} | {measurement.marks:N0} | {Median(generation):0.0} ms | {svg.Length / 1024.0:N0} KB | {Median(render):0.0} ms | {measurement.nodes:N0} |");
 }
 
 // Re-rendering is what an interactive chart does on every zoom, pan or series toggle.

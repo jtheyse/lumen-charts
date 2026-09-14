@@ -21,6 +21,9 @@ The profiler asserts nothing and does not run in continuous integration: a timin
 | Scatter | 10,000 | 1,200 | 10,000 | 9.3 ms | 2,499 KB | 83.1 ms | 30,020 |
 | Scatter | 50,000 | 1,200 | 50,000 | 64.4 ms | 12,619 KB | 394.6 ms | 150,019 |
 | Scatter | 100,000 | 1,200 | 100,000 | 131.5 ms | 25,270 KB | 818.9 ms | 300,020 |
+| Scatter, 80 cells | 50,000 | 1,200 | 2,161 | 11.8 ms | 626 KB | 33.6 ms | 6,503 |
+| Scatter, 80 cells | 100,000 | 1,200 | 2,161 | 19.5 ms | 627 KB | 33.4 ms | 6,504 |
+| Scatter, 160 cells | 100,000 | 1,200 | 8,639 | 24.4 ms | 2,525 KB | 62.3 ms | 25,938 |
 
 Replacing a rendered 1,200-mark chart in place, which is what a zoom, a pan or a series toggle does: **32 ms**.
 
@@ -32,12 +35,18 @@ Replacing a rendered 1,200-mark chart in place, which is what a zoom, a pan or a
 
 **Scatter and bubble are the exposure.** They render every point by design, because thinning a cloud changes what the reader sees. That is defensible up to roughly 10,000 points. Beyond it the cost is not the drawing but the DOM: 50,000 points means 150,000 elements and 12 MB of markup, and 100,000 points means 300,000 elements and 25 MB. At that size the page is slow to load, slow to hover and expensive to keep in memory, and it will be far worse on a phone than on this machine.
 
+## Density binning
+
+`DensityCells` was added in 0.7.0 on the strength of the rows above. Aggregating 100,000 scatter points into an 80-cell grid takes the browser from 819 ms to 33 ms, the markup from 25 MB to 627 KB, and the DOM from 300,020 elements to 6,504 — while the chart states on its face how many observations it aggregated and into how many cells.
+
+It also reads better. Drawing 50,000 points individually saturates into solid blobs: overlapping series hide each other completely, and nothing shows where the mass sits. The binned version shows the interior structure of both clouds and their overlap.
+
 ## On a second renderer
 
 Roadmap item 4 asked whether a Canvas or WebGL renderer is justified. On this evidence, **not yet**, and not for the reason that was assumed.
 
 The families that were expected to need it — line and area over large series — are already flat, because sampling caps the work. Adding a second renderer for them would buy nothing and would cost a second implementation of every axis, label, tooltip and accessibility affordance, all of which come free while marks are real DOM elements a screen reader and the keyboard can reach.
 
-The families that do degrade are the unsampled point clouds, and the cheaper fix there is to reduce what is drawn rather than to change how it is drawn: density binning, or drawing a sampled cloud with an honest note about how many observations it represents. That keeps one renderer, one accessibility story and one export path. A Canvas renderer only becomes the right answer if a specific application needs every one of 50,000 individual points to stay individually visible and hoverable, which no use here has yet required.
+The families that do degrade are the unsampled point clouds, and the cheaper fix there was to reduce what is drawn rather than to change how it is drawn. That shipped as `DensityCells`, and it keeps one renderer, one accessibility story and one export path. A Canvas renderer only becomes the right answer if a specific application needs every one of 50,000 individual points to stay individually visible and hoverable, which no use here has yet required.
 
-Until then the honest statement is the one in the README: scatter and bubble render every point, comfortable to about 10,000, and larger clouds need aggregation first.
+Until then the honest statement is the one in the README: scatter and bubble render every point by default, comfortable to about 10,000, and larger clouds should set `DensityCells` or be aggregated before charting.

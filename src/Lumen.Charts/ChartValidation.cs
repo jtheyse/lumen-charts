@@ -21,6 +21,11 @@ public static partial class ChartValidation
         if (spec.Series is null || spec.Series.Count > 32) throw new ArgumentException("Provide at most 32 series.");
         if (spec.MaxRenderedPoints is < 16 or > 5000) throw new ArgumentException("MaxRenderedPoints must be between 16 and 5000.");
         if (spec.Bins is < 1 or > Statistics.MaxBins) throw new ArgumentException($"Bins must be between 1 and {Statistics.MaxBins}.");
+        if (spec.DensityCells is not null)
+        {
+            if (spec.Kind != ChartKind.Scatter) throw new ArgumentException("Density cells apply to scatter charts; the other kinds either draw one mark per category or already sample.");
+            if (spec.DensityCells is < 8 or > 200) throw new ArgumentException("DensityCells must be between 8 and 200.");
+        }
         if (spec.Kind is ChartKind.Candlestick or ChartKind.Histogram && spec.Series.Count > 1)
             throw new ArgumentException("Candlestick and histogram charts accept one series.");
         Bounds(spec.XMin, spec.XMax); Bounds(spec.YMin, spec.YMax);
