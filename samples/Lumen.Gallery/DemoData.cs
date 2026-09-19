@@ -1,9 +1,17 @@
 namespace Lumen.Gallery;
 
 public enum AxisDemo { Numeric, Time, Log }
+public enum BrandDemo { Lumen, Harbour, PageCss }
 
 public static class DemoData
 {
+    /// <summary>A brand written in C#: it renders the same in the page, in exports and through the HTTP API.</summary>
+    public static readonly Lumen.Charts.ChartStyle Harbour = new()
+    {
+        Background="#F6F3EE",Text="#1F2A37",Muted="#4B5563",Grid="#E5DED3",Edge="#6B7280",
+        Series=["#1D4E89","#B03A2E","#2E7D5B","#9A6A12"],Rising="#2E7D5B",Falling="#B03A2E",
+        HeatmapLow="#EFE6D8",HeatmapHigh="#1D4E89",FontFamily="Georgia,Cambria,serif"
+    };
     public static bool TimeCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Area or Lumen.Charts.ChartKind.Scatter or Lumen.Charts.ChartKind.Bubble;
     public static bool LogCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Scatter or Lumen.Charts.ChartKind.Bubble;
     public static readonly string[] Months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];

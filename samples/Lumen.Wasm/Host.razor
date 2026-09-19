@@ -1,4 +1,5 @@
 <main>
+<LumenBrand Series="--brand-1, --brand-2, --brand-3" Background="--surface" Text="--ink" Muted="--ink-muted" Grid="--rule">
     <h1>Lumen Charts on WebAssembly</h1>
     <p>The same components as the server gallery, running entirely in the browser. Every chart below is rendered by <code>Lumen.Charts</code> inside WebAssembly, with tooltips, exports, point selection and node dragging supplied by the shared static assets of the Razor class library.</p>
 
@@ -16,6 +17,7 @@
     <h2 id="graph">Network</h2>
     <div class="card"><LumenGraph Spec="graph" NodeSelected="OnNode"/></div>
     <p class="state" role="status">@(node ?? "Drag a node, or focus one and press Enter to select it.")</p>
+</LumenBrand>
 </main>
 @code {
     private static readonly ChartKind[] kinds=[ChartKind.Line,ChartKind.Column,ChartKind.Candlestick,ChartKind.Histogram,ChartKind.Box,ChartKind.Donut];

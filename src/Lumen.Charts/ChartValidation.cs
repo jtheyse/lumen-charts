@@ -11,6 +11,7 @@ public static partial class ChartValidation
         Dimensions(spec.Width, spec.Height);
         if (!Enum.IsDefined(spec.Kind) || !Enum.IsDefined(spec.Theme)) throw new ArgumentException("Unknown chart kind or theme.");
         if (!Enum.IsDefined(spec.XAxis) || !Enum.IsDefined(spec.YAxis)) throw new ArgumentException("Unknown axis kind.");
+        Style(spec.Style);
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");
         if (spec.XAxis != AxisKind.Linear && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Band))
             throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick and band charts; the other kinds index or derive their X values.");
@@ -90,6 +91,25 @@ public static partial class ChartValidation
         if (axis == AxisKind.Log && low <= 0) throw new ArgumentException("Log Y axes require positive band bounds.");
     }
 
+    internal static void Style(ChartStyle? style)
+    {
+        if (style is null) return;
+        foreach (var color in new[] { style.Background, style.Text, style.Muted, style.Grid, style.Edge, style.Rising, style.Falling, style.HeatmapLow, style.HeatmapHigh })
+        {
+            if (color is null) throw new ArgumentException("Style colours cannot be null.");
+            Color(color);
+        }
+        if (style.Series is null || style.Series.Count is 0 or > 32) throw new ArgumentException("A style needs between 1 and 32 series colours.");
+        foreach (var color in style.Series)
+        {
+            if (color is null) throw new ArgumentException("Style colours cannot be null.");
+            Color(color);
+        }
+        // The font list is written into a style attribute, so anything beyond a plain family list is refused.
+        if (style.FontFamily is null || !FontFamily().IsMatch(style.FontFamily))
+            throw new ArgumentException("Font families may contain letters, digits, spaces, commas and hyphens, up to 200 characters.");
+    }
+
     internal static bool Finite(double n) => double.IsFinite(n) && Math.Abs(n) <= 1e100;
     internal static void Dimensions(int width, int height)
     {
@@ -112,4 +132,6 @@ public static partial class ChartValidation
     }
     [GeneratedRegex("^#[0-9a-fA-F]{6}$")]
     private static partial Regex HexColor();
+    [GeneratedRegex("^[A-Za-z0-9 ,\\-]{1,200}$")]
+    private static partial Regex FontFamily();
 }

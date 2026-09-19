@@ -47,17 +47,17 @@ public static class GraphEngine
     {
         var layout = Layout(graph).ToDictionary(p => p.Id, p => positions is not null && positions.TryGetValue(p.Id, out var moved) ? moved : new GraphPoint(p.X, p.Y), StringComparer.Ordinal);
         var routes = Routes(graph);
-        var w = new SvgWriter();
+        var w = new SvgWriter { Style = graph.Style ?? ChartSvg.Preset(graph.Theme) };
         var crossings = graph.Layout == GraphLayout.Circular ? "" : $" · {Crossings(graph)} edge crossings";
         ChartSvg.Begin(w, graph.Width, graph.Height, graph.Title,
-            $"{graph.Nodes.Count} nodes · {graph.Edges.Count} directed connections · {graph.Layout} layout{crossings}", graph.Theme);
+            $"{graph.Nodes.Count} nodes · {graph.Edges.Count} directed connections · {graph.Layout} layout{crossings}");
         for (var i = 0; i < graph.Edges.Count; i++)
         {
             var edge = graph.Edges[i];
             var a = layout[edge.Source];
             if (edge.Source == edge.Target)
             {
-                w.Add($"<path d='M{N(a.X - 12)},{N(a.Y - 17)} C{N(a.X - 65)},{N(a.Y - 75)} {N(a.X + 65)},{N(a.Y - 75)} {N(a.X + 12)},{N(a.Y - 17)}' fill='none' stroke='#8090AD'><title>{SvgWriter.E(edge.Label ?? "Self-loop")}</title></path>");
+                w.Add($"<path d='M{N(a.X - 12)},{N(a.Y - 17)} C{N(a.X - 65)},{N(a.Y - 75)} {N(a.X + 65)},{N(a.Y - 75)} {N(a.X + 12)},{N(a.Y - 17)}' fill='none' stroke='{w.Style.Edge}'><title>{SvgWriter.E(edge.Label ?? "Self-loop")}</title></path>");
                 continue;
             }
             // Dragged endpoints replace the layout's own; the bends between them stay where the layout put them.
@@ -66,9 +66,9 @@ public static class GraphEngine
             var start = Shift(points[0], points[1], Trim);
             var end = Shift(points[^1], points[^2], Trim);
             points[0] = start; points[^1] = end;
-            w.Add($"<path d='{Path(points)}' fill='none' stroke='#8090AD' stroke-width='1.5'/>");
+            w.Add($"<path d='{Path(points)}' fill='none' stroke='{w.Style.Edge}' stroke-width='1.5'/>");
             var direction = Unit(points[^2], end);
-            w.Add($"<path d='M{N(end.X)},{N(end.Y)} L{N(end.X - direction.X * 9 - direction.Y * 4)},{N(end.Y - direction.Y * 9 + direction.X * 4)} L{N(end.X - direction.X * 9 + direction.Y * 4)},{N(end.Y - direction.Y * 9 - direction.X * 4)} Z' fill='#8090AD'/>");
+            w.Add($"<path d='M{N(end.X)},{N(end.Y)} L{N(end.X - direction.X * 9 - direction.Y * 4)},{N(end.Y - direction.Y * 9 + direction.X * 4)} L{N(end.X - direction.X * 9 + direction.Y * 4)},{N(end.Y - direction.Y * 9 - direction.X * 4)} Z' fill='{w.Style.Edge}'/>");
             if (edge.Label is not null)
             {
                 var middle = points[points.Length / 2];
@@ -78,7 +78,7 @@ public static class GraphEngine
         }
         for (var i = 0; i < graph.Nodes.Count; i++)
         {
-            var n = graph.Nodes[i]; var p = layout[n.Id]; var color = n.Color ?? ChartSvg.Palette[i % ChartSvg.Palette.Count];
+            var n = graph.Nodes[i]; var p = layout[n.Id]; var color = n.Color ?? w.Style.SeriesColor(i);
             w.Add($"<g class='lumen-node' tabindex='0' role='button' data-node='{SvgWriter.E(n.Id)}' data-position='{N(p.X)},{N(p.Y)}' aria-label='{SvgWriter.E(n.Label)}'><title>{SvgWriter.E(n.Label)}</title><circle cx='{N(p.X)}' cy='{N(p.Y)}' r='{N(Radius)}' fill='{color}' fill-opacity='.15' stroke='{color}' stroke-width='2'/>");
             w.Text(p.X, p.Y + 5, (i + 1).ToString(), "text-anchor='middle' font-weight='600'");
             w.Text(p.X, p.Y + 42, ChartSvg.Short(n.Label, 22), "text-anchor='middle'"); w.Add("</g>");
@@ -236,6 +236,7 @@ public static class GraphEngine
     {
         ArgumentNullException.ThrowIfNull(g); ChartValidation.Dimensions(g.Width, g.Height); ChartValidation.Text(g.Title);
         if (!Enum.IsDefined(g.Layout) || !Enum.IsDefined(g.Theme)) throw new ArgumentException("Unknown layout or theme.");
+        ChartValidation.Style(g.Style);
         if (g.Nodes is null || g.Edges is null || g.Nodes.Count > 250 || g.Edges.Count > 2000) throw new ArgumentException("Graphs support at most 250 nodes and 2000 edges.");
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var n in g.Nodes)

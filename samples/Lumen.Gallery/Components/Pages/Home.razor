@@ -22,13 +22,18 @@
                 @foreach(var kind in Enum.GetValues<ChartKind>())
                 { <button class="@(selected==kind ? "selected" : "")" aria-pressed="@(selected==kind ? "true" : "false")" @onclick="()=>Select(kind)">@Name(kind)</button> }
             </div>
+            <div class="segmented axis-choice" role="group" aria-label="Chart brand">
+                <button class="@(brand==BrandDemo.Lumen ? "selected" : "")" aria-pressed="@(brand==BrandDemo.Lumen ? "true" : "false")" @onclick="()=>brand=BrandDemo.Lumen">Lumen brand</button>
+                <button class="@(brand==BrandDemo.Harbour ? "selected" : "")" aria-pressed="@(brand==BrandDemo.Harbour ? "true" : "false")" @onclick="()=>brand=BrandDemo.Harbour">Harbour (C#)</button>
+                <button class="@(brand==BrandDemo.PageCss ? "selected" : "")" aria-pressed="@(brand==BrandDemo.PageCss ? "true" : "false")" @onclick="()=>brand=BrandDemo.PageCss">Page CSS</button>
+            </div>
             <div class="segmented axis-choice" role="group" aria-label="Axis type">
                 <button class="@(axisDemo==AxisDemo.Numeric ? "selected" : "")" aria-pressed="@(axisDemo==AxisDemo.Numeric ? "true" : "false")" @onclick="()=>axisDemo=AxisDemo.Numeric">Numeric axes</button>
                 @if(DemoData.TimeCapable(selected)) { <button class="@(axisDemo==AxisDemo.Time ? "selected" : "")" aria-pressed="@(axisDemo==AxisDemo.Time ? "true" : "false")" @onclick="()=>axisDemo=AxisDemo.Time">Time X</button> }
                 @if(DemoData.LogCapable(selected)) { <button class="@(axisDemo==AxisDemo.Log ? "selected" : "")" aria-pressed="@(axisDemo==AxisDemo.Log ? "true" : "false")" @onclick="()=>axisDemo=AxisDemo.Log">Log Y</button> }
             </div>
             <div class="chart-card"><div class="card-meta"><span><i></i> LIVE COMPONENT <span class="divider">/</span> @Name(selected)</span><button @onclick="()=>revision++">↻ Refresh sample</button></div>
-                <LumenChart @key="(selected,axisDemo)" Spec="Current" PointSelected="OnPoint"/>
+                @Branded(@<LumenChart @key="(selected,axisDemo)" Spec="Current" PointSelected="OnPoint"/>)
             </div>
             <div class="under-chart"><span>↳ @Hint</span><span>@(selection ?? "Select a point to inspect its value")</span></div>
         </section>
@@ -36,7 +41,7 @@
             <article class="small-card"><div class="eyebrow">DESIGNED TO COMMUNICATE</div><h3>Good defaults.<br/>Honest comparisons.</h3><p>Zero baselines for bars. Explicit gaps for missing data. Readable labels and an underlying data table.</p><div class="mini-tags"><span>No charting JS dependencies</span><span>Typed data binding</span></div></article>
             <article class="small-card accent"><div class="eyebrow">TAKE YOUR WORK WITH YOU</div><h3>Ready for the<br/>next conversation.</h3><p>Export crisp SVG graphics for reports or the original observations as CSV. Your data stays yours.</p><a href="#integration">Explore the rendering API ↗</a></article>
         </section>
-        <section id="network"><div class="section-heading"><div><div class="eyebrow">BEYOND THE AXES</div><h2>See how everything connects.</h2></div><div class="segmented"><button class="@(layout==GraphLayout.Layered?"selected":"")" @onclick="()=>SetLayout(GraphLayout.Layered)">Layered</button><button class="@(layout==GraphLayout.Circular?"selected":"")" @onclick="()=>SetLayout(GraphLayout.Circular)">Circular</button></div></div><div class="chart-card"><LumenGraph Spec="Graph" NodeSelected="OnNode"/></div><p class="quiet">@(node ?? "Drag a node to move it, or focus one and press Enter to select it and the arrow keys to nudge it. Layered layouts order each level to reduce edge crossings and require an acyclic graph.")</p></section>
+        <section id="network"><div class="section-heading"><div><div class="eyebrow">BEYOND THE AXES</div><h2>See how everything connects.</h2></div><div class="segmented"><button class="@(layout==GraphLayout.Layered?"selected":"")" @onclick="()=>SetLayout(GraphLayout.Layered)">Layered</button><button class="@(layout==GraphLayout.Circular?"selected":"")" @onclick="()=>SetLayout(GraphLayout.Circular)">Circular</button></div></div><div class="chart-card">@Branded(@<LumenGraph Spec="Graph" NodeSelected="OnNode"/>)</div><p class="quiet">@(node ?? "Drag a node to move it, or focus one and press Enter to select it and the arrow keys to nudge it. Layered layouts order each level to reduce edge crossings and require an acyclic graph.")</p></section>
         <section id="integration" class="integration"><div><div class="eyebrow">SMALL API. REAL POSSIBILITIES.</div><h2>From C# to clarity.</h2><p>Share one chart specification between your Blazor interface, your reports, and your HTTP API.</p><a href="/api/charts/types" target="_blank">View supported API chart types ↗</a></div><pre><code>@Snippet</code></pre></section>
         <footer><span class="brand">lumen.</span><span>Charts that help you see.</span><span>Preview 0.1 · Built with Blazor</span></footer>
     </main>
@@ -44,6 +49,15 @@
 @code {
     private ChartKind selected=ChartKind.Area;
     private AxisDemo axisDemo=AxisDemo.Numeric;
+    private BrandDemo brand=BrandDemo.Lumen;
+    // Page CSS reads this page's own custom properties, so it follows the dark-mode switch by itself;
+    // Harbour is fixed in C#, and the Lumen brand is the library default driven by the theme.
+    private RenderFragment Branded(RenderFragment content) => brand switch
+    {
+        BrandDemo.PageCss => @<LumenBrand Series="--brand-1, --brand-2, --brand-3, --brand-4" Background="--surface" Text="--text" Muted="--muted" Grid="--line">@content</LumenBrand>,
+        BrandDemo.Harbour => @<CascadingValue Value="DemoData.Harbour">@content</CascadingValue>,
+        _ => content
+    };
     private GraphLayout layout=GraphLayout.Layered;
     private bool dark;private int revision;private string? selection;private string? node;private GraphSpec? graphCache;
     private GraphSpec Graph=>graphCache ??= DemoData.Graph(layout,Theme);

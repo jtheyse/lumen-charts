@@ -34,6 +34,8 @@ public sealed record ChartSpec
     public string Source { get; init; } = "";
     public ChartKind Kind { get; init; } = ChartKind.Line;
     public ChartTheme Theme { get; init; }
+    /// <summary>A host application's colours and typeface. When set it replaces <see cref="Theme"/>.</summary>
+    public ChartStyle? Style { get; init; }
     /// <summary>Time X values are Unix milliseconds UTC. Log axes are base 10 and require positive values.</summary>
     public AxisKind XAxis { get; init; } = AxisKind.Linear;
     public AxisKind YAxis { get; init; } = AxisKind.Linear;
@@ -65,6 +67,8 @@ public sealed record GraphSpec
     public IReadOnlyList<GraphEdge> Edges { get; init; } = [];
     public GraphLayout Layout { get; init; } = GraphLayout.Layered;
     public ChartTheme Theme { get; init; }
+    /// <summary>A host application's colours and typeface. When set it replaces <see cref="Theme"/>.</summary>
+    public ChartStyle? Style { get; init; }
     public int Width { get; init; } = 900;
     public int Height { get; init; } = 460;
 }

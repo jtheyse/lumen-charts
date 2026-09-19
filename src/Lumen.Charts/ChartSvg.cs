@@ -9,6 +9,7 @@ internal sealed class SvgWriter
     private readonly StringBuilder output = new();
     /// <summary>Native SVG tooltips. Hosts that draw their own tooltips render marks without them.</summary>
     public bool Titles { get; init; } = true;
+    public ChartStyle Style { get; init; } = ChartStyle.Light;
     public static string N(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     public static string E(string? value) => WebUtility.HtmlEncode(value ?? "");
     public void Add(string value) => output.Append(value);
@@ -22,20 +23,24 @@ internal sealed class SvgWriter
 public static class ChartSvg
 {
     /// <summary>Every entry keeps at least a 3:1 contrast against both the light and the dark chart background.</summary>
-    public static readonly IReadOnlyList<string> Palette = Array.AsReadOnly(new[] { "#5675E7", "#169B8D", "#B87F44", "#A775C8", "#D36B84", "#4F93AD" });
+    public static readonly IReadOnlyList<string> Palette = ChartStyle.Light.Series;
     /// <summary>Candlestick bodies are colored by direction rather than by series.</summary>
     public const string RisingColor = "#169B8D", FallingColor = "#D36B84";
     public static string SeriesColor(ChartSeries series, int index) => series.Color ?? Palette[index % Palette.Count];
+    public static string SeriesColor(ChartSeries series, int index, ChartStyle style) => series.Color ?? style.SeriesColor(index);
+    /// <summary>The style a spec draws with: its own, or the preset for its theme.</summary>
+    public static ChartStyle ResolveStyle(ChartSpec spec) => spec.Style ?? Preset(spec.Theme);
+    internal static ChartStyle Preset(ChartTheme theme) => theme == ChartTheme.Dark ? ChartStyle.Dark : ChartStyle.Light;
 
     /// <summary>Renders a chart. <paramref name="includeTitles"/> controls the native SVG tooltip on each mark.</summary>
     public static string Render(ChartSpec spec, bool includeLegend = true, bool includeTitles = true)
     {
         ChartValidation.Validate(spec);
-        var w = new SvgWriter { Titles = includeTitles };
+        var w = new SvgWriter { Titles = includeTitles, Style = ResolveStyle(spec) };
         var legendColumns = Math.Max(1, (spec.Width - 48) / 180);
         var legendRows = includeLegend && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Histogram and not ChartKind.Box
             ? (int)Math.Ceiling(spec.Series.Count / (double)legendColumns) : 0;
-        Begin(w, spec.Width, spec.Height + legendRows * 22, spec.Title, spec.Description, spec.Theme);
+        Begin(w, spec.Width, spec.Height + legendRows * 22, spec.Title, spec.Description);
         if (!HasData(spec))
             w.Text(spec.Width / 2, spec.Height / 2, "No data to display", "text-anchor='middle'");
         else if (spec.Kind == ChartKind.Donut) Donut(w, spec);
@@ -53,17 +58,17 @@ public static class ChartSvg
             {
                 var x = 24 + i % legendColumns * ((spec.Width - 48d) / legendColumns);
                 var y = spec.Height + 10 + i / legendColumns * 22;
-                w.Add($"<rect x='{N(x)}' y='{N(y - 8)}' width='9' height='9' rx='2' fill='{SeriesColor(spec.Series[i], i)}'/>");
+                w.Add($"<rect x='{N(x)}' y='{N(y - 8)}' width='9' height='9' rx='2' fill='{SeriesColor(spec.Series[i], i, w.Style)}'/>");
                 w.Text(x + 16, y, Short(spec.Series[i].Name, 24), "font-size='11'");
             }
         w.Add("</svg>");
         return w.ToString();
     }
 
-    internal static void Begin(SvgWriter w, int width, int height, string title, string description, ChartTheme theme)
+    internal static void Begin(SvgWriter w, int width, int height, string title, string description)
     {
-        var dark = theme == ChartTheme.Dark;
-        w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{(dark ? "#303B50" : "#E8EDF5")};--lumen-muted:{(dark ? "#AAB8CF" : "#63718A")};width:100%;height:auto;display:block;background:{(dark ? "#171E2E" : "#FFFFFF")};color:{(dark ? "#E8ECF6" : "#26324B")};font-family:Segoe UI,Arial,sans-serif;font-size:12px' fill='currentColor'>");
+        var style = w.Style;
+        w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{style.Grid};--lumen-muted:{style.Muted};width:100%;height:auto;display:block;background:{style.Background};color:{style.Text};font-family:{style.FontFamily};font-size:12px' fill='currentColor'>");
         w.Add($"<title>{SvgWriter.E(title)}</title><desc>{SvgWriter.E(description)}</desc>");
         w.Add("<style>.lumen-svg .lumen-grid{stroke:var(--lumen-grid);stroke-width:1}.lumen-svg .lumen-muted{fill:var(--lumen-muted)}.lumen-svg .lumen-datum{outline:none;cursor:pointer}.lumen-svg .lumen-datum:focus{stroke:currentColor;stroke-width:3}.lumen-svg .lumen-datum:hover{filter:brightness(.87)}.lumen-svg .lumen-node{cursor:grab;outline:none}.lumen-svg .lumen-node:focus circle{stroke-width:4}.lumen-svg .lumen-node:active{cursor:grabbing}</style>");
         w.Text(24, 28, title, "font-size='17' font-weight='600'");
@@ -147,7 +152,7 @@ public static class ChartSvg
         var positive = cats.ToDictionary(x => x, _ => 0d); var negative = cats.ToDictionary(x => x, _ => 0d);
         for (var si = 0; si < s.Series.Count; si++)
         {
-            var series = s.Series[si]; var color = SeriesColor(series, si);
+            var series = s.Series[si]; var color = SeriesColor(series, si, w.Style);
             if (s.Kind == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, Y, xs, ys, cells, left, right, top, bottom);
             else if (s.Kind == ChartKind.Candlestick) Candles(w, series, X, Y, xs, ys);
             else if (s.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Band)
@@ -243,7 +248,7 @@ public static class ChartSvg
         {
             var p = series.Points[pi];
             double open = p.Open!.Value, high = p.High!.Value, low = p.Low!.Value, close = p.Close!.Value;
-            var color = close >= open ? RisingColor : FallingColor;
+            var color = close >= open ? w.Style.Rising : w.Style.Falling;
             double body = Y(Math.Max(open, close)), baseline = Y(Math.Min(open, close));
             Datum(w, 0, pi, $"{p.Label ?? xs.Format(p.X)}: open {ys.Format(open)}, high {ys.Format(high)}, low {ys.Format(low)}, close {ys.Format(close)}",
                 $"<line x1='{N(columns[pi])}' y1='{N(Y(high))}' x2='{N(columns[pi])}' y2='{N(Y(low))}' stroke='{color}' stroke-width='1.5'/>" +
@@ -292,7 +297,7 @@ public static class ChartSvg
         var xs = new Axis(AxisKind.Linear, bins[0].Start, bins[^1].End);
         var ys = Axis.Create(AxisKind.Linear, bins.Select(b => (double)b.Count), true, s.YMin, s.YMax);
         Frame(w, s, ys, left, right, top, bottom);
-        var color = SeriesColor(s.Series[0], 0);
+        var color = SeriesColor(s.Series[0], 0, w.Style);
         foreach (var bin in bins)
         {
             double x = xs.Map(bin.Start, left, right), width = xs.Map(bin.End, left, right) - x, y = ys.Map(bin.Count, bottom, top);
@@ -320,7 +325,7 @@ public static class ChartSvg
         {
             if (observations[si].Length == 0) continue;
             var summary = Statistics.Summarize(observations[si]);
-            var color = SeriesColor(s.Series[si], si);
+            var color = SeriesColor(s.Series[si], si, w.Style);
             var center = left + (si + .5) * band;
             var width = Math.Min(band * .45, 80);
             double q1 = ys.Map(summary.Q1, bottom, top), q3 = ys.Map(summary.Q3, bottom, top);
@@ -359,7 +364,7 @@ public static class ChartSvg
             var large = sweep > Math.PI ? 1 : 0;
             string At(double radius, double a) => $"{N(cx + radius * Math.Cos(a))},{N(cy + radius * Math.Sin(a))}";
             var path = $"M{At(r,angle)} A{N(r)},{N(r)} 0 {large} 1 {At(r,end)} L{At(inner,end)} A{N(inner)},{N(inner)} 0 {large} 0 {At(inner,angle)} Z";
-            var color = Palette[i % Palette.Count];
+            var color = w.Style.SeriesColor(i);
             Datum(w, 0, i, $"{p.Label ?? LinearScale.Label(p.X)}: {LinearScale.Label(p.Y.Value)} ({p.Y / total:P1})", $"<path d='{path}' fill='{color}'/>");
             if (i < 10)
             {
@@ -387,7 +392,7 @@ public static class ChartSvg
                 var p = s.Series[si].Points[pi]; if (!p.Y.HasValue) continue;
                 var x = 130 + Array.IndexOf(cats,p.X)*cw;
                 var t = scale.Map(p.Y.Value, 0, 1);
-                var color = $"#{(int)(228-164*t):X2}{(int)(237-132*t):X2}{(int)(252-44*t):X2}";
+                var color = Mix(w.Style.HeatmapLow, w.Style.HeatmapHigh, t);
                 // A hairline keeps the palest cells distinguishable from the chart background.
                 Datum(w,si,pi,PointLabel(s.Series[si],p),$"<rect x='{N(x+1)}' y='{N(80+si*ch+1)}' width='{N(Math.Max(0,cw-2))}' height='{N(Math.Max(0,ch-2))}' rx='3' fill='{color}' stroke='var(--lumen-muted)' stroke-opacity='.4'/>");
             }
@@ -415,7 +420,7 @@ public static class ChartSvg
         {
             var series=s.Series[si];
             if(cats.Any(x=>!series.Points.Any(p=>p.X==x&&p.Y.HasValue))) throw new ArgumentException("Radar series must contain every category without missing values.");
-            var color=SeriesColor(series,si);
+            var color=SeriesColor(series,si,w.Style);
             w.Add($"<polygon points='{string.Join(" ",cats.Select((x,i)=> {var p=At(i,series.Points.First(p=>p.X==x).Y!.Value);return $"{N(p.X)},{N(p.Y)}";}))}' fill='{color}' fill-opacity='.1' stroke='{color}' stroke-width='2'/>");
             for(var pi=0;pi<series.Points.Count;pi++)
             {
@@ -424,6 +429,13 @@ public static class ChartSvg
             }
         }
         w.Text(24,s.Height-38,$"Radial scale: 0 to {LinearScale.Label(max)}","class='lumen-muted'");
+    }
+    /// <summary>Linear interpolation per channel, truncated, which is how the heatmap ramp has always been computed.</summary>
+    private static string Mix(string low, string high, double t)
+    {
+        int Channel(string hex, int offset) => int.Parse(hex.AsSpan(offset, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        int Blend(int offset) => (int)(Channel(low, offset) + (Channel(high, offset) - Channel(low, offset)) * t);
+        return $"#{Blend(1):X2}{Blend(3):X2}{Blend(5):X2}";
     }
     internal static string Short(string text,int max) => text.Length <= max ? text : text[..(max-1)] + "…";
 }

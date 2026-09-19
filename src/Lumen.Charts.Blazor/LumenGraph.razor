@@ -13,6 +13,8 @@
 @code {
     [Parameter, EditorRequired] public GraphSpec Spec { get; set; } = new();
     [Parameter] public EventCallback<string> NodeSelected { get; set; }
+    /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style on the spec itself wins.</summary>
+    [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }
     private readonly Dictionary<string,GraphPoint> moved=new(StringComparer.Ordinal);
     private string svg="",status="",signature="";
     private ElementReference root;
@@ -25,7 +27,7 @@
         if(current!=signature) { signature=current;moved.Clear();status=""; }
         Render();
     }
-    private void Render()=>svg=GraphEngine.Render(Spec,moved);
+    private void Render()=>svg=GraphEngine.Render(Spec.Style is null && CascadingStyle is not null ? Spec with { Style=CascadingStyle } : Spec,moved);
     private void ResetLayout() { moved.Clear();status="Layout reset";Render(); }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

@@ -7,7 +7,7 @@
         {
             var index=i;
             <button type="button" aria-pressed="@(!hidden.Contains(i) ? "true" : "false")" @onclick="()=>Toggle(index)">
-                <span style="background:@ChartSvg.SeriesColor(Spec.Series[i],i)"></span>@Spec.Series[i].Name
+                <span style="background:@ChartSvg.SeriesColor(Spec.Series[i],i,Style)"></span>@Spec.Series[i].Name
             </button>
         }
     </div>
@@ -41,6 +41,9 @@
 @code {
     [Parameter, EditorRequired] public ChartSpec Spec { get; set; } = new();
     [Parameter] public EventCallback<PointSelection> PointSelected { get; set; }
+    /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style on the spec itself wins.</summary>
+    [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }
+    private ChartStyle Style => Spec.Style ?? CascadingStyle ?? ChartSvg.ResolveStyle(Spec);
     private readonly HashSet<int> hidden=[];
     private string svg="",status="";
     private bool showData;
@@ -76,7 +79,7 @@
     }
     private void ResetView() { viewMin=null;viewMax=null;Render(); }
     protected override void OnParametersSet() { hidden.RemoveWhere(i=>i>=Spec.Series.Count);viewMin=null;viewMax=null;Render(); }
-    private ChartSpec VisibleSpec() => Spec with { XMin=CanZoom ? viewMin ?? Spec.XMin : Spec.XMin, XMax=CanZoom ? viewMax ?? Spec.XMax : Spec.XMax, Series=Spec.Series.Select((s,i)=>(s,i)).Where(p=>!hidden.Contains(p.i)).Select(p=>p.s with {Color=ChartSvg.SeriesColor(p.s,p.i)}).ToArray() };
+    private ChartSpec VisibleSpec() => Spec with { Style=Style, XMin=CanZoom ? viewMin ?? Spec.XMin : Spec.XMin, XMax=CanZoom ? viewMax ?? Spec.XMax : Spec.XMax, Series=Spec.Series.Select((s,i)=>(s,i)).Where(p=>!hidden.Contains(p.i)).Select(p=>p.s with {Color=ChartSvg.SeriesColor(p.s,p.i,Style)}).ToArray() };
     // The component draws its own tooltips, so marks render without the native SVG title.
     private void Render() { xAxis=FullRange;visible=Enumerable.Range(0,Spec.Series.Count).Where(i=>!hidden.Contains(i)).ToArray();svg=ChartSvg.Render(VisibleSpec(), includeLegend:false, includeTitles:false); }
     private void Toggle(int index) { if(!hidden.Add(index))hidden.Remove(index);Render(); }

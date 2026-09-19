@@ -107,6 +107,34 @@ export function detach(root) {
     handlers.delete(root);
 }
 
+/// Reads the host's custom properties as they apply at `root` and normalizes each to #RRGGBB.
+/// Accepts anything the browser accepts as a colour, plus Bootstrap-style "13, 110, 253" triples.
+/// Transparency is discarded: a chart colour is drawn opaque.
+export function resolveBrand(root, request) {
+    const probe = document.createElement('span');
+    probe.style.display = 'none';
+    root.appendChild(probe);
+    const host = getComputedStyle(root);
+    const colour = name => {
+        const raw = name ? host.getPropertyValue(name).trim() : '';
+        if (!raw) return null;
+        probe.style.color = '';
+        probe.style.color = raw;
+        if (!probe.style.color) probe.style.color = `rgb(${raw})`;
+        if (!probe.style.color) return null;
+        const channels = getComputedStyle(probe).color.match(/[\d.]+/g);
+        return channels ? '#' + channels.slice(0, 3).map(v => Math.round(+v).toString(16).padStart(2, '0')).join('').toUpperCase() : null;
+    };
+    const result = {
+        series: (request.series || []).map(colour),
+        background: colour(request.background), text: colour(request.text), muted: colour(request.muted),
+        grid: colour(request.grid), rising: colour(request.rising), falling: colour(request.falling),
+        font: request.font ? host.fontFamily : null
+    };
+    probe.remove();
+    return result;
+}
+
 export function download(content, filename, type) {
     save(new Blob([content], { type }), filename);
 }

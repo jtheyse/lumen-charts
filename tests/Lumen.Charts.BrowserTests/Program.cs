@@ -163,6 +163,34 @@ if (await graph.CountAsync() > 0 && await graph.Locator("[data-node]").CountAsyn
     });
 }
 
+// Only a host that wraps its charts in LumenBrand can prove the page's own colours reach the chart.
+if (await page.Locator("[data-lumen-brand]").CountAsync() > 0)
+{
+    await Test("LumenBrand draws with the host's colours and typeface, and exports them", async () =>
+    {
+        await page.WaitForSelectorAsync("[data-lumen-brand=resolved]");
+        // Normalize independently of the library, so a bug in its resolver cannot also hide in this check.
+        var expected = await page.EvaluateAsync<string[]>(@"() => {
+            const wrapper = document.querySelector('[data-lumen-brand]');
+            const name = wrapper.dataset.lumenSeries.split(',')[0].trim();
+            const canvas = document.createElement('canvas').getContext('2d');
+            canvas.fillStyle = getComputedStyle(wrapper).getPropertyValue(name).trim();
+            const font = getComputedStyle(wrapper).fontFamily.split(',').map(f => f.replace(/[""']/g, '').trim()).join(',');
+            return [canvas.fillStyle.toUpperCase(), font];
+        }");
+        var brandChart = page.Locator("[data-lumen-brand] .lumen-chart").First;
+        var fill = await brandChart.Locator(".lumen-datum circle, .lumen-datum rect").First.GetAttributeAsync("fill");
+        Check(fill == expected[0], $"first mark is {fill}, the page's first brand colour is {expected[0]}");
+        var style = await brandChart.Locator("svg").First.GetAttributeAsync("style");
+        Check(style!.Contains("font-family:" + expected[1]), $"chart font does not match the host font {expected[1]}");
+        var download = await page.RunAndWaitForDownloadAsync(async () =>
+            await brandChart.Locator(".lumen-tools button", new() { HasTextString = "Export SVG" }).ClickAsync());
+        var exported = await File.ReadAllTextAsync((await download.PathAsync())!);
+        Check(exported.Contains(expected[0]), "the exported file lost the host's brand");
+    });
+}
+else Console.WriteLine("SKIP LumenBrand check: this host renders no LumenBrand");
+
 // A fresh load, so the sweep sees the page as a visitor first meets it rather than mid-interaction.
 await page.ReloadAsync(new() { WaitUntil = WaitUntilState.NetworkIdle });
 await page.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });

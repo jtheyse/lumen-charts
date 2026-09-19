@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.7.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.8.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -107,6 +107,51 @@ ChartSpec latency = new() {
 ```
 
 `Statistics.Quantile`, `Statistics.Summarize` and `Statistics.Bins` are public, so the same numbers are available without rendering. Quantiles interpolate linearly between order statistics, matching NumPy's default and Excel's `PERCENTILE.INC`. CSV exports add `Open,High,Low,Close` for candlestick charts and `Low,High` for band charts.
+
+### Branding
+
+Charts can draw in a host application's colours and typeface. A `ChartStyle` holds them, and it renders into the SVG itself, so an exported SVG or PNG and the HTTP API carry the brand exactly as the page shows it. Three ways to supply one, from most specific to least:
+
+1. **`ChartSpec.Style`** or **`GraphSpec.Style`** — one chart, anywhere, including server rendering and the HTTP API.
+2. **A cascaded `ChartStyle`** — every chart and graph beneath it in a Blazor tree.
+3. **`Theme`** — the built-in `Light` and `Dark`, used when neither of the above is set. `ChartStyle.Light` and `ChartStyle.Dark` reproduce them exactly.
+
+```csharp
+public static readonly ChartStyle Brand = new() {
+    Background = "#F6F3EE", Text = "#1F2A37", Muted = "#4B5563", Grid = "#E5DED3",
+    Series = ["#1D4E89", "#B03A2E", "#2E7D5B"], FontFamily = "Georgia,Cambria,serif"
+};
+```
+
+```razor
+<CascadingValue Value="Brand">
+    @Body   @* every LumenChart and LumenGraph in the app *@
+</CascadingValue>
+```
+
+Most applications already define their brand in CSS. `LumenBrand` reads it from the page instead, by custom property name, and cascades the result:
+
+```razor
+<LumenBrand Series="--bs-primary, --bs-success, --bs-warning, --bs-danger"
+            Background="--bs-body-bg" Text="--bs-body-color"
+            Muted="--bs-secondary-color" Grid="--bs-border-color">
+    <LumenChart Spec="revenue" />
+    <LumenGraph Spec="pipeline" />
+</LumenBrand>
+```
+
+It accepts any colour the browser accepts, plus Bootstrap-style `13, 110, 253` triples, and uses the font family in effect where it sits unless `UseHostFont` is false. Anything the page does not define comes from `Fallback`, which is also what renders before the page has been read. It reads the page again after every parent render and redraws only when the colours changed, so a host that switches to dark mode by changing its custom properties is followed without further wiring. It also sets the component chrome — focus rings, control borders and an inverse tooltip — through `--lumen-accent`, `--lumen-control-border`, `--lumen-tooltip-bg` and `--lumen-tooltip-fg`, which a host can also set in its own stylesheet.
+
+A brand palette is the likeliest way to make a chart inaccessible, so check it:
+
+```csharp
+foreach (var issue in Brand.ContrastIssues())
+    Console.WriteLine($"{issue.Element} {issue.Foreground}: {issue.Ratio}:1, needs {issue.Required}:1");
+```
+
+`ContrastIssues` applies the WCAG 2.1 minimums — 4.5:1 for text, 3:1 for series, candles and edges — and both built-in presets report none. `LumenBrand` raises `Resolved` with each style it reads, so an application can check a page-supplied brand at run time too.
+
+Limits: server rendering cannot read a stylesheet, so `ChartSvg.Render` and the HTTP API need an explicit `ChartStyle`. `LumenBrand` discards transparency, since a chart colour is drawn opaque, and maps series, background, text, muted, grid and candle colours; graph edges and the heatmap ramp come from `Fallback`. Font lists are reduced to letters, digits, spaces, commas and hyphens because they are written into a style attribute; `ChartStyle.FontFamilyFrom` performs that reduction on any CSS value.
 
 ### Dense scatter charts
 
@@ -235,6 +280,10 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.8.0 additions
+
+Branding, described under [Branding](#branding): `ChartStyle` with `Light` and `Dark` presets, `ChartSpec.Style` and `GraphSpec.Style`, a cascaded style for Blazor trees, `LumenBrand` to read a brand from the page's own CSS, `ContrastIssues` and `Contrast.Ratio` for checking it, `ChartStyle.FontFamilyFrom`, and CSS custom properties for the component chrome. Output for a spec without a style is byte-for-byte unchanged, which was checked across 61 renderings before and after the change. The gallery has a Lumen / Harbour (C#) / Page CSS switch, and the WebAssembly sample takes its brand and typeface from its own stylesheet.
 
 ## 0.7.0 additions
 

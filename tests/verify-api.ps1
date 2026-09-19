@@ -46,6 +46,11 @@ foreach($bad in @('{"kind":"Line","yAxis":"Log","series":[{"name":"S","points":[
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400) 'Invalid axis request rejected'
 }
+$branded='{"title":"Brand","kind":"Line","style":{"background":"#F6F3EE","series":["#1D4E89"],"fontFamily":"Georgia,serif"},"series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $branded
+Verify ($r.Content.Contains('background:#F6F3EE') -and $r.Content.Contains("fill='#1D4E89'") -and $r.Content.Contains('font-family:Georgia,serif')) 'A style in the request brands the SVG'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Line","style":{"fontFamily":"Arial;background:url(x)"},"series":[{"name":"S","points":[{"x":0,"y":1}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'A style that could escape the markup is rejected'
 $graph='{"nodes":[{"id":"a","label":"Start"},{"id":"b","label":"End"}],"edges":[{"source":"a","target":"b"}],"layout":"Layered"}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType application/json -Body $graph
 Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'Graph SVG'

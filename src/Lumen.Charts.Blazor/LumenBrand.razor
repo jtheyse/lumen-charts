@@ -1,0 +1,96 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+<div class="lumen-brand" @ref="root" data-lumen-brand="@(resolved ? "resolved" : "pending")" data-lumen-series="@Series" style="@Chrome">
+    <CascadingValue Value="current">@ChildContent</CascadingValue>
+</div>
+@code {
+    /// <summary>The charts and graphs that should take the host's branding.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    /// <summary>Custom property names for the series palette, comma separated and read in order, such as
+    /// <c>--bs-primary, --bs-success</c>. Names the page does not define are skipped.</summary>
+    [Parameter] public string? Series { get; set; }
+    [Parameter] public string? Background { get; set; }
+    [Parameter] public string? Text { get; set; }
+    [Parameter] public string? Muted { get; set; }
+    [Parameter] public string? Grid { get; set; }
+    [Parameter] public string? Rising { get; set; }
+    [Parameter] public string? Falling { get; set; }
+    /// <summary>Use the font family in effect where this component sits in the page.</summary>
+    [Parameter] public bool UseHostFont { get; set; } = true;
+    /// <summary>Values for anything the page does not define, and what renders before the page has been read.</summary>
+    [Parameter] public ChartStyle Fallback { get; set; } = ChartStyle.Light;
+    /// <summary>Raised whenever a newly read style replaces the previous one.</summary>
+    [Parameter] public EventCallback<ChartStyle> Resolved { get; set; }
+
+    private ElementReference root;
+    private IJSObjectReference? module;
+    private ChartStyle? current;
+    private string signature = "";
+    private bool resolved, stale = true;
+
+    // The component's own controls follow the brand too: the accent for focus rings, and a tooltip
+    // drawn as the inverse of the chart, which is exactly as legible as the chart's own text.
+    private string? Chrome => current is null ? null :
+        $"--lumen-accent:{current.SeriesColor(0)};--lumen-tooltip-bg:{current.Text};--lumen-tooltip-fg:{current.Background};--lumen-control-border:{current.Grid}";
+
+    // Every parent render may mean the page changed — a dark-mode switch, say — so the page is read
+    // again after it; children re-render only when the resolved colours actually differ.
+    protected override void OnParametersSet() { current ??= Fallback; stale = true; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!stale) return;
+        stale = false;
+        try
+        {
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Lumen.Charts.Blazor/lumen.js");
+            var page = await module.InvokeAsync<HostColours>("resolveBrand", root, new
+            {
+                series = Names(Series), background = Background, text = Text, muted = Muted,
+                grid = Grid, rising = Rising, falling = Falling, font = UseHostFont
+            });
+            var next = Build(page);
+            var key = Signature(next);
+            if (resolved && key == signature) return;
+            resolved = true; signature = key; current = next;
+            await Resolved.InvokeAsync(next);
+            StateHasChanged();
+        }
+        catch (JSDisconnectedException) { }
+    }
+
+    private ChartStyle Build(HostColours page)
+    {
+        var series = (page.Series ?? []).Where(Hex).Select(colour => colour!).ToArray();
+        string Pick(string? colour, string fallback) => Hex(colour) ? colour! : fallback;
+        return Fallback with
+        {
+            Series = series.Length > 0 ? series : Fallback.Series,
+            Background = Pick(page.Background, Fallback.Background),
+            Text = Pick(page.Text, Fallback.Text),
+            Muted = Pick(page.Muted, Fallback.Muted),
+            Grid = Pick(page.Grid, Fallback.Grid),
+            Rising = Pick(page.Rising, Fallback.Rising),
+            Falling = Pick(page.Falling, Fallback.Falling),
+            FontFamily = (UseHostFont ? ChartStyle.FontFamilyFrom(page.Font) : null) ?? Fallback.FontFamily
+        };
+    }
+
+    private static bool Hex(string? colour) =>
+        colour is { Length: 7 } && colour[0] == '#' && colour.Skip(1).All(Uri.IsHexDigit);
+
+    private static string[] Names(string? list) =>
+        (list ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static string Signature(ChartStyle style) => string.Join("|", style.Series) + "|" +
+        string.Join("|", style.Background, style.Text, style.Muted, style.Grid, style.Rising, style.Falling, style.FontFamily);
+
+    public async ValueTask DisposeAsync()
+    {
+        try { if (module is not null) await module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+    }
+
+    private sealed record HostColours(string?[]? Series, string? Background, string? Text, string? Muted,
+        string? Grid, string? Rising, string? Falling, string? Font);
+}
