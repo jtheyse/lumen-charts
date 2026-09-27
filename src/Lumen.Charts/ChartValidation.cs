@@ -17,6 +17,18 @@ public static partial class ChartValidation
             throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick and band charts; the other kinds index or derive their X values.");
         if (spec.YAxis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Band or ChartKind.Box))
             throw new ArgumentException("Log Y axes require line, scatter, bubble, candlestick, band or box charts; magnitude, count and radial charts need a zero baseline.");
+        if (!Enum.IsDefined(spec.Y2Axis) || spec.Y2Axis == AxisKind.Time) throw new ArgumentException("The secondary axis is numeric or logarithmic; time axes are supported on X only.");
+        if (spec.Y2Axis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band))
+            throw new ArgumentException("A logarithmic secondary axis requires line, scatter, bubble or band charts.");
+        var secondary = spec.Series?.Any(series => series?.Secondary == true) == true;
+        if (secondary)
+        {
+            if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Band))
+                throw new ArgumentException("A secondary axis applies to line, area, scatter, bubble, column and band charts; stacked, horizontal, candlestick and radial charts cannot measure against two.");
+            if (spec.Series!.All(series => series.Secondary))
+                throw new ArgumentException("A secondary axis needs at least one series on the left to measure against.");
+        }
+        Text(spec.Y2Label);
         if (spec.IncludeZero && (spec.XAxis == AxisKind.Log || spec.YAxis == AxisKind.Log)) throw new ArgumentException("Log axes cannot include zero.");
         Text(spec.Title); Text(spec.Description); Text(spec.Source); Text(spec.XLabel); Text(spec.YLabel);
         if (spec.Series is null || spec.Series.Count > 32) throw new ArgumentException("Provide at most 32 series.");
@@ -51,6 +63,8 @@ public static partial class ChartValidation
         Bounds(spec.XMin, spec.XMax); Bounds(spec.YMin, spec.YMax);
         if (spec.XAxis == AxisKind.Log && (spec.XMin <= 0 || spec.XMax <= 0)) throw new ArgumentException("Log X bounds must be positive.");
         if (spec.YAxis == AxisKind.Log && (spec.YMin <= 0 || spec.YMax <= 0)) throw new ArgumentException("Log Y bounds must be positive.");
+        Bounds(spec.Y2Min, spec.Y2Max);
+        if (spec.Y2Axis == AxisKind.Log && (spec.Y2Min <= 0 || spec.Y2Max <= 0)) throw new ArgumentException("Log secondary bounds must be positive.");
         if (spec.XAxis == AxisKind.Time && ((spec.XMin.HasValue && !TimeAxis.InRange(spec.XMin.Value)) || (spec.XMax.HasValue && !TimeAxis.InRange(spec.XMax.Value))))
             throw new ArgumentException("Time bounds must be Unix milliseconds between year 1 and year 9999.");
         var count = 0;
@@ -67,7 +81,8 @@ public static partial class ChartValidation
                     throw new ArgumentException("Coordinates must be finite, magnitude <= 1e100; bubble sizes must be nonnegative.");
                 Text(p.Label);
                 if (spec.XAxis == AxisKind.Log && p.X <= 0) throw new ArgumentException("Log X axes require positive X values.");
-                if (spec.YAxis == AxisKind.Log && p.Y.HasValue && p.Y.Value <= 0) throw new ArgumentException("Log Y axes require positive values; use a linear axis for zero or negative data.");
+                if ((series.Secondary ? spec.Y2Axis : spec.YAxis) == AxisKind.Log && p.Y.HasValue && p.Y.Value <= 0)
+                    throw new ArgumentException("Log Y axes require positive values; use a linear axis for zero or negative data.");
                 if (spec.XAxis == AxisKind.Time && !TimeAxis.InRange(p.X)) throw new ArgumentException("Time X values must be Unix milliseconds between year 1 and year 9999.");
                 if (spec.Kind is ChartKind.Donut or ChartKind.Radar && p.Y < 0)
                     throw new ArgumentException("Donut and radar charts require nonnegative values.");
@@ -87,7 +102,7 @@ public static partial class ChartValidation
         }
         if (spec.Kind == ChartKind.Donut && count > 100) throw new ArgumentException("Donut charts support at most 100 slices.");
         if (spec.Kind is ChartKind.Bar or ChartKind.Column or ChartKind.StackedColumn or ChartKind.Area or ChartKind.Histogram)
-            if (spec.YMin > 0 || spec.YMax < 0) throw new ArgumentException("Magnitude charts require a zero baseline.");
+            if (spec.YMin > 0 || spec.YMax < 0 || spec.Y2Min > 0 || spec.Y2Max < 0) throw new ArgumentException("Magnitude charts require a zero baseline.");
     }
 
     private static void Candle(ChartPoint p, AxisKind axis)

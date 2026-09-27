@@ -94,22 +94,30 @@ public static class ChartSvg
     {
         var horizontal = s.Kind == ChartKind.Bar;
         var category = s.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn;
-        var left = horizontal ? 160d : 76d; var right = s.Width - 30d;
+        var secondary = s.Series.Any(series => series.Secondary);
+        var left = horizontal ? 160d : 76d; var right = s.Width - (secondary ? 76d : 30d);
         var top = 78d; var bottom = s.Height - 76d;
         var points = s.Series.SelectMany(x => x.Points).ToArray();
         var maxSize = points.Length == 0 ? 0 : points.Max(point => point.Size);
         var cats = points.Select(p => p.X).Distinct().Order().ToArray();
         var xs = Axis.Create(s.XAxis, points.Select(p => p.X), min: s.XMin, max: s.XMax);
-        var values = points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
+        var primary = s.Series.Where(series => !series.Secondary).SelectMany(series => series.Points).ToArray();
+        var values = primary.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
         if (s.Kind is ChartKind.Candlestick or ChartKind.Band)
-            foreach (var p in points.Where(p => p.Low.HasValue && p.High.HasValue)) { values.Add(p.Low!.Value); values.Add(p.High!.Value); }
+            foreach (var p in primary.Where(p => p.Low.HasValue && p.High.HasValue)) { values.Add(p.Low!.Value); values.Add(p.High!.Value); }
         if (s.Kind == ChartKind.StackedColumn)
             foreach (var x in cats)
             {
                 values.Add(points.Where(p => p.X == x && p.Y > 0).Sum(p => p.Y!.Value));
                 values.Add(points.Where(p => p.X == x && p.Y < 0).Sum(p => p.Y!.Value));
             }
-        var ys = Axis.Create(s.YAxis, values, s.IncludeZero || category || s.Kind == ChartKind.Area, s.YMin, s.YMax);
+        var zero = s.IncludeZero || category || s.Kind == ChartKind.Area;
+        var ys = Axis.Create(s.YAxis, values, zero, s.YMin, s.YMax);
+        var second = s.Series.Where(series => series.Secondary).SelectMany(series => series.Points).ToArray();
+        var secondValues = second.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
+        if (s.Kind == ChartKind.Band)
+            foreach (var p in second.Where(p => p.Low.HasValue && p.High.HasValue)) { secondValues.Add(p.Low!.Value); secondValues.Add(p.High!.Value); }
+        var ys2 = secondary ? Axis.Create(s.Y2Axis, secondValues, zero, s.Y2Min, s.Y2Max) : ys;
         double X(double x) => category ? left + (Array.IndexOf(cats, x) + .5) / cats.Length * (right - left) : xs.Map(x, left, right);
         double Y(double y) => ys.Map(y, bottom, top);
         foreach (var (tick, label) in ys.Ticks())
@@ -125,6 +133,10 @@ public static class ChartSvg
                 w.Text(left - 12, y + 4, label, "text-anchor='end' class='lumen-muted'");
             }
         }
+        // Ticks on the right, but no second set of gridlines: one grid is what a reader can follow.
+        if (secondary)
+            foreach (var (tick, label) in ys2.Ticks())
+                w.Text(right + 12, ys2.Map(tick, bottom, top) + 4, label, "text-anchor='start' class='lumen-muted'");
         if (category)
         {
             var step = Math.Max(1, (int)Math.Ceiling(cats.Length / (horizontal ? (bottom - top) / 24 : (right - left) / 65)));
@@ -145,6 +157,8 @@ public static class ChartSvg
         }
         w.Text((left + right) / 2, bottom + 44, horizontal ? s.YLabel : s.XLabel, "text-anchor='middle' class='lumen-muted'");
         w.Text(20, (top + bottom) / 2, horizontal ? s.XLabel : s.YLabel, $"text-anchor='middle' transform='rotate(-90 20 {N((top + bottom) / 2)})' class='lumen-muted'");
+        if (secondary)
+            w.Text(s.Width - 16, (top + bottom) / 2, s.Y2Label, $"text-anchor='middle' transform='rotate(90 {N(s.Width - 16)} {N((top + bottom) / 2)})' class='lumen-muted'");
         // Nested SVG provides a local clipping viewport without global clip-path IDs. It is inset by
         // one marker radius so a mark on the first or last value is drawn whole and stays hoverable.
         const double bleed = 6;
@@ -155,11 +169,14 @@ public static class ChartSvg
         for (var si = 0; si < s.Series.Count; si++)
         {
             var series = s.Series[si]; var color = SeriesColor(series, si, w.Style);
-            if (s.Kind == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, Y, xs, ys, cells, left, right, top, bottom);
-            else if (s.Kind == ChartKind.Candlestick) Candles(w, series, X, Y, xs, ys);
+            // Each series is measured against its own axis from here on.
+            var scale = series.Secondary ? ys2 : ys;
+            double At(double y) => scale.Map(y, bottom, top);
+            if (s.Kind == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, At, xs, scale, cells, left, right, top, bottom);
+            else if (s.Kind == ChartKind.Candlestick) Candles(w, series, X, At, xs, scale);
             else if (s.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Band)
             {
-                if (s.Kind == ChartKind.Band) Bands(w, series, color, X, Y, s.MaxRenderedPoints);
+                if (s.Kind == ChartKind.Band) Bands(w, series, color, X, At, s.MaxRenderedPoints);
                 // Sample each continuous run independently, preserving missing-observation gaps.
                 var start = 0;
                 while (start < series.Points.Count)
@@ -168,14 +185,14 @@ public static class ChartSvg
                     var end = start; while (end < series.Points.Count && series.Points[end].Y.HasValue) end++;
                     var run = series.Points.Skip(start).Take(end - start).ToArray();
                     var indices = Sampling.MinMax(run, s.MaxRenderedPoints);
-                    var path = string.Join(" ", indices.Select((i, n) => $"{(n == 0 ? "M" : "L")}{N(X(run[i].X))},{N(Y(run[i].Y!.Value))}"));
+                    var path = string.Join(" ", indices.Select((i, n) => $"{(n == 0 ? "M" : "L")}{N(X(run[i].X))},{N(At(run[i].Y!.Value))}"));
                     if (s.Kind == ChartKind.Area)
-                        w.Add($"<path d='{path} L{N(X(run[^1].X))},{N(Y(0))} L{N(X(run[0].X))},{N(Y(0))} Z' fill='{color}' fill-opacity='.12'/>");
+                        w.Add($"<path d='{path} L{N(X(run[^1].X))},{N(At(0))} L{N(X(run[0].X))},{N(At(0))} Z' fill='{color}' fill-opacity='.12'/>");
                     w.Add($"<path d='{path}' fill='none' stroke='{color}' stroke-width='2.5' stroke-linejoin='round'/>");
                     foreach (var i in indices)
                     {
                         var p = run[i];
-                        Datum(w, si, start + i, PointLabel(series,p,xs,ys), $"<circle cx='{N(X(p.X))}' cy='{N(Y(p.Y!.Value))}' r='{(indices.Count > 80 ? "2" : "4")}' fill='{color}'/>");
+                        Datum(w, si, start + i, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(p.Y!.Value))}' r='{(indices.Count > 80 ? "2" : "4")}' fill='{color}'/>");
                     }
                     start = end;
                 }
@@ -200,15 +217,15 @@ public static class ChartSvg
                     }
                     else
                     {
-                        rx = left + ci * band + band * .14 + (stacked ? 0 : si * width); ry = Math.Min(Y(basis), Y(basis + y));
-                        rw = width; rh = Math.Abs(Y(basis + y) - Y(basis));
+                        rx = left + ci * band + band * .14 + (stacked ? 0 : si * width); ry = Math.Min(At(basis), At(basis + y));
+                        rw = width; rh = Math.Abs(At(basis + y) - At(basis));
                     }
-                    Datum(w, si, pi, PointLabel(series,p,xs,ys), $"<rect x='{N(rx)}' y='{N(ry)}' width='{N(rw)}' height='{N(rh)}' rx='2' fill='{color}'/>");
+                    Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<rect x='{N(rx)}' y='{N(ry)}' width='{N(rw)}' height='{N(rh)}' rx='2' fill='{color}'/>");
                 }
                 else
                 {
                     var radius = s.Kind == ChartKind.Bubble ? Math.Sqrt(p.Size / Math.Max(maxSize, double.Epsilon)) * 22 : 4;
-                    Datum(w, si, pi, PointLabel(series,p,xs,ys), $"<circle cx='{N(X(p.X))}' cy='{N(Y(y))}' r='{N(radius)}' fill='{color}' fill-opacity='.7' stroke='{color}'/>");
+                    Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(y))}' r='{N(radius)}' fill='{color}' fill-opacity='.7' stroke='{color}'/>");
                 }
             }
         }

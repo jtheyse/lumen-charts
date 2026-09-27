@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.9.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.10.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -153,6 +153,27 @@ foreach (var issue in Brand.ContrastIssues())
 
 Limits: server rendering cannot read a stylesheet, so `ChartSvg.Render` and the HTTP API need an explicit `ChartStyle`. `LumenBrand` discards transparency, since a chart colour is drawn opaque, and maps series, background, text, muted, grid and candle colours; graph edges and the heatmap ramp come from `Fallback`. Font lists are reduced to letters, digits, spaces, commas and hyphens because they are written into a style attribute; `ChartStyle.FontFamilyFrom` performs that reduction on any CSS value.
 
+### A second axis
+
+Series in different units can be read against a right-hand axis. Mark the series and name the axis:
+
+```csharp
+ChartSpec growth = new() {
+    Kind = ChartKind.Line,
+    YLabel = "Active accounts (thousands)", Y2Label = "Conversion (%)",
+    Series = [
+        new("Accounts", accounts),
+        new("Conversion", conversion) { Secondary = true }
+    ]
+};
+```
+
+The right axis takes its own scale from its own series, and `Y2Axis`, `Y2Min` and `Y2Max` control it exactly as `YAxis`, `YMin` and `YMax` control the left. Tooltips and the data table read each point in its own units. Only the left axis draws gridlines, because two sets of lines through one plot are harder to read than one, and the plot narrows to leave room for the right-hand labels.
+
+At least one series must stay on the left, so the left axis always means something. A secondary axis applies to line, area, scatter, bubble, column and band charts; stacked columns, horizontal bars, candlesticks and the radial kinds reject it rather than imply a comparison they cannot make. Annotations measure against the left axis.
+
+Two axes make unrelated series look related, and the relationship you see depends on where each scale happens to start. Use one when the units genuinely differ and the shapes are worth comparing, not to fit an extra series into a chart that has run out of room.
+
 ### Annotations
 
 A chart can carry references the data is read against — a target, a threshold, the window a campaign ran in:
@@ -286,7 +307,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 ## Supported behavior and limits
 
 - Line, area, scatter, bubble, column, horizontal bar, signed stacked column, donut, heatmap, radar, candlestick, uncertainty band, histogram, box plot.
-- Linear, base-10 logarithmic and UTC time axes; category labels on categorical charts. Time and log X axes apply to line, area, scatter and bubble charts; log Y applies to line, scatter and bubble charts, because magnitude and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999. Time zones, business calendars and irregular tick placement are not implemented.
+- Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter and bubble charts; log Y applies to line, scatter and bubble charts, because magnitude and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999. Time zones, business calendars and irregular tick placement are not implemented.
 - Explicit limits via XMin/XMax/YMin/YMax. Bars and areas enforce a zero baseline. Null Y preserves gaps in lines/areas and is omitted elsewhere.
 - Line/area min/max sampling preserves original indices and extrema per continuous run; this is not a total chart-wide point budget. CSV always exports original observations.
 - Up to 100,000 input points, 32 series; 100 categories/slices. Sampling holds a line or area chart at its mark budget, so the browser cost is the same for 1,000 points as for 100,000: about 33 ms either way on the machine in [the measurements](docs/PERFORMANCE.md). Scatter and bubble render every point by default, which is comfortable to about 10,000; 50,000 points means 150,000 DOM elements and 12 MB of markup, and 100,000 means 300,000 elements and 25 MB. A scatter chart can set `DensityCells` to aggregate instead, which takes 100,000 points to 6,504 elements and 33 ms. Bubble has no equivalent, because binning would destroy the size encoding. There is no GPU acceleration and no million-point claim.
@@ -299,6 +320,10 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.10.0 additions
+
+A secondary Y axis, described under [A second axis](#a-second-axis): `ChartSeries.Secondary`, `Y2Label`, `Y2Axis`, `Y2Min` and `Y2Max`. Charts without one render exactly as before, which was checked across 63 renderings before and after the change. The gallery's line demonstration measures conversion against the right-hand axis.
 
 ## 0.9.0 additions
 

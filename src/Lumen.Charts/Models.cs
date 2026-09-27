@@ -22,6 +22,10 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
 }
 public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, string? Color = null)
 {
+    /// <summary>Measure this series against the right-hand axis instead of the left, for a series in
+    /// different units. At least one series must stay on the left.</summary>
+    public bool Secondary { get; init; }
+
     public static ChartSeries From<T>(string name, IEnumerable<T> items,
         Func<T, double> x, Func<T, double?> y, Func<T, string?>? label = null) =>
         new(name, items.Select(item => new ChartPoint(x(item), y(item), label?.Invoke(item))).ToArray());
@@ -39,9 +43,12 @@ public sealed record ChartSpec
     /// <summary>Time X values are Unix milliseconds UTC. Log axes are base 10 and require positive values.</summary>
     public AxisKind XAxis { get; init; } = AxisKind.Linear;
     public AxisKind YAxis { get; init; } = AxisKind.Linear;
+    public AxisKind Y2Axis { get; init; } = AxisKind.Linear;
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];
     public string XLabel { get; init; } = "";
     public string YLabel { get; init; } = "";
+    /// <summary>Names the right-hand axis, which appears when a series is marked secondary.</summary>
+    public string Y2Label { get; init; } = "";
     public int Width { get; init; } = 900;
     public int Height { get; init; } = 420;
     public bool IncludeZero { get; init; }
@@ -49,6 +56,8 @@ public sealed record ChartSpec
     public double? XMax { get; init; }
     public double? YMin { get; init; }
     public double? YMax { get; init; }
+    public double? Y2Min { get; init; }
+    public double? Y2Max { get; init; }
     public int MaxRenderedPoints { get; init; } = 1200;
     /// <summary>Histogram bin count. Null selects a count from the data.</summary>
     public int? Bins { get; init; }

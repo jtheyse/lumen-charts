@@ -89,6 +89,13 @@ public static class DemoData
             spec=spec with{XAxis=Lumen.Charts.AxisKind.Time,XLabel="Week beginning (UTC)",Description="Weekly activity across three product plans",
                 Series=series.Select(s=>s with{Points=s.Points.Select((p,i)=>p with{X=Lumen.Charts.TimeAxis.Value(start.AddDays(i*7)),Label=null}).ToArray()}).ToArray()};
         }
+        // Conversion runs in percent, so it is measured against the right-hand axis.
+        if(axis==AxisDemo.Numeric&&kind==Lumen.Charts.ChartKind.Line)
+        {
+            var conversion=new Lumen.Charts.ChartSeries("Conversion",Enumerable.Range(0,12)
+                .Select(i=>new Lumen.Charts.ChartPoint(i,Math.Round(2.4+i*.28+random.NextDouble()*.5,2),Months[i])).ToArray()){Secondary=true};
+            spec=spec with{Series=[..spec.Series,conversion],Y2Label="Conversion (%)"};
+        }
         // A target every plan is measured against, and the window a campaign ran in.
         if(axis==AxisDemo.Numeric&&kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Area)
             spec=spec with{Annotations=[new(Lumen.Charts.AnnotationAxis.Y,55){Label="Target"},

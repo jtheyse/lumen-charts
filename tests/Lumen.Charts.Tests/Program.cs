@@ -768,6 +768,63 @@ Test("A column chart still takes a Y reference",()=>{
     var doc=Svg(Spec(ChartKind.Column) with{Annotations=[new(AnnotationAxis.Y,4){Label="Budget"}]});
     Check(Annotation(doc).Attribute("aria-label")!.Value=="Budget: 4");
 });
+ChartSpec Paired()=>Spec() with{Y2Label="Rate (%)",Series=[
+    new("Accounts",Enumerable.Range(0,6).Select(i=>new ChartPoint(i,100+i*80)).ToArray()),
+    new("Conversion",Enumerable.Range(0,6).Select(i=>new ChartPoint(i,2+i*0.4)).ToArray()){Secondary=true}]};
+double[] Heights(XDocument doc,int series)=>doc.Descendants(ns+"g")
+    .Where(e=>(string?)e.Attribute("data-series")==series.ToString(CultureInfo.InvariantCulture))
+    .Select(e=>double.Parse(e.Element(ns+"circle")!.Attribute("cy")!.Value,CultureInfo.InvariantCulture)).ToArray();
+Test("A secondary series is measured against its own axis",()=>{
+    var doc=Svg(Paired());
+    double[] left=Heights(doc,0),right=Heights(doc,1);
+    Check(left.Length==6&&right.Length==6);
+    // Both series climb across the full plot even though one runs 100..500 and the other 2..4.
+    Check(left[0]-left[^1]>150&&right[0]-right[^1]>150,$"left spans {left[0]-left[^1]}, right spans {right[0]-right[^1]}");
+    // On one shared axis the small series would sit flat at the bottom; it does not.
+    var shared=Svg(Paired() with{Series=[Paired().Series[0],Paired().Series[1] with{Secondary=false}]});
+    Check(Heights(shared,1).Max()-Heights(shared,1).Min()<20,"the control chart did not flatten the small series");
+});
+Test("The right axis carries its own ticks and name",()=>{
+    var doc=Svg(Paired());
+    var labels=doc.Descendants(ns+"text").Select(t=>t.Value).ToArray();
+    Check(labels.Contains("Rate (%)"),"the secondary axis is unnamed");
+    Check(doc.Descendants(ns+"text").Any(t=>(string?)t.Attribute("transform") is string x&&x.StartsWith("rotate(90")),"the secondary name is not rotated on the right");
+    var anchored=doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="start"&&(string?)t.Attribute("class")=="lumen-muted").ToArray();
+    Check(anchored.Length>=3,"the right axis has no ticks");
+    // One grid to read, not two: a gridline per left tick and none for the right axis.
+    var leftTicks=doc.Descendants(ns+"text").Count(t=>(string?)t.Attribute("text-anchor")=="end"&&(string?)t.Attribute("class")=="lumen-muted");
+    Check(doc.Descendants(ns+"line").Count(l=>(string?)l.Attribute("class")=="lumen-grid")==leftTicks,"the gridlines do not match the left axis alone");
+});
+Test("The plot narrows to leave room for the right axis",()=>{
+    double Width(ChartSpec spec)=>double.Parse(Svg(spec).Descendants(ns+"svg").Single(e=>e.Attribute("x") is not null).Attribute("width")!.Value,CultureInfo.InvariantCulture);
+    Check(Width(Paired())<Width(Spec())-40,"the plot did not make room");
+});
+Test("A secondary point reads in its own units",()=>{
+    var doc=Svg(Paired());
+    var mark=doc.Descendants(ns+"g").First(e=>(string?)e.Attribute("data-series")=="1");
+    Check(mark.Attribute("aria-label")!.Value=="Conversion: 0, 2",mark.Attribute("aria-label")!.Value);
+});
+Test("The secondary axis takes its own bounds and scale",()=>{
+    var bounded=Svg(Paired() with{Y2Min=0,Y2Max=10});
+    Check(bounded.Descendants(ns+"text").Any(t=>t.Value=="10"&&(string?)t.Attribute("text-anchor")=="start"));
+    var logged=Svg(Spec(ChartKind.Scatter) with{Y2Axis=AxisKind.Log,Series=[
+        new("Left",[new(0,1),new(1,2)]),
+        new("Right",[new(0,1),new(1,1000)]){Secondary=true}]});
+    var rightTicks=logged.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="start").Select(t=>t.Value).ToArray();
+    Check(rightTicks.Contains("10")&&rightTicks.Contains("100"),string.Join(",",rightTicks));
+});
+Test("Reject a secondary axis where a chart cannot measure against two",()=>{
+    ChartSpec With(ChartKind kind)=>Spec(kind) with{Series=[new("A",[new(0,1),new(1,2)]),new("B",[new(0,3),new(1,4)]){Secondary=true}]};
+    Reject(()=>ChartSvg.Render(With(ChartKind.StackedColumn)));
+    Reject(()=>ChartSvg.Render(With(ChartKind.Bar)));
+    Reject(()=>ChartSvg.Render(With(ChartKind.Donut)));
+    Reject(()=>ChartSvg.Render(With(ChartKind.Radar)));
+    Reject(()=>ChartSvg.Render(Spec() with{Series=[new("Only",[new(0,1),new(1,2)]){Secondary=true}]}));
+    Reject(()=>ChartSvg.Render(Paired() with{Y2Axis=AxisKind.Time}));
+    Reject(()=>ChartSvg.Render(Spec(ChartKind.Column) with{Y2Axis=AxisKind.Log,Series=[new("A",[new(0,1)]),new("B",[new(1,2)]){Secondary=true}]}));
+    Reject(()=>ChartSvg.Render(Paired() with{Y2Axis=AxisKind.Log,Series=[Paired().Series[0],new("Zeroed",[new(0,0),new(1,1)]){Secondary=true}]}));
+    Reject(()=>ChartSvg.Render(Paired() with{Y2Min=5,Y2Max=1}));
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

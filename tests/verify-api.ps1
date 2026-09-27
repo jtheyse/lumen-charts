@@ -46,6 +46,11 @@ foreach($bad in @('{"kind":"Line","yAxis":"Log","series":[{"name":"S","points":[
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400) 'Invalid axis request rejected'
 }
+$paired='{"title":"Two units","kind":"Line","y2Label":"Rate","series":[{"name":"Accounts","points":[{"x":0,"y":100},{"x":1,"y":500}]},{"name":"Rate","secondary":true,"points":[{"x":0,"y":2},{"x":1,"y":4}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $paired
+Verify ($r.Content.Contains('Rate: 1, 4') -and $r.Content.Contains('rotate(90')) 'A secondary series is measured and named on the right'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"StackedColumn","series":[{"name":"A","points":[{"x":0,"y":1}]},{"name":"B","secondary":true,"points":[{"x":0,"y":2}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'A secondary axis on a stacked chart is rejected'
 $annotated='{"title":"Target","kind":"Line","annotations":[{"axis":"Y","from":25,"label":"Target"},{"axis":"X","from":1,"to":2,"label":"Window"}],"series":[{"name":"S","points":[{"x":0,"y":10},{"x":1,"y":30},{"x":2,"y":20},{"x":3,"y":40}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $annotated
 Verify ($r.Content.Contains('Target: 25') -and $r.Content.Contains('Window: 1 to 2')) 'Annotations in the request are drawn and named'
