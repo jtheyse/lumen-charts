@@ -64,6 +64,36 @@ public static class Statistics
             sorted.Where(v => v < q1 - fence || v > q3 + fence).ToArray());
     }
 
+    /// <summary>
+    /// A kernel density estimate over the observed range, for a violin's outline. The kernel is Gaussian
+    /// and the bandwidth is Silverman's rule of thumb, taking the smaller of the standard deviation and
+    /// the interquartile range so one long tail cannot smooth the shape away. The grid runs from the
+    /// smallest observation to the largest and no further, so the drawing claims no values the data
+    /// never had. Returns nothing for fewer than two observations or for a set with no spread.
+    /// </summary>
+    public static IReadOnlyList<(double Value, double Density)> Density(IReadOnlyList<double> values, int samples = 64)
+    {
+        if (values.Count < 2 || samples < 2) return [];
+        var sorted = values.OrderBy(v => v).ToArray();
+        double low = sorted[0], high = sorted[^1];
+        if (high <= low) return [];
+        var mean = sorted.Average();
+        var deviation = Math.Sqrt(sorted.Sum(v => (v - mean) * (v - mean)) / (sorted.Length - 1));
+        var spread = Quantile(sorted, .75) - Quantile(sorted, .25);
+        var width = .9 * (spread > 0 ? Math.Min(deviation, spread / 1.349) : deviation) * Math.Pow(sorted.Length, -.2);
+        if (width <= 0) return [];
+        var scale = 1 / (sorted.Length * width * Math.Sqrt(2 * Math.PI));
+        var estimate = new (double, double)[samples];
+        for (var i = 0; i < samples; i++)
+        {
+            var at = low + (high - low) * i / (samples - 1);
+            var sum = 0d;
+            foreach (var v in sorted) { var z = (at - v) / width; sum += Math.Exp(-.5 * z * z); }
+            estimate[i] = (at, sum * scale);
+        }
+        return estimate;
+    }
+
     /// <summary>Equal-width bins. Freedman–Diaconis chooses the count when <paramref name="count"/> is null, falling back to Sturges.</summary>
     public static IReadOnlyList<HistogramBin> Bins(IReadOnlyList<double> values, int? count = null)
     {

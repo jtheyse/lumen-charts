@@ -41,7 +41,7 @@ public static class ChartSvg
         var w = new SvgWriter { Titles = includeTitles, Style = ResolveStyle(spec), MinorGrid = spec.MinorGridlines };
         var legendColumns = Math.Max(1, (spec.Width - 48) / 180);
         var legendRows = includeLegend && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Histogram and not ChartKind.Box
-            ? (int)Math.Ceiling(spec.Series.Count / (double)legendColumns) : 0;
+            and not ChartKind.Violin ? (int)Math.Ceiling(spec.Series.Count / (double)legendColumns) : 0;
         Begin(w, spec.Width, spec.Height + legendRows * 22, spec.Title, spec.Description);
         if (!HasData(spec))
             w.Text(spec.Width / 2, spec.Height / 2, "No data to display", "text-anchor='middle'");
@@ -49,6 +49,7 @@ public static class ChartSvg
         else if (spec.Kind == ChartKind.Radar) Radar(w, spec);
         else if (spec.Kind == ChartKind.Heatmap) Heatmap(w, spec);
         else if (spec.Kind == ChartKind.Histogram) Histogram(w, spec);
+        else if (spec.Kind == ChartKind.Violin) Violin(w, spec);
         else if (spec.Kind == ChartKind.Box) Box(w, spec);
         else Cartesian(w, spec);
         if (spec.Kind == ChartKind.Scatter && spec.DensityCells is not null)
@@ -439,6 +440,47 @@ public static class ChartSvg
                     $"<circle cx='{N(center)}' cy='{N(ys.Map(value, bottom, top))}' r='3.5' fill='none' stroke='{color}' stroke-width='1.5'/>");
             }
             w.Text(center, bottom + 21, Short($"{s.Series[si].Name} (n={observations[si].Length})", 22), "text-anchor='middle' class='lumen-muted'");
+        }
+    }
+
+    /// <summary>
+    /// One kernel density estimate per series, mirrored about its own column. The estimate is made in the
+    /// space the axis draws in, so a logarithmic axis shapes the violin in logarithms rather than stretching
+    /// one tail across the plot. The widest point of each violin fills its column, so shapes are comparable
+    /// within a chart but the width carries no units; the quartile bar and median tick carry the numbers.
+    /// </summary>
+    private static void Violin(SvgWriter w, ChartSpec s)
+    {
+        var observations = s.Series.Select(series => series.Points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray()).ToArray();
+        double left = 76, right = s.Width - 30, top = 78, bottom = s.Height - 76;
+        var ys = Axis.Create(s.YAxis, observations.SelectMany(v => v), s.IncludeZero, s.YMin, s.YMax);
+        Frame(w, s, ys, left, right, top, bottom);
+        var band = (right - left) / s.Series.Count;
+        var logarithmic = s.YAxis == AxisKind.Log;
+        for (var si = 0; si < s.Series.Count; si++)
+        {
+            if (observations[si].Length == 0) continue;
+            var color = SeriesColor(s.Series[si], si, w.Style);
+            var center = left + (si + .5) * band;
+            var width = Math.Min(band * .45, 80);
+            var summary = Statistics.Summarize(observations[si]);
+            var estimate = Statistics.Density(logarithmic ? observations[si].Select(Math.Log10).ToArray() : observations[si]);
+            var shape = "";
+            if (estimate.Count > 0)
+            {
+                var peak = estimate.Max(point => point.Density);
+                double At(double value) => ys.Map(logarithmic ? Math.Pow(10, value) : value, bottom, top);
+                string Side(IEnumerable<(double Value, double Density)> points, int direction) => string.Join(" ",
+                    points.Select(point => $"{N(center + direction * point.Density / peak * width)},{N(At(point.Value))}"));
+                shape = $"<path d='M{Side(estimate, 1)} {Side(estimate.Reverse(), -1)} Z' fill='{color}' fill-opacity='.22' stroke='{color}' stroke-width='1.5' stroke-linejoin='round'/>";
+            }
+            double q1 = ys.Map(summary.Q1, bottom, top), q3 = ys.Map(summary.Q3, bottom, top);
+            var median = ys.Map(summary.Median, bottom, top);
+            Aggregate(w, $"{s.Series[si].Name}: {Count(observations[si].Length)} observations, median {ys.Format(summary.Median)}, quartiles {ys.Format(summary.Q1)} to {ys.Format(summary.Q3)}, range {ys.Format(observations[si].Min())} to {ys.Format(observations[si].Max())}",
+                shape +
+                $"<rect x='{N(center - 4)}' y='{N(Math.Min(q1, q3))}' width='8' height='{N(Math.Max(Math.Abs(q1 - q3), 1))}' rx='2' fill='{color}' fill-opacity='.85'/>" +
+                $"<line x1='{N(center - width / 2)}' y1='{N(median)}' x2='{N(center + width / 2)}' y2='{N(median)}' stroke='{color}' stroke-width='2.5'/>");
+            w.Text(center, bottom + 21, Short($"{s.Series[si].Name} (n={Count(observations[si].Length)})", 22), "text-anchor='middle' class='lumen-muted'");
         }
     }
 

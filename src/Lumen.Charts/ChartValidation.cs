@@ -15,7 +15,7 @@ public static partial class ChartValidation
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");
         if (spec.XAxis != AxisKind.Linear && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Band))
             throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick and band charts; the other kinds index or derive their X values.");
-        if (spec.YAxis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Band or ChartKind.Box))
+        if (spec.YAxis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Band or ChartKind.Box or ChartKind.Violin))
             throw new ArgumentException("Log Y axes require line, scatter, bubble, candlestick, band or box charts; magnitude, count and radial charts need a zero baseline.");
         if (!Enum.IsDefined(spec.Y2Axis) || spec.Y2Axis == AxisKind.Time) throw new ArgumentException("The secondary axis is numeric or logarithmic; time axes are supported on X only.");
         if (spec.Y2Axis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band))
@@ -42,7 +42,7 @@ public static partial class ChartValidation
             if (annotation is null) throw new ArgumentException("Annotations cannot be null.");
             if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column
                 or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Band))
-                throw new ArgumentException("Annotations apply to charts drawn on an X and Y axis; donut, radar, heatmap, histogram and box charts do not take them yet.");
+                throw new ArgumentException("Annotations apply to charts drawn on an X and Y axis; donut, radar, heatmap, histogram, box and violin charts do not take them yet.");
             if (!Enum.IsDefined(annotation.Axis)) throw new ArgumentException("Unknown annotation axis.");
             if (!Finite(annotation.From) || (annotation.To.HasValue && !Finite(annotation.To.Value)))
                 throw new ArgumentException("Annotation values must be finite, magnitude <= 1e100.");

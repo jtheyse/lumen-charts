@@ -7,7 +7,7 @@ foreach($path in @('/health','/_framework/blazor.web.js','/_content/Lumen.Charts
  Verify ($r.StatusCode -eq 200) "Asset/health $path"
 }
 $types=Invoke-RestMethod "$BaseUrl/api/charts/types"
-Verify ($types.Count -eq 14) 'Fourteen chart types'
+Verify ($types.Count -eq 15) 'Fifteen chart types'
 foreach($kind in @('Line','Area','Scatter','Bubble','Column','Bar','StackedColumn','Donut','Heatmap','Radar')){
  $spec=@{title='API test';kind=$kind;series=@(@{name='Sample';points=@(@{x=0;y=2;label='A'},@{x=1;y=4;label='B'},@{x=2;y=3;label='C'})})}
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body ($spec|ConvertTo-Json -Depth 10) -SkipHttpErrorCheck
@@ -22,7 +22,8 @@ $families=@(
  @{name='Candlestick';marker="rx='1'";body='{"title":"Prices","kind":"Candlestick","series":[{"name":"ACME","points":[{"x":0,"open":10,"high":12,"low":9,"close":11},{"x":1,"open":11,"high":13,"low":10,"close":10.4}]}]}'},
  @{name='Band';marker="fill-opacity='.16'";body='{"title":"Forecast","kind":"Band","series":[{"name":"Demand","points":[{"x":0,"y":10,"low":8,"high":12},{"x":1,"y":12,"low":9,"high":15}]}]}'},
  @{name='Histogram';marker='equal-width bins';body='{"title":"Latency","kind":"Histogram","bins":5,"series":[{"name":"Requests","points":[{"x":0,"y":1},{"x":1,"y":2},{"x":2,"y":2},{"x":3,"y":3},{"x":4,"y":5},{"x":5,"y":8}]}]}'},
- @{name='Box';marker='median';body='{"title":"Spread","kind":"Box","series":[{"name":"Europe","points":[{"x":0,"y":1},{"x":1,"y":2},{"x":2,"y":3},{"x":3,"y":4},{"x":4,"y":40}]}]}'})
+ @{name='Box';marker='median';body='{"title":"Spread","kind":"Box","series":[{"name":"Europe","points":[{"x":0,"y":1},{"x":1,"y":2},{"x":2,"y":3},{"x":3,"y":4},{"x":4,"y":40}]}]}'},
+ @{name='Violin';marker='observations, median';body='{"title":"Shape","kind":"Violin","series":[{"name":"Europe","points":[{"x":0,"y":1},{"x":1,"y":2},{"x":2,"y":2},{"x":3,"y":3},{"x":4,"y":5},{"x":5,"y":8},{"x":6,"y":13},{"x":7,"y":21}]}]}'})
 foreach($family in $families){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $family.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') "$($family.name) SVG response"

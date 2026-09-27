@@ -19,15 +19,15 @@ XDocument Svg(ChartSpec spec)=>XDocument.Parse(ChartSvg.Render(spec));
 ChartSpec Sample(ChartKind kind)=>kind switch{
     ChartKind.Candlestick=>Spec(kind) with{Series=[new("Price",[ChartPoint.Candle(0,10,12,9,11),ChartPoint.Candle(1,11,13,10,10.5),ChartPoint.Candle(2,10.5,11,8,9)])]},
     ChartKind.Band=>Spec(kind) with{Series=[new("Forecast",[ChartPoint.Interval(0,2,1,3),ChartPoint.Interval(1,5,4,6),ChartPoint.Interval(2,3,2,4)])]},
-    ChartKind.Histogram or ChartKind.Box=>Spec(kind) with{Series=[new("Sample",Enumerable.Range(0,40).Select(i=>new ChartPoint(i,i%7+1)).ToArray())]},
+    ChartKind.Histogram or ChartKind.Box or ChartKind.Violin=>Spec(kind) with{Series=[new("Sample",Enumerable.Range(0,40).Select(i=>new ChartPoint(i,i%7+1)).ToArray())]},
     _=>Spec(kind)};
 foreach(var kind in Enum.GetValues<ChartKind>())
 {
     Test($"{kind}: valid SVG and accessible marks",()=>{
         var doc=Svg(Sample(kind));Check(doc.Root!.Name==ns+"svg");Check(doc.Descendants(ns+"title").Any());
         Check(doc.Descendants().Any(e=>(string?)e.Attribute("class")=="lumen-datum"));
-        // Histogram bins and box glyphs are aggregates: focusable and labelled, but not observation indices.
-        Check(kind is ChartKind.Histogram or ChartKind.Box || doc.Descendants().Any(e=>e.Attribute("data-point") is not null));
+        // Histogram bins, box glyphs and violins are aggregates: focusable and labelled, but not observation indices.
+        Check(kind is ChartKind.Histogram or ChartKind.Box or ChartKind.Violin || doc.Descendants().Any(e=>e.Attribute("data-point") is not null));
         Check(!doc.ToString().Contains("NaN")&&!doc.ToString().Contains("Infinity"));
     });
     Test($"{kind}: empty data",()=>Check(ChartSvg.Render(new(){Kind=kind}).Contains("No data to display")));
@@ -1082,6 +1082,97 @@ Test("A trend line is refused where marks sit by index",()=>{
 Test("A series with no spread in X draws no trend",()=>{
     var spec=Spec(ChartKind.Scatter) with{Series=[new("Column",[new(4,1),new(4,9)]){Trend=true}]};
     Check(!ChartSvg.Render(spec).Contains("lumen-trend"),"a vertical trend was drawn");
+});
+double[] Normal(int count,double center,double spread,int seed)
+{
+    var random=new Random(seed);
+    return Enumerable.Range(0,count).Select(_=>{
+        double u1=1-random.NextDouble(),u2=random.NextDouble();
+        return center+spread*Math.Sqrt(-2*Math.Log(u1))*Math.Cos(2*Math.PI*u2);}).ToArray();
+}
+Test("A density estimate covers the observed range and no more",()=>{
+    var values=Normal(200,50,8,7);
+    var estimate=Statistics.Density(values);
+    Check(estimate.Count==64);
+    Check(Math.Abs(estimate[0].Value-values.Min())<1e-9&&Math.Abs(estimate[^1].Value-values.Max())<1e-9,"the grid leaves the data");
+    Check(estimate.All(point=>point.Density>=0));
+    // The trapezoid over the observed range carries nearly all of the mass.
+    var area=estimate.Zip(estimate.Skip(1),(a,b)=>(b.Value-a.Value)*(a.Density+b.Density)/2).Sum();
+    Check(area>.9&&area<1.001,$"area {area}");
+});
+Test("A density estimate needs two observations and some spread",()=>{
+    Check(Statistics.Density([]).Count==0&&Statistics.Density([4d]).Count==0);
+    Check(Statistics.Density([4d,4d,4d]).Count==0,"a flat set produced a shape");
+    Check(Statistics.Density([1d,2d,3d],1).Count==0,"one sample is not a curve");
+});
+Test("A density estimate finds the peak and the gap a box plot hides",()=>{
+    var single=Statistics.Density(Normal(300,20,3,11));
+    var peak=single.MaxBy(point=>point.Density).Value;
+    Check(Math.Abs(peak-20)<2,$"peak at {peak}");
+    // Two separated groups: the estimate dips between them, which is the whole point of a violin.
+    var split=Statistics.Density([..Normal(200,10,1.5,3),..Normal(200,40,1.5,4)]);
+    var middle=split.Where(point=>point.Value>20&&point.Value<30).Max(point=>point.Density);
+    var modes=split.Where(point=>point.Value<20||point.Value>30).Max(point=>point.Density);
+    Check(middle<modes/4,$"the valley is {middle} against peaks of {modes}");
+});
+Test("A violin mirrors its estimate about its own column",()=>{
+    var spec=Spec(ChartKind.Violin) with{Series=[new("Europe",Normal(120,40,6,5).Select((v,i)=>new ChartPoint(i,v)).ToArray())]};
+    var doc=Svg(spec);
+    var outline=(string)doc.Descendants(ns+"path").Single(e=>((string?)e.Attribute("fill-opacity"))==".22").Attribute("d")!;
+    var xs=outline.TrimStart('M').Split(' ').Where(pair=>pair!="Z").Select(pair=>double.Parse(pair.Split(',')[0],CultureInfo.InvariantCulture)).ToArray();
+    Check(xs.Length==128,$"{xs.Length} points");
+    var center=(xs.Min()+xs.Max())/2;
+    // Every point on the right has its twin on the left.
+    Check(xs.Take(64).Zip(xs.Skip(64).Reverse()).All(pair=>Math.Abs(pair.First-center-(center-pair.Second))<1e-6),"the sides do not match");
+    Check(doc.Descendants(ns+"text").Any(e=>e.Value.StartsWith("Europe (n=120")),"the column is not named and counted");
+});
+Test("A violin carries its quartiles, median and count to a reader",()=>{
+    var spec=Spec(ChartKind.Violin) with{Series=[new("Latency",Enumerable.Range(1,20).Select(i=>new ChartPoint(i,i*1d)).ToArray())]};
+    var label=Svg(spec).Descendants(ns+"g").Single(e=>(string?)e.Attribute("class")=="lumen-datum").Attribute("aria-label")!.Value;
+    Check(label.Contains("20 observations")&&label.Contains("median 10.5")&&label.Contains("quartiles 5.75 to 15.25")&&label.Contains("range 1 to 20"),label);
+    var doc=Svg(spec);
+    Check(doc.Descendants(ns+"rect").Any()&&doc.Descendants(ns+"line").Any(l=>(string?)l.Attribute("stroke-width")=="2.5"),"no quartile bar or median tick");
+});
+Test("Violins share one axis and stand in their own columns",()=>{
+    var spec=Spec(ChartKind.Violin) with{Series=[
+        new("Low",Normal(80,10,2,1).Select((v,i)=>new ChartPoint(i,v)).ToArray()),
+        new("High",Normal(80,60,2,2).Select((v,i)=>new ChartPoint(i,v)).ToArray())]};
+    var doc=Svg(spec);
+    var outlines=doc.Descendants(ns+"path").Where(e=>((string?)e.Attribute("fill-opacity"))==".22").ToArray();
+    Check(outlines.Length==2);
+    double Center(XElement path){var xs=((string)path.Attribute("d")!).TrimStart('M').Split(' ').Where(pair=>pair!="Z")
+        .Select(pair=>double.Parse(pair.Split(',')[0],CultureInfo.InvariantCulture)).ToArray();return (xs.Min()+xs.Max())/2;}
+    Check(Center(outlines[0])<Center(outlines[1]),"the columns overlap");
+    // A violin chart names its columns on the axis, so it needs no legend.
+    Check(!doc.Descendants(ns+"text").Any(e=>e.Value=="Low"&&(string?)e.Parent!.Attribute("class")=="lumen-legend"));
+});
+Test("A logarithmic violin is shaped in logarithms",()=>{
+    var values=Enumerable.Range(0,120).Select(i=>Math.Pow(10,1+i%3)).ToArray();
+    var spec=Spec(ChartKind.Violin) with{YAxis=AxisKind.Log,Series=[new("Traffic",values.Select((v,i)=>new ChartPoint(i,v)).ToArray())]};
+    var doc=Svg(spec);
+    var d=(string)doc.Descendants(ns+"path").Single(e=>((string?)e.Attribute("fill-opacity"))==".22").Attribute("d")!;
+    Check(!d.Contains("NaN")&&!d.Contains("Infinity"),d[..60]);
+    // Three decades, evenly spaced on a log axis, give three evenly spaced bulges.
+    var points=d.TrimStart('M').Split(' ').Take(64).Select(pair=>pair.Split(',').Select(v=>double.Parse(v,CultureInfo.InvariantCulture)).ToArray()).ToArray();
+    // The widest places are the three decades; the outermost two are the ends of the grid, because
+    // the smallest and largest observations are themselves modes.
+    // Rounded coordinates make a peak two samples wide, so a plateau counts once, at its far end.
+    var bulges=points.Where((pt,i)=>(i==0||pt[0]>=points[i-1][0])&&(i==points.Length-1||pt[0]>points[i+1][0])).ToArray();
+    Check(bulges.Length==3,$"{bulges.Length} bulges in {string.Join(" ",points.Select(pt=>pt[0].ToString("0",CultureInfo.InvariantCulture)))}");
+    Check(Math.Abs((bulges[0][1]-bulges[1][1])-(bulges[1][1]-bulges[2][1]))<6,"the decades are not evenly spaced");
+});
+Test("A violin refuses what it cannot draw",()=>{
+    var spec=Sample(ChartKind.Violin);
+    Reject(()=>ChartSvg.Render(spec with{Annotations=[new ChartAnnotation(AnnotationAxis.Y,3)]}));
+    Reject(()=>ChartSvg.Render(spec with{XAxis=AxisKind.Time}));
+    Reject(()=>ChartSvg.Render(spec with{Series=[spec.Series[0] with{Trend=true}]}));
+    Reject(()=>ChartSvg.Render(spec with{Series=[spec.Series[0],spec.Series[0] with{Name="Second",Secondary=true}]}));
+    Check(ChartSvg.Render(spec with{YAxis=AxisKind.Log,Series=[new("Positive",Enumerable.Range(1,30).Select(i=>new ChartPoint(i,i*3d)).ToArray())]}).Contains("lumen-datum"));
+});
+Test("A violin with one observation still reports it",()=>{
+    var doc=Svg(Spec(ChartKind.Violin) with{Series=[new("Single",[new(0,5)])]});
+    Check(!doc.ToString().Contains("fill-opacity='.22'"),"a single observation drew a shape");
+    Check(doc.Descendants(ns+"g").Any(e=>(string?)e.Attribute("class")=="lumen-datum"),"the column vanished");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

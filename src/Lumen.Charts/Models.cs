@@ -1,6 +1,6 @@
 namespace Lumen.Charts;
 
-public enum ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box }
+public enum ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin }
 public enum ChartTheme { Light, Dark }
 
 /// <summary>Null Y is a missing observation, never an implicit zero. Size encodes bubble area.</summary>

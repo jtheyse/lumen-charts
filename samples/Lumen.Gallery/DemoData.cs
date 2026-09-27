@@ -73,13 +73,16 @@ public static class DemoData
             title="Where the response times land";desc="320 sampled requests · bin count chosen from the data";
             x="Response time (ms)";y="Requests";
         }
-        if(kind==Lumen.Charts.ChartKind.Box)
+        if(kind is Lumen.Charts.ChartKind.Box or Lumen.Charts.ChartKind.Violin)
         {
             Lumen.Charts.ChartSeries Spread(string name,double center,double width,int count)=>new(name,
                 Enumerable.Range(0,count).Select(i=>new Lumen.Charts.ChartPoint(i,
                     Math.Round(center+(random.NextDouble()+random.NextDouble()-1)*width+(i%17==0?width*2.4:0),1))).ToArray());
             series=[Spread("Europe",210,40,45),Spread("Africa",260,70,38),Spread("Americas",180,30,52)];
-            title="Compare the spread, not just the average";desc="Latency samples by region · box shows quartiles, whiskers reach 1.5 interquartile ranges";
+            title="Compare the spread, not just the average";
+            desc=kind==Lumen.Charts.ChartKind.Violin
+                ? "Latency samples by region · the outline is a kernel density estimate, the bar the quartiles"
+                : "Latency samples by region · box shows quartiles, whiskers reach 1.5 interquartile ranges";
             x="Region";y="Latency (ms)";
         }
         if(kind==Lumen.Charts.ChartKind.Bar) {title="Compare plans without the clutter";x="Month";}

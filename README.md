@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.14.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.15.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -125,6 +125,7 @@ The line is fitted in the space the chart draws in, which is what keeps it strai
 | `Band` | `Y` with `Low` and `High` bounds — use `ChartPoint.Interval` | Filled interval behind the central line; points without bounds break the band into runs |
 | `Histogram` | One series of raw observations in `Y`; `X` is ignored | Equal-width bins over a zero baseline. `Bins` sets the count; otherwise Freedman–Diaconis chooses it, falling back to Sturges when the interquartile range is zero |
 | `Box` | One series per distribution, raw observations in `Y`; `X` is ignored | Quartile box, Tukey whiskers at 1.5 interquartile ranges, and outliers as circles |
+| `Violin` | One series per distribution, raw observations in `Y`; `X` is ignored | Kernel density outline mirrored about each column, with a quartile bar and a median tick |
 
 ```csharp
 ChartSpec prices = new() {
@@ -340,7 +341,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 
 ## Supported behavior and limits
 
-- Line, area, scatter, bubble, column, horizontal bar, signed stacked column, donut, heatmap, radar, candlestick, uncertainty band, histogram, box plot.
+- Line, area, scatter, bubble, column, horizontal bar, signed stacked column, donut, heatmap, radar, candlestick, uncertainty band, histogram, box plot, violin.
 - Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter and bubble charts; log Y applies to line, scatter and bubble charts, because magnitude and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999, and `TimeZone` decides the calendar they are read in. `SkipWeekends` and `TimeSkips` compress a time axis over spans it should not draw, at most 400 listed spans per chart; the axis stays piecewise proportional, so a gap in the data itself still reads as a gap. Irregular tick placement is not implemented.
 - `MinorGridlines` adds lighter lines between the labelled ticks: four or five divisions per interval on a linear axis depending on its step, the mantissas between decades on a logarithmic one, and none on a time axis, because half of a month is not a boundary anyone reads. Off by default.
 - Explicit limits via XMin/XMax/YMin/YMax. Bars and areas enforce a zero baseline. Null Y preserves gaps in lines/areas and is omitted elsewhere.
@@ -348,6 +349,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Up to 100,000 input points, 32 series; 100 categories/slices. Sampling holds a line or area chart at its mark budget, so the browser cost is the same for 1,000 points as for 100,000: about 33 ms either way on the machine in [the measurements](docs/PERFORMANCE.md). Scatter and bubble render every point by default, which is comfortable to about 10,000; 50,000 points means 150,000 DOM elements and 12 MB of markup, and 100,000 means 300,000 elements and 25 MB. A scatter chart can set `DensityCells` to aggregate instead, which takes 100,000 points to 6,504 elements and 33 ms. Bubble has no equivalent, because binning would destroy the size encoding. There is no GPU acceleration and no million-point claim.
 - Bubble area is proportional to Size across all series. Radar requires complete, nonnegative series on common categories. Donut accepts one nonnegative series.
 - A trend line applies to line, area, scatter and bubble charts; category, radial and derived kinds refuse it. It is one least-squares line per series, fitted over every observation in the series rather than the zoomed window, and it is not an observation: it raises no point selection, appears in no CSV export and adds no row to the data table. Other fits — moving averages, polynomial, exponential regression — are not implemented.
+- A violin estimates its outline with a Gaussian kernel at Silverman's bandwidth, taking the smaller of the standard deviation and the interquartile range so one long tail cannot smooth the shape away. The estimate is drawn over the observed range and no further, so the outline claims no values the data never had, and it is computed in the space the axis draws in, so a logarithmic axis shapes the violin in logarithms. The widest point of each violin fills its column: widths are comparable within a chart but carry no units, and the quartile bar and median tick carry the numbers. A violin is an aggregate, like a histogram bin or a box: focusable and named, raising no point selection. A series with fewer than two observations, or with no spread, draws its quartile bar and median without an outline. The bandwidth is not configurable, and split or paired violins are not implemented.
 - Candlestick and histogram accept one series. Candlestick requires all four prices with High highest and Low lowest, and colors bodies by direction rather than by series. Band points need both bounds or neither. Histogram and box read observations from Y and ignore X; box computes its own quartiles, so precomputed five-number summaries are not accepted yet. Histogram bins and box glyphs are labelled, focusable aggregates that report no observation index, so they raise no point selection; candlesticks and box outliers do.
 - Layered graphs use longest-path levels, then barycenter sweeps that keep the ordering with the fewest crossings found. This is a heuristic, not minimal crossings. Edges spanning several levels bend once per level and are drawn as smooth curves; there is no orthogonal routing, no force simulation and no automatic node overlap removal. Self-loops are allowed in layered graphs and draw as a loop on their node; longer cycles still need the circular layout. Nodes can be dragged or nudged with the arrow keys in the component, which needs an interactive render mode. At most 250 nodes / 2,000 edges; dense graphs can still overlap.
 - Narrow screens use a keyboard-focusable, horizontally scrollable chart viewport to preserve label readability.
@@ -356,6 +358,10 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.15.0 additions
+
+`ChartKind.Violin`, and the `Statistics.Density` kernel density estimate behind it, for the shape of a distribution rather than its five-number summary. A violin chart shows what a box plot cannot: a set of observations with two clusters reads as one box, but as two bulges. The estimate is made in the space the axis draws in and over the observed range only. The gallery's latency demonstration draws the same three regions as its box plot.
 
 ## 0.14.0 additions
 
