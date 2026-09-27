@@ -13,11 +13,25 @@ public static class TimeAxis
     public static DateTimeOffset Moment(double value) => DateTimeOffset.FromUnixTimeMilliseconds((long)Math.Round(value));
     internal static double Value(DateTime utc) => Value(new DateTimeOffset(utc, TimeSpan.Zero));
     internal static bool InRange(double value) => value >= MinValue && value <= MaxValue;
+
+    /// <summary>Resolves a zone identifier, such as <c>Europe/London</c>. Null or blank means UTC.</summary>
+    public static TimeZoneInfo? Zone(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
+        catch (Exception error) when (error is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            throw new ArgumentException($"Unknown time zone '{id}'. Use an identifier the host recognises, such as Europe/London.");
+        }
+    }
 }
 
 /// <summary>Linear, base-10 logarithmic or time domain mapped onto a pixel interval.</summary>
 public readonly record struct Axis(AxisKind Kind, double Min, double Max)
 {
+    /// <summary>The zone a time axis reads its calendar in. Null keeps everything in UTC.</summary>
+    public TimeZoneInfo? Zone { get; init; }
+
     private const double Second = 1000, Minute = 60 * Second, Hour = 60 * Minute, Day = 24 * Hour;
     private static readonly (double Step, string Format)[] FixedSteps =
     [
@@ -28,7 +42,7 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         (Day, "d MMM"), (2 * Day, "d MMM"), (7 * Day, "d MMM"), (14 * Day, "d MMM"), (28 * Day, "d MMM")
     ];
 
-    public static Axis Create(AxisKind kind, IEnumerable<double> values, bool zero = false, double? min = null, double? max = null)
+    public static Axis Create(AxisKind kind, IEnumerable<double> values, bool zero = false, double? min = null, double? max = null, TimeZoneInfo? zone = null)
     {
         if (kind == AxisKind.Linear)
         {
@@ -47,7 +61,7 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         if (max.HasValue) hi = max.Value;
         if (lo >= hi) throw new ArgumentException("Axis bounds exclude the data extent or have no range.");
         if (kind == AxisKind.Log && lo <= 0) throw new ArgumentException("Log axes require positive bounds.");
-        return new(kind, lo, hi);
+        return new(kind, lo, hi) { Zone = kind == AxisKind.Time ? zone : null };
     }
 
     public double Map(double value, double start, double end) =>
@@ -63,8 +77,26 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
 
     /// <summary>Label for a data value, used by tooltips and tables.</summary>
     public string Format(double value) => Kind == AxisKind.Time
-        ? TimeAxis.Moment(value).UtcDateTime.ToString(Max - Min < 2 * Day ? "d MMM yyyy HH:mm" : "d MMM yyyy", CultureInfo.InvariantCulture)
+        ? Local(value).ToString(Max - Min < 2 * Day ? "d MMM yyyy HH:mm" : "d MMM yyyy", CultureInfo.InvariantCulture)
         : LinearScale.Label(value);
+
+    /// <summary>The moment as the axis's zone shows it, which is UTC when no zone is set.</summary>
+    private DateTime Local(double value)
+    {
+        var moment = TimeAxis.Moment(value).UtcDateTime;
+        return Zone is null ? moment : TimeZoneInfo.ConvertTimeFromUtc(moment, Zone);
+    }
+
+    /// <summary>The axis value for a local wall-clock reading, stepping over a gap left by a clock change.</summary>
+    private double Absolute(DateTime local)
+    {
+        if (Zone is null) return TimeAxis.Value(DateTime.SpecifyKind(local, DateTimeKind.Utc));
+        var moment = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        // Spring forward removes an hour from the local clock; a tick that lands inside it moves to the
+        // first reading the zone actually had.
+        for (var attempt = 0; attempt < 4 && Zone.IsInvalidTime(moment); attempt++) moment = moment.AddMinutes(30);
+        return TimeAxis.Value(new DateTimeOffset(moment, Zone.GetUtcOffset(moment)));
+    }
 
     /// <summary>Tick values inside the domain with their axis labels. Time ticks fall on calendar boundaries.</summary>
     public IReadOnlyList<(double Value, string Label)> Ticks(int count = 5) => Kind switch
@@ -108,8 +140,21 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
             // Steps of two days or more align to Monday 5 January 1970 rather than the epoch Thursday.
             var origin = step >= 2 * Day ? 4 * Day : 0;
             var result = new List<(double, string)>();
-            for (var value = origin + Math.Ceiling((Min - origin) / step) * step; value <= Max; value += step)
-                result.Add((value, TimeAxis.Moment(value).UtcDateTime.ToString(format, CultureInfo.InvariantCulture)));
+            if (Zone is null)
+            {
+                for (var value = origin + Math.Ceiling((Min - origin) / step) * step; value <= Max; value += step)
+                    result.Add((value, TimeAxis.Moment(value).UtcDateTime.ToString(format, CultureInfo.InvariantCulture)));
+                return result;
+            }
+            // In a zone the boundaries belong to the local clock, so each tick is realigned to it; a
+            // clock change therefore shifts the following ticks rather than the whole series drifting.
+            var next = Align(Min, step, origin);
+            while (next <= Max)
+            {
+                result.Add((next, Local(next).ToString(format, CultureInfo.InvariantCulture)));
+                next = Align(next + step * .5, step, origin);
+                if (result.Count > 64) break;
+            }
             return result;
         }
         foreach (var months in (int[])[1, 3, 6])
@@ -120,9 +165,30 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         return YearTicks(1_000_000);
     }
 
+    /// <summary>The first local boundary of <paramref name="step"/> at or after <paramref name="from"/>.</summary>
+    private double Align(double from, double step, double origin)
+    {
+        var local = Local(from);
+        var day = new DateTime(local.Year, local.Month, local.Day, 0, 0, 0, DateTimeKind.Utc);
+        if (step >= Day)
+        {
+            // Whole days and multiples of them keep the epoch's Monday phase, counted in local days.
+            var days = (int)Math.Round(step / Day);
+            var since = (int)Math.Floor((day - new DateTime(1970, 1, 5, 0, 0, 0, DateTimeKind.Utc)).TotalDays);
+            var phase = ((since % days) + days) % days;
+            day = day.AddDays(-phase);
+            var value = Absolute(day);
+            return value >= from ? value : Absolute(day.AddDays(days));
+        }
+        var elapsed = local.TimeOfDay.TotalMilliseconds;
+        var floored = day.AddMilliseconds(Math.Floor(elapsed / step) * step);
+        var at = Absolute(floored);
+        return at >= from ? at : Absolute(floored.AddMilliseconds(step));
+    }
+
     private IReadOnlyList<(double, string)> MonthTicks(int step)
     {
-        var start = TimeAxis.Moment(Min).UtcDateTime;
+        var start = Local(Min);
         var index = start.Year * 12 + start.Month - 1;
         if (start.Day > 1 || start.TimeOfDay > TimeSpan.Zero) index++;
         index = (int)(Math.Ceiling(index / (double)step) * step);
@@ -130,7 +196,7 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         while (index / 12 <= 9999)
         {
             var moment = new DateTime(index / 12, index % 12 + 1, 1, 0, 0, 0, DateTimeKind.Utc);
-            var value = TimeAxis.Value(moment);
+            var value = Absolute(moment);
             if (value > Max) break;
             if (value >= Min) result.Add((value, moment.ToString("MMM yyyy", CultureInfo.InvariantCulture)));
             index += step;
@@ -140,13 +206,13 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
 
     private IReadOnlyList<(double, string)> YearTicks(int step)
     {
-        var start = TimeAxis.Moment(Min).UtcDateTime;
+        var start = Local(Min);
         var year = start.Year + (start.Month > 1 || start.Day > 1 || start.TimeOfDay > TimeSpan.Zero ? 1 : 0);
         year = (int)(Math.Ceiling(year / (double)step) * step);
         var result = new List<(double, string)>();
         for (; year is >= 1 and <= 9999; year += step)
         {
-            var value = TimeAxis.Value(new DateTime(year, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            var value = Absolute(new DateTime(year, 1, 1, 0, 0, 0, DateTimeKind.Utc));
             if (value > Max) break;
             if (value >= Min) result.Add((value, year.ToString(CultureInfo.InvariantCulture)));
         }

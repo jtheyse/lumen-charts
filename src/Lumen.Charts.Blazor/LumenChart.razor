@@ -60,7 +60,7 @@
         _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{LinearScale.Label(point.Y.Value)} ({LinearScale.Label(point.Low.Value)} to {LinearScale.Label(point.High.Value)})",
         _=>point.Y.HasValue?LinearScale.Label(point.Y.Value):"Missing"
     };
-    private Axis FullRange => Axis.Create(Spec.XAxis,Spec.Series.SelectMany(s=>s.Points).Select(p=>p.X), min:Spec.XMin, max:Spec.XMax);
+    private Axis FullRange => Axis.Create(Spec.XAxis,Spec.Series.SelectMany(s=>s.Points).Select(p=>p.X), min:Spec.XMin, max:Spec.XMax, zone:TimeAxis.Zone(Spec.TimeZone));
     // The view is tracked as a fraction of the full axis so log and time domains zoom in their own space.
     private (double Min,double Max) View { get { var full=FullRange;return (viewMin.HasValue?full.Map(viewMin.Value,0,1):0,viewMax.HasValue?full.Map(viewMax.Value,0,1):1); } }
     private void Zoom(double factor)

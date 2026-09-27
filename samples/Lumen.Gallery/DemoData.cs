@@ -86,7 +86,7 @@ public static class DemoData
         if(axis==AxisDemo.Time&&TimeCapable(kind))
         {
             var start=new DateTimeOffset(2026,1,5,0,0,0,TimeSpan.Zero);
-            spec=spec with{XAxis=Lumen.Charts.AxisKind.Time,XLabel="Week beginning (UTC)",Description="Weekly activity across three product plans",
+            spec=spec with{XAxis=Lumen.Charts.AxisKind.Time,TimeZone="Africa/Johannesburg",XLabel="Week beginning (Johannesburg)",Description="Weekly activity across three product plans",
                 Series=series.Select(s=>s with{Points=s.Points.Select((p,i)=>p with{X=Lumen.Charts.TimeAxis.Value(start.AddDays(i*7)),Label=null}).ToArray()}).ToArray()};
         }
         // Conversion runs in percent, so it is measured against the right-hand axis.

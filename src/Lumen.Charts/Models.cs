@@ -42,6 +42,8 @@ public sealed record ChartSpec
     public ChartStyle? Style { get; init; }
     /// <summary>Time X values are Unix milliseconds UTC. Log axes are base 10 and require positive values.</summary>
     public AxisKind XAxis { get; init; } = AxisKind.Linear;
+    /// <summary>The zone a time axis reads its calendar in, such as <c>America/New_York</c>. Null keeps it in UTC.</summary>
+    public string? TimeZone { get; init; }
     public AxisKind YAxis { get; init; } = AxisKind.Linear;
     public AxisKind Y2Axis { get; init; } = AxisKind.Linear;
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];

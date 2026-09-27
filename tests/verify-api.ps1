@@ -39,6 +39,11 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify ($r.Content -match 'Feb 2026|Jan 2026') 'Time axis renders calendar labels'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $timeSpec
 Verify ($r.Content.Contains('Series,X,XTime,Y,Label,Size') -and $r.Content.Contains('2026-01-01T00:00:00.000Z')) 'Time CSV adds ISO timestamps'
+$zoned='{"title":"Local","kind":"Line","xAxis":"Time","timeZone":"America/New_York","series":[{"name":"Signal","points":[{"x":1767571200000,"y":1},{"x":1767592800000,"y":2},{"x":1767614400000,"y":3}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $zoned
+Verify ($r.Content.Contains('4 Jan 2026 19:00')) 'A time axis reads its calendar in the requested zone'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Line","xAxis":"Time","timeZone":"Mars/Olympus","series":[{"name":"S","points":[{"x":1767571200000,"y":1}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'An unknown time zone is rejected'
 $logSpec='{"title":"Log","kind":"Scatter","yAxis":"Log","series":[{"name":"Load","points":[{"x":1,"y":2},{"x":2,"y":200},{"x":3,"y":20000}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $logSpec
 Verify (([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'Log axis SVG'

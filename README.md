@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.10.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.11.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -81,7 +81,16 @@ ChartSpec traffic = new() {
 };
 ```
 
-`TimeAxis.Value(DateTimeOffset)` and `TimeAxis.Moment(double)` convert between moments and axis values. Time ticks fall on calendar boundaries — seconds, minutes, hours, days, fortnights, months or years — and are formatted in UTC with the invariant culture; local time zones are not applied. Log ticks are decades, subdivided at 2 and 5 across one or two decades. `Axis.Create`, `Axis.Map`, `Axis.Invert`, `Axis.Ticks` and `Axis.Format` are public if you need the geometry without SVG. CSV exports of a time chart add an `XTime` column with ISO 8601 UTC timestamps beside the numeric X column.
+`TimeAxis.Value(DateTimeOffset)` and `TimeAxis.Moment(double)` convert between moments and axis values. Time ticks fall on calendar boundaries — seconds, minutes, hours, days, fortnights, months or years — and are formatted with the invariant culture. They read in UTC unless `TimeZone` names one:
+
+```csharp
+ChartSpec shifts = new() {
+    XAxis = AxisKind.Time, TimeZone = "America/New_York",
+    Series = [new("Orders", readings)]
+};
+```
+
+A day then begins where the zone begins it, not at 00:00 UTC, and months and years start on their local first. Ticks hold their local boundary across a clock change, so the hour a zone skips or repeats moves the ticks that follow rather than drifting the whole axis; a tick landing inside a skipped hour moves to the first reading the zone actually had. Tooltips, the data table and the axis all read in the same zone, and the identifier is whatever the host recognises — `Europe/London` on any current .NET, Windows identifiers too. Log ticks are decades, subdivided at 2 and 5 across one or two decades. `Axis.Create`, `Axis.Map`, `Axis.Invert`, `Axis.Ticks` and `Axis.Format` are public if you need the geometry without SVG. CSV exports of a time chart add an `XTime` column with ISO 8601 UTC timestamps beside the numeric X column.
 
 ### Statistical and financial families
 
@@ -307,7 +316,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 ## Supported behavior and limits
 
 - Line, area, scatter, bubble, column, horizontal bar, signed stacked column, donut, heatmap, radar, candlestick, uncertainty band, histogram, box plot.
-- Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter and bubble charts; log Y applies to line, scatter and bubble charts, because magnitude and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999. Time zones, business calendars and irregular tick placement are not implemented.
+- Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter and bubble charts; log Y applies to line, scatter and bubble charts, because magnitude and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999, and `TimeZone` decides the calendar they are read in. Business calendars and irregular tick placement are not implemented.
 - Explicit limits via XMin/XMax/YMin/YMax. Bars and areas enforce a zero baseline. Null Y preserves gaps in lines/areas and is omitted elsewhere.
 - Line/area min/max sampling preserves original indices and extrema per continuous run; this is not a total chart-wide point budget. CSV always exports original observations.
 - Up to 100,000 input points, 32 series; 100 categories/slices. Sampling holds a line or area chart at its mark budget, so the browser cost is the same for 1,000 points as for 100,000: about 33 ms either way on the machine in [the measurements](docs/PERFORMANCE.md). Scatter and bubble render every point by default, which is comfortable to about 10,000; 50,000 points means 150,000 DOM elements and 12 MB of markup, and 100,000 means 300,000 elements and 25 MB. A scatter chart can set `DensityCells` to aggregate instead, which takes 100,000 points to 6,504 elements and 33 ms. Bubble has no equivalent, because binning would destroy the size encoding. There is no GPU acceleration and no million-point claim.
@@ -320,6 +329,10 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.11.0 additions
+
+`ChartSpec.TimeZone`, so a time axis reads its calendar where the data happened rather than in UTC. Day, month and year ticks land on their local boundaries and hold them across a clock change, and tooltips and the data table follow. A chart without a zone is unchanged, which was checked across 63 renderings before and after. The gallery's time demonstration reads in Johannesburg.
 
 ## 0.10.0 additions
 

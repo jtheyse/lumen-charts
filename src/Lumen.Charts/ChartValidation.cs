@@ -65,6 +65,12 @@ public static partial class ChartValidation
         if (spec.YAxis == AxisKind.Log && (spec.YMin <= 0 || spec.YMax <= 0)) throw new ArgumentException("Log Y bounds must be positive.");
         Bounds(spec.Y2Min, spec.Y2Max);
         if (spec.Y2Axis == AxisKind.Log && (spec.Y2Min <= 0 || spec.Y2Max <= 0)) throw new ArgumentException("Log secondary bounds must be positive.");
+        if (spec.TimeZone is not null)
+        {
+            if (spec.XAxis != AxisKind.Time) throw new ArgumentException("A time zone applies to a time X axis.");
+            Text(spec.TimeZone);
+            TimeAxis.Zone(spec.TimeZone);
+        }
         if (spec.XAxis == AxisKind.Time && ((spec.XMin.HasValue && !TimeAxis.InRange(spec.XMin.Value)) || (spec.XMax.HasValue && !TimeAxis.InRange(spec.XMax.Value))))
             throw new ArgumentException("Time bounds must be Unix milliseconds between year 1 and year 9999.");
         var count = 0;
