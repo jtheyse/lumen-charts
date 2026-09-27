@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.13.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.14.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -103,6 +103,19 @@ ChartSpec prices = new() {
 Weekends are counted in `TimeZone`, so a market's weekend is its own rather than UTC's, and they are worked out over the axis range the chart settles on, including after a zoom. Ticks inside a skipped span are not drawn, which is why a weekday axis carries no Saturday label. Two consequences are worth knowing: a moment inside a skipped span has no position of its own and sits where the span opens, and reading a position back — which is what a zoom does — gives the moment the axis resumes at. `TimeAxis.Weekends`, `TimeAxis.Day` and `TimeAxis.Normalise` are public if you want to build the spans yourself.
 
 Log ticks are decades, subdivided at 2 and 5 across one or two decades. `Axis.Create`, `Axis.Map`, `Axis.Invert`, `Axis.Ticks` and `Axis.Format` are public if you need the geometry without SVG. CSV exports of a time chart add an `XTime` column with ISO 8601 UTC timestamps beside the numeric X column.
+
+### Trend lines
+
+A series can carry a least-squares line:
+
+```csharp
+ChartSpec relationship = new() {
+    Kind = ChartKind.Scatter,
+    Series = [new("Accounts", observations) { Trend = true }]
+};
+```
+
+The line is fitted in the space the chart draws in, which is what keeps it straight on screen: a logarithmic axis has already taken the logarithm, and a trading axis has already left out the spans it skips. On plain axes this is the ordinary least-squares fit, because the scaling between data and pixels does not change it. It is drawn dashed in the series colour, reports its direction and R squared to a pointer and to assistive technology, and is left out when a series has fewer than two observations or no spread in X. `Statistics.Fit` returns `Slope`, `Intercept`, `R2` and `Count` if you want the numbers rather than the line.
 
 ### Statistical and financial families
 
@@ -334,6 +347,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Line/area min/max sampling preserves original indices and extrema per continuous run; this is not a total chart-wide point budget. CSV always exports original observations.
 - Up to 100,000 input points, 32 series; 100 categories/slices. Sampling holds a line or area chart at its mark budget, so the browser cost is the same for 1,000 points as for 100,000: about 33 ms either way on the machine in [the measurements](docs/PERFORMANCE.md). Scatter and bubble render every point by default, which is comfortable to about 10,000; 50,000 points means 150,000 DOM elements and 12 MB of markup, and 100,000 means 300,000 elements and 25 MB. A scatter chart can set `DensityCells` to aggregate instead, which takes 100,000 points to 6,504 elements and 33 ms. Bubble has no equivalent, because binning would destroy the size encoding. There is no GPU acceleration and no million-point claim.
 - Bubble area is proportional to Size across all series. Radar requires complete, nonnegative series on common categories. Donut accepts one nonnegative series.
+- A trend line applies to line, area, scatter and bubble charts; category, radial and derived kinds refuse it. It is one least-squares line per series, fitted over every observation in the series rather than the zoomed window, and it is not an observation: it raises no point selection, appears in no CSV export and adds no row to the data table. Other fits — moving averages, polynomial, exponential regression — are not implemented.
 - Candlestick and histogram accept one series. Candlestick requires all four prices with High highest and Low lowest, and colors bodies by direction rather than by series. Band points need both bounds or neither. Histogram and box read observations from Y and ignore X; box computes its own quartiles, so precomputed five-number summaries are not accepted yet. Histogram bins and box glyphs are labelled, focusable aggregates that report no observation index, so they raise no point selection; candlesticks and box outliers do.
 - Layered graphs use longest-path levels, then barycenter sweeps that keep the ordering with the fewest crossings found. This is a heuristic, not minimal crossings. Edges spanning several levels bend once per level and are drawn as smooth curves; there is no orthogonal routing, no force simulation and no automatic node overlap removal. Self-loops are allowed in layered graphs and draw as a loop on their node; longer cycles still need the circular layout. Nodes can be dragged or nudged with the arrow keys in the component, which needs an interactive render mode. At most 250 nodes / 2,000 edges; dense graphs can still overlap.
 - Narrow screens use a keyboard-focusable, horizontally scrollable chart viewport to preserve label readability.
@@ -342,6 +356,10 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.14.0 additions
+
+Trend lines: `ChartSeries.Trend` draws a least-squares fit through a series, and `Statistics.Fit` exposes the slope, intercept and R squared behind it. Fitting in the space the chart draws in means one straight line on a logarithmic axis and one straight line on a trading axis, rather than a curve or a jump at every weekend. A chart without a trend is unchanged across the same 63 renderings. The gallery's scatter demonstration fits each of its three series.
 
 ## 0.13.0 additions
 

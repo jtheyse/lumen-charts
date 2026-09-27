@@ -54,6 +54,13 @@ foreach($bad in @('{"kind":"Line","skipWeekends":true,"series":[{"name":"S","poi
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400) 'An impossible skipped span is rejected'
 }
+$trend='{"title":"Fit","kind":"Scatter","series":[{"name":"Accounts","trend":true,"points":[{"x":1,"y":3},{"x":2,"y":5},{"x":3,"y":7},{"x":4,"y":9}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $trend
+Verify ($r.Content.Contains("class='lumen-trend'") -and $r.Content.Contains('R squared 1.00') -and $r.Content.Contains('rising')) 'A scatter series carries its least-squares line'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $trend.Replace('"trend":true','"trend":false')
+Verify (-not $r.Content.Contains('lumen-trend')) 'A series that asks for no trend draws none'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $trend.Replace('"kind":"Scatter"','"kind":"Column"') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'A trend line on a category chart is rejected'
 $logSpec='{"title":"Log","kind":"Scatter","yAxis":"Log","series":[{"name":"Load","points":[{"x":1,"y":2},{"x":2,"y":200},{"x":3,"y":20000}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $logSpec
 Verify (([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'Log axis SVG'

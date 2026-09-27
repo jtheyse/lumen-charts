@@ -25,6 +25,9 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// <summary>Measure this series against the right-hand axis instead of the left, for a series in
     /// different units. At least one series must stay on the left.</summary>
     public bool Secondary { get; init; }
+    /// <summary>Draws a least-squares line through this series. Fitted in the space each axis draws in,
+    /// so it stays straight on screen; a series with no spread in X draws none.</summary>
+    public bool Trend { get; init; }
 
     public static ChartSeries From<T>(string name, IEnumerable<T> items,
         Func<T, double> x, Func<T, double?> y, Func<T, string?>? label = null) =>

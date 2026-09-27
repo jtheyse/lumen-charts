@@ -85,8 +85,8 @@ public static class DemoData
         if(kind==Lumen.Charts.ChartKind.Bar) {title="Compare plans without the clutter";x="Month";}
         if(kind==Lumen.Charts.ChartKind.Scatter || kind==Lumen.Charts.ChartKind.Bubble)
         {
-            title="Explore the relationship";desc="Account engagement and retention · illustrative observations";x="Engagement score";y="Retention score";
-            series=series.Select(s=>s with {Points=s.Points.Select(p=>p with {X=p.X*8+random.Next(6)}).ToArray()}).ToArray();
+            title="Explore the relationship";desc="Account engagement and retention · illustrative observations"+(kind==Lumen.Charts.ChartKind.Scatter?" with a least-squares trend per series":"");x="Engagement score";y="Retention score";
+            series=series.Select(s=>s with {Points=s.Points.Select(p=>p with {X=p.X*8+random.Next(6)}).ToArray(),Trend=kind==Lumen.Charts.ChartKind.Scatter}).ToArray();
         }
         var spec=new Lumen.Charts.ChartSpec{Kind=kind,Theme=theme,XAxis=xKind,SkipWeekends=weekends,TimeSkips=holidays,Title=title,Description=desc,Series=series,XLabel=x,YLabel=y,Source="Source: deterministic demonstration data · not business results",Height=420};
         if(axis==AxisDemo.Time&&TimeCapable(kind))

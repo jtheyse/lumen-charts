@@ -8,8 +8,36 @@ public sealed record BoxSummary(double Q1, double Median, double Q3, double Lowe
 
 public sealed record HistogramBin(double Start, double End, int Count);
 
+/// <summary>A least-squares line and the share of the variance in Y it accounts for.</summary>
+public sealed record LinearFit(double Slope, double Intercept, double R2, int Count)
+{
+    public double Predict(double x) => Intercept + Slope * x;
+}
+
 public static class Statistics
 {
+    /// <summary>
+    /// Fits <c>y = a + bx</c> by least squares. Returns null when there are fewer than two observations
+    /// or they all share one X, which leaves no line to draw. X is centred first, so a time axis in Unix
+    /// milliseconds keeps its precision. Observations that share one Y are explained perfectly by a flat
+    /// line, so their R squared is 1 rather than undefined.
+    /// </summary>
+    public static LinearFit? Fit(IEnumerable<(double X, double Y)> points)
+    {
+        var data = points.ToArray();
+        if (data.Length < 2) return null;
+        double meanX = data.Average(p => p.X), meanY = data.Average(p => p.Y);
+        double sxx = 0, sxy = 0, syy = 0;
+        foreach (var (x, y) in data)
+        {
+            double dx = x - meanX, dy = y - meanY;
+            sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
+        }
+        if (sxx == 0) return null;
+        var slope = sxy / sxx;
+        return new(slope, meanY - slope * meanX, syy == 0 ? 1 : Math.Clamp(sxy * sxy / (sxx * syy), 0, 1), data.Length);
+    }
+
     public const int MaxBins = 100;
 
     /// <summary>Linear interpolation between order statistics, matching NumPy's default and Excel's PERCENTILE.INC.</summary>

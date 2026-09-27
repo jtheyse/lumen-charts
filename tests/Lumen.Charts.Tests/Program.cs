@@ -996,6 +996,93 @@ Test("Skipped spans are rejected where they cannot apply",()=>{
     Reject(()=>ChartSvg.Render(time with{TimeSkips=Enumerable.Range(0,401).Select(i=>new TimeSkip(i*10,i*10+5)).ToArray()}));
     Check(ChartSvg.Render(time with{SkipWeekends=true,TimeSkips=[TimeAxis.Day(new DateTime(2026,1,7))]}).Length>0);
 });
+Test("A least-squares line recovers the line it was given",()=>{
+    var fit=Statistics.Fit(Enumerable.Range(0,20).Select(i=>((double)i,3d*i+2)))!;
+    Check(Math.Abs(fit.Slope-3)<1e-9&&Math.Abs(fit.Intercept-2)<1e-9,$"{fit.Slope} {fit.Intercept}");
+    Check(Math.Abs(fit.R2-1)<1e-12&&fit.Count==20);
+    Check(Math.Abs(fit.Predict(100)-302)<1e-9);
+});
+Test("A fit needs two observations and some spread in X",()=>{
+    Check(Statistics.Fit([])is null&&Statistics.Fit([(1d,1d)])is null,"a line was fitted through nothing");
+    Check(Statistics.Fit([(5d,1d),(5d,9d)])is null,"a vertical line was fitted");
+    // One Y throughout is explained perfectly by a flat line rather than being undefined.
+    var flat=Statistics.Fit([(1d,4d),(2d,4d),(3d,4d)])!;
+    Check(flat.Slope==0&&flat.R2==1&&Math.Abs(flat.Intercept-4)<1e-12);
+});
+Test("R squared falls as the observations scatter",()=>{
+    double[] xs=[1,2,3,4,5,6];
+    var tight=Statistics.Fit(xs.Select(x=>(x,2*x+(x%2==0?.1:-.1))))!;
+    var loose=Statistics.Fit(xs.Select(x=>(x,2*x+(x%2==0?6d:-6d))))!;
+    Check(tight.R2>.99&&loose.R2<.5,$"{tight.R2} {loose.R2}");
+    Check(Statistics.Fit(xs.Select(x=>(x,-4*x+1)))!.Slope<0);
+});
+Test("A time axis keeps its precision when fitted",()=>{
+    // Unix milliseconds are large enough that an uncentred fit loses the slope entirely.
+    var day=86400000d;var start=Utc(2026,1,5);
+    var fit=Statistics.Fit(Enumerable.Range(0,30).Select(i=>(start+i*day,100+i*.5)))!;
+    Check(Math.Abs(fit.Slope*day-.5)<1e-9,$"slope per day {fit.Slope*day}");
+    Check(Math.Abs(fit.Predict(start+29*day)-114.5)<1e-9);
+});
+Test("A trend line is drawn only when a series asks for it",()=>{
+    var scatter=Spec(ChartKind.Scatter);
+    Check(!ChartSvg.Render(scatter).Contains("lumen-trend"),"a trend appeared uninvited");
+    var trended=scatter with{Series=[scatter.Series[0] with{Trend=true}]};
+    var path=Svg(trended).Descendants(ns+"path").Single(e=>(string?)e.Attribute("class")=="lumen-trend");
+    Check((string?)path.Attribute("stroke-dasharray")=="7 5"&&(string?)path.Attribute("fill")=="none");
+    Check(path.Value.Contains("R squared")&&path.Value.Contains("Series trend"),path.Value);
+    // Two stops on a plain axis, so the line is straight.
+    Check(((string)path.Attribute("d")!).Count(c=>c=='M'||c=='L')==2,(string)path.Attribute("d")!);
+});
+Test("A trend line spans the plot and follows the data",()=>{
+    var spec=Spec(ChartKind.Scatter) with{Series=[new("Rising",Enumerable.Range(0,10).Select(i=>new ChartPoint(i,i*2+1)).ToArray()){Trend=true}]};
+    var d=(string)Svg(spec).Descendants(ns+"path").Single(e=>(string?)e.Attribute("class")=="lumen-trend").Attribute("d")!;
+    var ends=d.Split(' ').Select(part=>part.TrimStart('M','L').Split(',').Select(v=>double.Parse(v,CultureInfo.InvariantCulture)).ToArray()).ToArray();
+    Check(ends[0][0]<ends[1][0],"the line does not run left to right");
+    Check(ends[0][1]>ends[1][1],"a rising series drew a falling line");
+    // The marks sit on the line, because the observations are exactly linear.
+    var marks=Svg(spec).Descendants(ns+"circle").Select(c=>(X:(double)c.Attribute("cx")!,Y:(double)c.Attribute("cy")!)).ToArray();
+    var slope=(ends[1][1]-ends[0][1])/(ends[1][0]-ends[0][0]);
+    Check(marks.All(m=>Math.Abs(ends[0][1]+slope*(m.X-ends[0][0])-m.Y)<.5),"the marks do not sit on the line");
+});
+Test("A logarithmic axis is fitted in the space it draws",()=>{
+    // Powers of ten are a straight line on a log axis, and nothing else would be.
+    var spec=Spec(ChartKind.Scatter) with{YAxis=AxisKind.Log,
+        Series=[new("Growth",Enumerable.Range(1,5).Select(i=>new ChartPoint(i,Math.Pow(10,i))).ToArray()){Trend=true}]};
+    var d=(string)Svg(spec).Descendants(ns+"path").Single(e=>(string?)e.Attribute("class")=="lumen-trend").Attribute("d")!;
+    var ends=d.Split(' ').Select(part=>part.TrimStart('M','L').Split(',').Select(v=>double.Parse(v,CultureInfo.InvariantCulture)).ToArray()).ToArray();
+    var marks=Svg(spec).Descendants(ns+"circle").Select(c=>(X:(double)c.Attribute("cx")!,Y:(double)c.Attribute("cy")!)).ToArray();
+    var slope=(ends[1][1]-ends[0][1])/(ends[1][0]-ends[0][0]);
+    Check(marks.All(m=>Math.Abs(ends[0][1]+slope*(m.X-ends[0][0])-m.Y)<.5),"the log fit missed its own points");
+});
+Test("A compressed axis takes one straight trend, not a jump per weekend",()=>{
+    var days=TradingDays(15);
+    var spec=Spec() with{Kind=ChartKind.Scatter,XAxis=AxisKind.Time,SkipWeekends=true,
+        Series=[new("Close",days.Select((v,i)=>new ChartPoint(v,100+i)).ToArray()){Trend=true}]};
+    var doc=Svg(spec);
+    var d=(string)doc.Descendants(ns+"path").Single(e=>(string?)e.Attribute("class")=="lumen-trend").Attribute("d")!;
+    Check(d.Count(c=>c=='M'||c=='L')==2,d);
+    // The observations rise by one a day with the weekends left out, so they all sit on the line.
+    var ends=d.Split(' ').Select(part=>part.TrimStart('M','L').Split(',').Select(v=>double.Parse(v,CultureInfo.InvariantCulture)).ToArray()).ToArray();
+    var slope=(ends[1][1]-ends[0][1])/(ends[1][0]-ends[0][0]);
+    var marks=doc.Descendants(ns+"circle").Select(c=>(X:(double)c.Attribute("cx")!,Y:(double)c.Attribute("cy")!)).ToArray();
+    Check(marks.Length==days.Length&&marks.All(m=>Math.Abs(ends[0][1]+slope*(m.X-ends[0][0])-m.Y)<.5),"the marks do not sit on the line");
+});
+Test("A trend says which way it runs",()=>{
+    string Label(bool up)=>Svg(Spec(ChartKind.Scatter) with{Series=[new("S",Enumerable.Range(0,6)
+        .Select(i=>new ChartPoint(i,up?i*2+1:20-i*2)).ToArray()){Trend=true}]})
+        .Descendants(ns+"path").Single(e=>(string?)e.Attribute("class")=="lumen-trend").Value;
+    Check(Label(true).Contains("rising")&&Label(false).Contains("falling"),Label(true)+" | "+Label(false));
+});
+Test("A trend line is refused where marks sit by index",()=>{
+    foreach(var kind in (ChartKind[])[ChartKind.Column,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Donut,ChartKind.Histogram,ChartKind.Box])
+        Reject(()=>ChartSvg.Render(Sample(kind) with{Series=Sample(kind).Series.Select(series=>series with{Trend=true}).ToArray()}));
+    var series=Spec().Series[0] with{Trend=true};
+    Check(ChartSvg.Render(Spec() with{Series=[series]}).Contains("lumen-trend"));
+});
+Test("A series with no spread in X draws no trend",()=>{
+    var spec=Spec(ChartKind.Scatter) with{Series=[new("Column",[new(4,1),new(4,9)]){Trend=true}]};
+    Check(!ChartSvg.Render(spec).Contains("lumen-trend"),"a vertical trend was drawn");
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

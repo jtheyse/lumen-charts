@@ -245,8 +245,26 @@ public static class ChartSvg
                     Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(y))}' r='{N(radius)}' fill='{color}' fill-opacity='.7' stroke='{color}'/>");
                 }
             }
+            if (series.Trend) Trend(w, series, color, X, At, left, right);
         }
         w.Add("</svg>");
+    }
+
+    /// <summary>
+    /// A least-squares line across the plot, fitted in the space the reader sees. The axes have already
+    /// taken the logarithm and left out the spans a calendar skips, so the line is straight on screen
+    /// instead of curving on a log axis or jumping where a trading axis closes. Least squares is
+    /// unchanged by the scaling between data and pixels, so on plain axes this is the ordinary fit.
+    /// </summary>
+    private static void Trend(SvgWriter w, ChartSeries series, string color, Func<double, double> X, Func<double, double> Y, double left, double right)
+    {
+        var fit = Statistics.Fit(series.Points.Where(p => p.Y.HasValue).Select(p => (X(p.X), Y(p.Y!.Value))));
+        if (fit is null) return;
+        // Screen y grows downwards, so a falling line is a rising series.
+        var label = $"{series.Name} trend: {(fit.Slope <= 0 ? "rising" : "falling")}, R squared {fit.R2.ToString("0.00", CultureInfo.InvariantCulture)}";
+        w.Add($"<path class='lumen-trend' d='M{N(left)},{N(fit.Predict(left))} L{N(right)},{N(fit.Predict(right))}' " +
+            $"fill='none' stroke='{color}' stroke-width='2' stroke-dasharray='7 5' stroke-opacity='.85' role='img' aria-label='{SvgWriter.E(label)}'>" +
+            $"{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}</path>");
     }
 
     /// <summary>One shaded cell per occupied region. Cells are square in pixels, and a cell's opacity
