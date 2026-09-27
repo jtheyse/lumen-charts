@@ -71,6 +71,16 @@ public static partial class ChartValidation
             Text(spec.TimeZone);
             TimeAxis.Zone(spec.TimeZone);
         }
+        if (spec.TimeSkips is null || spec.TimeSkips.Count > 400) throw new ArgumentException("Provide at most 400 skipped spans; weekends are generated, not listed.");
+        if ((spec.SkipWeekends || spec.TimeSkips.Count > 0) && spec.XAxis != AxisKind.Time)
+            throw new ArgumentException("Skipped spans apply to a time X axis.");
+        foreach (var skip in spec.TimeSkips)
+        {
+            if (skip is null) throw new ArgumentException("Skipped spans cannot be null.");
+            if (!TimeAxis.InRange(skip.From) || !TimeAxis.InRange(skip.To))
+                throw new ArgumentException("Skipped spans must be Unix milliseconds between year 1 and year 9999.");
+            if (skip.To <= skip.From) throw new ArgumentException("A skipped span needs To above From.");
+        }
         if (spec.XAxis == AxisKind.Time && ((spec.XMin.HasValue && !TimeAxis.InRange(spec.XMin.Value)) || (spec.XMax.HasValue && !TimeAxis.InRange(spec.XMax.Value))))
             throw new ArgumentException("Time bounds must be Unix milliseconds between year 1 and year 9999.");
         var count = 0;

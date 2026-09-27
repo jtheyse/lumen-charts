@@ -14,6 +14,53 @@ public static class TimeAxis
     internal static double Value(DateTime utc) => Value(new DateTimeOffset(utc, TimeSpan.Zero));
     internal static bool InRange(double value) => value >= MinValue && value <= MaxValue;
 
+    /// <summary>
+    /// The weekends between two moments, as spans a time axis can leave out. Days are counted in
+    /// <paramref name="zone"/>, so a market's weekend is its own, not UTC's.
+    /// </summary>
+    public static IReadOnlyList<TimeSkip> Weekends(double from, double to, TimeZoneInfo? zone = null)
+    {
+        if (to <= from) return [];
+        var skips = new List<TimeSkip>();
+        var start = Moment(from).UtcDateTime;
+        if (zone is not null) start = TimeZoneInfo.ConvertTimeFromUtc(start, zone);
+        for (var day = start.Date.AddDays(-7); skips.Count < 4000; day = day.AddDays(1))
+        {
+            if (day.DayOfWeek is not DayOfWeek.Saturday) continue;
+            double opens = Local(day, zone), closes = Local(day.AddDays(2), zone);
+            if (closes <= from) continue;
+            if (opens >= to) break;
+            skips.Add(new(Math.Max(opens, from), Math.Min(closes, to)));
+        }
+        return skips;
+    }
+
+    /// <summary>
+    /// Clips spans to an axis range, drops the empty ones and merges any that overlap or touch, which is
+    /// the order and spacing <see cref="Axis.Skips"/> relies on to compress a domain.
+    /// </summary>
+    public static IReadOnlyList<TimeSkip> Normalise(IEnumerable<TimeSkip> skips, double from, double to)
+    {
+        var merged = new List<TimeSkip>();
+        foreach (var skip in skips.Select(s => new TimeSkip(Math.Max(s.From, from), Math.Min(s.To, to)))
+                                  .Where(s => s.To > s.From).OrderBy(s => s.From))
+            if (merged.Count > 0 && skip.From <= merged[^1].To) merged[^1] = new(merged[^1].From, Math.Max(merged[^1].To, skip.To));
+            else merged.Add(skip);
+        return merged;
+    }
+
+    /// <summary>A whole day, as a span a time axis can leave out. Use it for a market holiday.</summary>
+    public static TimeSkip Day(DateTime date, TimeZoneInfo? zone = null) =>
+        new(Local(date.Date, zone), Local(date.Date.AddDays(1), zone));
+
+    private static double Local(DateTime local, TimeZoneInfo? zone)
+    {
+        if (zone is null) return Value(DateTime.SpecifyKind(local, DateTimeKind.Utc));
+        var moment = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        for (var attempt = 0; attempt < 4 && zone.IsInvalidTime(moment); attempt++) moment = moment.AddMinutes(30);
+        return Value(new DateTimeOffset(moment, zone.GetUtcOffset(moment)));
+    }
+
     /// <summary>Resolves a zone identifier, such as <c>Europe/London</c>. Null or blank means UTC.</summary>
     public static TimeZoneInfo? Zone(string? id)
     {
@@ -26,11 +73,16 @@ public static class TimeAxis
     }
 }
 
+/// <summary>A span of time an axis leaves out, so the data either side of it sits together.</summary>
+public sealed record TimeSkip(double From, double To);
+
 /// <summary>Linear, base-10 logarithmic or time domain mapped onto a pixel interval.</summary>
 public readonly record struct Axis(AxisKind Kind, double Min, double Max)
 {
     /// <summary>The zone a time axis reads its calendar in. Null keeps everything in UTC.</summary>
     public TimeZoneInfo? Zone { get; init; }
+    /// <summary>Spans the axis leaves out, such as the weekends between trading days. Ordered and non-overlapping.</summary>
+    public IReadOnlyList<TimeSkip> Skips { get; init; } = [];
 
     private const double Second = 1000, Minute = 60 * Second, Hour = 60 * Minute, Day = 24 * Hour;
     private static readonly (double Step, string Format)[] FixedSteps =
@@ -42,7 +94,8 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         (Day, "d MMM"), (2 * Day, "d MMM"), (7 * Day, "d MMM"), (14 * Day, "d MMM"), (28 * Day, "d MMM")
     ];
 
-    public static Axis Create(AxisKind kind, IEnumerable<double> values, bool zero = false, double? min = null, double? max = null, TimeZoneInfo? zone = null)
+    public static Axis Create(AxisKind kind, IEnumerable<double> values, bool zero = false, double? min = null, double? max = null,
+        TimeZoneInfo? zone = null, bool weekends = false, IEnumerable<TimeSkip>? skips = null)
     {
         if (kind == AxisKind.Linear)
         {
@@ -61,16 +114,55 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         if (max.HasValue) hi = max.Value;
         if (lo >= hi) throw new ArgumentException("Axis bounds exclude the data extent or have no range.");
         if (kind == AxisKind.Log && lo <= 0) throw new ArgumentException("Log axes require positive bounds.");
-        return new(kind, lo, hi) { Zone = kind == AxisKind.Time ? zone : null };
+        var axis = new Axis(kind, lo, hi) { Zone = kind == AxisKind.Time ? zone : null };
+        if (kind != AxisKind.Time || (!weekends && skips is null)) return axis;
+        var wanted = weekends ? TimeAxis.Weekends(lo, hi, axis.Zone) : [];
+        return axis with { Skips = TimeAxis.Normalise(skips is null ? wanted : wanted.Concat(skips), lo, hi) };
     }
 
-    public double Map(double value, double start, double end) =>
-        start + (Transform(value) - Transform(Min)) / (Transform(Max) - Transform(Min)) * (end - start);
+    public double Map(double value, double start, double end)
+    {
+        if (Skips.Count == 0)
+            return start + (Transform(value) - Transform(Min)) / (Transform(Max) - Transform(Min)) * (end - start);
+        double from = Elapsed(Min), to = Elapsed(Max);
+        return to == from ? start : start + (Elapsed(value) - from) / (to - from) * (end - start);
+    }
+
+    /// <summary>The distance from the axis start with the skipped spans taken out; a value inside one
+    /// sits at its near edge, since the axis has no room to draw it anywhere else.</summary>
+    private double Elapsed(double value)
+    {
+        var elapsed = value;
+        foreach (var skip in Skips)
+        {
+            if (value <= skip.From) break;
+            elapsed -= Math.Min(value, skip.To) - skip.From;
+        }
+        return elapsed;
+    }
+
+    /// <summary>The value at a compressed distance. Both edges of a skipped span share one position,
+    /// and this returns the far one, where the axis resumes and the data sits.</summary>
+    private double Restore(double elapsed)
+    {
+        var value = elapsed;
+        foreach (var skip in Skips)
+        {
+            if (value < skip.From) break;
+            value += skip.To - skip.From;
+        }
+        return value;
+    }
 
     /// <summary>Reverses <see cref="Map"/> for a position in the same pixel interval.</summary>
     public double Invert(double position, double start, double end)
     {
         var fraction = (position - start) / (end - start);
+        if (Skips.Count > 0)
+        {
+            double from = Elapsed(Min), to = Elapsed(Max);
+            return Restore(from + fraction * (to - from));
+        }
         var value = Transform(Min) + fraction * (Transform(Max) - Transform(Min));
         return Kind == AxisKind.Log ? Math.Pow(10, value) : value;
     }
@@ -99,12 +191,15 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     }
 
     /// <summary>Tick values inside the domain with their axis labels. Time ticks fall on calendar boundaries.</summary>
-    public IReadOnlyList<(double Value, string Label)> Ticks(int count = 5) => Kind switch
+    public IReadOnlyList<(double Value, string Label)> Ticks(int count = 5)
     {
-        AxisKind.Time => TimeTicks(count),
-        AxisKind.Log => LogTicks(count),
-        _ => new LinearScale(Min, Max).Ticks(count).Select(v => (v, LinearScale.Label(v))).ToArray()
-    };
+        if (Kind == AxisKind.Log) return LogTicks(count);
+        if (Kind != AxisKind.Time) return new LinearScale(Min, Max).Ticks(count).Select(v => (v, LinearScale.Label(v))).ToArray();
+        var ticks = TimeTicks(count);
+        if (Skips.Count == 0) return ticks;
+        var skips = Skips;
+        return ticks.Where(tick => !skips.Any(skip => tick.Item1 >= skip.From && tick.Item1 < skip.To)).ToArray();
+    }
 
     /// <summary>
     /// Values between the labelled ticks, for a lighter grid. A linear axis divides each interval into

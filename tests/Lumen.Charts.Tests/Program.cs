@@ -923,6 +923,79 @@ Test("Charts that derive their axis divide it too",()=>{
         Check(MinorLines(Svg(spec))>0,$"{kind} drew none");
     }
 });
+double Weekday(int offset)=>Utc(2026,1,5)+offset*86400000d;  // 5 January 2026 is a Monday.
+double[] TradingDays(int span)=>Enumerable.Range(0,span).Select(Weekday)
+    .Where(v=>TimeAxis.Moment(v).DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday).ToArray();
+Test("A weekend axis puts the trading days side by side",()=>{
+    var days=TradingDays(15);
+    var axis=Axis.Create(AxisKind.Time,days,weekends:true);
+    Check(axis.Skips.Count==2,$"{axis.Skips.Count} weekends over three weeks");
+    var gaps=days.Zip(days.Skip(1),(a,b)=>Math.Round(axis.Map(b,0,1000)-axis.Map(a,0,1000),6)).Distinct().ToArray();
+    Check(gaps.Length==1,"trading days are unevenly spaced: "+string.Join(",",gaps));
+    var plain=Axis.Create(AxisKind.Time,days);
+    Check(plain.Skips.Count==0&&days.Any(d=>Math.Abs(plain.Map(d,0,1000)-axis.Map(d,0,1000))>1),"the plain axis compressed too");
+});
+Test("A tick inside a skipped span is left out",()=>{
+    var axis=Axis.Create(AxisKind.Time,TradingDays(15),weekends:true);
+    var ticks=axis.Ticks(6);
+    Check(ticks.Count>2,$"{ticks.Count} ticks left");
+    Check(ticks.All(t=>!axis.Skips.Any(skip=>t.Value>=skip.From&&t.Value<skip.To)),"a tick landed inside a weekend");
+    Check(ticks.All(t=>TimeAxis.Moment(t.Value).DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday),
+        string.Join(",",ticks.Select(t=>t.Label)));
+});
+Test("A compressed axis inverts back to the moment it drew",()=>{
+    var axis=Axis.Create(AxisKind.Time,TradingDays(15),weekends:true);
+    foreach(var value in (double[])[Weekday(0),Weekday(1)+3600000d*9,Weekday(7),Weekday(14)])
+        Check(Math.Abs(axis.Invert(axis.Map(value,40,900),40,900)-value)<1,"the round trip lost "+value);
+    // A Saturday has no room of its own, so it sits where the weekend opens, and reading that
+    // position back gives the Monday, which is the moment the axis resumes at.
+    Check(Math.Abs(axis.Map(Utc(2026,1,10,12),0,1000)-axis.Map(Utc(2026,1,10),0,1000))<1e-9);
+    Check(Math.Abs(axis.Invert(axis.Map(Utc(2026,1,10,12),0,1000),0,1000)-Weekday(7))<1);
+});
+Test("Weekends are counted where the market is",()=>{
+    var york=TimeAxis.Zone("America/New_York");
+    var skips=TimeAxis.Weekends(Weekday(0)+12*3600000d,Weekday(15),york);
+    Check(skips.Count==2,$"{skips.Count} weekends");
+    var sunday=TimeAxis.Weekends(Weekday(0),Weekday(15),york);
+    Check(sunday.Count==3&&sunday[0].From==Weekday(0),"the tail of a New York weekend was dropped");
+    // A New York Saturday begins at 05:00 UTC in January, not at midnight UTC.
+    Check(TimeAxis.Moment(skips[0].From).UtcDateTime==new DateTime(2026,1,10,5,0,0),TimeAxis.Moment(skips[0].From).ToString("O"));
+    Check(TimeAxis.Moment(skips[0].To).UtcDateTime==new DateTime(2026,1,12,5,0,0));
+    Check(TimeAxis.Moment(TimeAxis.Weekends(Weekday(0),Weekday(15))[0].From).UtcDateTime==new DateTime(2026,1,10,0,0,0));
+});
+Test("Skipped spans are clipped, sorted and merged",()=>{
+    var merged=TimeAxis.Normalise([new TimeSkip(50,80),new TimeSkip(10,30),new TimeSkip(25,40),new TimeSkip(200,300),new TimeSkip(-100,5)],0,250);
+    // 10-30 and 25-40 overlap and become one; 50-80 stands apart.
+    Check(string.Join(",",merged.Select(skip=>$"{skip.From}-{skip.To}"))=="0-5,10-40,50-80,200-250",
+        string.Join(",",merged.Select(skip=>$"{skip.From}-{skip.To}")));
+    Check(TimeAxis.Normalise([new TimeSkip(10,10),new TimeSkip(300,400)],0,250).Count==0,"an empty or outside span survived");
+});
+Test("A holiday leaves its day out",()=>{
+    var axis=Axis.Create(AxisKind.Time,[Weekday(0),Weekday(4)],skips:[TimeAxis.Day(new DateTime(2026,1,7))]);
+    Check(axis.Skips.Count==1);
+    // Four days less the holiday leaves three, so a day is a third of the width.
+    Check(Math.Abs(axis.Map(Weekday(3),0,1000)-axis.Map(Weekday(1),0,1000)-1000d/3)<1e-6,"the holiday still takes room");
+    // The tick where the holiday opens shares a position with the day the market returns, so only one is drawn.
+    Check(axis.Ticks(5).All(t=>t.Value!=Weekday(2)),string.Join(",",axis.Ticks(5).Select(t=>t.Label)));
+});
+Test("A chart leaves the weekends out of its axis and its labels",()=>{
+    var days=TradingDays(15);
+    var spec=Spec() with{XAxis=AxisKind.Time,SkipWeekends=true,
+        Series=[new("Close",days.Select((v,i)=>new ChartPoint(v,100+i%5)).ToArray())]};
+    var labels=Svg(spec).Descendants(ns+"text").Select(e=>e.Value).ToArray();
+    Check(!labels.Contains("10 Jan")&&!labels.Contains("11 Jan"),"a weekend was labelled");
+    Check(labels.Any(l=>l=="5 Jan"||l=="6 Jan"),string.Join("|",labels));
+    Check(ChartSvg.Render(spec)!=ChartSvg.Render(spec with{SkipWeekends=false}),"the weekends made no difference");
+});
+Test("Skipped spans are rejected where they cannot apply",()=>{
+    Reject(()=>ChartSvg.Render(Spec() with{SkipWeekends=true}));
+    Reject(()=>ChartSvg.Render(Spec() with{TimeSkips=[new TimeSkip(1,2)]}));
+    var time=TimeSpec(Weekday(0),86400000d,10);
+    Reject(()=>ChartSvg.Render(time with{TimeSkips=[new TimeSkip(5,5)]}));
+    Reject(()=>ChartSvg.Render(time with{TimeSkips=[new TimeSkip(0,TimeAxis.MaxValue+1)]}));
+    Reject(()=>ChartSvg.Render(time with{TimeSkips=Enumerable.Range(0,401).Select(i=>new TimeSkip(i*10,i*10+5)).ToArray()}));
+    Check(ChartSvg.Render(time with{SkipWeekends=true,TimeSkips=[TimeAxis.Day(new DateTime(2026,1,7))]}).Length>0);
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

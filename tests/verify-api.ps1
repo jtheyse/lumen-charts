@@ -44,6 +44,16 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify ($r.Content.Contains('4 Jan 2026 19:00')) 'A time axis reads its calendar in the requested zone'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Line","xAxis":"Time","timeZone":"Mars/Olympus","series":[{"name":"S","points":[{"x":1767571200000,"y":1}]}]}' -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400) 'An unknown time zone is rejected'
+$trading='{"title":"Trading","kind":"Line","xAxis":"Time","skipWeekends":true,"series":[{"name":"Close","points":[{"x":1767571200000,"y":1},{"x":1767657600000,"y":2},{"x":1767744000000,"y":3},{"x":1767830400000,"y":4},{"x":1767916800000,"y":5},{"x":1768176000000,"y":6},{"x":1768262400000,"y":7},{"x":1768348800000,"y":8},{"x":1768435200000,"y":9},{"x":1768521600000,"y":10}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $trading
+Verify ($r.Content.Contains('>5 Jan<') -and -not $r.Content.Contains('>10 Jan<') -and -not $r.Content.Contains('>11 Jan<')) 'A trading axis labels no weekend'
+$holiday=$trading.Replace('"skipWeekends":true','"skipWeekends":true,"timeSkips":[{"from":1767744000000,"to":1767830400000}]')
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $holiday
+Verify (-not $r.Content.Contains('>7 Jan<')) 'A skipped holiday leaves the axis'
+foreach($bad in @('{"kind":"Line","skipWeekends":true,"series":[{"name":"S","points":[{"x":1,"y":1}]}]}','{"kind":"Line","xAxis":"Time","timeSkips":[{"from":1767744000000,"to":1767744000000}],"series":[{"name":"S","points":[{"x":1767571200000,"y":1}]}]}')){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400) 'An impossible skipped span is rejected'
+}
 $logSpec='{"title":"Log","kind":"Scatter","yAxis":"Log","series":[{"name":"Load","points":[{"x":1,"y":2},{"x":2,"y":200},{"x":3,"y":20000}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $logSpec
 Verify (([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'Log axis SVG'

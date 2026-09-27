@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.12.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.13.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -90,7 +90,19 @@ ChartSpec shifts = new() {
 };
 ```
 
-A day then begins where the zone begins it, not at 00:00 UTC, and months and years start on their local first. Ticks hold their local boundary across a clock change, so the hour a zone skips or repeats moves the ticks that follow rather than drifting the whole axis; a tick landing inside a skipped hour moves to the first reading the zone actually had. Tooltips, the data table and the axis all read in the same zone, and the identifier is whatever the host recognises — `Europe/London` on any current .NET, Windows identifiers too. Log ticks are decades, subdivided at 2 and 5 across one or two decades. `Axis.Create`, `Axis.Map`, `Axis.Invert`, `Axis.Ticks` and `Axis.Format` are public if you need the geometry without SVG. CSV exports of a time chart add an `XTime` column with ISO 8601 UTC timestamps beside the numeric X column.
+A day then begins where the zone begins it, not at 00:00 UTC, and months and years start on their local first. Ticks hold their local boundary across a clock change, so the hour a zone skips or repeats moves the ticks that follow rather than drifting the whole axis; a tick landing inside a skipped hour moves to the first reading the zone actually had. Tooltips, the data table and the axis all read in the same zone, and the identifier is whatever the host recognises — `Europe/London` on any current .NET, Windows identifiers too. A market does not trade at the weekend, and a strictly proportional axis spends two sevenths of its width saying so. `SkipWeekends` leaves those spans out, and `TimeSkips` leaves out any others, such as the days an exchange is shut:
+
+```csharp
+ChartSpec prices = new() {
+    Kind = ChartKind.Candlestick, XAxis = AxisKind.Time,
+    SkipWeekends = true, TimeSkips = [TimeAxis.Day(new DateTime(2026, 4, 3))],
+    Series = [new("ACME", bars)]
+};
+```
+
+Weekends are counted in `TimeZone`, so a market's weekend is its own rather than UTC's, and they are worked out over the axis range the chart settles on, including after a zoom. Ticks inside a skipped span are not drawn, which is why a weekday axis carries no Saturday label. Two consequences are worth knowing: a moment inside a skipped span has no position of its own and sits where the span opens, and reading a position back — which is what a zoom does — gives the moment the axis resumes at. `TimeAxis.Weekends`, `TimeAxis.Day` and `TimeAxis.Normalise` are public if you want to build the spans yourself.
+
+Log ticks are decades, subdivided at 2 and 5 across one or two decades. `Axis.Create`, `Axis.Map`, `Axis.Invert`, `Axis.Ticks` and `Axis.Format` are public if you need the geometry without SVG. CSV exports of a time chart add an `XTime` column with ISO 8601 UTC timestamps beside the numeric X column.
 
 ### Statistical and financial families
 
@@ -316,7 +328,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 ## Supported behavior and limits
 
 - Line, area, scatter, bubble, column, horizontal bar, signed stacked column, donut, heatmap, radar, candlestick, uncertainty band, histogram, box plot.
-- Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter and bubble charts; log Y applies to line, scatter and bubble charts, because magnitude and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999, and `TimeZone` decides the calendar they are read in. Business calendars and irregular tick placement are not implemented.
+- Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter and bubble charts; log Y applies to line, scatter and bubble charts, because magnitude and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999, and `TimeZone` decides the calendar they are read in. `SkipWeekends` and `TimeSkips` compress a time axis over spans it should not draw, at most 400 listed spans per chart; the axis stays piecewise proportional, so a gap in the data itself still reads as a gap. Irregular tick placement is not implemented.
 - `MinorGridlines` adds lighter lines between the labelled ticks: four or five divisions per interval on a linear axis depending on its step, the mantissas between decades on a logarithmic one, and none on a time axis, because half of a month is not a boundary anyone reads. Off by default.
 - Explicit limits via XMin/XMax/YMin/YMax. Bars and areas enforce a zero baseline. Null Y preserves gaps in lines/areas and is omitted elsewhere.
 - Line/area min/max sampling preserves original indices and extrema per continuous run; this is not a total chart-wide point budget. CSV always exports original observations.
@@ -330,6 +342,10 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.13.0 additions
+
+Business calendars: `ChartSpec.SkipWeekends` and `ChartSpec.TimeSkips`, so a trading chart puts its days side by side instead of spending two sevenths of its width on closed markets. The compression sits in `Axis`, which means the rendering, the zoom, the tooltips and the data table all read one domain. A chart that skips nothing is unchanged down to the byte across the same 63 renderings. The gallery's candlestick demonstration now draws 30 trading days with the weekends and Good Friday left out.
 
 ## 0.12.0 additions
 

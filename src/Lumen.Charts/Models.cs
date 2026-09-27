@@ -44,6 +44,10 @@ public sealed record ChartSpec
     public AxisKind XAxis { get; init; } = AxisKind.Linear;
     /// <summary>The zone a time axis reads its calendar in, such as <c>America/New_York</c>. Null keeps it in UTC.</summary>
     public string? TimeZone { get; init; }
+    /// <summary>Leaves the weekends out of a time axis, so trading days sit side by side. Counted in <see cref="TimeZone"/>.</summary>
+    public bool SkipWeekends { get; init; }
+    /// <summary>Further spans a time axis leaves out, such as market holidays. Use <see cref="TimeAxis.Day"/> for one.</summary>
+    public IReadOnlyList<TimeSkip> TimeSkips { get; init; } = [];
     public AxisKind YAxis { get; init; } = AxisKind.Linear;
     public AxisKind Y2Axis { get; init; } = AxisKind.Linear;
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];

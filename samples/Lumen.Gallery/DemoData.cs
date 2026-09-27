@@ -20,7 +20,8 @@ public static class DemoData
         var random=new Random(42+revision);
         Lumen.Charts.ChartSeries Make(string name,double baseline) => new(name,Enumerable.Range(0,12).Select(i=>new Lumen.Charts.ChartPoint(i,Math.Round(baseline+i*2+random.NextDouble()*18,1),Months[i],10+random.Next(80))).ToArray());
         var series=new[]{Make("Workspace",35),Make("Enterprise",20),Make("Community",10)};
-        var xKind=Lumen.Charts.AxisKind.Linear; var title="A clearer view of growth"; var desc="Monthly activity across three product plans";var x="Month index";var y="Active accounts (thousands)";
+        var xKind=Lumen.Charts.AxisKind.Linear; var weekends=false; IReadOnlyList<Lumen.Charts.TimeSkip> holidays=[];
+        var title="A clearer view of growth"; var desc="Monthly activity across three product plans";var x="Month index";var y="Active accounts (thousands)";
         if(kind==Lumen.Charts.ChartKind.Donut)
         {
             series=[new("Acquisition",[new(0,42,"Organic"),new(1,28,"Direct"),new(2,18,"Referral"),new(3,12,"Campaigns")])];
@@ -40,18 +41,23 @@ public static class DemoData
         if(kind==Lumen.Charts.ChartKind.Candlestick)
         {
             var open=118.0;var candles=new List<Lumen.Charts.ChartPoint>();var day=new DateTimeOffset(2026,3,2,0,0,0,TimeSpan.Zero);
-            for(var i=0;i<30;i++)
+            var shut=new DateTime(2026,4,3);   // Good Friday, when the exchange does not open.
+            while(candles.Count<30)
             {
-                var close=Math.Round(open*(1+(random.NextDouble()-.47)*.06),2);
-                candles.Add(Lumen.Charts.ChartPoint.Candle(Lumen.Charts.TimeAxis.Value(day.AddDays(i)),open,
-                    Math.Round(Math.Max(open,close)*(1+random.NextDouble()*.018),2),
-                    Math.Round(Math.Min(open,close)*(1-random.NextDouble()*.018),2),close));
-                open=close;
+                if(day.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday && day.Date!=shut)
+                {
+                    var close=Math.Round(open*(1+(random.NextDouble()-.47)*.06),2);
+                    candles.Add(Lumen.Charts.ChartPoint.Candle(Lumen.Charts.TimeAxis.Value(day),open,
+                        Math.Round(Math.Max(open,close)*(1+random.NextDouble()*.018),2),
+                        Math.Round(Math.Min(open,close)*(1-random.NextDouble()*.018),2),close));
+                    open=close;
+                }
+                day=day.AddDays(1);
             }
             series=[new("ACME",candles)];
-            title="Follow the market's mood";desc="Simulated daily prices · the body spans open to close, the wick the full range";
+            title="Follow the market's mood";desc="Simulated daily prices · 30 trading days, with the weekends and Good Friday left out of the axis";
             x="Trading day (UTC)";y="Price (ZAR)";
-            xKind=Lumen.Charts.AxisKind.Time;
+            xKind=Lumen.Charts.AxisKind.Time;weekends=true;holidays=[Lumen.Charts.TimeAxis.Day(shut)];
         }
         if(kind==Lumen.Charts.ChartKind.Band)
         {
@@ -82,7 +88,7 @@ public static class DemoData
             title="Explore the relationship";desc="Account engagement and retention · illustrative observations";x="Engagement score";y="Retention score";
             series=series.Select(s=>s with {Points=s.Points.Select(p=>p with {X=p.X*8+random.Next(6)}).ToArray()}).ToArray();
         }
-        var spec=new Lumen.Charts.ChartSpec{Kind=kind,Theme=theme,XAxis=xKind,Title=title,Description=desc,Series=series,XLabel=x,YLabel=y,Source="Source: deterministic demonstration data · not business results",Height=420};
+        var spec=new Lumen.Charts.ChartSpec{Kind=kind,Theme=theme,XAxis=xKind,SkipWeekends=weekends,TimeSkips=holidays,Title=title,Description=desc,Series=series,XLabel=x,YLabel=y,Source="Source: deterministic demonstration data · not business results",Height=420};
         if(axis==AxisDemo.Time&&TimeCapable(kind))
         {
             var start=new DateTimeOffset(2026,1,5,0,0,0,TimeSpan.Zero);

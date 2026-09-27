@@ -102,7 +102,8 @@ public static class ChartSvg
         var points = s.Series.SelectMany(x => x.Points).ToArray();
         var maxSize = points.Length == 0 ? 0 : points.Max(point => point.Size);
         var cats = points.Select(p => p.X).Distinct().Order().ToArray();
-        var xs = Axis.Create(s.XAxis, points.Select(p => p.X), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone));
+        var xs = Axis.Create(s.XAxis, points.Select(p => p.X), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone),
+            weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null);
         var primary = s.Series.Where(series => !series.Secondary).SelectMany(series => series.Points).ToArray();
         var values = primary.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
         if (s.Kind is ChartKind.Candlestick or ChartKind.Band)
