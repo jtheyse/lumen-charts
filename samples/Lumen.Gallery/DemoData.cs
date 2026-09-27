@@ -89,6 +89,12 @@ public static class DemoData
             spec=spec with{XAxis=Lumen.Charts.AxisKind.Time,XLabel="Week beginning (UTC)",Description="Weekly activity across three product plans",
                 Series=series.Select(s=>s with{Points=s.Points.Select((p,i)=>p with{X=Lumen.Charts.TimeAxis.Value(start.AddDays(i*7)),Label=null}).ToArray()}).ToArray()};
         }
+        // A target every plan is measured against, and the window a campaign ran in.
+        if(axis==AxisDemo.Numeric&&kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Area)
+            spec=spec with{Annotations=[new(Lumen.Charts.AnnotationAxis.Y,55){Label="Target"},
+                new(Lumen.Charts.AnnotationAxis.X,7){To=9,Label="Campaign"}]};
+        if(axis==AxisDemo.Numeric&&kind is Lumen.Charts.ChartKind.Column or Lumen.Charts.ChartKind.Bar)
+            spec=spec with{Annotations=[new(Lumen.Charts.AnnotationAxis.Y,55){Label="Target"}]};
         if(axis==AxisDemo.Log&&LogCapable(kind))
             spec=spec with{YAxis=Lumen.Charts.AxisKind.Log,YLabel="Requests per minute (log scale)",Description="Traffic spanning several orders of magnitude",
                 Series=spec.Series.Select((s,si)=>s with{Points=s.Points.Select((p,i)=>p with{Y=Math.Round(Math.Pow(10,si*.6+i*.3)+random.Next(1,9),2)}).ToArray()}).ToArray()};

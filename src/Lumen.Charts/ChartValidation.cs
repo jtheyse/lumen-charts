@@ -22,6 +22,25 @@ public static partial class ChartValidation
         if (spec.Series is null || spec.Series.Count > 32) throw new ArgumentException("Provide at most 32 series.");
         if (spec.MaxRenderedPoints is < 16 or > 5000) throw new ArgumentException("MaxRenderedPoints must be between 16 and 5000.");
         if (spec.Bins is < 1 or > Statistics.MaxBins) throw new ArgumentException($"Bins must be between 1 and {Statistics.MaxBins}.");
+        if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
+        foreach (var annotation in spec.Annotations)
+        {
+            if (annotation is null) throw new ArgumentException("Annotations cannot be null.");
+            if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column
+                or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Band))
+                throw new ArgumentException("Annotations apply to charts drawn on an X and Y axis; donut, radar, heatmap, histogram and box charts do not take them yet.");
+            if (!Enum.IsDefined(annotation.Axis)) throw new ArgumentException("Unknown annotation axis.");
+            if (!Finite(annotation.From) || (annotation.To.HasValue && !Finite(annotation.To.Value)))
+                throw new ArgumentException("Annotation values must be finite, magnitude <= 1e100.");
+            if (annotation.To <= annotation.From) throw new ArgumentException("A band annotation needs To above From.");
+            if (annotation.Axis == AnnotationAxis.X && spec.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn)
+                throw new ArgumentException("X annotations need a numeric axis; category charts place their bars by index.");
+            var axis = annotation.Axis == AnnotationAxis.X ? spec.XAxis : spec.YAxis;
+            if (axis == AxisKind.Log && annotation.From <= 0) throw new ArgumentException("Log axes require positive annotation values.");
+            if (annotation.Axis == AnnotationAxis.X && spec.XAxis == AxisKind.Time && !TimeAxis.InRange(annotation.From))
+                throw new ArgumentException("Time annotations must be Unix milliseconds between year 1 and year 9999.");
+            Text(annotation.Label); Color(annotation.Color);
+        }
         if (spec.DensityCells is not null)
         {
             if (spec.Kind != ChartKind.Scatter) throw new ArgumentException("Density cells apply to scatter charts; the other kinds either draw one mark per category or already sample.");

@@ -700,6 +700,74 @@ Test("LumenBrand renders its fallback until the page has been read",()=>{
         Check(html.Contains("background:#F6F3EE")&&html.Contains("--lumen-accent:#1D4E89"));
     } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
 });
+ChartSpec Marked(params ChartAnnotation[] annotations)=>Spec() with{Annotations=annotations,
+    Series=[new("S",[new(0,10),new(1,30),new(2,20),new(3,40)])]};
+XElement Annotation(XDocument doc)=>doc.Descendants(ns+"g").Single(e=>(string?)e.Attribute("class")=="lumen-datum"&&e.Element(ns+"text") is not null);
+Test("A reference line sits at its value and names itself",()=>{
+    var doc=Svg(Marked(new ChartAnnotation(AnnotationAxis.Y,25){Label="Target"}));
+    var group=Annotation(doc);
+    Check(group.Attribute("aria-label")!.Value=="Target: 25");
+    var lines=group.Elements(ns+"line").ToArray();
+    // An invisible wider line first, so the dashes are not the only hoverable part.
+    Check(lines.Length==2&&(string?)lines[0].Attribute("stroke-opacity")=="0"&&(string?)lines[0].Attribute("stroke-width")=="12");
+    var line=lines[1];
+    Check(line.Attribute("y1")!.Value==line.Attribute("y2")!.Value,"a Y reference is not horizontal");
+    Check((string?)line.Attribute("stroke-dasharray")=="6 4");
+    // Halfway between the 10 and 40 extremes of the data, so halfway down the plot.
+    var y=double.Parse(line.Attribute("y1")!.Value,CultureInfo.InvariantCulture);
+    Check(Math.Abs(y-(78+(420-76))/2.0)<12,$"the line is at {y}");
+    Check(group.Element(ns+"text")!.Value=="Target: 25");
+});
+Test("A vertical reference uses the X axis and its formatting",()=>{
+    var start=TimeAxis.Value(new DateTimeOffset(2026,1,1,0,0,0,TimeSpan.Zero));
+    var doc=Svg(Spec() with{XAxis=AxisKind.Time,Annotations=[new(AnnotationAxis.X,start+86400000d*15){Label="Launch"}],
+        Series=[new("S",Enumerable.Range(0,30).Select(i=>new ChartPoint(start+i*86400000d,i)).ToArray())]});
+    var group=Annotation(doc);
+    Check(group.Attribute("aria-label")!.Value=="Launch: 16 Jan 2026",group.Attribute("aria-label")!.Value);
+    var line=group.Elements(ns+"line").Last();
+    Check(line.Attribute("x1")!.Value==line.Attribute("x2")!.Value,"an X reference is not vertical");
+});
+Test("A band covers the range it names",()=>{
+    var doc=Svg(Marked(new ChartAnnotation(AnnotationAxis.Y,15){To=35,Label="Acceptable"}));
+    var group=Annotation(doc);
+    Check(group.Attribute("aria-label")!.Value=="Acceptable: 15 to 35");
+    var rect=group.Element(ns+"rect")!;
+    Check((string?)rect.Attribute("fill-opacity")==".12");
+    var height=double.Parse(rect.Attribute("height")!.Value,CultureInfo.InvariantCulture);
+    Check(height>50,$"the band is only {height} tall");
+});
+Test("Annotations render behind the data and inside the plot's clip",()=>{
+    var markup=ChartSvg.Render(Marked(new ChartAnnotation(AnnotationAxis.Y,25)));
+    var clip=markup.IndexOf("overflow='hidden'");
+    var annotation=markup.IndexOf("stroke-dasharray");
+    var firstMark=markup.IndexOf("data-point=");
+    Check(clip<annotation&&annotation<firstMark,"an annotation is outside the clip or drawn over the data");
+});
+Test("An annotation takes the style's muted colour unless it names one",()=>{
+    var branded=Svg(Marked(new ChartAnnotation(AnnotationAxis.Y,25)) with{Style=ChartStyle.Light with{Muted="#4B5563"}});
+    Check((string?)Annotation(branded).Elements(ns+"line").Last().Attribute("stroke")=="#4B5563");
+    var own=Svg(Marked(new ChartAnnotation(AnnotationAxis.Y,25){Color="#B03A2E",Dashed=false}));
+    var line=Annotation(own).Elements(ns+"line").Last();
+    Check((string?)line.Attribute("stroke")=="#B03A2E"&&line.Attribute("stroke-dasharray") is null);
+});
+Test("An annotation without a label still reads as a value",()=>{
+    Check(Annotation(Svg(Marked(new ChartAnnotation(AnnotationAxis.Y,25)))).Attribute("aria-label")!.Value=="25");
+});
+Test("Reject annotations a chart cannot place honestly",()=>{
+    Reject(()=>ChartSvg.Render(Spec(ChartKind.Donut) with{Annotations=[new(AnnotationAxis.Y,1)]}));
+    Reject(()=>ChartSvg.Render(Spec(ChartKind.Histogram) with{Series=[new("S",[new(0,1),new(1,2)])],Annotations=[new(AnnotationAxis.Y,1)]}));
+    Reject(()=>ChartSvg.Render(Spec(ChartKind.Column) with{Annotations=[new(AnnotationAxis.X,1)]}));
+    Reject(()=>ChartSvg.Render(Marked(new ChartAnnotation(AnnotationAxis.Y,10){To=10})));
+    Reject(()=>ChartSvg.Render(Marked(new ChartAnnotation(AnnotationAxis.Y,double.NaN))));
+    Reject(()=>ChartSvg.Render(Marked(new ChartAnnotation((AnnotationAxis)7,1))));
+    Reject(()=>ChartSvg.Render(Marked(new ChartAnnotation(AnnotationAxis.Y,1){Color="red"})));
+    Reject(()=>ChartSvg.Render(Spec(ChartKind.Scatter) with{YAxis=AxisKind.Log,Series=[new("S",[new(1,1),new(2,10)])],Annotations=[new(AnnotationAxis.Y,0)]}));
+    Reject(()=>ChartSvg.Render(Marked(Enumerable.Range(0,33).Select(i=>new ChartAnnotation(AnnotationAxis.Y,i+1)).ToArray())));
+});
+Test("A column chart still takes a Y reference",()=>{
+    var doc=Svg(Spec(ChartKind.Column) with{Annotations=[new(AnnotationAxis.Y,4){Label="Budget"}]});
+    Check(Annotation(doc).Attribute("aria-label")!.Value=="Budget: 4");
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

@@ -29,7 +29,9 @@ async Task Test(string name, Func<Task> action)
 var chart = page.Locator(".lumen-chart").First;
 var tooltip = chart.Locator(".lumen-tooltip");
 var status = chart.Locator(".lumen-status");
-ILocator Marks() => chart.Locator(".lumen-datum");
+// Data marks specifically: a chart may also carry aggregates such as annotations, histogram bins
+// and box glyphs, which are labelled and focusable but report no observation.
+ILocator Marks() => chart.Locator(".lumen-datum[data-point]");
 ILocator Tool(string name) => chart.Locator(".lumen-tools button", new() { HasTextString = name });
 
 await Test("Chart renders focusable marks", async () =>
@@ -94,10 +96,10 @@ await Test("Hiding a series removes its marks", async () =>
     if (await legend.CountAsync() < 2) return;
     var before = await Marks().CountAsync();
     await legend.First.ClickAsync();
-    await page.WaitForFunctionAsync($"() => document.querySelectorAll('.lumen-chart .lumen-datum').length < {before}");
+    await page.WaitForFunctionAsync($"() => document.querySelectorAll('.lumen-chart .lumen-datum[data-point]').length < {before}");
     Check(await legend.First.GetAttributeAsync("aria-pressed") == "false");
     await legend.First.ClickAsync();
-    await page.WaitForFunctionAsync($"() => document.querySelectorAll('.lumen-chart .lumen-datum').length === {before}");
+    await page.WaitForFunctionAsync($"() => document.querySelectorAll('.lumen-chart .lumen-datum[data-point]').length === {before}");
 });
 
 await Test("The data table lists observations with scoped headers", async () =>

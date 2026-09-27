@@ -149,6 +149,8 @@ public static class ChartSvg
         // one marker radius so a mark on the first or last value is drawn whole and stays hoverable.
         const double bleed = 6;
         w.Add($"<svg x='{N(left-bleed)}' y='{N(top-bleed)}' width='{N(right-left+2*bleed)}' height='{N(bottom-top+2*bleed)}' viewBox='{N(left-bleed)} {N(top-bleed)} {N(right-left+2*bleed)} {N(bottom-top+2*bleed)}' overflow='hidden'>");
+        // Behind the data, and inside the clip, so a reference pans and zooms with what it refers to.
+        foreach (var annotation in s.Annotations) Annotate(w, annotation, X, Y, xs, ys, left, right, top, bottom);
         var positive = cats.ToDictionary(x => x, _ => 0d); var negative = cats.ToDictionary(x => x, _ => 0d);
         for (var si = 0; si < s.Series.Count; si++)
         {
@@ -237,6 +239,39 @@ public static class ChartSvg
                         $"{ys.Format(ys.Invert(y + size, bottom, top))} to {ys.Format(ys.Invert(y, bottom, top))}";
             Aggregate(w, label, $"<rect x='{N(x)}' y='{N(y)}' width='{N(size)}' height='{N(size)}' fill='{color}' fill-opacity='{N(Math.Round(weight, 3))}'/>");
         }
+    }
+
+    private static void Annotate(SvgWriter w, ChartAnnotation annotation, Func<double, double> X, Func<double, double> Y,
+        Axis xs, Axis ys, double left, double right, double top, double bottom)
+    {
+        var horizontal = annotation.Axis == AnnotationAxis.Y;
+        var axis = horizontal ? ys : xs;
+        var colour = annotation.Color ?? w.Style.Muted;
+        var at = horizontal ? Y(annotation.From) : X(annotation.From);
+        string shape, reading;
+        double labelX, labelY; string anchor;
+        if (annotation.To is { } to)
+        {
+            var other = horizontal ? Y(to) : X(to);
+            double x = horizontal ? left : Math.Min(at, other), y = horizontal ? Math.Min(at, other) : top;
+            double width = horizontal ? right - left : Math.Abs(other - at), height = horizontal ? Math.Abs(other - at) : bottom - top;
+            shape = $"<rect x='{N(x)}' y='{N(y)}' width='{N(width)}' height='{N(height)}' fill='{colour}' fill-opacity='.12'/>";
+            reading = $"{axis.Format(annotation.From)} to {axis.Format(to)}";
+            (labelX, labelY, anchor) = horizontal ? (right - 6, y + 13, "end") : (x + 6, top + 13, "start");
+        }
+        else
+        {
+            var dash = annotation.Dashed ? " stroke-dasharray='6 4'" : "";
+            double x1 = horizontal ? left : at, y1 = horizontal ? at : top, x2 = horizontal ? right : at, y2 = horizontal ? at : bottom;
+            // An invisible wider line carries the pointer, so a dashed reference is hoverable
+            // along its whole length rather than only where a dash happens to fall.
+            shape = $"<line x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{colour}' stroke-opacity='0' stroke-width='12'/>" +
+                $"<line x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{colour}' stroke-width='1.5'{dash}/>";
+            reading = axis.Format(annotation.From);
+            (labelX, labelY, anchor) = horizontal ? (right - 6, at - 6, "end") : (at + 6, top + 13, "start");
+        }
+        var label = annotation.Label is null ? reading : $"{annotation.Label}: {reading}";
+        Aggregate(w, label, shape + $"<text x='{N(labelX)}' y='{N(labelY)}' text-anchor='{anchor}' fill='{colour}' font-size='11'>{SvgWriter.E(label)}</text>");
     }
 
     private static void Candles(SvgWriter w, ChartSeries series, Func<double, double> X, Func<double, double> Y, Axis xs, Axis ys)

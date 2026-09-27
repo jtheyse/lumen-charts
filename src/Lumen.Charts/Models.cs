@@ -55,6 +55,25 @@ public sealed record ChartSpec
     /// <summary>Scatter only. Set a cell count across the plot to draw one shaded cell per occupied
     /// region instead of one mark per observation. Null draws every point, which is the default.</summary>
     public int? DensityCells { get; init; }
+    /// <summary>Reference lines and bands drawn behind the data.</summary>
+    public IReadOnlyList<ChartAnnotation> Annotations { get; init; } = [];
+}
+
+public enum AnnotationAxis { X, Y }
+
+/// <summary>
+/// A reference drawn behind the data: a line at <paramref name="From"/>, or a band when <see cref="To"/>
+/// is set. Values are in data coordinates, so an annotation pans and zooms with the chart.
+/// </summary>
+public sealed record ChartAnnotation(AnnotationAxis Axis, double From)
+{
+    /// <summary>The far edge of a band. Null draws a line.</summary>
+    public double? To { get; init; }
+    /// <summary>Shown with the value. Null shows the value alone.</summary>
+    public string? Label { get; init; }
+    /// <summary>Defaults to the style's muted colour.</summary>
+    public string? Color { get; init; }
+    public bool Dashed { get; init; } = true;
 }
 
 public sealed record GraphNode(string Id, string Label, string? Color = null);

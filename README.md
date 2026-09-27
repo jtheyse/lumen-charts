@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.8.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.9.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -153,6 +153,25 @@ foreach (var issue in Brand.ContrastIssues())
 
 Limits: server rendering cannot read a stylesheet, so `ChartSvg.Render` and the HTTP API need an explicit `ChartStyle`. `LumenBrand` discards transparency, since a chart colour is drawn opaque, and maps series, background, text, muted, grid and candle colours; graph edges and the heatmap ramp come from `Fallback`. Font lists are reduced to letters, digits, spaces, commas and hyphens because they are written into a style attribute; `ChartStyle.FontFamilyFrom` performs that reduction on any CSS value.
 
+### Annotations
+
+A chart can carry references the data is read against — a target, a threshold, the window a campaign ran in:
+
+```csharp
+ChartSpec revenue = new() {
+    Kind = ChartKind.Line,
+    Annotations = [
+        new(AnnotationAxis.Y, 55) { Label = "Target" },
+        new(AnnotationAxis.X, 7) { To = 9, Label = "Campaign" }
+    ],
+    Series = [new("Revenue", months)]
+};
+```
+
+`From` alone draws a line, dashed unless `Dashed` is false; adding `To` draws a band. Values are in data coordinates, so an annotation zooms and pans with what it refers to and clips at the plot edge. They render behind the data, take the style's muted colour unless `Color` names one, and each is a focusable, labelled aggregate reading `Target: 55` — the value is always shown, so a reference can never sit somewhere other than where it claims.
+
+Annotations apply to the charts drawn on an X and Y axis. Donut, radar, heatmap, histogram and box charts reject them rather than place them arbitrarily, and an X annotation is refused on a category chart, whose bars sit at indices rather than at values. At most 32 per chart.
+
 ### Dense scatter charts
 
 A scatter chart draws every observation, which stops being readable long before it stops being fast: fifty thousand points saturate into solid shapes, and an overlapping series disappears underneath the one drawn after it. Setting `DensityCells` bins the plot into a square grid and shades one cell per occupied region instead:
@@ -280,6 +299,10 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.9.0 additions
+
+Reference lines and bands, described under [Annotations](#annotations): `ChartAnnotation` and `ChartSpec.Annotations`, drawn behind the data in data coordinates so they move with it. The gallery's line, area, column and bar demonstrations carry a target and a campaign window.
 
 ## 0.8.0 additions
 

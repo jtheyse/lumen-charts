@@ -46,6 +46,11 @@ foreach($bad in @('{"kind":"Line","yAxis":"Log","series":[{"name":"S","points":[
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400) 'Invalid axis request rejected'
 }
+$annotated='{"title":"Target","kind":"Line","annotations":[{"axis":"Y","from":25,"label":"Target"},{"axis":"X","from":1,"to":2,"label":"Window"}],"series":[{"name":"S","points":[{"x":0,"y":10},{"x":1,"y":30},{"x":2,"y":20},{"x":3,"y":40}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $annotated
+Verify ($r.Content.Contains('Target: 25') -and $r.Content.Contains('Window: 1 to 2')) 'Annotations in the request are drawn and named'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Donut","annotations":[{"axis":"Y","from":1}],"series":[{"name":"S","points":[{"x":0,"y":1}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'An annotation on a chart without axes is rejected'
 $branded='{"title":"Brand","kind":"Line","style":{"background":"#F6F3EE","series":["#1D4E89"],"fontFamily":"Georgia,serif"},"series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $branded
 Verify ($r.Content.Contains('background:#F6F3EE') -and $r.Content.Contains("fill='#1D4E89'") -and $r.Content.Contains('font-family:Georgia,serif')) 'A style in the request brands the SVG'
