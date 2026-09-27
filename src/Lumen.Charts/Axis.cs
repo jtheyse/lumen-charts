@@ -106,6 +106,39 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         _ => new LinearScale(Min, Max).Ticks(count).Select(v => (v, LinearScale.Label(v))).ToArray()
     };
 
+    /// <summary>
+    /// Values between the labelled ticks, for a lighter grid. A linear axis divides each interval into
+    /// four or five depending on its step, a log axis marks the mantissas between decades, and a time
+    /// axis has none, because half of a month is not a boundary anyone reads.
+    /// </summary>
+    public IReadOnlyList<double> MinorTicks(int count = 5)
+    {
+        var major = Ticks(count).Select(t => t.Value).ToArray();
+        if (Kind == AxisKind.Time || major.Length < 2) return [];
+        var result = new List<double>();
+        if (Kind == AxisKind.Log)
+        {
+            // A decade is divided by its own mantissas, which is what makes a log grid readable.
+            foreach (var tick in major)
+                for (var mantissa = 2; mantissa <= 9; mantissa++)
+                {
+                    var value = tick * mantissa;
+                    if (value > Min && value < Max) result.Add(value);
+                }
+            return result;
+        }
+        var step = major[1] - major[0];
+        var magnitude = Math.Pow(10, Math.Floor(Math.Log10(Math.Abs(step))));
+        var divisions = Math.Abs(step / magnitude - 2) < .01 || Math.Abs(step / magnitude - 2.5) < .01 ? 4 : 5;
+        for (var value = major[0] - step; value < Max; value += step)
+            for (var division = 1; division < divisions; division++)
+            {
+                var minor = value + step * division / divisions;
+                if (minor > Min && minor < Max) result.Add(minor);
+            }
+        return result;
+    }
+
     private double Transform(double value) => Kind == AxisKind.Log ? Math.Log10(value) : value;
 
     private IReadOnlyList<(double, string)> LogTicks(int count)

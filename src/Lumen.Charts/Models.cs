@@ -66,6 +66,8 @@ public sealed record ChartSpec
     /// <summary>Scatter only. Set a cell count across the plot to draw one shaded cell per occupied
     /// region instead of one mark per observation. Null draws every point, which is the default.</summary>
     public int? DensityCells { get; init; }
+    /// <summary>Lighter lines between the labelled ticks. Off by default; a time axis never takes them.</summary>
+    public bool MinorGridlines { get; init; }
     /// <summary>Reference lines and bands drawn behind the data.</summary>
     public IReadOnlyList<ChartAnnotation> Annotations { get; init; } = [];
 }

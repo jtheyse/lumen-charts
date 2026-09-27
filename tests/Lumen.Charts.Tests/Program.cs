@@ -872,6 +872,57 @@ Test("Reject a zone the host does not know, or one without a time axis",()=>{
     Reject(()=>ChartSvg.Render(TimeSpec(Utc(2026,1,5),3600000d,6) with{TimeZone="Mars/Olympus"}));
     Reject(()=>ChartSvg.Render(Spec() with{TimeZone="America/New_York"}));
 });
+int MinorLines(XDocument doc)=>doc.Descendants(ns+"line").Count(l=>(string?)l.Attribute("class")=="lumen-grid-minor");
+Test("Minor lines divide each interval and stay off by default",()=>{
+    var plain=Svg(Spec());
+    Check(MinorLines(plain)==0&&!plain.ToString().Contains("lumen-grid-minor"),"a chart that asked for nothing carries minor lines or their rule");
+    var divided=Svg(Spec() with{MinorGridlines=true});
+    Check(MinorLines(divided)>0);
+    var axis=new Axis(AxisKind.Linear,0,8);
+    var minors=axis.MinorTicks();
+    var majors=axis.Ticks().Select(t=>t.Value).ToArray();
+    Check(minors.All(m=>m>0&&m<8)&&minors.Distinct().Count()==minors.Count,"a minor value repeats or sits outside the axis");
+    Check(!minors.Any(m=>majors.Any(major=>Math.Abs(major-m)<1e-9)),"a labelled tick is repeated as a minor line");
+    // Each interval is divided evenly; the wider gaps in the sequence are where a major tick sits.
+    foreach(var major in majors.SkipLast(1))
+    {
+        var inside=minors.Where(m=>m>major&&m<major+2).OrderBy(m=>m).ToArray();
+        Check(inside.Length==3,$"interval at {major} has {inside.Length} divisions");
+        Check(inside.Zip(inside.Skip(1),(a,b)=>Math.Round(b-a,6)).Distinct().Count()==1,"the divisions are uneven");
+    }
+});
+Test("The number of divisions follows the step",()=>{
+    // A step of two reads best in quarters, a step of ten in fifths.
+    Check(Math.Round(new Axis(AxisKind.Linear,0,8).MinorTicks().First(),6)==0.5,"a step of 2 should divide into four");
+    var overForty=new Axis(AxisKind.Linear,0,40).MinorTicks();
+    Check(Math.Round(overForty[1]-overForty[0],6)==2,"a step of 10 should divide into five");
+    // A step of two and a half also divides into four, which lands on eighths of ten.
+    Check(Math.Round(new Axis(AxisKind.Linear,0,10).MinorTicks().First(),6)==0.625);
+});
+Test("A log axis marks the mantissas between its decades",()=>{
+    var minors=Axis.Create(AxisKind.Log,[1,1000]).MinorTicks();
+    Check(minors.Contains(20)&&minors.Contains(50)&&minors.Contains(200),string.Join(",",minors.Take(12)));
+    Check(!minors.Contains(10)&&!minors.Contains(100),"a decade is repeated as a minor line");
+});
+Test("A time axis takes no minor lines",()=>{
+    Check(new Axis(AxisKind.Time,Utc(2026,1,1),Utc(2026,12,31)).MinorTicks().Count==0);
+    var doc=Svg(TimeSpec(Utc(2026,1,1),86400000d,20) with{MinorGridlines=true});
+    // The value axis still divides; the time axis does not.
+    Check(MinorLines(doc)>0&&doc.Descendants(ns+"line").Where(l=>(string?)l.Attribute("class")=="lumen-grid-minor")
+        .All(l=>l.Attribute("y1")!.Value==l.Attribute("y2")!.Value),"a time axis drew vertical minor lines");
+});
+Test("Minor lines are lighter than the labelled grid and sit behind the data",()=>{
+    var markup=ChartSvg.Render(Spec() with{MinorGridlines=true});
+    Check(markup.Contains(".lumen-grid-minor{stroke:var(--lumen-grid);stroke-width:1;stroke-opacity:.45}"));
+    Check(markup.IndexOf("lumen-grid-minor'")<markup.IndexOf("data-point="),"minor lines are drawn over the data");
+});
+Test("Charts that derive their axis divide it too",()=>{
+    foreach(var kind in (ChartKind[])[ChartKind.Histogram,ChartKind.Box])
+    {
+        var spec=Spec(kind) with{MinorGridlines=true,Series=[new("Sample",Enumerable.Range(0,40).Select(i=>new ChartPoint(i,i%7+1)).ToArray())]};
+        Check(MinorLines(Svg(spec))>0,$"{kind} drew none");
+    }
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

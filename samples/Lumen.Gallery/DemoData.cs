@@ -103,7 +103,7 @@ public static class DemoData
         if(axis==AxisDemo.Numeric&&kind is Lumen.Charts.ChartKind.Column or Lumen.Charts.ChartKind.Bar)
             spec=spec with{Annotations=[new(Lumen.Charts.AnnotationAxis.Y,55){Label="Target"}]};
         if(axis==AxisDemo.Log&&LogCapable(kind))
-            spec=spec with{YAxis=Lumen.Charts.AxisKind.Log,YLabel="Requests per minute (log scale)",Description="Traffic spanning several orders of magnitude",
+            spec=spec with{YAxis=Lumen.Charts.AxisKind.Log,MinorGridlines=true,YLabel="Requests per minute (log scale)",Description="Traffic spanning several orders of magnitude",
                 Series=spec.Series.Select((s,si)=>s with{Points=s.Points.Select((p,i)=>p with{Y=Math.Round(Math.Pow(10,si*.6+i*.3)+random.Next(1,9),2)}).ToArray()}).ToArray()};
         return spec;
     }

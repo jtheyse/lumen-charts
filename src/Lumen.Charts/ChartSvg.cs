@@ -10,6 +10,8 @@ internal sealed class SvgWriter
     /// <summary>Native SVG tooltips. Hosts that draw their own tooltips render marks without them.</summary>
     public bool Titles { get; init; } = true;
     public ChartStyle Style { get; init; } = ChartStyle.Light;
+    /// <summary>Charts that draw no minor lines carry no rule for them.</summary>
+    public bool MinorGrid { get; init; }
     public static string N(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     public static string E(string? value) => WebUtility.HtmlEncode(value ?? "");
     public void Add(string value) => output.Append(value);
@@ -36,7 +38,7 @@ public static class ChartSvg
     public static string Render(ChartSpec spec, bool includeLegend = true, bool includeTitles = true)
     {
         ChartValidation.Validate(spec);
-        var w = new SvgWriter { Titles = includeTitles, Style = ResolveStyle(spec) };
+        var w = new SvgWriter { Titles = includeTitles, Style = ResolveStyle(spec), MinorGrid = spec.MinorGridlines };
         var legendColumns = Math.Max(1, (spec.Width - 48) / 180);
         var legendRows = includeLegend && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Histogram and not ChartKind.Box
             ? (int)Math.Ceiling(spec.Series.Count / (double)legendColumns) : 0;
@@ -70,7 +72,7 @@ public static class ChartSvg
         var style = w.Style;
         w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{style.Grid};--lumen-muted:{style.Muted};width:100%;height:auto;display:block;background:{style.Background};color:{style.Text};font-family:{style.FontFamily};font-size:12px' fill='currentColor'>");
         w.Add($"<title>{SvgWriter.E(title)}</title><desc>{SvgWriter.E(description)}</desc>");
-        w.Add("<style>.lumen-svg .lumen-grid{stroke:var(--lumen-grid);stroke-width:1}.lumen-svg .lumen-muted{fill:var(--lumen-muted)}.lumen-svg .lumen-datum{outline:none;cursor:pointer}.lumen-svg .lumen-datum:focus{stroke:currentColor;stroke-width:3}.lumen-svg .lumen-datum:hover{filter:brightness(.87)}.lumen-svg .lumen-node{cursor:grab;outline:none}.lumen-svg .lumen-node:focus circle{stroke-width:4}.lumen-svg .lumen-node:active{cursor:grabbing}</style>");
+        w.Add("<style>.lumen-svg .lumen-grid{stroke:var(--lumen-grid);stroke-width:1}"+(w.MinorGrid?".lumen-svg .lumen-grid-minor{stroke:var(--lumen-grid);stroke-width:1;stroke-opacity:.45}":"")+".lumen-svg .lumen-muted{fill:var(--lumen-muted)}.lumen-svg .lumen-datum{outline:none;cursor:pointer}.lumen-svg .lumen-datum:focus{stroke:currentColor;stroke-width:3}.lumen-svg .lumen-datum:hover{filter:brightness(.87)}.lumen-svg .lumen-node{cursor:grab;outline:none}.lumen-svg .lumen-node:focus circle{stroke-width:4}.lumen-svg .lumen-node:active{cursor:grabbing}</style>");
         w.Text(24, 28, title, "font-size='17' font-weight='600'");
         w.Text(24, 49, description, "class='lumen-muted' font-size='11'");
     }
@@ -120,6 +122,20 @@ public static class ChartSvg
         var ys2 = secondary ? Axis.Create(s.Y2Axis, secondValues, zero, s.Y2Min, s.Y2Max) : ys;
         double X(double x) => category ? left + (Array.IndexOf(cats, x) + .5) / cats.Length * (right - left) : xs.Map(x, left, right);
         double Y(double y) => ys.Map(y, bottom, top);
+        if (s.MinorGridlines)
+        {
+            foreach (var minor in ys.MinorTicks())
+            {
+                if (horizontal) { var x = ys.Map(minor, left, right); w.Line(x, top, x, bottom, "class='lumen-grid-minor'"); }
+                else { var y = Y(minor); w.Line(left, y, right, y, "class='lumen-grid-minor'"); }
+            }
+            if (!category && !horizontal)
+                foreach (var minor in xs.MinorTicks())
+                {
+                    var x = X(minor);
+                    w.Line(x, top, x, bottom, "class='lumen-grid-minor'");
+                }
+        }
         foreach (var (tick, label) in ys.Ticks())
         {
             if (horizontal)
@@ -328,6 +344,12 @@ public static class ChartSvg
     /// <summary>Y gridlines, tick labels and axis titles shared by the charts that derive their X axis.</summary>
     private static void Frame(SvgWriter w, ChartSpec s, Axis ys, double left, double right, double top, double bottom)
     {
+        if (s.MinorGridlines)
+            foreach (var minor in ys.MinorTicks())
+            {
+                var y = ys.Map(minor, bottom, top);
+                w.Line(left, y, right, y, "class='lumen-grid-minor'");
+            }
         foreach (var (tick, label) in ys.Ticks())
         {
             var y = ys.Map(tick, bottom, top);
