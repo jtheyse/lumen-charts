@@ -2191,6 +2191,28 @@ Test("A chart that asks for no zones or point colours draws as before",()=>{
     var doc=Svg(Spec() with{Series=[new("S",[new(0,2),new(1,3),new(2,null),new(3,1),new(4,2)])]});
     Check(Strokes(doc).Select(s=>s.Ink).SequenceEqual([ChartStyle.Light.Series[0],ChartStyle.Light.Series[0]]),"a plain line no longer draws one stroke per run");
 });
+Test("A horizontal bar chart draws a value reference upright at its value, its label inside the plot",()=>{
+    // The value axis runs along X, from 0 at x=160 to 40 at x=870, so its middle is at 20.
+    var doc=Svg(Spec(ChartKind.Bar) with{Series=[new("S",[new(0,10,"A"),new(1,40,"B")])],Annotations=[
+        new(AnnotationAxis.Y,10){Label="Floor"},new(AnnotationAxis.Y,35){Label="Target"},new(AnnotationAxis.Y,45){Label="Beyond"},
+        new(AnnotationAxis.Y,5){To=15,Label="Low"},new(AnnotationAxis.Y,30){To=50,Label="Stretch"}]});
+    double Px(double value)=>160+value/40*710;
+    XElement Reference(string name)=>doc.Descendants(ns+"g").Single(g=>(string?)g.Attribute("aria-label")==name);
+    (double X,string? Anchor) Label(string name)=>((double)Reference(name).Element(ns+"text")!.Attribute("x")!,(string?)Reference(name).Element(ns+"text")!.Attribute("text-anchor"));
+    foreach(var (name,value) in new[]{("Floor: 10",10d),("Target: 35",35d)})
+    {
+        var line=Reference(name).Elements(ns+"line").Last();
+        Check((double)line.Attribute("x1")! ==Px(value)&&(double)line.Attribute("x2")! ==Px(value)&&(double)line.Attribute("y1")! ==78&&(double)line.Attribute("y2")! ==344,$"{name} is not upright at its value");
+    }
+    var low=Reference("Low: 5 to 15").Element(ns+"rect")!;
+    Check((double)low.Attribute("x")! ==Px(5)&&Math.Abs((double)low.Attribute("width")!-(Px(15)-Px(5)))<1e-6&&(double)low.Attribute("y")! ==78&&(double)low.Attribute("height")! ==266,"the band does not span its values upright");
+    // A label reads into the larger side of the plot: right of a reference in the left half, left of one in the right half.
+    Check(Label("Floor: 10")==(Px(10)+6,"start")&&Label("Low: 5 to 15")==(Px(5)+6,"start")&&Label("Target: 35")==(Px(35)-6,"end"),"a label runs towards the nearer edge");
+    // A band running off the plot labels the part the plot shows; a reference wholly off it turns its label away, to clip with it.
+    Check(Label("Stretch: 30 to 50")==(870-6,"end")&&Label("Beyond: 45")==(Px(45)+6,"start"),"a label is placed off the part of the plot its reference covers");
+    // X stays refused: a category chart places its bars by index, not at values.
+    Reject(()=>ChartSvg.Render(Spec(ChartKind.Bar) with{Annotations=[new(AnnotationAxis.X,1)]}));
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

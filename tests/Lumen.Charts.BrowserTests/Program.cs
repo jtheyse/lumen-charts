@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Deque.AxeCore.Commons;
 using Deque.AxeCore.Playwright;
 using Microsoft.Playwright;
@@ -197,7 +198,7 @@ else Console.WriteLine("SKIP LumenBrand check: this host renders no LumenBrand")
 await page.ReloadAsync(new() { WaitUntil = WaitUntilState.NetworkIdle });
 await page.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });
 
-await Test("axe-core reports no WCAG A or AA violation", async () =>
+async Task Sweep()
 {
     var result = await page.RunAxe(new AxeRunOptions
     {
@@ -209,7 +210,25 @@ await Test("axe-core reports no WCAG A or AA violation", async () =>
         foreach (var node in violation.Nodes.Take(3)) Console.WriteLine($"      {node.Html}");
     }
     Check(result.Violations.Length == 0, string.Join("; ", result.Violations.Select(v => $"{v.Id} on {v.Nodes.Length} node(s)")));
-});
+}
+
+await Test("axe-core reports no WCAG A or AA violation", Sweep);
+
+// A theme belongs to the host, not to a component, so there is no component selector for it: the switch is
+// found the way a user finds it, as a button named for the theme.
+var theme = page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) });
+if (await theme.CountAsync() > 0)
+{
+    await Test("axe-core reports no WCAG A or AA violation in the dark theme", async () =>
+    {
+        var before = await chart.Locator("svg").First.GetAttributeAsync("style");
+        await theme.First.ClickAsync();
+        // The chart redraws in the theme's colours, so the sweep cannot run against the light page by mistake.
+        await page.WaitForFunctionAsync("before => document.querySelector('.lumen-chart svg')?.getAttribute('style') !== before", before);
+        await Sweep();
+    });
+}
+else Console.WriteLine("SKIP dark-theme axe sweep: this host has no theme switch");
 
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed. ({address})");
 foreach (var failure in failures) Console.Error.WriteLine(failure);

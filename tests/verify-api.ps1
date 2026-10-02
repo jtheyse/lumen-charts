@@ -115,6 +115,10 @@ foreach($bad in @('{"kind":"Line","xAxis":"Time","xFormat":"Duration","series":[
 $annotated='{"title":"Target","kind":"Line","annotations":[{"axis":"Y","from":25,"label":"Target"},{"axis":"X","from":1,"to":2,"label":"Window"}],"series":[{"name":"S","points":[{"x":0,"y":10},{"x":1,"y":30},{"x":2,"y":20},{"x":3,"y":40}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $annotated
 Verify ($r.Content.Contains('Target: 25') -and $r.Content.Contains('Window: 1 to 2')) 'Annotations in the request are drawn and named'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":"Target","kind":"Bar","annotations":[{"axis":"Y","from":25,"label":"Target"}],"series":[{"name":"S","points":[{"x":0,"y":10,"label":"A"},{"x":1,"y":40,"label":"B"}]}]}'
+# The value axis runs along X from 0 at 160 to 40 at 870, so 25 sits at 603.75, and the plot spans 78 to 344 down the page.
+$line=([xml]$r.Content).SelectNodes('//*[local-name()="g"][@aria-label="Target: 25"]/*[local-name()="line"]')|Select-Object -Last 1
+Verify ($line.x1 -eq '603.75' -and $line.x2 -eq '603.75' -and $line.y1 -eq '78' -and $line.y2 -eq '344') 'A value annotation on a horizontal bar chart stands upright at its value'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Donut","annotations":[{"axis":"Y","from":1}],"series":[{"name":"S","points":[{"x":0,"y":1}]}]}' -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400) 'An annotation on a chart without axes is rejected'
 $branded='{"title":"Brand","kind":"Line","style":{"background":"#F6F3EE","series":["#1D4E89"],"fontFamily":"Georgia,serif"},"series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}'

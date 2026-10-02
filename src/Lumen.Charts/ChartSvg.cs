@@ -185,8 +185,12 @@ public static class ChartSvg
         const double bleed = 6;
         w.Add($"<svg x='{N(left-bleed)}' y='{N(top-bleed)}' width='{N(right-left+2*bleed)}' height='{N(bottom-top+2*bleed)}' viewBox='{N(left-bleed)} {N(top-bleed)} {N(right-left+2*bleed)} {N(bottom-top+2*bleed)}' overflow='hidden'>");
         // Behind the data, and inside the clip, so a reference pans and zooms with what it refers to.
-        if (s.YZones is { } bands) ZoneBands(w, bands, horizontal ? v => ys.Map(v, left, right) : Y, ys, horizontal, left, right, top, bottom);
-        foreach (var annotation in s.Annotations) Annotate(w, annotation, X, Y, xs, ys, left, right, top, bottom);
+        Func<double, double> value = horizontal ? v => ys.Map(v, left, right) : Y;
+        if (s.YZones is { } bands) ZoneBands(w, bands, value, ys, horizontal, left, right, top, bottom);
+        // A horizontal bar chart measures along X, so there a value reference stands upright, as the zone bands do.
+        foreach (var annotation in s.Annotations)
+            if (horizontal) Annotate(w, annotation with { Axis = AnnotationAxis.X }, value, value, ys, ys, left, right, top, bottom, inside: true);
+            else Annotate(w, annotation, X, Y, xs, ys, left, right, top, bottom);
         var positive = cats.ToDictionary(x => x, _ => 0d); var negative = cats.ToDictionary(x => x, _ => 0d);
         for (var si = 0; si < s.Series.Count; si++)
         {
@@ -372,9 +376,11 @@ public static class ChartSvg
     }
 
     /// <summary>Draws one reference. <paramref name="reading"/> replaces the values it would otherwise read out, and
-    /// <paramref name="ink"/> its label's colour.</summary>
+    /// <paramref name="ink"/> its label's colour. <paramref name="inside"/> sets an upright reference's label on the
+    /// side of it with more of the plot, from the part of it the plot shows, so a label near the end of the axis stays
+    /// in view; a reference wholly off the plot turns its label away, so the two clip together.</summary>
     private static void Annotate(SvgWriter w, ChartAnnotation annotation, Func<double, double> X, Func<double, double> Y,
-        Axis xs, Axis ys, double left, double right, double top, double bottom, string? reading = null, string? ink = null)
+        Axis xs, Axis ys, double left, double right, double top, double bottom, string? reading = null, string? ink = null, bool inside = false)
     {
         var horizontal = annotation.Axis == AnnotationAxis.Y;
         var axis = horizontal ? ys : xs;
@@ -382,6 +388,13 @@ public static class ChartSvg
         var at = horizontal ? Y(annotation.From) : X(annotation.From);
         string shape;
         double labelX, labelY; string anchor;
+        (double, double, string) Upright(double near, double far)
+        {
+            if (!inside || near > right) return (near + 6, top + 13, "start");
+            if (far < left) return (far - 6, top + 13, "end");
+            (near, far) = (Math.Max(near, left), Math.Min(far, right));
+            return near + far > left + right ? (far - 6, top + 13, "end") : (near + 6, top + 13, "start");
+        }
         if (annotation.To is { } to)
         {
             var other = horizontal ? Y(to) : X(to);
@@ -389,7 +402,7 @@ public static class ChartSvg
             double width = horizontal ? right - left : Math.Abs(other - at), height = horizontal ? Math.Abs(other - at) : bottom - top;
             shape = $"<rect x='{N(x)}' y='{N(y)}' width='{N(width)}' height='{N(height)}' fill='{colour}' fill-opacity='.12'/>";
             reading ??= $"{axis.Format(annotation.From)} to {axis.Format(to)}";
-            (labelX, labelY, anchor) = horizontal ? (right - 6, y + 13, "end") : (x + 6, top + 13, "start");
+            (labelX, labelY, anchor) = horizontal ? (right - 6, y + 13, "end") : Upright(x, x + width);
         }
         else
         {
@@ -400,7 +413,7 @@ public static class ChartSvg
             shape = $"<line x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{colour}' stroke-opacity='0' stroke-width='12'/>" +
                 $"<line x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{colour}' stroke-width='1.5'{dash}/>";
             reading ??= axis.Format(annotation.From);
-            (labelX, labelY, anchor) = horizontal ? (right - 6, at - 6, "end") : (at + 6, top + 13, "start");
+            (labelX, labelY, anchor) = horizontal ? (right - 6, at - 6, "end") : Upright(at, at);
         }
         var label = annotation.Label is null ? reading : $"{annotation.Label}: {reading}";
         Aggregate(w, label, shape + $"<text x='{N(labelX)}' y='{N(labelY)}' text-anchor='{anchor}' fill='{ink ?? colour}' font-size='11'>{SvgWriter.E(label)}</text>");

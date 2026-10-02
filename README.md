@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.20.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.20.1. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -31,7 +31,7 @@ pwsh tests/Lumen.Charts.BrowserTests/bin/Release/net10.0/playwright.ps1 install 
 dotnet run --project tests/Lumen.Charts.BrowserTests -c Release --no-build -- http://localhost:5188
 ```
 
-It uses component selectors only, so the same fourteen checks, the axe sweep included, run against the gallery and against the WebAssembly host on port 5199. It stays outside the solution so the ordinary build needs no browser download.
+It uses component selectors, so the same checks, the axe sweep included, run against the gallery and against the WebAssembly host on port 5199. Two depend on the host. The brand check runs where the page wraps its charts in `LumenBrand`, and a second axe sweep runs with the dark theme on where the page has a theme button, which the suite finds by its name and presses as a user would. A host without one says SKIP rather than failing: the gallery skips the brand check and the WebAssembly page the dark sweep, so each runs fifteen. It stays outside the solution so the ordinary build needs no browser download.
 
 The repository NuGet.Config restores from nuget.org for one dependency: `Lumen.Charts.Blazor` references `Microsoft.AspNetCore.Components.Web` (8.0.0) rather than the ASP.NET Core shared framework, because a WebAssembly host has no shared framework to reference. `Lumen.Charts` and `Lumen.Charts.AspNetCore` add no packages of their own. With the gallery running, execute `./tests/verify-api.ps1` for HTTP integration checks.
 
@@ -265,7 +265,9 @@ ChartSpec revenue = new() {
 
 `From` alone draws a line, dashed unless `Dashed` is false; adding `To` draws a band. Values are in data coordinates, so an annotation zooms and pans with what it refers to and clips at the plot edge. They render behind the data, take the style's muted colour unless `Color` names one, and each is a focusable, labelled aggregate reading `Target: 55` — the value is always shown, so a reference can never sit somewhere other than where it claims.
 
-Annotations apply to the charts drawn on an X and Y axis. Donut, radar, heatmap, histogram and box charts reject them rather than place them arbitrarily, and an X annotation is refused on a category chart, whose bars sit at indices rather than at values. At most 32 per chart.
+`AnnotationAxis` names an axis of the data, not a direction on the screen. A horizontal bar chart draws its values along the bottom, so there a Y annotation stands upright at its value, line or band, as the zone bands do. Its label sits at the top of the plot on the side of it with more room, reading from the part of it the plot shows, so a target near the end of the axis keeps its label in view; one wholly off the plot turns its label away and clips with it.
+
+Annotations apply to the charts drawn on an X and Y axis. Donut, radar, heatmap, histogram and box charts reject them rather than place them arbitrarily, and an X annotation is refused on a category chart, horizontal bars included, whose bars sit at indices rather than at values. At most 32 per chart.
 
 ### Training zones
 
@@ -434,7 +436,7 @@ Measured by the regression suite, so a change that breaks one of these fails the
 - No element takes a positive tab index. The toolbar status is a live region, legend buttons expose `aria-pressed`, the data toggle exposes `aria-expanded`, and the data table has a caption with scoped column headers.
 - Keyboard: Tab reaches marks, legend, toolbar and graph nodes; Enter or Space selects a mark or node; Escape hides the tooltip; arrow keys nudge a focused graph node.
 
-Confirmed in a browser accessibility tree: each mark appears as a named button, the chart appears as a named group, and both status regions announce. Every continuous-integration run also sweeps both sample hosts with axe-core, restricted to the WCAG 2.0 and 2.1 A and AA rules, and fails on any violation.
+Confirmed in a browser accessibility tree: each mark appears as a named button, the chart appears as a named group, and both status regions announce. Every continuous-integration run also sweeps both sample hosts with axe-core, and the gallery a second time in its dark theme, restricted to the WCAG 2.0 and 2.1 A and AA rules, and fails on any violation.
 
 Not done, and not claimed: no screen-reader run (NVDA, JAWS or VoiceOver), no WCAG conformance statement, and no testing with speech or magnification software. An automated sweep catches only what automation can see — roughly a third of the success criteria — so a clean axe run is a floor, not a certificate. One known rough edge: a chart with many marks produces many tab stops — 1,200 at the default sampling budget — so keyboard users reaching content past a chart may prefer the data table, which stays a single stop and holds the original observations.
 
@@ -472,13 +474,21 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
 
+## 0.20.1 fixes
+
+Two defects older than 0.20.0, and nothing new.
+
+A value annotation on a horizontal bar chart was drawn across the plot at a height that meant nothing: the annotation code laid every Y reference along the screen's vertical, and a horizontal bar chart draws its values along X. It now stands upright at its value, as a line or a band, through the same path as the zone bands, with its label on the side with more of the plot so a target near the end of the axis stays in view. `AnnotationAxis` now says what each axis means, described under [Annotations](#annotations): Y is the value axis wherever the chart draws it, and X stays refused on every category chart, horizontal bars included. The gallery's bar demonstration draws its target upright at 55. Being a fix, this changes renderings on purpose: of the 106 hashed renderings, the one with Y annotations on a horizontal bar chart changed and the other 105 match, among them a new guard, hashed before the change, for zone bands on a horizontal bar chart, which share the code.
+
+The gallery's dark theme failed axe-core's contrast rule on 13 nodes, all in its own chrome. Its accent blue, `#4B66CA`, and its section-label grey, `#636D80`, were the same in both themes and measured between 2.67:1 and 3.46:1 on the dark surfaces. They are now the page tokens `--accent` and `--eyebrow`, which the dark theme lightens in their own hue to `#8295DA` and `#9099A9`, at least 4.82:1 and 4.85:1 wherever they sit; every text use of the accent takes the token, the headline and brand mark included, so the dark theme keeps one accent, and the light theme is unchanged. The browser suite swept only the light theme, which is why it never saw them. It now presses the gallery's theme button and sweeps again, and says SKIP on a host without one. The WebAssembly page has no dark theme, and its one use of `#4B66CA`, on white, measures 5.18:1.
+
 ## 0.20.0 additions
 
 Zones on charts, the third step of the build order in [FITNESS.md](docs/FITNESS.md), described under [Training zones](#training-zones). `Zone` takes an optional colour, and `ChartStyle.Zones` gives the zones without one a seven-colour ramp that clears 3:1 on both presets and that `ContrastIssues` now checks. `ChartSeries.Zones` colours a line, area, scatter, bubble, column or bar series by the zone of each value, splitting a line or area stroke exactly where it crosses a bound and naming the zone in every label. `ChartPoint.Color` colours a single mark ahead of its zone and its series, and a line segment from the point it starts at. `ChartSpec.YZones` shades each zone as a labelled band behind the data, through the annotation path, without widening the axis. Between them they draw the activity stream, time in zone, a grade-coloured elevation profile and a zone-coloured scatter. All of it round-trips through the HTTP API's JSON, the unbounded top zone as `"Infinity"`.
 
 A chart that sets none of this renders as before: the 84 hashed renderings match, and so do sixteen more, hashed before the change, that guard sampled lines and areas, markers, donuts, and Y annotations on seven kinds and on log and reversed axes. Five new ones cover a zone-coloured heart-rate stream over its bands in both themes, time-in-zone bars, a grade-coloured area and a zone-coloured scatter. The gallery's line and bar charts add a Heart-rate zones mode: a simulated interval run coloured and shaded by Coggan's heart-rate zones, and the time it spent in each.
 
-Building this found two things. A zone scale checks itself as it is constructed, so a broken one posted to the HTTP API threw from inside the JSON reader and was answered with a server error; it is now reported as invalid JSON, and answered 400. And a Y annotation on a horizontal bar chart has always been drawn across the plot at a vertical position rather than upright at its value. Correcting that would change existing renderings, so it is left for a release of its own; zone bands, which share the annotation code, are drawn upright there.
+Building this found two things. A zone scale checks itself as it is constructed, so a broken one posted to the HTTP API threw from inside the JSON reader and was answered with a server error; it is now reported as invalid JSON, and answered 400. And a Y annotation on a horizontal bar chart had always been drawn across the plot at a vertical position rather than upright at its value. Correcting that would change existing renderings, so it was left for a release of its own, [0.20.1](#0201-fixes); zone bands, which share the annotation code, were drawn upright there from the start.
 
 ## 0.19.0 additions
 

@@ -106,6 +106,11 @@ public sealed record ChartSpec
     public ZoneScale? YZones { get; init; }
 }
 
+/// <summary>
+/// The data axis a reference marks. Y is the value axis wherever the chart draws it: up the side, or along the bottom
+/// of a horizontal bar chart, where a Y reference therefore stands upright. X is the axis points are placed along by
+/// their X value; category charts, horizontal bars included, place their bars by index instead, so they refuse it.
+/// </summary>
 public enum AnnotationAxis { X, Y }
 
 /// <summary>
