@@ -59,6 +59,40 @@ await Test("Keyboard focus shows the tooltip and Escape hides it", async () =>
     await tooltip.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
 });
 
+// The refined finish hides a line's or area's markers until their point is hovered or focused. A host whose first chart
+// shows its markers says SKIP.
+var concealed = chart.Locator(".lumen-datum[data-point]:has(circle.lumen-marker)");
+if (await concealed.CountAsync() > 0)
+{
+    await Test("A hidden marker shows with its tooltip on hover, and with its focus ring when Tab reaches it", async () =>
+    {
+        var mark = concealed.First;
+        var marker = mark.Locator("circle.lumen-marker");
+        // The checks before this one leave a mark focused and the pointer over it, which show its marker as they should.
+        await page.EvaluateAsync("() => document.activeElement?.blur()");
+        await page.Mouse.MoveAsync(1, 1);
+        Check(await marker.EvaluateAsync<string>("c => getComputedStyle(c).opacity") == "0", "the marker shows before its point is reached");
+        var label = await mark.GetAttributeAsync("aria-label");
+        await mark.HoverAsync();
+        await tooltip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        Check(await tooltip.TextContentAsync() == label, "the tooltip does not read the hidden marker's point");
+        Check(await marker.EvaluateAsync<string>("c => getComputedStyle(c).opacity") == "1", "hovering the point does not show its marker");
+        // Pointing away hides it again; reached from the chart by Tab, a point shows its marker inside the focus ring.
+        await page.Mouse.MoveAsync(1, 1);
+        await page.WaitForFunctionAsync("c => getComputedStyle(c).opacity === '0'", await marker.ElementHandleAsync());
+        await chart.Locator(".lumen-viewport").FocusAsync();
+        for (var i = 0; i < 40 && !await page.EvaluateAsync<bool>("() => !!document.activeElement?.matches('.lumen-datum[data-point]')"); i++)
+            await page.Keyboard.PressAsync("Tab");
+        var focused = chart.Locator(".lumen-datum[data-point]:focus circle.lumen-marker");
+        Check(await focused.CountAsync() == 1, "Tab did not reach a point with a hidden marker");
+        var shown = await focused.EvaluateAsync<string[]>("c => [getComputedStyle(c).opacity, getComputedStyle(c).strokeWidth]");
+        Check(shown[0] == "1" && shown[1] == "3px", $"a focused point does not show its marker with the focus ring: {string.Join(", ", shown)}");
+        await tooltip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        await page.Keyboard.PressAsync("Escape");
+    });
+}
+else Console.WriteLine("SKIP hidden-marker check: this host's first chart shows its markers");
+
 await Test("Selecting a mark reports the original observation", async () =>
 {
     await Marks().Nth(1).ClickAsync();

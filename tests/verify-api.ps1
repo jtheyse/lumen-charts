@@ -128,9 +128,12 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify ($r.StatusCode -eq 400) 'A style that could escape the markup is rejected'
 $zoned='{"title":"Effort","kind":"Line","yZones":{"zones":[{"name":"Easy","upper":120},{"name":"Steady","upper":140},{"name":"Hard","upper":"Infinity"}]},"series":[{"name":"Heart rate","zones":{"zones":[{"name":"Easy","upper":120},{"name":"Steady","upper":140},{"name":"Hard","upper":"Infinity"}]},"points":[{"x":0,"y":110},{"x":1,"y":150},{"x":2,"y":130}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $zoned
-$strokes=@([regex]::Matches($r.Content,"fill='none' stroke='(#[0-9A-F]{6})' stroke-width='2.5'")|ForEach-Object{$_.Groups[1].Value}|Sort-Object -Unique)
+$strokes=@([regex]::Matches($r.Content,"fill='none' stroke='(#[0-9A-F]{6})' stroke-width='1.6' stroke-linejoin='round' stroke-linecap='round' vector-effect='non-scaling-stroke'")|ForEach-Object{$_.Groups[1].Value}|Sort-Object -Unique)
 Verify ($strokes.Count -ge 3 -and $r.Content.Contains('Heart rate: 1, 150, Hard')) 'A zone-coloured line posted as JSON changes stroke colour at its bounds and names each zone'
 Verify ($r.Content.Contains('>Easy: up to 120<') -and $r.Content.Contains('>Steady: 120 to 140<') -and $r.Content.Contains('>Hard: above 140<')) 'Zone bands render their names and ranges'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $zoned.Replace('"kind":"Line",','"kind":"Line","style":{"finish":"Classic"},')
+$classic=@([regex]::Matches($r.Content,"fill='none' stroke='(#[0-9A-F]{6})' stroke-width='2.5' stroke-linejoin='round'/>")|ForEach-Object{$_.Groups[1].Value}|Sort-Object -Unique)
+Verify ($r.StatusCode -eq 200 -and $classic.Count -ge 3 -and -not $r.Content.Contains('vector-effect') -and -not $r.Content.Contains('lumen-marker') -and -not $r.Content.Contains("stroke-width='1.6'")) 'A classic finish posted as JSON draws the 2.5-pixel strokes and visible markers of 0.23.0'
 $coloured='{"title":"Time in zone","kind":"Bar","yFormat":"Duration","series":[{"name":"Time","points":[{"x":0,"y":600,"label":"Easy","color":"#848484"},{"x":1,"y":1500,"label":"Steady","color":"#3F87D9"},{"x":2,"y":300,"label":"Hard","color":"#2E9B58"}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $coloured
 Verify ($r.Content.Contains("fill='#848484'") -and $r.Content.Contains("fill='#3F87D9'") -and $r.Content.Contains("fill='#2E9B58'") -and $r.Content.Contains('Time: Steady, 25:00')) 'Point colours posted as JSON colour their bars'
@@ -144,9 +147,9 @@ $mixed='{"title":"Training","kind":"Line","y2Label":"Form","series":[{"name":"Fi
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $mixed
 $xml=[xml]$r.Content
 $bars=@($xml.SelectNodes('//*[local-name()="g"][starts-with(@aria-label,"Stress: ")]/*[local-name()="rect"]'))
-$strokes=@($xml.SelectNodes('//*[local-name()="path"][@fill="none"][@stroke-width="2.5"]'))
+$strokes=@($xml.SelectNodes('//*[local-name()="path"][@fill="none"][@stroke-width="1.6"][@vector-effect="non-scaling-stroke"]'))
 Verify ($r.StatusCode -eq 200 -and $bars.Count -eq 4 -and $strokes.Count -ge 2 -and $r.Content.Contains("fill-opacity='.12'")) 'A mixed chart posted as JSON renders its lines, its columns and its area'
-Verify (@($strokes|Where-Object{$_.GetAttribute('stroke-dasharray') -eq '6 4'}).Count -ge 1 -and $r.Content.Contains('Fitness: 3, 44, projected') -and -not $r.Content.Contains('Fitness: 1, 42, projected')) 'A projected series posted as JSON renders a dashed stroke and names its projected marks'
+Verify (@($strokes|Where-Object{$_.GetAttribute('stroke-dasharray') -eq '4.4 5.6'}).Count -ge 1 -and $r.Content.Contains('Fitness: 3, 44, projected') -and -not $r.Content.Contains('Fitness: 1, 42, projected')) 'A projected series posted as JSON renders a dashed stroke and names its projected marks'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $mixed.Replace('"kind":"Line",','"kind":"Line","yAxis":"Log",').Replace('{"x":1,"y":0}','{"x":1,"y":10}') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('logarithmic')) 'A column series on a log axis is rejected'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Donut","series":[{"name":"S","kind":"Line","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}' -SkipHttpErrorCheck

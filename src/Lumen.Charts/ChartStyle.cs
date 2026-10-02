@@ -7,6 +7,14 @@ namespace Lumen.Charts;
 public enum GridLine { Solid, Dotted, Dashed, Hidden }
 
 /// <summary>
+/// How a chart is drawn beyond its colours. <see cref="Refined"/> is the default: thin strokes that keep their width at any
+/// display size, line markers that appear when a point is hovered or focused, hairline dotted gridlines, legend keys shaped
+/// like their marks, ticks spaced to the room they have, and reference labels kept legible and inside the plot.
+/// <see cref="Classic"/> draws exactly as 0.23.0 did, byte for byte.
+/// </summary>
+public enum ChartFinish { Refined, Classic }
+
+/// <summary>
 /// Every colour and the typeface a chart draws with. Set it on a <see cref="ChartSpec"/> or
 /// <see cref="GraphSpec"/> to render a host application's brand into the SVG itself, so exported
 /// files and the HTTP API carry the brand as well as the page. Colours are <c>#RRGGBB</c>.
@@ -41,8 +49,12 @@ public sealed record ChartStyle
     /// <summary>A CSS font-family list without quotes, such as <c>Inter, Segoe UI, sans-serif</c>.</summary>
     public string FontFamily { get; init; } = "Segoe UI,Arial,sans-serif";
     /// <summary>The horizontal and vertical gridlines of a chart drawn on X and Y axes, major and minor. A radar's rings
-    /// and spokes are its scale and stay solid.</summary>
-    public GridLine Gridlines { get; init; }
+    /// and spokes are its scale and stay solid. A style that sets none draws them dotted in the refined finish, so every
+    /// preset and brand reads <see cref="GridLine.Dotted"/>, and solid in the classic finish, as 0.23.0 did.</summary>
+    public GridLine Gridlines { get => gridlines ?? (Finish == ChartFinish.Classic ? GridLine.Solid : GridLine.Dotted); init => gridlines = value; }
+    private readonly GridLine? gridlines;
+    /// <summary>The refined finish, the default, or the classic one, which draws exactly as 0.23.0 did.</summary>
+    public ChartFinish Finish { get; init; }
     /// <summary>Rounds the far end of every column and bar, the end away from its baseline, which is the bottom of a negative
     /// column; the baseline end stays square. It is clamped to half the bar's width, where the end is a semicircle, and to
     /// the bar's length, so a large radius draws capsules. A stacked column rounds only its outermost segment. Null keeps

@@ -321,6 +321,7 @@ public static partial class ChartValidation
             Color(color);
         }
         if (!Enum.IsDefined(style.Gridlines)) throw new ArgumentException("Unknown gridline style.");
+        if (!Enum.IsDefined(style.Finish)) throw new ArgumentException("Unknown finish.");
         if (style.BarRadius is { } radius && (!Finite(radius) || radius < 0))
             throw new ArgumentException("A bar radius must be finite and nonnegative; each bar clamps it to half its width, so a large one draws capsules.");
         // The font list is written into a style attribute, so anything beyond a plain family list is refused.

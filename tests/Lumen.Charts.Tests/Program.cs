@@ -16,6 +16,10 @@ void Reject(Action action) {try{action();}catch(ArgumentException){return;}throw
 ChartSpec Spec(ChartKind kind=ChartKind.Line)=>new(){Title="Example",Kind=kind,Series=[new("Series",[new(0,2,"A"),new(1,5,"B"),new(2,3,"C")])]};
 XNamespace ns="http://www.w3.org/2000/svg";
 XDocument Svg(ChartSpec spec)=>XDocument.Parse(ChartSvg.Render(spec));
+// 0.24.0 made the refined finish the default. Tests written against 0.23.0's look, such as 2.5-pixel strokes, visible line
+// markers, solid gridlines, square legend keys and reference labels inside their groups, draw in the classic finish, where
+// that look holds; the refined finish has tests of its own at the end.
+ChartSpec Classic(ChartSpec spec)=>spec with{Style=ChartSvg.ResolveStyle(spec) with{Finish=ChartFinish.Classic}};
 ChartSpec Sample(ChartKind kind)=>kind switch{
     ChartKind.Candlestick or ChartKind.Ohlc=>Spec(kind) with{Series=[new("Price",[ChartPoint.Candle(0,10,12,9,11),ChartPoint.Candle(1,11,13,10,10.5),ChartPoint.Candle(2,10.5,11,8,9)])]},
     ChartKind.Band=>Spec(kind) with{Series=[new("Forecast",[ChartPoint.Interval(0,2,1,3),ChartPoint.Interval(1,5,4,6),ChartPoint.Interval(2,3,2,4)])]},
@@ -73,7 +77,7 @@ Test("Escape labels and title",()=>{
     Check(!doc.Descendants(ns+"script").Any());Check(!doc.Descendants().Attributes().Any(a=>a.Name.LocalName.StartsWith("on")));
 });
 Test("Missing values split line paths",()=>{
-    var doc=Svg(Spec() with{Series=[new("S",[new(0,2),new(1,3),new(2,null),new(3,1),new(4,2)])]});
+    var doc=Svg(Classic(Spec() with{Series=[new("S",[new(0,2),new(1,3),new(2,null),new(3,1),new(4,2)])]}));
     Check(doc.Descendants(ns+"path").Count(e=>(string?)e.Attribute("stroke-width")=="2.5")==2);
     Check(doc.Descendants().Count(e=>e.Attribute("data-point") is not null)==4);
 });
@@ -204,7 +208,7 @@ Test("Log ticks add intermediate steps over short ranges",()=>{
     Check(values.Contains(2d)&&values.Contains(5d)&&values.Contains(10d));
 });
 Test("Log chart renders finite geometry",()=>{
-    var doc=Svg(Spec(ChartKind.Scatter) with{YAxis=AxisKind.Log,Series=[new("S",[new(1,0.01),new(2,1),new(3,1000)])]});
+    var doc=Svg(Classic(Spec(ChartKind.Scatter) with{YAxis=AxisKind.Log,Series=[new("S",[new(1,0.01),new(2,1),new(3,1000)])]}));
     Check(doc.Descendants(ns+"circle").All(e=>double.Parse(e.Attribute("cy")!.Value,CultureInfo.InvariantCulture) is >=0 and <=420));
 });
 Test("Reject nonpositive values on a log axis",()=>{
@@ -300,7 +304,7 @@ Test("Candlestick CSV exports the four prices",()=>{
 ChartSpec Bands()=>Spec(ChartKind.Band) with{Series=[new("Forecast",[
     ChartPoint.Interval(0,10,8,12),ChartPoint.Interval(1,12,9,15),ChartPoint.Interval(2,11,7,16)])]};
 Test("Band fills the interval and keeps the central line",()=>{
-    var doc=Svg(Bands());
+    var doc=Svg(Classic(Bands()));
     Check(doc.Descendants(ns+"path").Count(e=>(string?)e.Attribute("fill-opacity")==".16")==1);
     Check(doc.Descendants(ns+"path").Count(e=>(string?)e.Attribute("stroke-width")=="2.5")==1);
     Check(doc.Descendants(ns+"g").Where(e=>e.Attribute("data-point") is not null).All(e=>e.Attribute("aria-label")!.Value.Contains("band")));
@@ -682,7 +686,7 @@ string RenderInside(ChartStyle? cascaded,ChartSpec spec)
     } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
 }
 Test("A cascaded style brands the component, and a spec's own style wins",()=>{
-    var branded=RenderInside(Brand(),Spec());
+    var branded=RenderInside(Brand() with{Finish=ChartFinish.Classic},Spec());
     Check(branded.Contains("background:#F6F3EE")&&branded.Contains("background:#1D4E89"),"cascaded style missing from the chart or its legend");
     var own=RenderInside(Brand(),Spec() with{Style=ChartStyle.Dark});
     Check(own.Contains("background:#171E2E")&&!own.Contains("#F6F3EE"),"the cascade overrode the spec's own style");
@@ -704,7 +708,7 @@ ChartSpec Marked(params ChartAnnotation[] annotations)=>Spec() with{Annotations=
     Series=[new("S",[new(0,10),new(1,30),new(2,20),new(3,40)])]};
 XElement Annotation(XDocument doc)=>doc.Descendants(ns+"g").Single(e=>(string?)e.Attribute("class")=="lumen-datum"&&e.Element(ns+"text") is not null);
 Test("A reference line sits at its value and names itself",()=>{
-    var doc=Svg(Marked(new ChartAnnotation(AnnotationAxis.Y,25){Label="Target"}));
+    var doc=Svg(Classic(Marked(new ChartAnnotation(AnnotationAxis.Y,25){Label="Target"})));
     var group=Annotation(doc);
     Check(group.Attribute("aria-label")!.Value=="Target: 25");
     var lines=group.Elements(ns+"line").ToArray();
@@ -720,15 +724,15 @@ Test("A reference line sits at its value and names itself",()=>{
 });
 Test("A vertical reference uses the X axis and its formatting",()=>{
     var start=TimeAxis.Value(new DateTimeOffset(2026,1,1,0,0,0,TimeSpan.Zero));
-    var doc=Svg(Spec() with{XAxis=AxisKind.Time,Annotations=[new(AnnotationAxis.X,start+86400000d*15){Label="Launch"}],
-        Series=[new("S",Enumerable.Range(0,30).Select(i=>new ChartPoint(start+i*86400000d,i)).ToArray())]});
+    var doc=Svg(Classic(Spec() with{XAxis=AxisKind.Time,Annotations=[new(AnnotationAxis.X,start+86400000d*15){Label="Launch"}],
+        Series=[new("S",Enumerable.Range(0,30).Select(i=>new ChartPoint(start+i*86400000d,i)).ToArray())]}));
     var group=Annotation(doc);
     Check(group.Attribute("aria-label")!.Value=="Launch: 16 Jan 2026",group.Attribute("aria-label")!.Value);
     var line=group.Elements(ns+"line").Last();
     Check(line.Attribute("x1")!.Value==line.Attribute("x2")!.Value,"an X reference is not vertical");
 });
 Test("A band covers the range it names",()=>{
-    var doc=Svg(Marked(new ChartAnnotation(AnnotationAxis.Y,15){To=35,Label="Acceptable"}));
+    var doc=Svg(Classic(Marked(new ChartAnnotation(AnnotationAxis.Y,15){To=35,Label="Acceptable"})));
     var group=Annotation(doc);
     Check(group.Attribute("aria-label")!.Value=="Acceptable: 15 to 35");
     var rect=group.Element(ns+"rect")!;
@@ -737,21 +741,21 @@ Test("A band covers the range it names",()=>{
     Check(height>50,$"the band is only {height} tall");
 });
 Test("Annotations render behind the data and inside the plot's clip",()=>{
-    var markup=ChartSvg.Render(Marked(new ChartAnnotation(AnnotationAxis.Y,25)));
+    var markup=ChartSvg.Render(Classic(Marked(new ChartAnnotation(AnnotationAxis.Y,25))));
     var clip=markup.IndexOf("overflow='hidden'");
     var annotation=markup.IndexOf("stroke-dasharray");
     var firstMark=markup.IndexOf("data-point=");
     Check(clip<annotation&&annotation<firstMark,"an annotation is outside the clip or drawn over the data");
 });
 Test("An annotation takes the style's muted colour unless it names one",()=>{
-    var branded=Svg(Marked(new ChartAnnotation(AnnotationAxis.Y,25)) with{Style=ChartStyle.Light with{Muted="#4B5563"}});
+    var branded=Svg(Marked(new ChartAnnotation(AnnotationAxis.Y,25)) with{Style=ChartStyle.Light with{Muted="#4B5563",Finish=ChartFinish.Classic}});
     Check((string?)Annotation(branded).Elements(ns+"line").Last().Attribute("stroke")=="#4B5563");
-    var own=Svg(Marked(new ChartAnnotation(AnnotationAxis.Y,25){Color="#B03A2E",Dashed=false}));
+    var own=Svg(Classic(Marked(new ChartAnnotation(AnnotationAxis.Y,25){Color="#B03A2E",Dashed=false})));
     var line=Annotation(own).Elements(ns+"line").Last();
     Check((string?)line.Attribute("stroke")=="#B03A2E"&&line.Attribute("stroke-dasharray") is null);
 });
 Test("An annotation without a label still reads as a value",()=>{
-    Check(Annotation(Svg(Marked(new ChartAnnotation(AnnotationAxis.Y,25)))).Attribute("aria-label")!.Value=="25");
+    Check(Annotation(Svg(Classic(Marked(new ChartAnnotation(AnnotationAxis.Y,25))))).Attribute("aria-label")!.Value=="25");
 });
 Test("Reject annotations a chart cannot place honestly",()=>{
     Reject(()=>ChartSvg.Render(Spec(ChartKind.Donut) with{Annotations=[new(AnnotationAxis.Y,1)]}));
@@ -765,7 +769,7 @@ Test("Reject annotations a chart cannot place honestly",()=>{
     Reject(()=>ChartSvg.Render(Marked(Enumerable.Range(0,33).Select(i=>new ChartAnnotation(AnnotationAxis.Y,i+1)).ToArray())));
 });
 Test("A column chart still takes a Y reference",()=>{
-    var doc=Svg(Spec(ChartKind.Column) with{Annotations=[new(AnnotationAxis.Y,4){Label="Budget"}]});
+    var doc=Svg(Classic(Spec(ChartKind.Column) with{Annotations=[new(AnnotationAxis.Y,4){Label="Budget"}]}));
     Check(Annotation(doc).Attribute("aria-label")!.Value=="Budget: 4");
 });
 ChartSpec Paired()=>Spec() with{Y2Label="Rate (%)",Series=[
@@ -1034,7 +1038,7 @@ Test("A trend line is drawn only when a series asks for it",()=>{
     Check(((string)path.Attribute("d")!).Count(c=>c=='M'||c=='L')==2,(string)path.Attribute("d")!);
 });
 Test("A trend line spans the plot and follows the data",()=>{
-    var spec=Spec(ChartKind.Scatter) with{Series=[new("Rising",Enumerable.Range(0,10).Select(i=>new ChartPoint(i,i*2+1)).ToArray()){Trend=true}]};
+    var spec=Classic(Spec(ChartKind.Scatter) with{Series=[new("Rising",Enumerable.Range(0,10).Select(i=>new ChartPoint(i,i*2+1)).ToArray()){Trend=true}]});
     var d=(string)Svg(spec).Descendants(ns+"path").Single(e=>(string?)e.Attribute("class")=="lumen-trend").Attribute("d")!;
     var ends=d.Split(' ').Select(part=>part.TrimStart('M','L').Split(',').Select(v=>double.Parse(v,CultureInfo.InvariantCulture)).ToArray()).ToArray();
     Check(ends[0][0]<ends[1][0],"the line does not run left to right");
@@ -1046,8 +1050,8 @@ Test("A trend line spans the plot and follows the data",()=>{
 });
 Test("A logarithmic axis is fitted in the space it draws",()=>{
     // Powers of ten are a straight line on a log axis, and nothing else would be.
-    var spec=Spec(ChartKind.Scatter) with{YAxis=AxisKind.Log,
-        Series=[new("Growth",Enumerable.Range(1,5).Select(i=>new ChartPoint(i,Math.Pow(10,i))).ToArray()){Trend=true}]};
+    var spec=Classic(Spec(ChartKind.Scatter) with{YAxis=AxisKind.Log,
+        Series=[new("Growth",Enumerable.Range(1,5).Select(i=>new ChartPoint(i,Math.Pow(10,i))).ToArray()){Trend=true}]});
     var d=(string)Svg(spec).Descendants(ns+"path").Single(e=>(string?)e.Attribute("class")=="lumen-trend").Attribute("d")!;
     var ends=d.Split(' ').Select(part=>part.TrimStart('M','L').Split(',').Select(v=>double.Parse(v,CultureInfo.InvariantCulture)).ToArray()).ToArray();
     var marks=Svg(spec).Descendants(ns+"circle").Select(c=>(X:(double)c.Attribute("cx")!,Y:(double)c.Attribute("cy")!)).ToArray();
@@ -1056,8 +1060,8 @@ Test("A logarithmic axis is fitted in the space it draws",()=>{
 });
 Test("A compressed axis takes one straight trend, not a jump per weekend",()=>{
     var days=TradingDays(15);
-    var spec=Spec() with{Kind=ChartKind.Scatter,XAxis=AxisKind.Time,SkipWeekends=true,
-        Series=[new("Close",days.Select((v,i)=>new ChartPoint(v,100+i)).ToArray()){Trend=true}]};
+    var spec=Classic(Spec() with{Kind=ChartKind.Scatter,XAxis=AxisKind.Time,SkipWeekends=true,
+        Series=[new("Close",days.Select((v,i)=>new ChartPoint(v,100+i)).ToArray()){Trend=true}]});
     var doc=Svg(spec);
     var d=(string)doc.Descendants(ns+"path").Single(e=>(string?)e.Attribute("class")=="lumen-trend").Attribute("d")!;
     Check(d.Count(c=>c=='M'||c=='L')==2,d);
@@ -1956,28 +1960,28 @@ string Tint(string colour,string background,double opacity)=>"#"+string.Concat(n
     ((int)Math.Round(Convert.ToInt32(background.Substring(at,2),16)*(1-opacity)+Convert.ToInt32(colour.Substring(at,2),16)*opacity)).ToString("X2")));
 Test("A line crossing zone bounds is split exactly where it crosses each, and each piece takes its zone's colour",()=>{
     // 110 to 150 crosses 120 a quarter of the way along and 140 three quarters of the way.
-    var up=Strokes(Svg(Effortful(110,150)));
+    var up=Strokes(Svg(Classic(Effortful(110,150))));
     Check(up.Select(s=>s.Ink).SequenceEqual(Ramp[..3]),string.Join(",",up.Select(s=>s.Ink)));
     Matches(up[0].Points,(76,PY(110)),(274.5,PY(120)));
     Matches(up[1].Points,(274.5,PY(120)),(671.5,PY(140)));
     Matches(up[2].Points,(671.5,PY(140)),(870,PY(150)));
-    var down=Strokes(Svg(Effortful(150,110)));
+    var down=Strokes(Svg(Classic(Effortful(150,110))));
     Check(down.Select(s=>s.Ink).SequenceEqual(Ramp[..3].Reverse()));
     Matches(down[0].Points,(76,PY(150)),(274.5,PY(140)));
     Matches(down[1].Points,(274.5,PY(140)),(671.5,PY(120)));
     Matches(down[2].Points,(671.5,PY(120)),(870,PY(110)));
     // Crossing three bounds in one segment splits it into four pieces.
-    Check(Strokes(Svg(Effortful(105,195))).Select(s=>s.Ink).SequenceEqual(Ramp[..4]));
+    Check(Strokes(Svg(Classic(Effortful(105,195)))).Select(s=>s.Ink).SequenceEqual(Ramp[..4]));
     // On a log axis the segment is straight on screen, not in the data, so the split is interpolated on screen:
     // 100 is half way from 10 to 1000 there, against a tenth of the way in the data.
-    var log=Strokes(Svg(Spec() with{YAxis=AxisKind.Log,YMin=10,YMax=1000,Series=[new("S",[new(0,10),new(1,1000)]){Zones=new([new("Low",100),new("High",double.PositiveInfinity)])}]}));
+    var log=Strokes(Svg(Classic(Spec() with{YAxis=AxisKind.Log,YMin=10,YMax=1000,Series=[new("S",[new(0,10),new(1,1000)]){Zones=new([new("Low",100),new("High",double.PositiveInfinity)])}]})));
     Check(log.Length==2);
     Matches(log[0].Points,(76,344),(473,211));
     Matches(log[1].Points,(473,211),(870,78));
 });
 Test("A value exactly on a bound takes the lower zone, as ZoneScale.IndexOf does",()=>{
     Check(Effort().IndexOf(120)==0&&Effort().IndexOf(Math.BitIncrement(120))==1);
-    var doc=Svg(Effortful(110,120,130,120,110));
+    var doc=Svg(Classic(Effortful(110,120,130,120,110)));
     var strokes=Strokes(doc);
     // Rising to the bound and falling back to it stay below it; leaving it upwards starts the zone above at once.
     Check(strokes.Select(s=>s.Ink).SequenceEqual([Ramp[0],Ramp[1],Ramp[0]]),string.Join(",",strokes.Select(s=>s.Ink)));
@@ -1990,7 +1994,7 @@ Test("A value exactly on a bound takes the lower zone, as ZoneScale.IndexOf does
 });
 Test("A point's own colour beats its zone's, which beats the series colour",()=>{
     var series=new ChartSeries("Effort",[new(0,110){Color="#ABCDEF"},new(1,130),new(2,150)],"#123456"){Zones=Effort()};
-    var line=Svg(Spec() with{YMin=100,YMax=200,Series=[series]});
+    var line=Svg(Classic(Spec() with{YMin=100,YMax=200,Series=[series]}));
     Check(Points(line).Select(m=>(string?)m.Attribute("fill")).SequenceEqual(["#ABCDEF",Ramp[1],Ramp[2]]));
     // The segment from the coloured point is drawn whole in its colour although it crosses 120; the next splits at 140.
     var strokes=Strokes(line);
@@ -2003,19 +2007,19 @@ Test("A point's own colour beats its zone's, which beats the series colour",()=>
         if(kind is ChartKind.Scatter or ChartKind.Bubble) Check(marks.Select(m=>(string?)m.Attribute("stroke")).SequenceEqual(["#ABCDEF",Ramp[1],Ramp[2]]),$"{kind} outlines");
     }
     // Without zones a point with no colour keeps the series colour, and a segment the colour of the point it starts from.
-    var plain=Svg(Spec() with{Series=[series with{Zones=null,Points=[new(0,110),new(1,130){Color="#ABCDEF"},new(2,150),new(3,140){Color="#FEDCBA"}]}]});
+    var plain=Svg(Classic(Spec() with{Series=[series with{Zones=null,Points=[new(0,110),new(1,130){Color="#ABCDEF"},new(2,150),new(3,140){Color="#FEDCBA"}]}]}));
     Check(Points(plain).Select(m=>(string?)m.Attribute("fill")).SequenceEqual(["#123456","#ABCDEF","#123456","#FEDCBA"]));
     Check(Strokes(plain).Select(s=>s.Ink).SequenceEqual(["#123456","#ABCDEF","#123456"]));
-    Check(Strokes(Svg(Spec() with{Series=[series with{Zones=null,Points=[new(0,1),new(1,2)]}]})).Single().Ink=="#123456");
+    Check(Strokes(Svg(Classic(Spec() with{Series=[series with{Zones=null,Points=[new(0,1),new(1,2)]}]}))).Single().Ink=="#123456");
 });
 Test("An area keeps its fill in the series colour while its stroke follows the zones",()=>{
-    var doc=Svg(Effortful(110,150) with{Kind=ChartKind.Area,YMin=0});
+    var doc=Svg(Classic(Effortful(110,150) with{Kind=ChartKind.Area,YMin=0}));
     Check((string?)doc.Descendants(ns+"path").Single(p=>(string?)p.Attribute("fill-opacity")==".12").Attribute("fill")==ChartStyle.Light.Series[0]);
     Check(Strokes(doc).Select(s=>s.Ink).SequenceEqual(Ramp[..3]));
 });
 Test("A long zone-coloured line colours its sampled segments by the zone each piece lies in",()=>{
     var values=Enumerable.Range(0,6000).Select(i=>Math.Round(150+40*Math.Sin(i/37.0)+i%7,2)).ToArray();
-    var doc=Svg(Effortful(values) with{MaxRenderedPoints=400});
+    var doc=Svg(Classic(Effortful(values) with{MaxRenderedPoints=400}));
     var marks=doc.Descendants(ns+"g").Count(g=>g.Attribute("data-point") is not null);
     Check(marks is > 100 and <= 400,$"{marks} marks");
     var pieces=0;
@@ -2030,7 +2034,7 @@ Test("A long zone-coloured line colours its sampled segments by the zone each pi
     Check(pieces>marks,$"{pieces} pieces for {marks} sampled points");
 });
 Test("Zone bands are built from the scale, clamped to the plot, and leave the axis range alone",()=>{
-    var data=Spec() with{Series=[new("S",[new(0,105),new(1,150),new(2,130)])]};
+    var data=Classic(Spec() with{Series=[new("S",[new(0,105),new(1,150),new(2,130)])]});
     string[] Ticks(XDocument doc)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="end"&&(string?)t.Attribute("class")=="lumen-muted").Select(t=>t.Value).ToArray();
     XDocument plain=Svg(data),zoned=Svg(data with{YZones=Effort()});
     Check(Ticks(plain).Length>=2&&Ticks(plain).SequenceEqual(Ticks(zoned)),"the bands moved the axis");
@@ -2120,7 +2124,7 @@ Test("Point colours draw time in zone and colour by a derived value",()=>{
     // An elevation profile coloured by grade: each segment takes the colour of the point it starts from, the fill the series'.
     double[] grades=[0,2,6,9,4,-3];
     string Grade(double grade)=>grade>=6?"#DD4B45":grade>=2?"#DB6A1F":"#2E9B58";
-    var profile=Svg(Spec(ChartKind.Area) with{Series=[new("Elevation",grades.Select((g,i)=>new ChartPoint(i,100+i*5){Color=Grade(g)}).ToArray())]});
+    var profile=Svg(Classic(Spec(ChartKind.Area) with{Series=[new("Elevation",grades.Select((g,i)=>new ChartPoint(i,100+i*5){Color=Grade(g)}).ToArray())]}));
     Check(Strokes(profile).Select(s=>s.Ink).SequenceEqual(["#2E9B58","#DB6A1F","#DD4B45","#DB6A1F"]),string.Join(",",Strokes(profile).Select(s=>s.Ink)));
     Check((string?)profile.Descendants(ns+"path").Single(p=>(string?)p.Attribute("fill-opacity")==".12").Attribute("fill")==ChartStyle.Light.Series[0]);
 });
@@ -2188,14 +2192,14 @@ Test("A chart that asks for no zones or point colours draws as before",()=>{
         Check(svg==ChartSvg.Render(Sample(kind) with{Style=ChartStyle.Light with{Zones=["#010203"]}}),$"{kind} moved with the ramp");
         Check(!Ramp.Any(svg.Contains),$"{kind} drew a zone colour");
     }
-    var doc=Svg(Spec() with{Series=[new("S",[new(0,2),new(1,3),new(2,null),new(3,1),new(4,2)])]});
+    var doc=Svg(Classic(Spec() with{Series=[new("S",[new(0,2),new(1,3),new(2,null),new(3,1),new(4,2)])]}));
     Check(Strokes(doc).Select(s=>s.Ink).SequenceEqual([ChartStyle.Light.Series[0],ChartStyle.Light.Series[0]]),"a plain line no longer draws one stroke per run");
 });
 Test("A horizontal bar chart draws a value reference upright at its value, its label inside the plot",()=>{
     // The value axis runs along X, from 0 at x=160 to 40 at x=870, so its middle is at 20.
-    var doc=Svg(Spec(ChartKind.Bar) with{Series=[new("S",[new(0,10,"A"),new(1,40,"B")])],Annotations=[
+    var doc=Svg(Classic(Spec(ChartKind.Bar) with{Series=[new("S",[new(0,10,"A"),new(1,40,"B")])],Annotations=[
         new(AnnotationAxis.Y,10){Label="Floor"},new(AnnotationAxis.Y,35){Label="Target"},new(AnnotationAxis.Y,45){Label="Beyond"},
-        new(AnnotationAxis.Y,5){To=15,Label="Low"},new(AnnotationAxis.Y,30){To=50,Label="Stretch"}]});
+        new(AnnotationAxis.Y,5){To=15,Label="Low"},new(AnnotationAxis.Y,30){To=50,Label="Stretch"}]}));
     double Px(double value)=>160+value/40*710;
     XElement Reference(string name)=>doc.Descendants(ns+"g").Single(g=>(string?)g.Attribute("aria-label")==name);
     (double X,string? Anchor) Label(string name)=>((double)Reference(name).Element(ns+"text")!.Attribute("x")!,(string?)Reference(name).Element(ns+"text")!.Attribute("text-anchor"));
@@ -2287,7 +2291,7 @@ Test("Bands are drawn first, then areas, columns, lines and points, each group i
     Check(band==0&&band<fill&&fill<column&&column<stroke,$"band {band}, area {fill}, column {column}, line {stroke}");
 });
 Test("A projection dashes a line from the exact point where it reaches its X, and leaves the markers as they were",()=>{
-    var plan=Spec() with{YMin=0,YMax=20,Series=[new("Plan",[new(0,10),new(4,20),new(8,0),new(10,10)]){ProjectedFrom=5}]};
+    var plan=Classic(Spec() with{YMin=0,YMax=20,Series=[new("Plan",[new(0,10),new(4,20),new(8,0),new(10,10)]){ProjectedFrom=5}]});
     var unprojected=plan with{Series=[plan.Series[0] with{ProjectedFrom=null}]};
     // X runs 0 to 10 across 794 pixels and Y 0 to 20 across 266, so 4 to 8 reaches X 5 a quarter of the way along, at 15.
     double Px(double x)=>76+x*79.4; double Py(double y)=>344-y*13.3;
@@ -2306,28 +2310,28 @@ Test("A projection dashes a line from the exact point where it reaches its X, an
     Check(ChartSvg.Render(plan with{Series=[plan.Series[0] with{ProjectedFrom=11}]})==ChartSvg.Render(unprojected),"a projection past the data changed the chart");
     // On a logarithmic axis 10 lies half way between 1 and 100 on screen, so the split is half way along the drawn
     // segment, at 20, rather than at 11.8 where interpolating the data would put it.
-    var curve=Dashes(Svg(Spec() with{XAxis=AxisKind.Log,YMin=0,YMax=40,Series=[new("Curve",[new(1,10),new(100,30)]){ProjectedFrom=10}]}));
+    var curve=Dashes(Svg(Classic(Spec() with{XAxis=AxisKind.Log,YMin=0,YMax=40,Series=[new("Curve",[new(1,10),new(100,30)]){ProjectedFrom=10}]})));
     Matches(curve[0].Points,(76,344-10*6.65),(473,344-20*6.65));Matches(curve[1].Points,(473,344-20*6.65),(870,344-30*6.65));
     // An area keeps its fill whole.
     var area=plan with{Kind=ChartKind.Area};
     string Fill(ChartSpec spec)=>Svg(spec).Descendants(ns+"path").Single(p=>(string?)p.Attribute("fill-opacity")==".12").Attribute("d")!.Value;
     Check(Fill(area)==Fill(area with{Series=[area.Series[0] with{ProjectedFrom=null}]})&&Dashes(Svg(area)).Select(p=>p.Dashed).SequenceEqual([false,true]),"the area's fill moved or its stroke was not dashed");
     // With zones, the pieces past the projection are dashed in their own zone colours.
-    var zoned=Dashes(Svg(Effortful(110,150) with{Series=[Effortful(110,150).Series[0] with{ProjectedFrom=.5}]}));
+    var zoned=Dashes(Svg(Classic(Effortful(110,150) with{Series=[Effortful(110,150).Series[0] with{ProjectedFrom=.5}]})));
     Check(zoned.Select(p=>(p.Ink,p.Dashed)).SequenceEqual([(Ramp[0],false),(Ramp[1],false),(Ramp[1],true),(Ramp[2],true)]),string.Join(",",zoned.Select(p=>(p.Ink,p.Dashed))));
     Matches(zoned[1].Points,(76+794*.25,PY(120)),(473,PY(130)));Matches(zoned[2].Points,(473,PY(130)),(76+794*.75,PY(140)));
     // A category chart places categories by index, so a projection between two is interpolated between their centres.
-    var weekly=Dashes(Svg(Spec(ChartKind.Column) with{Series=[new("Volume",[new(0,6),new(1,8),new(2,7),new(3,9)]),
-        new("Plan",[new(0,6),new(1,7),new(2,7),new(3,8)]){Kind=ChartKind.Line,ProjectedFrom=1.5}]}));
+    var weekly=Dashes(Svg(Classic(Spec(ChartKind.Column) with{Series=[new("Volume",[new(0,6),new(1,8),new(2,7),new(3,9)]),
+        new("Plan",[new(0,6),new(1,7),new(2,7),new(3,8)]){Kind=ChartKind.Line,ProjectedFrom=1.5}]})));
     Check(weekly.Length==2&&Close(weekly[0].Points[^1].X,473)&&Close(weekly[1].Points[0].X,473),"the projection is not half way between the second and third categories");
 });
 Test("Lines, points and bands on a category chart mark the centre of each category, where its columns stand",()=>{
-    var doc=Svg(Spec(ChartKind.Column) with{Series=[
+    var doc=Svg(Classic(Spec(ChartKind.Column) with{Series=[
         new("Volume",[new(0,6,"W1"),new(1,8,"W2"),new(2,7,"W3"),new(3,9,"W4")]),
         new("Average",[new(0,6,"W1"),new(1,7,"W2"),new(2,7,"W3"),new(3,7.5,"W4")]){Kind=ChartKind.Line},
         new("Last year",[new(0,5,"W1"),new(1,9,"W2"),new(2,8,"W3"),new(3,10,"W4")]),
         new("Races",[new(1,4,"W2"),new(3,3,"W4")]){Kind=ChartKind.Scatter},
-        new("Range",[ChartPoint.Interval(0,6,5,7,"W1"),ChartPoint.Interval(1,7,6,8,"W2"),ChartPoint.Interval(2,7,6,8,"W3"),ChartPoint.Interval(3,8,7,9,"W4")]){Kind=ChartKind.Band}]});
+        new("Range",[ChartPoint.Interval(0,6,5,7,"W1"),ChartPoint.Interval(1,7,6,8,"W2"),ChartPoint.Interval(2,7,6,8,"W3"),ChartPoint.Interval(3,8,7,9,"W4")]){Kind=ChartKind.Band}]}));
     // Four categories across 794 pixels: each is 198.5 wide and centred at 76 + 198.5 (i + 0.5).
     double Centre(double i)=>76+198.5*(i+.5);
     bool AtCentres(IEnumerable<double> xs,params double[] categories)=>xs.Count()==categories.Length&&xs.Zip(categories).All(p=>Close(p.First,Centre(p.Second)));
@@ -2347,8 +2351,8 @@ Test("Zones, point colours and trend lines follow the mark a series draws, not t
     Check(Rects(zoned,1).Select(r=>(string?)r.Attribute("fill")).SequenceEqual([Ramp[0],Ramp[1],Ramp[3]]),"the columns ignore their zones");
     Check(Labels(zoned).Contains("Effort: 2, 170, Max"),"a column does not name its zone");
     // A line on a band chart splits its stroke at the bounds, as it would on a line chart; the band, drawn first, keeps its colour.
-    var banded=Svg(Spec(ChartKind.Band) with{YMin=100,YMax=200,Series=[new("Range",[ChartPoint.Interval(0,130,120,140),ChartPoint.Interval(1,135,125,145)]),
-        new("Heart rate",[new(0,110),new(1,150)]){Kind=ChartKind.Line,Zones=Effort()}]});
+    var banded=Svg(Classic(Spec(ChartKind.Band) with{YMin=100,YMax=200,Series=[new("Range",[ChartPoint.Interval(0,130,120,140),ChartPoint.Interval(1,135,125,145)]),
+        new("Heart rate",[new(0,110),new(1,150)]){Kind=ChartKind.Line,Zones=Effort()}]}));
     Check(Dashes(banded).Select(p=>p.Ink).SequenceEqual([ChartStyle.Light.Series[0],..Ramp[..3]]),string.Join(",",Dashes(banded).Select(p=>p.Ink)));
     // A point colour on that line is drawn; a band refuses one, and zones, wherever it is drawn.
     Check(ChartSvg.Render(Spec(ChartKind.Band) with{Series=[new("Range",[ChartPoint.Interval(0,1,0,2)]),new("Line",[new(0,1){Color="#123456"},new(1,2)]){Kind=ChartKind.Line}]}).Contains("stroke='#123456'"));
@@ -2449,11 +2453,11 @@ Test("A performance management chart from the load model: fitness and fatigue ov
     // Six weeks done and two planned, each a rest day, two hard days and easy ones between.
     var load=Training.Load(Enumerable.Range(0,56).Select(i=>(start.AddDays(i),(double)((i%7) switch{0=>0,2=>120,5=>150,_=>60}))),40,40);
     var planned=When(start.AddDays(42));
-    var doc=Svg(new ChartSpec{Kind=ChartKind.Line,XAxis=AxisKind.Time,YLabel="Training stress",Y2Label="Form",Series=[
+    var doc=Svg(Classic(new ChartSpec{Kind=ChartKind.Line,XAxis=AxisKind.Time,YLabel="Training stress",Y2Label="Form",Series=[
         ChartSeries.From("Fitness",load,d=>When(d.Day),d=>d.Fitness) with{ProjectedFrom=planned},
         ChartSeries.From("Fatigue",load,d=>When(d.Day),d=>d.Fatigue) with{ProjectedFrom=planned},
         ChartSeries.From("Form",load,d=>When(d.Day),d=>d.Form) with{Kind=ChartKind.Area,Secondary=true,ProjectedFrom=planned},
-        ChartSeries.From("Daily stress",load,d=>When(d.Day),d=>d.Stress) with{Kind=ChartKind.Column}]});
+        ChartSeries.From("Daily stress",load,d=>When(d.Day),d=>d.Stress) with{Kind=ChartKind.Column}]}));
     // With the right-hand axis the plot runs from 76 to 824, so the 56 days are 748/55 pixels apart.
     double Px(int day)=>76+day*748/55d;
     var bars=Rects(doc,3);
@@ -2486,7 +2490,7 @@ Test("The component's data table and status line read each series of a mixed cha
         new("Fitness",[new(June(1),40.5),new(June(2),39.6),new(June(3),41.2),new(June(4),41.6)]){ProjectedFrom=June(3)},
         new("Ride time",[new(June(1),3600),new(June(2),0),new(June(3),5400),new(June(4),2700)]){Kind=ChartKind.Area,Secondary=true},
         new("Target",[ChartPoint.Interval(June(1),40,30,50),ChartPoint.Interval(June(2),41,31,51),ChartPoint.Interval(June(3),42,32,52),ChartPoint.Interval(June(4),43,33,53)]){Kind=ChartKind.Band}]};
-    var html=Operate(spec,async chart=>{
+    var html=Operate(Classic(spec),async chart=>{
         typeof(LumenChart).GetField("showData",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.SetValue(chart,true);
         await chart.SelectPoint(0,2);
     });
@@ -2502,7 +2506,7 @@ Test("Series kinds and projections survive JSON, and a request that names neithe
     var json=System.Text.Json.JsonSerializer.Serialize(spec,options);
     Check(json.Contains("\"kind\":\"Column\"")&&json.Contains("\"kind\":\"Area\"")&&json.Contains("\"projectedFrom\":1.5"),json);
     Check(ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,options)!)==ChartSvg.Render(spec),"the marks changed in transit");
-    var written="{\"kind\":\"Line\",\"series\":[{\"name\":\"Fitness\",\"projectedFrom\":1,\"points\":[{\"x\":0,\"y\":40},{\"x\":1,\"y\":42},{\"x\":2,\"y\":45}]},"+
+    var written="{\"kind\":\"Line\",\"style\":{\"finish\":\"Classic\"},\"series\":[{\"name\":\"Fitness\",\"projectedFrom\":1,\"points\":[{\"x\":0,\"y\":40},{\"x\":1,\"y\":42},{\"x\":2,\"y\":45}]},"+
         "{\"name\":\"Stress\",\"kind\":\"Column\",\"points\":[{\"x\":0,\"y\":80},{\"x\":1,\"y\":0},{\"x\":2,\"y\":120}]}]}";
     var read=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,options)!;
     var svg=ChartSvg.Render(read);
@@ -2555,13 +2559,13 @@ Test("The X axis is labelled and titled once, under the bottom pane",()=>{
     Check(Below(doc).All(t=>Close(Attr(t,"y"),bottom+(t.Value=="Elapsed"?44:21)))&&Below(doc).Count(t=>t.Value=="Elapsed")==1,"an X label is not under the bottom pane, or is drawn twice");
 });
 Test("Each pane's Y axes measure its own series and no other, and are titled beside it",()=>{
-    var spec=Stacked() with{Panes=[Stacked().Panes[0] with{Y2Label="Rate"},Stacked().Panes[1]],Series=[..Stacked().Series,new("Rate",[new(0,.2),new(10,.4)]){Pane=1,Secondary=true}]};
+    var spec=Classic(Stacked() with{Panes=[Stacked().Panes[0] with{Y2Label="Rate"},Stacked().Panes[1]],Series=[..Stacked().Series,new("Rate",[new(0,.2),new(10,.4)]){Pane=1,Secondary=true}]});
     var doc=Svg(spec);
     var spans=PaneClips(doc).Select(PaneSpan).ToArray();
     string[] Within(string anchor,int pane)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")==anchor&&(string?)t.Attribute("class")=="lumen-muted"&&t.Attribute("transform") is null
         &&Attr(t,"y")-4>=spans[pane].Top-1e-6&&Attr(t,"y")-4<=spans[pane].Bottom+1e-6).Select(t=>t.Value).ToArray();
     // A series alone in one plot draws the ticks its pane should.
-    string[] Alone(ChartSeries series)=>Ticks(Svg(Spec() with{Series=[series with{Pane=0,Secondary=false}]}),"end");
+    string[] Alone(ChartSeries series)=>Ticks(Svg(Classic(Spec() with{Series=[series with{Pane=0,Secondary=false}]})),"end");
     for(var k=0;k<3;k++) Check(Within("end",k).SequenceEqual(Alone(spec.Series[k])),$"pane {k} reads {string.Join(",",Within("end",k))}");
     Check(Within("start",1).SequenceEqual(Alone(spec.Series[3]))&&Within("start",0).Length==0&&Within("start",2).Length==0,"the right-hand ticks are not pane 1's alone");
     // Titles stand at the middle of their own pane, the right-hand one beside the pane that has the axis.
@@ -2594,8 +2598,8 @@ Test("Each pane clips its own marks",()=>{
         Check(Rects(columns,k).Zip(new[]{0d,5,10}).All(p=>Close(Attr(p.First,"width"),34)&&Close(Attr(p.First,"x")+17,76+p.Second/10*794)),$"pane {k}'s columns share a slot with another pane's");
 });
 Test("An X annotation runs through every pane and is named once; Y annotations and the main zones stay in the main plot, and a pane's own zones shade it",()=>{
-    var spec=Stacked() with{YZones=new([new("Low",150),new("High",double.PositiveInfinity)]),Panes=[Stacked().Panes[0] with{YZones=new([new("Calm",2),new("Busy",double.PositiveInfinity)])},Stacked().Panes[1]],
-        Annotations=[new(AnnotationAxis.X,2){To=4,Label="Window"},new(AnnotationAxis.Y,120){Label="Target"},new(AnnotationAxis.X,7){Label="Event"}]};
+    var spec=Classic(Stacked() with{YZones=new([new("Low",150),new("High",double.PositiveInfinity)]),Panes=[Stacked().Panes[0] with{YZones=new([new("Calm",2),new("Busy",double.PositiveInfinity)])},Stacked().Panes[1]],
+        Annotations=[new(AnnotationAxis.X,2){To=4,Label="Window"},new(AnnotationAxis.Y,120){Label="Target"},new(AnnotationAxis.X,7){Label="Event"}]});
     var clips=PaneClips(Svg(spec));
     string[] Named(XElement clip)=>clip.Elements(ns+"g").Where(g=>(string?)g.Attribute("role")=="img").Select(g=>(string)g.Attribute("aria-label")!).ToArray();
     Check(Named(clips[0]).SequenceEqual(["Low: up to 150","High: above 150","Window: 2 to 4","Target: 120","Event: 7"]),string.Join(" | ",Named(clips[0])));
@@ -2619,10 +2623,10 @@ Test("A candlestick chart takes a moving average from Statistics.Rolling over it
     var candles=sessions.Select((x,i)=>ChartPoint.Candle(x,50+i,53+i,48+i,i%3==0?49+i:52+i)).ToArray();
     var average=Statistics.Rolling(candles.Select(p=>p.Close).ToArray(),5);
     // The average comes first, so the candles are not series 0, and take their own index.
-    var spec=new ChartSpec{Kind=ChartKind.Candlestick,XAxis=AxisKind.Time,SkipWeekends=true,Height=520,Panes=[new(){Label="Volume",YFormat=ValueFormat.Compact}],Series=[
+    var spec=Classic(new ChartSpec{Kind=ChartKind.Candlestick,XAxis=AxisKind.Time,SkipWeekends=true,Height=520,Panes=[new(){Label="Volume",YFormat=ValueFormat.Compact}],Series=[
         new("Five-day average",candles.Select((p,i)=>new ChartPoint(p.X,average[i]?.Mean)).ToArray()){Kind=ChartKind.Line},
         new("ACME",candles),
-        new("Volume",candles.Select((p,i)=>new ChartPoint(p.X,1_000_000+i*50_000)).ToArray()){Kind=ChartKind.Column,Pane=1}]};
+        new("Volume",candles.Select((p,i)=>new ChartPoint(p.X,1_000_000+i*50_000)).ToArray()){Kind=ChartKind.Column,Pane=1}]});
     var doc=Svg(spec);
     var clips=PaneClips(doc);
     // 520 - 154 leaves 366 pixels, less one gap 342, shared 1 : 0.5: the prices from 78 to 306 and the volume from 330 to 444.
@@ -2668,10 +2672,10 @@ Test("A candlestick chart takes a moving average from Statistics.Rolling over it
     Check(PaneClips(shown).Length==2&&!hidden.Contains(": open ")&&Labels(shown).Count(l=>l.StartsWith("Five-day average"))==16&&Labels(shown).Count(l=>l.StartsWith("Volume"))==20,"hiding the candles lost their companions");
 });
 Test("A series below the main plot is coloured, dashed, fitted and named on its own pane's axes",()=>{
-    var spec=Spec() with{Height=560,YMin=0,YMax=1000,XFormat=ValueFormat.Duration,Panes=[new(){YFormat=ValueFormat.Duration,YReversed=true,YMin=240,YMax=360}],Series=[
+    var spec=Classic(Spec() with{Height=560,YMin=0,YMax=1000,XFormat=ValueFormat.Duration,Panes=[new(){YFormat=ValueFormat.Duration,YReversed=true,YMin=240,YMax=360}],Series=[
         new("Power",[new(0,200),new(600,300),new(1200,250)]),
         new("Pace",[new(0,330),new(600,300),new(1200,270)]){Pane=1,Trend=true,Zones=new([new("Fast",280),new("Steady",320),new("Easy",double.PositiveInfinity)])},
-        new("Plan",[new(0,320),new(1200,260)]){Pane=1,ProjectedFrom=600}]};
+        new("Plan",[new(0,320),new(1200,260)]){Pane=1,ProjectedFrom=600}]});
     var doc=Svg(spec);
     // 560 - 154 leaves 406, less one gap 382, shared 1 : 0.5; pane 1 runs from 356.67 to 484 with 240 at its top.
     var span=PaneSpan(PaneClips(doc)[1]);
@@ -2831,7 +2835,7 @@ Test("Without the finish a chart draws exactly as before: 2.5 px strokes, 2 px c
     foreach(var kind in Enum.GetValues<ChartKind>())
         foreach(var theme in Enum.GetValues<ChartTheme>())
         {
-            var sample=Sample(kind) with{Theme=theme};
+            var sample=Classic(Sample(kind) with{Theme=theme});
             var svg=ChartSvg.Render(sample);
             Check(!svg.Contains(" id=")&&!svg.Contains("<defs")&&!svg.Contains("url("),$"{kind} {theme} carries an ID");
             // Every new property set to its default is the same chart.
@@ -2839,12 +2843,12 @@ Test("Without the finish a chart draws exactly as before: 2.5 px strokes, 2 px c
                 Series=sample.Series.Select(s=>s with{Curve=LineCurve.Linear,Fill=AreaFill.Flat,Markers=MarkerStyle.Auto,StrokeWidth=null,Gradient=null,HighlightLast=false,ValueLabels=false}).ToArray()};
             Check(ChartSvg.Render(spelled)==svg,$"{kind} {theme} changes when its defaults are spelled out");
         }
-    var line=Svg(Spec() with{MinorGridlines=true});
+    var line=Svg(Classic(Spec() with{MinorGridlines=true}));
     Check((string?)StrokeOf(line).Attribute("stroke-width")=="2.5"&&MarksOf(line,0).All(c=>(string?)c.Attribute("r")=="4"&&c.Attribute("fill-opacity") is null));
     Check(GridStrokes(line).Length>0&&GridStrokes(line).All(l=>l.Attribute("stroke-dasharray") is null),"a default gridline is not solid");
     Check(Ticks(line,"end").Length>0&&Ticks(line,"start").Length==0&&Attr(PaneClips(line).Single(),"x")==70);
-    Check(Svg(Spec(ChartKind.Column)).Descendants(ns+"rect").Where(r=>r.Parent!.Attribute("data-point") is not null).All(r=>(string?)r.Attribute("rx")=="2"),"a default column lost its corners");
-    Check(!Svg(Spec(ChartKind.Column)).Descendants(ns+"text").Any(t=>t.Attribute("aria-hidden") is not null),"a default column wrote its value");
+    Check(Svg(Classic(Spec(ChartKind.Column))).Descendants(ns+"rect").Where(r=>r.Parent!.Attribute("data-point") is not null).All(r=>(string?)r.Attribute("rx")=="2"),"a default column lost its corners");
+    Check(!Svg(Classic(Spec(ChartKind.Column))).Descendants(ns+"text").Any(t=>t.Attribute("aria-hidden") is not null),"a default column wrote its value");
 });
 Test("A smooth curve passes through every point and never leaves the range of the two points either side of it",()=>{
     double[] values=[0,10,10,0,5,100,0,0,50,49,51,3,3,3,80];
@@ -2881,7 +2885,7 @@ Test("A smooth curve passes through every point and never leaves the range of th
 });
 Test("A step line holds each value until the next point and rises or falls there, its area and zone colours with it",()=>{
     double X(double x)=>76+x*794/3;
-    var spec=Spec() with{YMin=0,YMax=40,Series=[new("S",[new(0,10),new(1,20),new(2,20),new(3,5)]){Curve=LineCurve.Step}]};
+    var spec=Classic(Spec() with{YMin=0,YMax=40,Series=[new("S",[new(0,10),new(1,20),new(2,20),new(3,5)]){Curve=LineCurve.Step}]});
     var doc=Svg(spec);
     Matches(Strokes(doc).Single().Points,(X(0),FY(10)),(X(1),FY(10)),(X(1),FY(20)),(X(2),FY(20)),(X(3),FY(20)),(X(3),FY(5)));
     // Each point sits where its hold begins.
@@ -2904,10 +2908,10 @@ Test("A step line holds each value until the next point and rises or falls there
 });
 Test("A smooth zone-coloured line splits on the curve where it crosses each bound, and a projection splits it at its X",()=>{
     double[] values=[110,150,125,165,130,105];
-    var plain=Effortful(values) with{Series=[Effortful(values).Series[0] with{Zones=null,Curve=LineCurve.Smooth}]};
+    var plain=Classic(Effortful(values) with{Series=[Effortful(values).Series[0] with{Zones=null,Curve=LineCurve.Smooth}]});
     var cubics=Cubics(StrokeOf(Svg(plain)).Attribute("d")!.Value);
     double CurveAt(double x){var c=cubics.First(k=>x>=k.X0-1e-9&&x<=k.X3+1e-9);return Bezier(c.Y0,c.Y1,c.Y2,c.Y3,(x-c.X0)/(c.X3-c.X0));}
-    var zoned=Strokes(Svg(Effortful(values) with{Series=[Effortful(values).Series[0] with{Curve=LineCurve.Smooth}]}));
+    var zoned=Strokes(Svg(Classic(Effortful(values) with{Series=[Effortful(values).Series[0] with{Curve=LineCurve.Smooth}]})));
     double[] bounds=[PY(120),PY(140),PY(160)];
     Check(zoned.Length==9,$"{zoned.Length} pieces");
     foreach(var (piece,next) in zoned.Zip(zoned.Skip(1)))
@@ -3117,16 +3121,16 @@ Test("Value labels sit just past each bar's far end in its axis's format, and ar
     Check(zoomed.Descendants(ns+"text").Where(t=>(string?)t.Attribute("aria-hidden")=="true").Select(t=>t.Value).SequenceEqual(["4"]));
 });
 Test("Gridlines can be dotted, dashed or hidden; the labels stay, and a radar keeps its rings",()=>{
-    var spec=Spec() with{MinorGridlines=true,Series=[new("S",[new(0,2),new(1,15),new(2,7)])]};
+    var spec=Classic(Spec() with{MinorGridlines=true,Series=[new("S",[new(0,2),new(1,15),new(2,7)])]});
     var solid=Svg(spec);
     Check(GridStrokes(solid).Length>10&&GridStrokes(solid).All(l=>l.Attribute("stroke-dasharray") is null));
     foreach(var (grid,dash) in new[]{(GridLine.Dotted,"1 3"),(GridLine.Dashed,"4 4")})
     {
-        var doc=Svg(spec with{Style=ChartStyle.Light with{Gridlines=grid}});
+        var doc=Svg(spec with{Style=spec.Style! with{Gridlines=grid}});
         Check(GridStrokes(doc).Length==GridStrokes(solid).Length&&GridStrokes(doc).All(l=>(string?)l.Attribute("stroke-dasharray")==dash),$"{grid} gridlines");
         Check(Ticks(doc,"end").SequenceEqual(Ticks(solid,"end"))&&StrokeOf(doc).Attribute("stroke-dasharray") is null,$"{grid} changed more than the grid");
     }
-    var hidden=Svg(spec with{Style=ChartStyle.Light with{Gridlines=GridLine.Hidden}});
+    var hidden=Svg(spec with{Style=spec.Style! with{Gridlines=GridLine.Hidden}});
     Check(GridStrokes(hidden).Length==0&&Ticks(hidden,"end").SequenceEqual(Ticks(solid,"end"))&&Ticks(hidden,"middle").SequenceEqual(Ticks(solid,"middle")),"a hidden grid lost its labels");
     Check(!hidden.Descendants(ns+"style").Single().Value.Contains("lumen-grid-minor"),"a chart that draws no minor lines carries their rule");
     // Horizontal bars, and the frame histograms, box plots and violins share, follow the style too.
@@ -3218,7 +3222,7 @@ Test("The finish survives JSON, and a request that names none of it draws as bef
     var svg=ChartSvg.Render(spec);
     Check(svg==ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(System.Text.Json.JsonSerializer.Serialize(spec,finishJson),finishJson)!),"the finish changed in transit");
     Check(svg.Contains("<linearGradient")&&svg.Contains("stroke-dasharray='1 3'")&&svg.Contains(" A8,8 "));
-    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"style\":{\"background\":\"#F6F3EE\"},\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",finishJson)!;
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"style\":{\"background\":\"#F6F3EE\",\"finish\":\"Classic\"},\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",finishJson)!;
     Check(old.YAxisSide==AxisSide.Left&&old.YTickLabels==TickLabels.All&&old.Style!.Gridlines==GridLine.Solid&&old.Style.BarRadius is null
         &&old.Series[0].Curve==LineCurve.Linear&&old.Series[0].Fill==AreaFill.Flat&&old.Series[0].Markers==MarkerStyle.Auto&&old.Series[0].StrokeWidth is null&&old.Series[0].Gradient is null&&!old.Series[0].HighlightLast&&!old.Series[0].ValueLabels);
     Check(!ChartSvg.Render(old).Contains(" id="));
@@ -3252,6 +3256,409 @@ Test("Each finishing touch refuses the marks and values it cannot apply to",()=>
     Reject(()=>ChartSvg.Render(Spec() with{Style=ChartStyle.Light with{Gridlines=(GridLine)4}}));
     Reject(()=>ChartSvg.Render(Spec() with{YAxisSide=(AxisSide)2}));
     Reject(()=>ChartSvg.Render(Spec() with{YTickLabels=(TickLabels)2}));
+});
+// 0.24.0: the refined finish is the default and the classic one is the exact way back. The rows below are renderings of the
+// release baseline, hashed from 0.23.0's own output, so the classic finish must reproduce every byte of them.
+string Hash16(string svg)=>Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(svg)))[..16];
+ChartPoint[] Twelve()=>Enumerable.Range(0,12).Select(i=>new ChartPoint(i,10+i*3+(i%3)*4,$"P{i}")).ToArray();
+ChartSpec Baseline(ChartKind kind,ChartTheme theme)=>kind switch{
+    ChartKind.Candlestick or ChartKind.Ohlc=>new(){Kind=kind,Theme=theme,Series=[new("P",Enumerable.Range(0,8).Select(i=>ChartPoint.Candle(i,10+i,14+i,8+i,11+i+(i%2==0?1:-2))).ToArray())]},
+    ChartKind.Band=>new(){Kind=kind,Theme=theme,Series=[new("F",Enumerable.Range(0,8).Select(i=>ChartPoint.Interval(i,10+i,8+i,13+i)).ToArray())]},
+    ChartKind.Histogram=>new(){Kind=kind,Theme=theme,Series=[new("S",Enumerable.Range(0,60).Select(i=>new ChartPoint(i,i%13+(i==7?40:0))).ToArray())]},
+    ChartKind.Box=>new(){Kind=kind,Theme=theme,Series=[new("S",Enumerable.Range(0,60).Select(i=>new ChartPoint(i,i%13+(i==7?40:0))).ToArray()),new("T",Enumerable.Range(0,40).Select(i=>new ChartPoint(i,i%9+3)).ToArray())]},
+    ChartKind.Donut=>new(){Kind=kind,Theme=theme,Series=[new("D",[new(0,4,"A"),new(1,3,"B"),new(2,2,"C")])]},
+    ChartKind.Radar=>new(){Kind=kind,Theme=theme,Series=[new("R",[new(0,4,"A"),new(1,3,"B"),new(2,5,"C"),new(3,2,"D")]),new("Q",[new(0,2,"A"),new(1,4,"B"),new(2,3,"C"),new(3,4,"D")])]},
+    ChartKind.Heatmap=>new(){Kind=kind,Theme=theme,Series=Enumerable.Range(0,3).Select(r=>new ChartSeries($"Row {r}",Enumerable.Range(0,6).Select(c=>new ChartPoint(c,(r*7+c*5)%17,$"C{c}")).ToArray())).ToArray()},
+    _=>new(){Kind=kind,Theme=theme,Title="Baseline",Description="Default output",Series=[new("A",Twelve()),new("B",Twelve().Select(p=>p with{Y=p.Y+5}).ToArray())]}};
+Test("The classic finish draws 0.23.0's charts byte for byte, gradients and their IDs included, and the refined one does not",()=>{
+    ChartSpec line=Baseline(ChartKind.Line,ChartTheme.Light),column=Baseline(ChartKind.Column,ChartTheme.Light);
+    ChartPoint[] Signed()=>Twelve().Select((p,i)=>p with{Y=i%3==0?-p.Y/2:p.Y-20}).ToArray();
+    ChartAnnotation[] References(double at,double from,double to)=>[new(AnnotationAxis.Y,at){Label="Line"},new(AnnotationAxis.Y,from){To=to,Label="Band",Color="#B03A2E"}];
+    var harbour=new ChartStyle{Background="#F6F3EE",Text="#1F2A37",Muted="#4B5563",Grid="#E5DED3",Edge="#6B7280",Series=["#1D4E89","#B03A2E","#2E7D5B","#9A6A12"],FontFamily="Georgia,Cambria,serif"};
+    var heart=ZoneScale.CogganHeartRate(170);
+    var seconds=Training.TimeInZone(Enumerable.Range(0,2400).Select(t=>Math.Round(95+85*(1-Math.Exp(-t/400.0))+12*Math.Sin(t/70.0)+t%5,1)).ToArray(),heart);
+    var climb=Enumerable.Range(0,120).Select(i=>new ChartPoint(i*30,Math.Round(24+16*Math.Sin(i/9d)+6*Math.Sin(i/3.1),1))).ToArray();
+    double[] volume=[6.5,7.2,8.1,5.0,7.9,8.8,9.4,5.6,9.1,10.2,10.8,6.0];
+    var rolling=Statistics.Rolling(volume.Select(v=>(double?)v).ToArray(),4,1);
+    ChartSpec weekly=new(){Kind=ChartKind.Column,Title="Weekly volume",YLabel="Hours",Series=[new("Volume",volume.Select((v,i)=>new ChartPoint(i,v,$"W{i+1}")).ToArray()),
+        new("Four-week average",rolling.Select((r,i)=>new ChartPoint(i,Math.Round(r!.Mean,2),$"W{i+1}")).ToArray()){Kind=ChartKind.Line}]};
+    var graph=new GraphSpec{Nodes=[new("a","A"),new("b","B"),new("c","C"),new("d","D")],Edges=[new("a","b"),new("b","c"),new("a","c","long"),new("c","d"),new("d","d")]};
+    string Chart(ChartSpec spec,bool classic,bool titles=true)=>ChartSvg.Render(classic?Classic(spec):spec,includeTitles:titles);
+    string Network(GraphSpec spec,bool classic)=>GraphEngine.Render(classic?spec with{Style=(spec.Style ?? (spec.Theme==ChartTheme.Dark?ChartStyle.Dark:ChartStyle.Light)) with{Finish=ChartFinish.Classic}}:spec);
+    (string Row,string Hash,Func<bool,string> Draw)[] rows=[
+        ("Line/Light/True","CB7DF56598CE861F",c=>Chart(line,c)),
+        ("Line/Dark/False","55C2631265A381D5",c=>Chart(Baseline(ChartKind.Line,ChartTheme.Dark),c,false)),
+        ("Area/Light/True","C65B9E85D21CE693",c=>Chart(Baseline(ChartKind.Area,ChartTheme.Light),c)),
+        ("Scatter/Light/True","C997C248FD160F89",c=>Chart(Baseline(ChartKind.Scatter,ChartTheme.Light),c)),
+        ("Bubble/Light/True","65D16775AD95EA30",c=>Chart(Baseline(ChartKind.Bubble,ChartTheme.Light),c)),
+        ("Column/Dark/True","D519769B30BA6A40",c=>Chart(Baseline(ChartKind.Column,ChartTheme.Dark),c)),
+        ("Bar/Light/False","193C4F6998BF341D",c=>Chart(Baseline(ChartKind.Bar,ChartTheme.Light),c,false)),
+        ("StackedColumn/Light/True","6E0798E56574C38E",c=>Chart(Baseline(ChartKind.StackedColumn,ChartTheme.Light),c)),
+        ("Donut/Light/True","41B05E947E74CD0F",c=>Chart(Baseline(ChartKind.Donut,ChartTheme.Light),c)),
+        ("Heatmap/Light/True","E701C0163185BA1C",c=>Chart(Baseline(ChartKind.Heatmap,ChartTheme.Light),c)),
+        ("Radar/Light/True","16406553279DC2CE",c=>Chart(Baseline(ChartKind.Radar,ChartTheme.Light),c)),
+        ("Candlestick/Light/True","ABD4EB8E08B1956B",c=>Chart(Baseline(ChartKind.Candlestick,ChartTheme.Light),c)),
+        ("Band/Light/True","BA35FFE76F28B956",c=>Chart(Baseline(ChartKind.Band,ChartTheme.Light),c)),
+        ("Histogram/Light/True","7A551A8B643A8CBB",c=>Chart(Baseline(ChartKind.Histogram,ChartTheme.Light),c)),
+        ("Box/Light/True","95739F92921BA181",c=>Chart(Baseline(ChartKind.Box,ChartTheme.Light),c)),
+        ("Violin/Light/True","AECF3380086ED39C",c=>Chart(Baseline(ChartKind.Violin,ChartTheme.Light),c)),
+        ("Ohlc/Dark/True","9EC042FF686CC18D",c=>Chart(Baseline(ChartKind.Ohlc,ChartTheme.Dark),c)),
+        ("annotated","B8D59813CF5546F6",c=>Chart(line with{Annotations=[new(AnnotationAxis.Y,25){Label="Target"},new(AnnotationAxis.X,3){To=6,Label="Window"}]},c)),
+        ("branded","EA336EC369F8AAB7",c=>Chart(Baseline(ChartKind.Area,ChartTheme.Light) with{Style=ChartStyle.Light with{Background="#F6F3EE",Series=["#1D4E89","#B03A2E"],FontFamily="Georgia,serif"}},c)),
+        ("graph/Circular/Light","1DF550CDF523B601",c=>Network(graph with{Layout=GraphLayout.Circular,Theme=ChartTheme.Light},c)),
+        ("graph/Layered/Dark","6E16348F752690A3",c=>Network(graph with{Layout=GraphLayout.Layered,Theme=ChartTheme.Dark},c)),
+        ("guard/y-annotations-Bar","B3B36E22BBCD4641",c=>Chart(Baseline(ChartKind.Bar,ChartTheme.Dark) with{Annotations=References(25,30,40)},c)),
+        ("zones/time-in-zone","77633DA66248659B",c=>Chart(Baseline(ChartKind.Bar,ChartTheme.Light) with{YFormat=ValueFormat.Duration,
+            Series=[new("Time in zone",heart.Zones.Select((z,i)=>new ChartPoint(i,seconds[i],z.Name){Color=ChartStyle.Light.Zones[i]}).ToArray())]},c)),
+        ("guard/style-light-line","A926CA670C8441DC",c=>Chart(line with{Style=ChartStyle.Light,MinorGridlines=true,Annotations=References(25,30,40)},c)),
+        ("guard/style-brand-line","C7CF4B40CCDCA415",c=>Chart(line with{Style=harbour,MinorGridlines=true,Annotations=References(25,30,40)},c)),
+        // Gradients: on no style, which a classic chart names as 0.23.0 named it; on a preset adjusted in C#; and on Midnight.
+        ("finish/smooth-fade-area","4E9548279D4A245D",c=>Chart(new(){Kind=ChartKind.Area,Title="Smooth fade",XFormat=ValueFormat.Duration,
+            Series=[new("Climb",climb){Curve=LineCurve.Smooth,Fill=AreaFill.Fade,StrokeWidth=2,Markers=MarkerStyle.None}]},c)),
+        ("finish/capsule-value-labels","08631EBEDF404578",c=>Chart(column with{Title="Capsules",Style=ChartStyle.Light with{BarRadius=9999},
+            Series=[new("Week",Signed()){ValueLabels=true,Fill=AreaFill.Fade},new("Last",Twelve().Select(p=>p with{Y=p.Y/2}).ToArray()){ValueLabels=true}]},c)),
+        ("finish/midnight-weekly","53E74673F793CA0E",c=>Chart(weekly with{Style=ChartStyle.Midnight,Series=[weekly.Series[0] with{ValueLabels=true},weekly.Series[1] with{Curve=LineCurve.Smooth,Markers=MarkerStyle.Hollow}]},c)),
+        ("finish/gradient-reversed","86F1C5C81227DEA4",c=>Chart(line with{Title="Reversed gradient",YReversed=true,YFormat=ValueFormat.Duration,
+            Series=[new("Pace",Enumerable.Range(0,30).Select(i=>new ChartPoint(i,330-i*3+i%4*6)).ToArray()){Gradient=[new(260,"#DD4B45"),new(300,"#A88200"),new(340,"#3F87D9")],Curve=LineCurve.Smooth,HighlightLast=true}]},c))];
+    foreach(var (row,hash,draw) in rows)
+    {
+        Check(Hash16(draw(true))==hash,$"{row} is not 0.23.0's in the classic finish: {Hash16(draw(true))}");
+        Check(Hash16(draw(false))!=hash,$"{row} is unchanged in the refined finish");
+    }
+});
+Test("A style draws refined unless it names the classic finish, whose gridlines are solid unless set, and both survive JSON",()=>{
+    Check(ChartStyle.Light.Finish==ChartFinish.Refined&&ChartStyle.Dark.Finish==ChartFinish.Refined&&ChartStyle.Midnight.Finish==ChartFinish.Refined&&new ChartStyle().Finish==ChartFinish.Refined);
+    // Every preset and every brand reads dotted gridlines in the refined finish, and solid ones in the classic, as 0.23.0 drew them.
+    Check(new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight,new ChartStyle{Background="#F6F3EE"}}.All(s=>s.Gridlines==GridLine.Dotted),"a refined style is not dotted");
+    Check((ChartStyle.Light with{Finish=ChartFinish.Classic}).Gridlines==GridLine.Solid&&(ChartStyle.Dark with{Finish=ChartFinish.Classic}).Gridlines==GridLine.Solid,"a classic preset is not solid");
+    // A style that sets its gridlines keeps them in either finish: Midnight is dotted in both, and a dashed grid dashed.
+    Check((ChartStyle.Midnight with{Finish=ChartFinish.Classic}).Gridlines==GridLine.Dotted&&(ChartStyle.Light with{Gridlines=GridLine.Dashed,Finish=ChartFinish.Classic}).Gridlines==GridLine.Dashed
+        &&(ChartStyle.Light with{Gridlines=GridLine.Solid}).Gridlines==GridLine.Solid);
+    var json=System.Text.Json.JsonSerializer.Serialize(ChartStyle.Light with{Finish=ChartFinish.Classic},finishJson);
+    Check(json.Contains("\"finish\":\"Classic\"")&&json.Contains("\"gridlines\":\"Solid\""),json);
+    var read=System.Text.Json.JsonSerializer.Deserialize<ChartStyle>(json,finishJson)!;
+    Check(read.Finish==ChartFinish.Classic&&read.Gridlines==GridLine.Solid);
+    // A request that names the classic finish draws 0.23.0's 2.5-pixel stroke; one that names no finish the refined 1.6.
+    string Request(string style)=>ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\""+style+",\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1},{\"x\":1,\"y\":2}]}]}",finishJson)!);
+    Check(Request(",\"style\":{\"finish\":\"Classic\"}")==ChartSvg.Render(Classic(new ChartSpec{Series=[new("S",[new(0,1),new(1,2)])]}))&&Request(",\"style\":{\"finish\":\"Classic\"}").Contains("stroke-width='2.5'"),"a classic request does not draw as 0.23.0");
+    Check(Request("").Contains("stroke-width='1.6'")&&Request(",\"style\":{\"background\":\"#FFFFFF\"}").Contains("stroke-width='1.6'"),"a request without a finish does not draw refined");
+    Reject(()=>ChartSvg.Render(Spec() with{Style=ChartStyle.Light with{Finish=(ChartFinish)5}}));
+    // A chart in each finish names its gradients differently, so the two can share a page.
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
+    string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    Check(Prefix(ChartSvg.Render(faded)).Length>0&&Prefix(ChartSvg.Render(faded))!=Prefix(ChartSvg.Render(Classic(faded))),"the two finishes share gradient IDs");
+    Check(Prefix(ChartSvg.Render(faded))==Prefix(ChartSvg.Render(faded with{Style=ChartStyle.Light})),"two drawings of one refined chart name its gradients differently");
+});
+// Every element that strokes, by its own attribute or, for a gridline, by the stylesheet. Text is left out: a reference label's
+// halo is a stroke that belongs to the text and scales with it.
+XElement[] Stroked(XDocument doc)=>doc.Descendants().Where(e=>e.Name!=ns+"text"&&e.Name!=ns+"g"&&
+    ((string?)e.Attribute("stroke") is {} stroke&&stroke!="none"||((string?)e.Attribute("class"))?.StartsWith("lumen-grid")==true)).ToArray();
+Test("Refined strokes are 1.6 pixels with round ends and joins, and every stroke keeps its width at any display size",()=>{
+    var line=StrokeOf(Svg(Spec()));
+    Check((string?)line.Attribute("stroke-width")=="1.6"&&(string?)line.Attribute("vector-effect")=="non-scaling-stroke"&&(string?)line.Attribute("stroke-linecap")=="round"&&(string?)line.Attribute("stroke-linejoin")=="round",line.ToString());
+    // Areas and bands draw 1.6 too, and so does every zone and projected piece; a stroke width of the series' own still wins.
+    Check((string?)StrokeOf(Svg(Spec(ChartKind.Area))).Attribute("stroke-width")=="1.6"&&(string?)StrokeOf(Svg(Sample(ChartKind.Band))).Attribute("stroke-width")=="1.6");
+    var pieces=Svg(Spec() with{YMin=100,YMax=200,Series=[new("Heart rate",[new(0,110),new(1,150),new(2,130)]){Zones=Effort(),ProjectedFrom=1.5}]}).Descendants(ns+"path").Where(p=>(string?)p.Attribute("fill")=="none").ToArray();
+    Check(pieces.Length>3&&pieces.All(p=>(string?)p.Attribute("stroke-width")=="1.6"&&(string?)p.Attribute("vector-effect")=="non-scaling-stroke"&&(string?)p.Attribute("stroke-linecap")=="round"),"a zone or projected piece is not a refined stroke");
+    Check((string?)StrokeOf(Svg(Spec() with{Series=[new("S",[new(0,1),new(1,2)]){StrokeWidth=3}]})).Attribute("stroke-width")=="3");
+    // Every stroke of every kind, in both themes and Midnight, with references, zones, trends, markers and panes.
+    var extras=new[]{Spec() with{Annotations=[new(AnnotationAxis.Y,3){Label="Line"},new(AnnotationAxis.X,.5){To=1,Label="Band"}],YZones=Effort(),MinorGridlines=true,
+            Series=[new("S",[new(0,110),new(1,150),new(2,130)]){Trend=true,Zones=Effort()},new("Hollow",[new(0,120),new(1,125),new(2,170)]){Markers=MarkerStyle.Hollow,HighlightLast=true}]},
+        Spec(ChartKind.Scatter) with{Series=[new("S",[new(0,1),new(1,3),new(2,2)]){Trend=true,Markers=MarkerStyle.Hollow}]},Stacked() with{MinorGridlines=true}};
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight})
+        foreach(var spec in Enum.GetValues<ChartKind>().Select(Sample).Concat(extras))
+        {
+            var doc=Svg(spec with{Style=style});
+            Check(Stroked(doc).All(e=>(string?)e.Attribute("vector-effect")=="non-scaling-stroke"),$"{spec.Kind}: {Stroked(doc).FirstOrDefault(e=>e.Attribute("vector-effect") is null)}");
+            // A hollow marker's ring is set on its group, so the circle it strokes carries the effect.
+            Check(doc.Descendants(ns+"g").Where(g=>g.Attribute("stroke") is not null&&g.Attribute("data-point") is not null).All(g=>(string?)g.Element(ns+"circle")!.Attribute("vector-effect")=="non-scaling-stroke"),$"{spec.Kind}: a hollow ring scales");
+            // Gridlines are hairlines that land on whole pixels; a radar's rings and spokes run at angles, where that would jag them.
+            if(spec.Kind!=ChartKind.Radar) Check(GridStrokes(doc).All(l=>(string?)l.Attribute("shape-rendering")=="crispEdges"),$"{spec.Kind}: a gridline is not crisp");
+        }
+    var network=XDocument.Parse(GraphEngine.Render(new GraphSpec{Nodes=[new("a","A"),new("b","B"),new("c","C")],Edges=[new("a","b"),new("b","c"),new("a","c"),new("c","c")]}));
+    Check(Stroked(network).Length>=6&&Stroked(network).All(e=>(string?)e.Attribute("vector-effect")=="non-scaling-stroke"),"a graph edge or node scales");
+    // The classic finish leaves every stroke to scale, as 0.23.0 did.
+    Check(Enum.GetValues<ChartKind>().All(kind=>!ChartSvg.Render(Classic(Sample(kind))).Contains("vector-effect")),"a classic chart carries the effect");
+});
+Test("Refined trend and reference lines are thinner than the data, and a projection keeps its 6 and 4 pixel rhythm with round ends",()=>{
+    double Width(XElement e)=>Attr(e,"stroke-width");
+    XElement Trend(XDocument doc)=>doc.Descendants(ns+"path").Single(p=>(string?)p.Attribute("class")=="lumen-trend");
+    var spec=Spec() with{Series=[new("S",[new(0,1),new(1,3),new(2,2)]){Trend=true}]};
+    var doc=Svg(spec);
+    Check(Close(Width(Trend(doc)),1.2)&&Width(Trend(doc))<Width(StrokeOf(doc))&&(string?)Trend(doc).Attribute("vector-effect")=="non-scaling-stroke"&&(string?)Trend(doc).Attribute("stroke-dasharray")=="7 5");
+    var wide=Svg(spec with{Series=[spec.Series[0] with{StrokeWidth=3}]});
+    Check(Close(Width(Trend(wide)),2.25)&&Width(Trend(wide))<Width(StrokeOf(wide)),"a trend does not follow its series' width");
+    Check(Close(Width(Trend(Svg(Spec(ChartKind.Scatter) with{Series=[new("S",[new(0,1),new(1,3),new(2,2)]){Trend=true}]}))),1.2),"a scatter trend is not 1.2");
+    Check(Width(Trend(Svg(Classic(spec))))==2,"the classic trend moved");
+    // A reference line is a 1-pixel guide over its invisible 12-pixel target, both keeping their width.
+    var marked=Svg(Spec() with{Annotations=[new(AnnotationAxis.Y,3){Label="Target"}]});
+    var lines=marked.Descendants(ns+"g").Single(g=>(string?)g.Attribute("aria-label")=="Target: 3").Elements(ns+"line").ToArray();
+    Check(lines.Length==2&&Width(lines[0])==12&&(string?)lines[0].Attribute("stroke-opacity")=="0"&&Width(lines[1])==1&&Width(lines[1])<1.6&&(string?)lines[1].Attribute("stroke-dasharray")=="6 4"
+        &&lines.All(l=>(string?)l.Attribute("vector-effect")=="non-scaling-stroke"),"a reference line is not a thin guide");
+    // A round end adds half the width to each side of a dash, so the pattern gives it back: 4.4 on and 5.6 off draw 6 and 4.
+    string Dash(double? width)=>Svg(Spec() with{Series=[new("S",[new(0,1),new(1,3),new(2,2)]){ProjectedFrom=1,StrokeWidth=width}]}).Descendants(ns+"path").Single(p=>p.Attribute("stroke-dasharray") is not null).Attribute("stroke-dasharray")!.Value;
+    Check(Dash(null)=="4.4 5.6"&&Dash(3)=="3 7"&&Dash(8)=="0 12",$"{Dash(null)}, {Dash(3)}, {Dash(8)}");
+    Check(Svg(Classic(Spec() with{Series=[new("S",[new(0,1),new(1,3),new(2,2)]){ProjectedFrom=1}]})).Descendants(ns+"path").Single(p=>p.Attribute("stroke-dasharray") is not null).Attribute("stroke-dasharray")!.Value=="6 4");
+});
+Test("Refined line markers appear on hover or focus, and every point keeps its focusable, labelled mark at the classic size",()=>{
+    var spec=Spec() with{Series=[new("S",[new(0,2,"A"),new(1,5,"B"),new(2,3,"C")])]};
+    XDocument refined=Svg(spec),classic=Svg(Classic(spec));
+    XElement[] Groups(XDocument doc)=>doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).ToArray();
+    Check(Groups(refined).Length==3&&Groups(refined).All(g=>(string?)g.Attribute("tabindex")=="0"&&(string?)g.Attribute("role")=="button"&&(string?)g.Attribute("class")=="lumen-datum"
+        &&g.Element(ns+"title")!.Value==g.Attribute("aria-label")!.Value),"a point lost its focusable, labelled mark");
+    Check(Groups(refined).Select(g=>(string)g.Attribute("aria-label")!).SequenceEqual(Groups(classic).Select(g=>(string)g.Attribute("aria-label")!)),"a point's name changed");
+    // The marker is drawn in its colour where the classic one is and as large, so it is as easy to point at; the stylesheet hides it
+    // until its point is hovered or focused, when it shows with the focus ring.
+    var circles=Groups(refined).Select(g=>g.Element(ns+"circle")!).ToArray();var shown=Groups(classic).Select(g=>g.Element(ns+"circle")!).ToArray();
+    Check(circles.All(c=>(string?)c.Attribute("class")=="lumen-marker"&&(string?)c.Attribute("fill")==ChartStyle.Light.Series[0]&&c.Attribute("fill-opacity") is null)
+        &&circles.Zip(shown).All(p=>p.First.Attribute("cx")!.Value==p.Second.Attribute("cx")!.Value&&p.First.Attribute("cy")!.Value==p.Second.Attribute("cy")!.Value&&Attr(p.First,"r")>=Attr(p.Second,"r")),"a hidden marker is smaller or elsewhere");
+    var sheet=refined.Descendants(ns+"style").Single().Value;
+    Check(sheet.Contains(".lumen-svg .lumen-marker{opacity:0}")&&sheet.Contains(".lumen-svg .lumen-datum:hover .lumen-marker,.lumen-svg .lumen-datum:focus .lumen-marker{opacity:1}")&&sheet.Contains(".lumen-svg .lumen-datum:focus{stroke:currentColor;stroke-width:3}"),"the marker is not revealed on hover and focus");
+    Check(!classic.Descendants(ns+"style").Single().Value.Contains("lumen-marker")&&!classic.Descendants().Any(e=>(string?)e.Attribute("class")=="lumen-marker"),"a classic marker is hidden");
+    // A long line's markers are 2 pixels in both finishes, and an area's hide as a line's do.
+    var dense=Spec() with{Series=[new("S",Enumerable.Range(0,100).Select(i=>new ChartPoint(i,i%7)).ToArray())]};
+    Check(Svg(dense).Descendants(ns+"circle").All(c=>(string?)c.Attribute("r")=="2"&&(string?)c.Attribute("class")=="lumen-marker")&&Svg(Classic(dense)).Descendants(ns+"circle").All(c=>(string?)c.Attribute("r")=="2"));
+    Check(Svg(Spec(ChartKind.Area)).Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).All(g=>(string?)g.Element(ns+"circle")!.Attribute("class")=="lumen-marker"));
+    // Scatter points and bubbles are their marks and stay in view, and a marker style a series names keeps 0.23.0's meaning.
+    foreach(var kind in new[]{ChartKind.Scatter,ChartKind.Bubble})
+        Check(!Svg(Spec(kind)).Descendants().Any(e=>(string?)e.Attribute("class")=="lumen-marker")&&Svg(Spec(kind)).Descendants(ns+"circle").Any(c=>(string?)c.Attribute("fill-opacity")==".7"),$"{kind} hid its marks");
+    string Marker(MarkerStyle style)=>Svg(spec with{Series=[spec.Series[0] with{Markers=style}]}).Descendants(ns+"g").First(g=>g.Attribute("data-point") is not null).Element(ns+"circle")!.ToString();
+    string Before(MarkerStyle style)=>Svg(Classic(spec with{Series=[spec.Series[0] with{Markers=style}]})).Descendants(ns+"g").First(g=>g.Attribute("data-point") is not null).Element(ns+"circle")!.ToString();
+    Check(Marker(MarkerStyle.Filled)==Before(MarkerStyle.Filled)&&Marker(MarkerStyle.None)==Before(MarkerStyle.None)&&!Marker(MarkerStyle.Hollow).Contains("lumen-marker"),"a named marker style changed its meaning");
+    // The latest reading stays ringed, and a point between two gaps, which has no line to show it, keeps its marker in view.
+    var ringed=Svg(spec with{Series=[spec.Series[0] with{HighlightLast=true}]}).Descendants(ns+"g").Last(g=>g.Attribute("data-point") is not null);
+    Check(ringed.Elements(ns+"circle").Count()==2&&ringed.Elements(ns+"circle").All(c=>c.Attribute("class") is null),"the latest reading is hidden");
+    var lone=Svg(Spec() with{Series=[new("S",[new(0,1),new(1,null),new(2,3),new(3,null),new(4,2),new(5,4)])]}).Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).ToArray();
+    Check(lone.Length==4&&lone.Take(2).All(g=>g.Element(ns+"circle")!.Attribute("class") is null)&&lone.Skip(2).All(g=>(string?)g.Element(ns+"circle")!.Attribute("class")=="lumen-marker"),"a point between two gaps is hidden");
+});
+// The labelled ticks of a pane, and the spacing between them: Y labels sit 4 pixels below their tick, left of the plot or right of it.
+double[] TickYs(XDocument doc,(double Top,double Bottom) span,double x)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("class")=="lumen-muted"&&t.Attribute("transform") is null
+    &&Close(Attr(t,"x"),x)&&Attr(t,"y")-4>=span.Top-1e-6&&Attr(t,"y")-4<=span.Bottom+1e-6).Select(t=>Attr(t,"y")-4).Order().ToArray();
+double Tightest(double[] ys)=>ys.Zip(ys.Skip(1)).Select(p=>p.Second-p.First).DefaultIfEmpty(double.PositiveInfinity).Min();
+Test("Refined Y ticks stand at least 28 pixels apart in a short pane, as in the activity stream's pace pane, and are left alone with room",()=>{
+    // The activity stream as 0.22.0 showed it: heart rate over its zones, pace on a reversed duration axis in a pane 93 pixels
+    // tall, and the climb beneath, where five pace labels stood 19 pixels apart.
+    var heart=ZoneScale.CogganHeartRate(170);
+    double[] t=Enumerable.Range(0,360).Select(i=>i*10d).ToArray();
+    double Hard(double s)=>s%900>300&&s%900<600?1:0;
+    var stream=new ChartSpec{Kind=ChartKind.Line,XFormat=ValueFormat.Duration,YLabel="Heart rate (bpm)",YZones=heart,Height=520,
+        Panes=[new(){Label="Pace (/km)",YFormat=ValueFormat.Duration,YReversed=true,Weight=.6},new(){Label="Elevation (m)",Weight=.45,Y2Label="Grade"}],
+        Series=[new("Heart rate",t.Select((s,i)=>new ChartPoint(s,Math.Round(110+55*(1-Math.Exp(-s/500))+22*Hard(s)+i%4))).ToArray()){Zones=heart},
+            new("Pace",t.Select((s,i)=>new ChartPoint(s,Math.Round(360-70*Hard(s)+i%12))).ToArray()){Pane=1},
+            new("Elevation",t.Select(s=>new ChartPoint(s,Math.Round(40+25*Math.Sin(s/700)+10*Math.Sin(s/230),1))).ToArray()){Kind=ChartKind.Area,Pane=2},
+            new("Grade",t.Select(s=>new ChartPoint(s,Math.Round(4*Math.Cos(s/700),2))).ToArray()){Pane=2,Secondary=true}]};
+    XDocument refined=Svg(stream),classic=Svg(Classic(stream));
+    var spans=PaneClips(refined).Select(PaneSpan).ToArray();
+    Check(spans.Length==3&&spans[1].Bottom-spans[1].Top<100,$"the pace pane is {spans[1].Bottom-spans[1].Top} pixels");
+    var pace=TickYs(classic,PaneClips(classic).Select(PaneSpan).ToArray()[1],64);
+    Check(pace.Length==5&&Tightest(pace)<28,$"the classic pace pane has {pace.Length} labels {Tightest(pace):0.#} pixels apart");
+    for(var k=0;k<3;k++)
+    {
+        var left=TickYs(refined,spans[k],64);
+        Check(left.Length>=2&&Tightest(left)>=28,$"pane {k} labels {left.Length} ticks {Tightest(left):0.#} pixels apart");
+    }
+    Check(TickYs(refined,spans[1],64).Length<pace.Length,"the pace pane kept its crowded labels");
+    // The right-hand axis of a short pane is spaced too, and its gridlines follow the ticks left of them.
+    Check(Tightest(TickYs(refined,spans[2],836))>=28&&TickYs(refined,spans[2],836).Length>=2,"the right-hand axis is crowded");
+    var grid=refined.Descendants(ns+"line").Where(l=>(string?)l.Attribute("class")=="lumen-grid"&&Attr(l,"y1")>=spans[1].Top-1e-6&&Attr(l,"y1")<=spans[1].Bottom+1e-6).Select(l=>Attr(l,"y1")).Order().ToArray();
+    Check(grid.SequenceEqual(TickYs(refined,spans[1],64)),"the pace pane's gridlines are not at its ticks");
+    // A box plot in a short chart, a logarithmic pane and a pane with minor lines are spaced the same way.
+    var box=Svg(Sample(ChartKind.Box) with{Height=240,YMin=0,YMax=100});
+    Check(Tightest(TickYs(box,(78,164),64))>=28&&TickYs(box,(78,164),64).Length>=2,"a short box plot is crowded");
+    Check(Tightest(TickYs(Svg(Classic(Sample(ChartKind.Box) with{Height=240,YMin=0,YMax=100})),(78,164),64))<28,"the classic box plot was not crowded");
+    var logged=Svg(Spec() with{Height=420,Panes=[new(){YAxis=AxisKind.Log,Weight=.3}],MinorGridlines=true,Series=[Spec().Series[0],new("Load",[new(0,1),new(1,40),new(2,3000)]){Pane=1}]});
+    var logSpan=PaneClips(logged).Select(PaneSpan).ToArray()[1];
+    Check(Tightest(TickYs(logged,logSpan,64))>=28&&TickYs(logged,logSpan,64).Length>=2,$"a short logarithmic pane is crowded: {Tightest(TickYs(logged,logSpan,64)):0.#}");
+    // Over two decades a logarithmic axis marks 1, 2 and 5 of each, whatever it is asked for; too crowded, it keeps the decades.
+    var decades=Svg(Spec() with{Height=420,Panes=[new(){YAxis=AxisKind.Log,Weight=.3}],Series=[Spec().Series[0],new("Load",[new(0,2),new(1,40),new(2,150)]){Pane=1}]});
+    var decadeSpan=PaneClips(decades).Select(PaneSpan).ToArray()[1];
+    var named=decades.Descendants(ns+"text").Where(t=>(string?)t.Attribute("class")=="lumen-muted"&&Close(Attr(t,"x"),64)&&Attr(t,"y")-4>=decadeSpan.Top-1e-6&&Attr(t,"y")-4<=decadeSpan.Bottom+1e-6).Select(t=>t.Value).ToArray();
+    Check(named.SequenceEqual(["10","100"])&&Tightest(TickYs(decades,decadeSpan,64))>=28,$"a short two-decade pane labels {string.Join(",",named)}");
+    // A plot with room keeps every tick it had.
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Column,ChartKind.Scatter,ChartKind.Area})
+        Check(Ticks(Svg(Spec(kind)),"end").SequenceEqual(Ticks(Svg(Classic(Spec(kind))),"end")),$"{kind} lost a tick it had room for");
+});
+// The X labels along the bottom of the last pane, and whether any two touch, each at least the generous width of 12-pixel text.
+(double X,string Text)[] Bottom(XDocument doc,double y)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="middle"&&(string?)t.Attribute("class")=="lumen-muted"&&Close(Attr(t,"y"),y)&&t.Value.Length>0)
+    .Select(t=>(Attr(t,"x"),t.Value)).OrderBy(l=>l.Item1).ToArray();
+bool Touching((double X,string Text)[] labels)=>labels.Zip(labels.Skip(1)).Any(p=>p.Second.X-p.First.X<(p.First.Text.Length+p.Second.Text.Length)/2d*.62*12);
+Test("Refined X labels are thinned until no two touch",()=>{
+    // Twelve zones in a column chart: names twelve characters long a category apart.
+    string[] names=["Active recovery","Endurance","Tempo","Lactate threshold","VO2max","Anaerobic capacity","Neuromuscular","Sweet spot","Recovery ride","Over-unders","Threshold block","Race pace"];
+    var zones=Spec(ChartKind.Column) with{Series=[new("Time",names.Select((n,i)=>new ChartPoint(i,10+i,n)).ToArray())]};
+    Check(Touching(Bottom(Svg(Classic(zones)),365)),"the classic labels did not touch");
+    var refined=Bottom(Svg(zones),365);
+    Check(!Touching(refined)&&refined.Length>=4&&refined[0].Text=="Active reco…",string.Join("|",refined.Select(l=>l.Text)));
+    // Half a year of weeks on a narrow time axis: a month apart, "Feb 2026" and "Mar 2026" touched; fewer ticks are asked for.
+    var months=Spec() with{Width=320,XAxis=AxisKind.Time,Series=[new("S",Enumerable.Range(0,26).Select(i=>new ChartPoint(Utc(2026,1,5)+i*7*86_400_000d,i%5)).ToArray())]};
+    Check(Touching(Bottom(Svg(Classic(months)),365)),"the classic month labels did not touch");
+    var narrow=Svg(months);
+    Check(!Touching(Bottom(narrow,365))&&Bottom(narrow,365).Length>=2,string.Join("|",Bottom(narrow,365).Select(l=>l.Text)));
+    // Labelled points keep every fourth or fifth rather than every third.
+    var sessions=Spec() with{Width=480,Series=[new("S",Enumerable.Range(0,20).Select(i=>new ChartPoint(i,i%4,$"Session {i+1}")).ToArray())]};
+    Check(Touching(Bottom(Svg(Classic(sessions)),365)),"the classic session labels did not touch");
+    var labelled=Svg(sessions);
+    Check(!Touching(Bottom(labelled,365))&&Bottom(labelled,365).Length>=2,string.Join("|",Bottom(labelled,365).Select(l=>l.Text)));
+    // Histogram edges already stand 70 pixels apart, wider than any edge's label, in both finishes.
+    var bins=Svg(Spec(ChartKind.Histogram) with{Width=360,Bins=30,Series=[new("S",Enumerable.Range(0,300).Select(i=>new ChartPoint(i,Math.Round(1000+i*3.3333,3))).ToArray())]});
+    Check(!Touching(Bottom(bins,365))&&Bottom(bins,365).Length>=2,string.Join("|",Bottom(bins,365).Select(l=>l.Text)));
+    // Labels with room are left as they were.
+    Check(Bottom(Svg(Spec(ChartKind.Column)),365).SequenceEqual(Bottom(Svg(Classic(Spec(ChartKind.Column))),365)),"a category label with room went");
+});
+// A refined reference label: drawn over the data, with the reference's own group carrying its name.
+XElement[] Halos(XDocument doc)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("paint-order")=="stroke").ToArray();
+// A generous box for an 11-pixel label at its anchor: 9 above the baseline, 3 below, at most .9 em a character across.
+(double Left,double Right,double Top,double Bottom) Box(XElement label)
+{
+    var width=label.Value.Sum(c=>c is 'm' or 'M' or 'w' or 'W'?.9:.62)*11;
+    var x=Attr(label,"x");var anchor=(string?)label.Attribute("text-anchor");
+    var left=anchor=="end"?x-width:anchor=="middle"?x-width/2:x;
+    return (left,left+width,Attr(label,"y")-9,Attr(label,"y")+3);
+}
+bool Overlap((double Left,double Right,double Top,double Bottom) a,(double Left,double Right,double Top,double Bottom) b)=>a.Left<b.Right&&b.Left<a.Right&&a.Top<b.Bottom&&b.Top<a.Bottom;
+Test("Refined reference labels sit inside their band and the plot, over the data with a halo, or are left out",()=>{
+    // Heart rate from 119, so the easy zone, up to 120, is a band 3.5 pixels tall at the foot of the plot.
+    var zoned=Spec() with{YZones=Effort(),Series=[new("Heart rate",Enumerable.Range(0,20).Select(i=>new ChartPoint(i,119+i*4)).ToArray())]};
+    XDocument classic=Svg(Classic(zoned)),refined=Svg(zoned);
+    var clip=PaneClips(refined).Single();var (top,bottom)=PaneSpan(clip);
+    XElement Band(XDocument doc,string name)=>doc.Descendants(ns+"g").Single(g=>((string?)g.Attribute("aria-label"))?.StartsWith(name)==true&&(string?)g.Attribute("role")=="img");
+    // 0.23.0 wrote the easy zone's label below the plot, where the clip, 6 pixels past it, cut the label off.
+    var easy=Band(classic,"Easy").Element(ns+"text")!;
+    Check(Attr(easy,"y")>bottom&&Attr(easy,"y")+3>bottom+6,$"the classic easy label was inside the plot, at {Attr(easy,"y")}");
+    // Refined, a band too thin for its label leaves it out; its group is still named, for the tooltip and assistive technology.
+    Check(Attr(Band(refined,"Easy").Element(ns+"rect")!,"height")<12&&!Halos(refined).Any(t=>t.Value.StartsWith("Easy"))&&Band(refined,"Easy").Attribute("aria-label")!.Value=="Easy: up to 120");
+    var labels=Halos(refined);
+    Check(labels.Length==3,string.Join("|",labels.Select(t=>t.Value)));
+    foreach(var label in labels)
+    {
+        var rect=Band(refined,label.Value).Element(ns+"rect")!;var box=Box(label);
+        Check(box.Top>=Attr(rect,"y")&&box.Bottom<=Attr(rect,"y")+Attr(rect,"height")&&box.Top>=top&&box.Bottom<=bottom&&box.Left>=76&&box.Right<=870,$"{label.Value} leaves its band or the plot");
+        // A halo in the background colour, under the fill, so the label reads across a line; the pointer passes through to the marks.
+        Check((string?)label.Attribute("stroke")=="#FFFFFF"&&(string?)label.Attribute("stroke-width")=="3"&&(string?)label.Attribute("stroke-linejoin")=="round"
+            &&(string?)label.Attribute("pointer-events")=="none"&&(string?)label.Attribute("aria-hidden")=="true"&&(string?)label.Attribute("fill")==ChartStyle.Light.Text,label.ToString());
+        Check(Band(refined,label.Value).Element(ns+"text") is null,"a band's group still holds its label");
+    }
+    // The labels follow the data in the pane's clip, so they are drawn over it.
+    var order=clip.Descendants().ToList();
+    Check(labels.All(l=>l.Parent==clip&&order.IndexOf(l)>order.FindLastIndex(e=>e.Attribute("data-point") is not null)),"a label is under the data or outside the clip");
+    Check((string?)Halos(Svg(zoned with{Theme=ChartTheme.Dark}))[0].Attribute("stroke")==ChartStyle.Dark.Background&&(string?)Halos(Svg(zoned with{Style=ChartStyle.Midnight}))[0].Attribute("stroke")=="#0B0E14","the halo is not the background");
+    // A line's label sits just above it, or just below where the plot ends above it; a line off the plot is not labelled.
+    double Y(double value)=>344-(value-2)/3*266;
+    var lines=Svg(Spec() with{Annotations=[new(AnnotationAxis.Y,3.5){Label="Middle"},new(AnnotationAxis.Y,4.95){Label="Top"},new(AnnotationAxis.Y,9){Label="Off"}]});
+    XElement Line(string name)=>Halos(lines).Single(t=>t.Value.StartsWith(name));
+    Check(Close(Attr(Line("Middle"),"y"),Y(3.5)-6)&&Close(Attr(Line("Top"),"y"),Y(4.95)+13)&&!Halos(lines).Any(t=>t.Value.StartsWith("Off")),string.Join("|",Halos(lines).Select(t=>$"{t.Value} {t.Attribute("y")}")));
+    // An upright band labels inside itself where it is wide enough and is left out where it is not; an upright line at the
+    // right edge is labelled on its left.
+    var upright=Svg(Spec() with{Annotations=[new(AnnotationAxis.X,0){To=1,Label="Wide"},new(AnnotationAxis.X,1.2){To=1.3,Label="Narrow window"},new(AnnotationAxis.X,1.95){Label="Late"}]});
+    var wide=Halos(upright).Single(t=>t.Value.StartsWith("Wide"));
+    Check(Attr(wide,"x")==82&&(string?)wide.Attribute("text-anchor")=="start"&&Box(wide).Right<=76+397,"the wide band's label is not inside it");
+    Check(!Halos(upright).Any(t=>t.Value.StartsWith("Narrow")),"the narrow band's label runs out of it");
+    var late=Halos(upright).Single(t=>t.Value.StartsWith("Late"));
+    Check((string?)late.Attribute("text-anchor")=="end"&&Box(late).Right<=76+794*1.95/2&&Box(late).Left>=76,"the late line's label leaves the plot");
+});
+Test("Refined labels on one edge are nudged apart rather than drawn over each other",()=>{
+    // Weekly load against an average and a target band whose top lies just above it: 0.23.0 wrote the two labels over each other.
+    var weekly=Spec(ChartKind.Column) with{YMin=0,YMax=600,Annotations=[new(AnnotationAxis.Y,400){To=500,Label="Target"},new(AnnotationAxis.Y,475){Label="Average"}],
+        Series=[new("Load",Enumerable.Range(0,12).Select(i=>new ChartPoint(i,380+i*15,$"W{i+1}")).ToArray())]};
+    var classic=Svg(Classic(weekly));
+    XElement Old(string name)=>classic.Descendants(ns+"g").Single(g=>((string?)g.Attribute("aria-label"))?.StartsWith(name)==true).Element(ns+"text")!;
+    Check(Overlap(Box(Old("Target")),Box(Old("Average"))),"the classic labels did not collide");
+    var refined=Halos(Svg(weekly));
+    Check(refined.Length==2&&!Overlap(Box(refined[0]),Box(refined[1])),string.Join("|",refined.Select(t=>$"{t.Value} {t.Attribute("y")}")));
+    double Y(double value)=>344-value/600*266;
+    var target=Box(refined.Single(t=>t.Value.StartsWith("Target")));var average=refined.Single(t=>t.Value.StartsWith("Average"));
+    Check(target.Top>=Y(500)&&target.Bottom<=Y(400),"the target's label left its band");
+    Check(Close(Attr(average,"y"),Y(475)-6),"the average's label left its line");
+    // Two upright lines close together: the second label drops a row instead of writing over the first.
+    var events=Svg(Spec() with{Annotations=[new(AnnotationAxis.X,.5){Label="Start"},new(AnnotationAxis.X,.55){Label="Restart"}]});
+    var oldEvents=Svg(Classic(Spec() with{Annotations=[new(AnnotationAxis.X,.5){Label="Start"},new(AnnotationAxis.X,.55){Label="Restart"}]})).Descendants(ns+"text").Where(t=>t.Value.Contains("tart: ")).ToArray();
+    Check(Overlap(Box(oldEvents[0]),Box(oldEvents[1])),"the classic event labels did not collide");
+    var halos=Halos(events);
+    Check(halos.Length==2&&!Overlap(Box(halos[0]),Box(halos[1]))&&Close(Attr(halos[1],"y")-Attr(halos[0],"y"),14),string.Join("|",halos.Select(t=>$"{t.Value} {t.Attribute("y")}")));
+    // Across many references every label shown is clear of every other.
+    var crowded=Halos(Svg(Spec() with{YZones=Effort(),Annotations=Enumerable.Range(0,8).Select(i=>new ChartAnnotation(AnnotationAxis.Y,121+i*9){Label=$"Line {i}"}).Append(new(AnnotationAxis.X,.2){To=.9,Label="Window"}).Append(new(AnnotationAxis.X,1.5){Label="Event"}).ToArray(),
+        Series=[new("S",Enumerable.Range(0,10).Select(i=>new ChartPoint(i/5d,110+i*9)).ToArray())]}));
+    Check(crowded.Length>=6&&crowded.SelectMany((a,i)=>crowded.Skip(i+1).Select(b=>(a,b))).All(p=>!Overlap(Box(p.a),Box(p.b))),"two labels overlap");
+});
+// The legend key of each series: the elements drawn between its row's start and its name, under the plot.
+XElement[] Key(XDocument doc,int index)
+{
+    var names=doc.Root!.Elements(ns+"text").Where(t=>(string?)t.Attribute("font-size")=="11"&&Attr(t,"y")>420).ToArray();
+    var name=names[index];var shapes=new List<XElement>();
+    for(var e=name.ElementsBeforeSelf().LastOrDefault();e is not null&&e.Name!=ns+"text"&&e.Name!=ns+"svg";e=e.ElementsBeforeSelf().LastOrDefault()) shapes.Insert(0,e);
+    return shapes.ToArray();
+}
+Test("Refined legend keys take the shape of their marks: a line, a dot or a square, dashed where the whole series is projected",()=>{
+    var mixed=Spec() with{Y2Label="Rate",Series=[new("Line",[new(0,1),new(1,2),new(2,3)]),new("Plan",[new(0,1),new(1,2),new(2,4)]){ProjectedFrom=0},new("Part plan",[new(0,1),new(1,2),new(2,4)]){ProjectedFrom=1},
+        new("Dots",[new(0,2),new(1,1),new(2,2)]){Kind=ChartKind.Scatter},new("Bars",[new(0,2),new(1,1),new(2,2)]){Kind=ChartKind.Column},new("Fill",[new(0,1),new(1,1),new(2,2)]){Kind=ChartKind.Area,Secondary=true},
+        new("Range",[ChartPoint.Interval(0,1,0,2),ChartPoint.Interval(1,2,1,3),ChartPoint.Interval(2,2,1,3)]){Kind=ChartKind.Band}]};
+    var doc=Svg(mixed);
+    string Shape(int i)=>string.Join(",",Key(doc,i).Select(e=>e.Name.LocalName));
+    Check(Enumerable.Range(0,7).Select(Shape).SequenceEqual(["line","line","line","circle","rect","rect","rect"]),string.Join("|",Enumerable.Range(0,7).Select(Shape)));
+    var line=Key(doc,0).Single();
+    Check((string?)line.Attribute("stroke")==ChartStyle.Light.Series[0]&&(string?)line.Attribute("stroke-width")=="2"&&(string?)line.Attribute("stroke-linecap")=="round"&&line.Attribute("stroke-dasharray") is null&&Attr(line,"y1")==Attr(line,"y2"),line.ToString());
+    Check((string?)Key(doc,1).Single().Attribute("stroke-dasharray")=="1 4"&&Key(doc,2).Single().Attribute("stroke-dasharray") is null,"a projection is not dashed only when it covers the whole series");
+    Check((string?)Key(doc,3).Single().Attribute("fill")==ChartStyle.Light.Series[3]&&(string?)Key(doc,3).Single().Attribute("r")=="4.5");
+    Check(Key(doc,4).Concat(Key(doc,5)).Concat(Key(doc,6)).All(r=>(string?)r.Attribute("width")=="9"&&(string?)r.Attribute("height")=="9"&&(string?)r.Attribute("rx")=="2"));
+    // Every key sits in the 14-pixel box before its name, which starts 20 pixels into the column.
+    var names=doc.Root!.Elements(ns+"text").Where(t=>(string?)t.Attribute("font-size")=="11"&&Attr(t,"y")>420).ToArray();
+    Check(names.Take(4).Select(t=>Attr(t,"x")).SequenceEqual([44d,257,470,683]),string.Join(",",names.Select(t=>Attr(t,"x"))));
+    // Scatter and bubble charts draw dots, column, bar, area, histogram and radar charts squares.
+    foreach(var (kind,shape) in new[]{(ChartKind.Scatter,"circle"),(ChartKind.Bubble,"circle"),(ChartKind.Column,"rect"),(ChartKind.Bar,"rect"),(ChartKind.StackedColumn,"rect"),(ChartKind.Area,"rect"),(ChartKind.Radar,"rect")})
+        Check(Key(Svg(Baseline(kind,ChartTheme.Light)),0).Single().Name.LocalName==shape,$"{kind}");
+    Check(Key(Svg(Baseline(ChartKind.Histogram,ChartTheme.Light) with{Series=[..Baseline(ChartKind.Histogram,ChartTheme.Light).Series,new("T",[new(0,1),new(1,2)])]}),1).Single().Name.LocalName=="rect");
+    // The classic finish keeps 0.23.0's square in the series colour, whatever the mark.
+    var classic=Svg(Classic(mixed));
+    Check(Enumerable.Range(0,7).All(i=>Key(classic,i).Single() is var r&&r.Name==ns+"rect"&&(string?)r.Attribute("fill")==ChartStyle.Light.SeriesColor(i)),"a classic key is not a square");
+});
+Test("A series drawn in colours of its own shows them in its legend key, side by side, instead of a series colour it never draws",()=>{
+    // Time in zone: every bar in its zone's colour, so the key is split into the first four of them.
+    var heart=ZoneScale.CogganHeartRate(170);
+    var zones=Spec(ChartKind.Bar) with{Series=[new("Time in zone",heart.Zones.Select((z,i)=>new ChartPoint(i,60+i*30,z.Name){Color=ChartStyle.Light.Zones[i]}).ToArray())]};
+    var key=Key(Svg(zones),0);
+    Check(key.Length==4&&key.All(r=>r.Name==ns+"rect"&&(string?)r.Attribute("height")=="9")&&key.Select(r=>(string?)r.Attribute("fill")).SequenceEqual(ChartStyle.Light.Zones.Take(4)),string.Join(",",key.Select(r=>r.ToString())));
+    Check(key.Zip(key.Skip(1)).All(p=>Close(Attr(p.First,"x")+Attr(p.First,"width"),Attr(p.Second,"x")))&&Close(key.Sum(r=>Attr(r,"width")),14),"the segments do not fill the key side by side");
+    Check(!key.Any(r=>(string?)r.Attribute("fill")==ChartStyle.Light.Series[0]),"the key still shows the series colour");
+    // Repeated colours count once, in order; a point without a colour leaves the key in the series colour; one colour throughout is that colour.
+    var repeated=Key(Svg(zones with{Series=[zones.Series[0] with{Points=zones.Series[0].Points.Select((p,i)=>p with{Color=i%2==0?"#123456":"#ABCDEF"}).ToArray()}]}),0);
+    Check(repeated.Select(r=>(string?)r.Attribute("fill")).SequenceEqual(["#123456","#ABCDEF"]),"repeated colours are not counted once");
+    Check((string?)Key(Svg(zones with{Series=[zones.Series[0] with{Points=[..zones.Series[0].Points.Take(4),zones.Series[0].Points[4] with{Color=null}]}]}),0).Single().Attribute("fill")==ChartStyle.Light.Series[0]);
+    Check((string?)Key(Svg(zones with{Series=[zones.Series[0] with{Points=zones.Series[0].Points.Select(p=>p with{Color="#123456"}).ToArray()}]}),0).Single().Attribute("fill")=="#123456");
+    // A line coloured by grade splits its line key; candles show their rising and falling colours.
+    var grade=Key(Svg(Spec() with{Series=[new("Elevation",[new(0,1){Color="#2E9B58"},new(1,2){Color="#DB6A1F"},new(2,3){Color="#DD4B45"}])]}),0);
+    Check(grade.Length==3&&grade.All(l=>l.Name==ns+"line")&&grade.Select(l=>(string?)l.Attribute("stroke")).SequenceEqual(["#2E9B58","#DB6A1F","#DD4B45"]),"a grade-coloured line's key is not split");
+    Check(Key(Svg(Sample(ChartKind.Candlestick)),0).Select(r=>(string?)r.Attribute("fill")).SequenceEqual([ChartStyle.Light.Rising,ChartStyle.Light.Falling]),"the candles' key is not rising and falling");
+    // The classic finish keeps 0.23.0's misleading square in the series colour.
+    Check((string?)Key(Svg(Classic(zones)),0).Single().Attribute("fill")==ChartStyle.Light.Series[0]);
+});
+Test("The component's legend draws the chart's own keys in the refined finish and 0.23.0's dots in the classic",()=>{
+    var spec=Spec() with{Series=[new("Line",[new(0,1),new(1,2)]),new("Dots",[new(0,2),new(1,1)]){Kind=ChartKind.Scatter},new("Bars",[new(0,2),new(1,1)]){Kind=ChartKind.Column},
+        new("Zones",[new(0,2){Color="#123456"},new(1,1){Color="#ABCDEF"}]){Kind=ChartKind.Column},new("Plan",[new(0,3),new(1,4)]){ProjectedFrom=0}]};
+    var html=RenderInside(null,spec);
+    var chart=Svg(spec);
+    for(var i=0;i<spec.Series.Count;i++)
+    {
+        // The legend draws exactly the key ChartSvg.LegendKey returns, and it is the chart's own key, moved to the origin.
+        var key=ChartSvg.LegendKey(spec,i);
+        Check(html.Contains(key),$"series {i}'s button does not draw its key");
+        var own=XDocument.Parse(key).Root!.Elements().ToArray();var drawn=Key(chart,i);
+        Check(own.Length==drawn.Length&&own.Zip(drawn).All(p=>p.First.Name==p.Second.Name&&(string?)p.First.Attribute("fill")==(string?)p.Second.Attribute("fill")&&(string?)p.First.Attribute("stroke")==(string?)p.Second.Attribute("stroke")
+            &&(string?)p.First.Attribute("stroke-dasharray")==(string?)p.Second.Attribute("stroke-dasharray")),$"series {i}'s key differs from the chart's");
+        Check((string?)XDocument.Parse(key).Root!.Attribute("aria-hidden")=="true"&&(string?)XDocument.Parse(key).Root!.Attribute("viewBox")=="0 0 14 9");
+    }
+    Check(!html.Contains("<span style=\"background:"),"a refined legend still draws dots");
+    // A cascaded brand reaches the keys; a donut's one series shows its slices, which the chart draws in their own colours.
+    Check(RenderInside(ChartStyle.Midnight,spec).Contains(ChartSvg.LegendKey(spec with{Style=ChartStyle.Midnight},0))&&ChartSvg.LegendKey(spec with{Style=ChartStyle.Midnight},0).Contains(ChartStyle.Midnight.Series[0]),"the cascaded brand did not reach the legend");
+    var donut=Sample(ChartKind.Donut) with{Series=[new("Mix",[new(0,3,"A"),new(1,2,"B"){Color="#123456"},new(2,1,"C")])]};
+    Check(RenderInside(null,donut).Contains(ChartSvg.LegendKey(donut,0))&&XDocument.Parse(ChartSvg.LegendKey(donut,0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual([ChartStyle.Light.Series[0],"#123456",ChartStyle.Light.Series[2]]),"the donut's key is not its slices");
+    // A heatmap row is drawn in the ramp from low to high, so that is its key.
+    Check(XDocument.Parse(ChartSvg.LegendKey(Sample(ChartKind.Heatmap),0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual([ChartStyle.Light.HeatmapLow,ChartStyle.Light.HeatmapHigh]),"a heatmap row's key is not its ramp");
+    // The classic finish keeps the dot it always drew, in the series colour.
+    var classic=RenderInside(ChartStyle.Light with{Finish=ChartFinish.Classic},spec);
+    Check(Enumerable.Range(0,spec.Series.Count).All(i=>classic.Contains($"<span style=\"background:{ChartStyle.Light.SeriesColor(i)}\"></span>"))&&!classic.Contains("viewBox='0 0 14 9'"),"the classic legend changed");
+    // The stylesheet sets the key beside its name.
+    var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
+    Check(css.Contains(".lumen-legend svg{")&&css.Contains(".lumen-legend span{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px}"));
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

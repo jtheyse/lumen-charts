@@ -57,7 +57,7 @@ public static class GraphEngine
             var a = layout[edge.Source];
             if (edge.Source == edge.Target)
             {
-                w.Add($"<path d='M{N(a.X - 12)},{N(a.Y - 17)} C{N(a.X - 65)},{N(a.Y - 75)} {N(a.X + 65)},{N(a.Y - 75)} {N(a.X + 12)},{N(a.Y - 17)}' fill='none' stroke='{w.Style.Edge}'><title>{SvgWriter.E(edge.Label ?? "Self-loop")}</title></path>");
+                w.Add($"<path d='M{N(a.X - 12)},{N(a.Y - 17)} C{N(a.X - 65)},{N(a.Y - 75)} {N(a.X + 65)},{N(a.Y - 75)} {N(a.X + 12)},{N(a.Y - 17)}' fill='none' stroke='{w.Style.Edge}'{w.Fixed}><title>{SvgWriter.E(edge.Label ?? "Self-loop")}</title></path>");
                 continue;
             }
             // Dragged endpoints replace the layout's own; the bends between them stay where the layout put them.
@@ -66,7 +66,7 @@ public static class GraphEngine
             var start = Shift(points[0], points[1], Trim);
             var end = Shift(points[^1], points[^2], Trim);
             points[0] = start; points[^1] = end;
-            w.Add($"<path d='{Path(points)}' fill='none' stroke='{w.Style.Edge}' stroke-width='1.5'/>");
+            w.Add($"<path d='{Path(points)}' fill='none' stroke='{w.Style.Edge}' stroke-width='1.5'{w.Fixed}/>");
             var direction = Unit(points[^2], end);
             w.Add($"<path d='M{N(end.X)},{N(end.Y)} L{N(end.X - direction.X * 9 - direction.Y * 4)},{N(end.Y - direction.Y * 9 + direction.X * 4)} L{N(end.X - direction.X * 9 + direction.Y * 4)},{N(end.Y - direction.Y * 9 - direction.X * 4)} Z' fill='{w.Style.Edge}'/>");
             if (edge.Label is not null)
@@ -79,7 +79,7 @@ public static class GraphEngine
         for (var i = 0; i < graph.Nodes.Count; i++)
         {
             var n = graph.Nodes[i]; var p = layout[n.Id]; var color = n.Color ?? w.Style.SeriesColor(i);
-            w.Add($"<g class='lumen-node' tabindex='0' role='button' data-node='{SvgWriter.E(n.Id)}' data-position='{N(p.X)},{N(p.Y)}' aria-label='{SvgWriter.E(n.Label)}'><title>{SvgWriter.E(n.Label)}</title><circle cx='{N(p.X)}' cy='{N(p.Y)}' r='{N(Radius)}' fill='{color}' fill-opacity='.15' stroke='{color}' stroke-width='2'/>");
+            w.Add($"<g class='lumen-node' tabindex='0' role='button' data-node='{SvgWriter.E(n.Id)}' data-position='{N(p.X)},{N(p.Y)}' aria-label='{SvgWriter.E(n.Label)}'><title>{SvgWriter.E(n.Label)}</title><circle cx='{N(p.X)}' cy='{N(p.Y)}' r='{N(Radius)}' fill='{color}' fill-opacity='.15' stroke='{color}' stroke-width='2'{w.Fixed}/>");
             w.Text(p.X, p.Y + 5, (i + 1).ToString(), "text-anchor='middle' font-weight='600'");
             w.Text(p.X, p.Y + 42, ChartSvg.Short(n.Label, 22), "text-anchor='middle'"); w.Add("</g>");
         }
