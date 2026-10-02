@@ -71,9 +71,12 @@ public static class DemoData
         }
         if(kind==Lumen.Charts.ChartKind.Histogram)
         {
-            series=[new("Response time",Enumerable.Range(0,320).Select(i=>
-                new Lumen.Charts.ChartPoint(i,Math.Round(38-Math.Log(1-random.NextDouble())*24,1))).ToArray())];
-            title="Where the response times land";desc="320 sampled requests · bin count chosen from the data";
+            // After the cache most requests are hits; the misses keep the old tail.
+            series=[new("Before caching",Enumerable.Range(0,320).Select(i=>
+                    new Lumen.Charts.ChartPoint(i,Math.Round(38-Math.Log(1-random.NextDouble())*24,1))).ToArray()),
+                new("After caching",Enumerable.Range(0,320).Select(i=>
+                    new Lumen.Charts.ChartPoint(i,Math.Round(i%10<7?12-Math.Log(1-random.NextDouble())*6:38-Math.Log(1-random.NextDouble())*24,1))).ToArray())];
+            title="See where the response times moved";desc="320 sampled requests before and after a cache · one set of bins, chosen from both";
             x="Response time (ms)";y="Requests";
         }
         if(kind is Lumen.Charts.ChartKind.Box or Lumen.Charts.ChartKind.Violin)
@@ -85,8 +88,10 @@ public static class DemoData
             title="Compare the spread, not just the average";
             desc=kind==Lumen.Charts.ChartKind.Violin
                 ? "Latency samples by region · the outline is a kernel density estimate, the bar the quartiles"
-                : "Latency samples by region · box shows quartiles, whiskers reach 1.5 interquartile ranges";
+                : "Latency samples by region, and Asia as a five-number summary from the warehouse · whiskers reach 1.5 interquartile ranges";
             x="Region";y="Latency (ms)";
+            // Asia arrives already summarised, so a violin, which needs the observations, leaves it out.
+            if(kind==Lumen.Charts.ChartKind.Box) series=[..series,new("Asia",[]){Summary=new(205,228,252,160,318,[352,371])}];
         }
         if(kind==Lumen.Charts.ChartKind.Bar) {title="Compare plans without the clutter";x="Month";}
         if(kind==Lumen.Charts.ChartKind.Scatter || kind==Lumen.Charts.ChartKind.Bubble)

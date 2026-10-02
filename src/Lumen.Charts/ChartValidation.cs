@@ -16,7 +16,7 @@ public static partial class ChartValidation
         if (spec.XAxis != AxisKind.Linear && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band))
             throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC and band charts; the other kinds index or derive their X values.");
         if (spec.YAxis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Box or ChartKind.Violin))
-            throw new ArgumentException("Log Y axes require line, scatter, bubble, candlestick, OHLC, band or box charts; magnitude, count and radial charts need a zero baseline.");
+            throw new ArgumentException("Log Y axes require line, scatter, bubble, candlestick, OHLC, band, box or violin charts; magnitude, count and radial charts need a zero baseline.");
         if (!Enum.IsDefined(spec.Y2Axis) || spec.Y2Axis == AxisKind.Time) throw new ArgumentException("The secondary axis is numeric or logarithmic; time axes are supported on X only.");
         if (spec.Y2Axis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band))
             throw new ArgumentException("A logarithmic secondary axis requires line, scatter, bubble or band charts.");
@@ -60,8 +60,10 @@ public static partial class ChartValidation
             if (spec.Kind != ChartKind.Scatter) throw new ArgumentException("Density cells apply to scatter charts; the other kinds either draw one mark per category or already sample.");
             if (spec.DensityCells is < 8 or > 200) throw new ArgumentException("DensityCells must be between 8 and 200.");
         }
-        if (spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Histogram && spec.Series.Count > 1)
-            throw new ArgumentException("Candlestick, OHLC and histogram charts accept one series.");
+        if (spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc && spec.Series.Count > 1)
+            throw new ArgumentException("Candlestick and OHLC charts accept one series.");
+        if (spec.Kind == ChartKind.Histogram && spec.Series.Count > 4)
+            throw new ArgumentException("Histograms accept at most four series; past four, the bars side by side in each bin are too narrow to read.");
         Bounds(spec.XMin, spec.XMax); Bounds(spec.YMin, spec.YMax);
         if (spec.XAxis == AxisKind.Log && (spec.XMin <= 0 || spec.XMax <= 0)) throw new ArgumentException("Log X bounds must be positive.");
         if (spec.YAxis == AxisKind.Log && (spec.YMin <= 0 || spec.YMax <= 0)) throw new ArgumentException("Log Y bounds must be positive.");
@@ -88,10 +90,13 @@ public static partial class ChartValidation
         var count = 0;
         foreach (var series in spec.Series)
         {
-            if (series is null || series.Points is null) throw new ArgumentException("Series and points cannot be null.");
+            if (series is null || series.Points is null)
+                throw new ArgumentException(series?.Summary is null ? "Series and points cannot be null." : "A series with a summary still needs a points list; pass an empty one.");
             if (series.Name is null) throw new ArgumentException("Series names cannot be null.");
             Text(series.Name); Color(series.Color);
-            count += series.Points.Count;
+            if (series.Summary is not null) Summary(series, spec.Kind, spec.YAxis);
+            // A summary's outliers are drawn one mark each, so they count towards the limit like points.
+            count += series.Points.Count + (series.Summary?.Outliers.Count ?? 0);
             if (count > MaxPoints) throw new ArgumentException($"At most {MaxPoints} points are supported per chart.");
             foreach (var p in series.Points)
             {
@@ -141,6 +146,21 @@ public static partial class ChartValidation
         if (!Finite(low) || !Finite(high) || low > high)
             throw new ArgumentException("Band bounds must be finite with Low no greater than High.");
         if (axis == AxisKind.Log && low <= 0) throw new ArgumentException("Log Y axes require positive band bounds.");
+    }
+
+    private static void Summary(ChartSeries series, ChartKind kind, AxisKind axis)
+    {
+        var s = series.Summary!;
+        if (kind != ChartKind.Box)
+            throw new ArgumentException("A precomputed summary applies to box charts only; a violin cannot estimate a density from five numbers, and the other kinds draw observations.");
+        if (series.Points.Count > 0) throw new ArgumentException("A series with a summary must have no points, because the two could disagree.");
+        if (s.Outliers is null) throw new ArgumentException("Summary outliers cannot be null; use an empty list.");
+        if (!Finite(s.LowerWhisker) || !Finite(s.Q1) || !Finite(s.Median) || !Finite(s.Q3) || !Finite(s.UpperWhisker) || !s.Outliers.All(Finite))
+            throw new ArgumentException("Summary values must be finite, magnitude <= 1e100.");
+        if (s.LowerWhisker > s.Q1 || s.Q1 > s.Median || s.Median > s.Q3 || s.Q3 > s.UpperWhisker)
+            throw new ArgumentException("Summary values must satisfy LowerWhisker <= Q1 <= Median <= Q3 <= UpperWhisker.");
+        if (axis == AxisKind.Log && (s.LowerWhisker <= 0 || s.Outliers.Any(v => v <= 0)))
+            throw new ArgumentException("Log Y axes require positive summary values; use a linear axis for zero or negative data.");
     }
 
     internal static void Style(ChartStyle? style)

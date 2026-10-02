@@ -336,7 +336,7 @@ Test("Histogram bar heights follow the bin counts",()=>{
     for(var i=1;i<4;i++)Check(Math.Sign(heights[i]-heights[i-1])==Math.Sign(counts[i]-counts[i-1]));
 });
 Test("Reject histogram specifications the binning cannot honor",()=>{
-    Reject(()=>ChartSvg.Render(Distribution(6) with{Series=[Distribution(6).Series[0],Distribution(6).Series[0]]}));
+    Reject(()=>ChartSvg.Render(Distribution(6) with{Series=Enumerable.Repeat(Distribution(6).Series[0],5).ToArray()}));
     Reject(()=>ChartSvg.Render(Distribution(6) with{Bins=0}));
     Reject(()=>ChartSvg.Render(Distribution(6) with{YAxis=AxisKind.Log}));
     Reject(()=>ChartSvg.Render(Distribution(6) with{XAxis=AxisKind.Time}));
@@ -1259,6 +1259,176 @@ Test("OHLC CSV exports the four prices",()=>{
     var csv=ChartExport.Csv(Ohlc());
     Check(csv.StartsWith("Series,X,Y,Label,Size,Open,High,Low,Close"));
     Check(csv.Contains("10,12.5,9.5,11.8"));
+});
+BoxSummary Warehouse()=>new(20,30,45,5,70,[90,2]);
+ChartSpec Supplied(BoxSummary summary,params ChartPoint[] points)=>Spec(ChartKind.Box) with{Series=[new("Asia",points){Summary=summary}]};
+XElement Glyph(XDocument doc)=>doc.Descendants(ns+"g").First(e=>(string?)e.Attribute("class")=="lumen-datum"&&e.Element(ns+"rect") is not null);
+double[] Grid(XDocument doc)=>doc.Descendants(ns+"line").Where(l=>(string?)l.Attribute("class")=="lumen-grid").Select(l=>Coord(l,"y1")).ToArray();
+Test("A supplied summary is drawn where its five numbers say",()=>{
+    var summary=Warehouse();
+    var doc=Svg(Supplied(summary));
+    var glyph=Glyph(doc);
+    var lines=glyph.Elements(ns+"line").ToArray();
+    var stem=lines.Single(l=>Coord(l,"x1")==Coord(l,"x2"));
+    var median=lines.Single(l=>(string?)l.Attribute("stroke-width")=="2.5");
+    var box=glyph.Element(ns+"rect")!;
+    // The whisker ends fix one map from value to pixel; every other number must land on it.
+    double upper=Coord(stem,"y1"),lower=Coord(stem,"y2");
+    double At(double value)=>lower+(value-summary.LowerWhisker)/(summary.UpperWhisker-summary.LowerWhisker)*(upper-lower);
+    Check(Math.Abs(Coord(box,"y")-At(summary.Q3))<1e-6,"the box does not start at Q3");
+    Check(Math.Abs(Coord(box,"y")+Coord(box,"height")-At(summary.Q1))<1e-6,"the box does not end at Q1");
+    Check(Coord(median,"y1")==Coord(median,"y2")&&Math.Abs(Coord(median,"y1")-At(summary.Median))<1e-6,"the median line is misplaced");
+    var caps=lines.Where(l=>l!=stem&&l!=median).Select(l=>Coord(l,"y1")).Order().ToArray();
+    Check(caps.SequenceEqual([upper,lower]),"the whisker caps are not at the whisker ends");
+    var marks=doc.Descendants(ns+"circle").Select(c=>Coord(c,"cy")).Order().ToArray();
+    Check(marks.Length==2&&Math.Abs(marks[0]-At(90))<1e-6&&Math.Abs(marks[1]-At(2))<1e-6,"the outliers are misplaced");
+    // The axis reaches the outliers: its grid matches a chart of observations spanning 2 to 90.
+    var raw=Svg(Spec(ChartKind.Box) with{Series=[new("Asia",new[]{2d,5,20,30,45,70,90}.Select(ChartPoint.Observation).ToArray())]});
+    Check(Grid(doc).SequenceEqual(Grid(raw)),"the axis does not reach the outliers");
+});
+Test("A supplied summary's outliers name no point to select",()=>{
+    var doc=Svg(Supplied(Warehouse()));
+    Check(!doc.Descendants().Any(e=>e.Attribute("data-point") is not null||e.Attribute("data-series") is not null),"a supplied outlier claims a point index");
+    var outliers=doc.Descendants(ns+"g").Where(e=>e.Element(ns+"circle") is not null).ToArray();
+    Check(outliers.Length==2);
+    Check(outliers.All(o=>(string?)o.Attribute("class")=="lumen-datum"&&(string?)o.Attribute("tabindex")=="0"&&(string?)o.Attribute("role")=="img"),"an outlier is not a focusable aggregate");
+    var labels=outliers.Select(o=>o.Attribute("aria-label")!.Value).Order().ToArray();
+    Check(labels.SequenceEqual(["Asia outlier (supplied summary): 2","Asia outlier (supplied summary): 90"]),string.Join(" | ",labels));
+    // Beside it, a series of observations still raises its own outlier.
+    var mixed=Svg(Spec(ChartKind.Box) with{Series=[new("Asia",[]){Summary=Warehouse()},new("Europe",[new(0,1),new(1,2),new(2,3),new(3,4),new(4,5),new(5,100)])]});
+    var indexed=mixed.Descendants(ns+"g").Single(e=>e.Attribute("data-point") is not null);
+    Check((string?)indexed.Attribute("data-series")=="1"&&(string?)indexed.Attribute("data-point")=="5","the observed outlier lost its index");
+});
+Test("A supplied summary says so and claims no observation count",()=>{
+    var doc=Svg(Spec(ChartKind.Box) with{Series=[new("Asia",[]){Summary=Warehouse()},new("Europe",Enumerable.Range(1,9).Select(i=>new ChartPoint(i,i*10d)).ToArray())]});
+    var texts=doc.Descendants(ns+"text").Select(e=>e.Value).ToArray();
+    Check(texts.Contains("Asia (summary)")&&!texts.Any(t=>t.Contains("Asia (n=")),"the summary column claims a count");
+    Check(texts.Contains("Europe (n=9)"),"the observed column lost its count");
+    var label=Glyph(doc).Attribute("aria-label")!.Value;
+    Check(label=="Asia (supplied summary): median 30, quartiles 20 to 45, whiskers 5 to 70, 2 outliers",label);
+    Check(RenderInside(Brand(),Supplied(Warehouse())).Contains("Asia (summary)"),"the component did not draw the summary");
+});
+Test("A supplied summary is drawn as given, whatever its whisker rule",()=>{
+    // Minimum and maximum whiskers reach well past Tukey's fences, and an outlier may sit inside them.
+    var doc=Svg(Supplied(new(20,30,40,0,200,[35])));
+    Check(Glyph(doc).Attribute("aria-label")!.Value.Contains("whiskers 0 to 200, 1 outliers"));
+    Check(doc.Descendants(ns+"circle").Count()==1);
+    Check(Svg(Supplied(new(5,5,5,5,5,[]))).Descendants(ns+"rect").Any(),"a summary with no spread drew nothing");
+});
+Test("Reject a summary that cannot be drawn honestly",()=>{
+    var good=Warehouse();
+    Reject(()=>ChartSvg.Render(Supplied(good,new ChartPoint(0,25))));
+    Reject(()=>ChartSvg.Render(Spec(ChartKind.Box) with{Series=[new("Asia",null!){Summary=good}]}));
+    Reject(()=>ChartSvg.Render(Supplied(good with{Outliers=null!})));
+    foreach(var bad in new[]{double.NaN,double.PositiveInfinity,1e101})
+    {
+        Reject(()=>ChartSvg.Render(Supplied(good with{LowerWhisker=bad})));
+        Reject(()=>ChartSvg.Render(Supplied(good with{Q1=bad})));
+        Reject(()=>ChartSvg.Render(Supplied(good with{Median=bad})));
+        Reject(()=>ChartSvg.Render(Supplied(good with{Q3=bad})));
+        Reject(()=>ChartSvg.Render(Supplied(good with{UpperWhisker=bad})));
+        Reject(()=>ChartSvg.Render(Supplied(good with{Outliers=[90,bad]})));
+    }
+    Reject(()=>ChartSvg.Render(Supplied(good with{LowerWhisker=21})));
+    Reject(()=>ChartSvg.Render(Supplied(good with{Q1=31})));
+    Reject(()=>ChartSvg.Render(Supplied(good with{Median=46})));
+    Reject(()=>ChartSvg.Render(Supplied(good with{Q3=71})));
+    Reject(()=>ChartSvg.Render(Supplied(good with{UpperWhisker=44})));
+    Check(ChartSvg.Render(Supplied(good)).Contains("Asia (summary)"));
+});
+Test("Only a box chart takes a supplied summary",()=>{
+    foreach(var kind in Enum.GetValues<ChartKind>().Where(kind=>kind!=ChartKind.Box))
+    {
+        try { ChartSvg.Render(Spec(kind) with{Series=[new("Asia",[]){Summary=Warehouse()}]}); throw new Exception($"{kind} drew a summary"); }
+        catch(ArgumentException error) { Check(error.Message.Contains("box charts only"),$"{kind}: {error.Message}"); }
+    }
+});
+Test("A supplied summary on a log axis needs positive numbers and reaches its outliers",()=>{
+    var spec=Supplied(new(40,90,300,8,900,[5000,2])) with{YAxis=AxisKind.Log};
+    var doc=Svg(spec);
+    Check(doc.Descendants(ns+"text").Any(e=>e.Value=="1000"),"the decades stop short of the outlier");
+    Reject(()=>ChartSvg.Render(Supplied(new(40,90,300,0,900,[])) with{YAxis=AxisKind.Log}));
+    Reject(()=>ChartSvg.Render(Supplied(new(40,90,300,8,900,[-1])) with{YAxis=AxisKind.Log}));
+});
+Test("A supplied summary survives a JSON round trip",()=>{
+    var options=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web){Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}};
+    var spec=Supplied(Warehouse());
+    var back=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(System.Text.Json.JsonSerializer.Serialize(spec,options),options)!;
+    Check(ChartSvg.Render(back)==ChartSvg.Render(spec),"the summary changed in transit");
+    // A host writing JSON by hand names the five numbers and leaves out what the record derives.
+    var json="{\"title\":\"Example\",\"kind\":\"Box\",\"series\":[{\"name\":\"Asia\",\"points\":[],\"summary\":{\"q1\":20,\"median\":30,\"q3\":45,\"lowerWhisker\":5,\"upperWhisker\":70,\"outliers\":[90,2]}}]}";
+    Check(ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,options)!)==ChartSvg.Render(spec),"hand-written JSON drew something else");
+});
+ChartSpec Compared(int? bins,params (string Name,double[] Values)[] sets)=>Spec(ChartKind.Histogram) with{Bins=bins,
+    Series=sets.Select(set=>new ChartSeries(set.Name,set.Values.Select(ChartPoint.Observation).ToArray())).ToArray()};
+XElement[] Bars(XDocument doc)=>doc.Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-datum"&&e.Element(ns+"rect") is not null).ToArray();
+double[] Early()=>Enumerable.Range(0,60).Select(i=>i*.8).ToArray();
+double[] Late()=>Enumerable.Range(0,45).Select(i=>30+i*1.6).ToArray();
+Test("Several histogram series share one set of bin edges",()=>{
+    var sets=Statistics.SharedBins([Early(),Late()]);
+    Check(sets.Count==2&&sets[0].Select(b=>(b.Start,b.End)).SequenceEqual(sets[1].Select(b=>(b.Start,b.End))),"the edges differ between series");
+    var pooled=Statistics.Bins([..Early(),..Late()]);
+    Check(pooled.Select(b=>(b.Start,b.End)).SequenceEqual(sets[0].Select(b=>(b.Start,b.End))),"the edges are not the pooled data's");
+    Check(pooled.Select(b=>b.Count).SequenceEqual(sets[0].Zip(sets[1],(a,b)=>a.Count+b.Count)),"the series do not add up to the pooled counts");
+    Check(sets[0].Sum(b=>b.Count)==60&&sets[1].Sum(b=>b.Count)==45);
+    // The chart reads the same ranges for both series.
+    var ranges=Bars(Svg(Compared(null,("Early",Early()),("Late",Late())))).Select(b=>b.Attribute("aria-label")!.Value)
+        .GroupBy(l=>l.Split(", ")[0],l=>l.Split(", ")[1].Split(':')[0]).Select(g=>g.ToArray()).ToArray();
+    Check(ranges.Length==2&&ranges[0].Length==pooled.Count&&ranges[0].SequenceEqual(ranges[1]),"the chart labels different ranges per series");
+});
+Test("Each histogram series counts its own observations in each shared bin",()=>{
+    var doc=Svg(Compared(4,("A",[0,1,5,12,15,25,39]),("B",[8,18,19,22,28,31,40])));
+    var bars=Bars(doc);
+    // Counted by hand over edges 0, 10, 20, 30 and 40, the last bin closed at the top.
+    string[] expected=["A, 0 to 10: 3 observations","B, 0 to 10: 1 observations","A, 10 to 20: 2 observations","B, 10 to 20: 2 observations",
+        "A, 20 to 30: 1 observations","B, 20 to 30: 2 observations","A, 30 to 40: 1 observations","B, 30 to 40: 2 observations"];
+    var labels=bars.Select(b=>b.Attribute("aria-label")!.Value).ToArray();
+    Check(labels.SequenceEqual(expected),string.Join(" | ",labels));
+    var heights=bars.Select(b=>Coord(b.Element(ns+"rect")!,"height")).ToArray();
+    Check(Math.Abs(heights[0]-3*heights[1])<1e-6&&Math.Abs(heights[2]-heights[3])<1e-6,"bar heights do not follow the counts");
+});
+Test("Bars in one bin stand side by side inside it",()=>{
+    double[] a=Early(),b=Late(),c=Enumerable.Range(0,30).Select(i=>10+i*2.5).ToArray();
+    var bars=Bars(Svg(Compared(6,("A",a),("B",b),("C",c)))).Select(e=>e.Element(ns+"rect")!).ToArray();
+    // The pooled observations as one series fill each bin with a single bar, which marks the bin.
+    var whole=Bars(Svg(Compared(6,("All",[..a,..b,..c])))).Select(e=>e.Element(ns+"rect")!).ToArray();
+    Check(bars.Length==18&&whole.Length==6);
+    for(var i=0;i<6;i++)
+    {
+        var group=bars.Skip(i*3).Take(3).ToArray();
+        double start=Coord(whole[i],"x"),end=start+Coord(whole[i],"width");
+        double first=Coord(group[0],"x"),last=Coord(group[2],"x")+Coord(group[2],"width");
+        Check(first>start&&last<end,$"bin {i}: the bars leave the bin or run into the next");
+        Check(Math.Abs((first-start)-(end-last))<1e-6,$"bin {i}: the group is not centred in its bin");
+        for(var k=0;k<2;k++)Check(Coord(group[k],"x")+Coord(group[k],"width")<=Coord(group[k+1],"x")+1e-6,$"bin {i}: bars {k} and {k+1} overlap");
+        Check(group.All(r=>Coord(r,"width")>0),$"bin {i}: a bar has no width");
+        Check(group.Select(r=>(string?)r.Attribute("fill")).SequenceEqual(ChartSvg.Palette.Take(3)),$"bin {i}: the bars are not in their series colours");
+    }
+});
+Test("A histogram of one series keeps its labels and draws no legend",()=>{
+    var doc=Svg(Distribution(6));
+    Check((string?)doc.Root!.Attribute("viewBox")=="0 0 900 420","a single histogram grew a legend");
+    Check(Bars(doc).All(b=>System.Text.RegularExpressions.Regex.IsMatch(b.Attribute("aria-label")!.Value,@"^[\d.]+ to [\d.]+: \d+ observations$")),"a single histogram renamed its bins");
+    var values=Distribution(6).Series[0].Points.Select(p=>p.Y!.Value).ToArray();
+    Check(Statistics.Bins(values,6).SequenceEqual(Statistics.SharedBins([values],6)[0]),"one set binned alone and as the only shared set disagree");
+});
+Test("A histogram of several series carries a legend and says what it pooled",()=>{
+    var spec=Compared(null,("Before",Late()),("After",Early()));
+    var doc=Svg(spec);
+    Check((string?)doc.Root!.Attribute("viewBox")=="0 0 900 442","no legend row");
+    Check(doc.Descendants(ns+"text").Any(e=>e.Value=="Before")&&doc.Descendants(ns+"text").Any(e=>e.Value=="After"),"the legend does not name both series");
+    Check(doc.Descendants(ns+"text").Any(e=>e.Value.StartsWith("105 observations across 2 series in ")&&e.Value.EndsWith(" shared equal-width bins")),"the caption does not say the bins are shared");
+    Check((string?)XDocument.Parse(ChartSvg.Render(spec,includeLegend:false)).Root!.Attribute("viewBox")=="0 0 900 420","a component legend was not left to the component");
+});
+Test("A histogram series with no observations keeps its place",()=>{
+    var bars=Bars(Svg(Compared(3,("Full",[1,2,3,4,5,6]),("Empty",[]))));
+    Check(bars.Length==6&&bars.Where((_,i)=>i%2==1).All(b=>b.Attribute("aria-label")!.Value.EndsWith(": 0 observations")),"the empty series lost its bars");
+});
+Test("A histogram takes at most four series",()=>{
+    ChartSeries Set(int i)=>new($"S{i}",Enumerable.Range(0,20).Select(v=>ChartPoint.Observation(v+i*3)).ToArray());
+    Check(Bars(Svg(Spec(ChartKind.Histogram) with{Bins=5,Series=Enumerable.Range(0,4).Select(Set).ToArray()})).Length==20);
+    try { ChartSvg.Render(Spec(ChartKind.Histogram) with{Series=Enumerable.Range(0,5).Select(Set).ToArray()}); throw new Exception("five series were drawn"); }
+    catch(ArgumentException error) { Check(error.Message.Contains("at most four"),error.Message); }
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

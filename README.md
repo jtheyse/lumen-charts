@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.16.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.17.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -124,8 +124,8 @@ The line is fitted in the space the chart draws in, which is what keeps it strai
 | `Candlestick` | One series; every point carries `Open`, `High`, `Low`, `Close` — use `ChartPoint.Candle` | Wick across the low-high range, body from open to close, colored by direction (`ChartSvg.RisingColor` and `FallingColor`) |
 | `Ohlc` | The same as `Candlestick` — one series of `ChartPoint.Candle` points | Vertical line across the low-high range, a tick to the left at the open and a tick to the right at the close, colored by direction |
 | `Band` | `Y` with `Low` and `High` bounds — use `ChartPoint.Interval` | Filled interval behind the central line; points without bounds break the band into runs |
-| `Histogram` | One series of raw observations in `Y`; `X` is ignored | Equal-width bins over a zero baseline. `Bins` sets the count; otherwise Freedman–Diaconis chooses it, falling back to Sturges when the interquartile range is zero |
-| `Box` | One series per distribution, raw observations in `Y`; `X` is ignored | Quartile box, Tukey whiskers at 1.5 interquartile ranges, and outliers as circles |
+| `Histogram` | One to four series of raw observations in `Y`; `X` is ignored | Equal-width bins over a zero baseline, chosen from the pooled observations and shared by every series. `Bins` sets the count; otherwise Freedman–Diaconis chooses it, falling back to Sturges when the interquartile range is zero. Several series stand side by side within each bin |
+| `Box` | One series per distribution: raw observations in `Y` with `X` ignored, or a precomputed `Summary` and no points | Quartile box, Tukey whiskers at 1.5 interquartile ranges, and outliers as circles; a supplied summary is drawn as given |
 | `Violin` | One series per distribution, raw observations in `Y`; `X` is ignored | Kernel density outline mirrored about each column, with a quartile bar and a median tick |
 
 ```csharp
@@ -140,9 +140,15 @@ ChartSpec latency = new() {
     Series = [new("Europe", europe.Select(ChartPoint.Observation).ToArray()),
               new("Africa", africa.Select(ChartPoint.Observation).ToArray())]
 };
+
+ChartSpec warehouse = new() {
+    Kind = ChartKind.Box, YLabel = "Latency (ms)",
+    Series = [new("Asia", []) { Summary = new(Q1: 205, Median: 228, Q3: 252,
+        LowerWhisker: 160, UpperWhisker: 318, Outliers: [352, 371]) }]
+};
 ```
 
-`Statistics.Quantile`, `Statistics.Summarize` and `Statistics.Bins` are public, so the same numbers are available without rendering. Quantiles interpolate linearly between order statistics, matching NumPy's default and Excel's `PERCENTILE.INC`. CSV exports add `Open,High,Low,Close` for candlestick charts and `Low,High` for band charts.
+`Statistics.Quantile`, `Statistics.Summarize`, `Statistics.Bins` and `Statistics.SharedBins` are public, so the same numbers are available without rendering. Quantiles interpolate linearly between order statistics, matching NumPy's default and Excel's `PERCENTILE.INC`. CSV exports add `Open,High,Low,Close` for candlestick charts and `Low,High` for band charts.
 
 ### Branding
 
@@ -308,6 +314,7 @@ app.MapLumenCharts();
 ```json
 {"title":"Revenue","kind":"Column","series":[{"name":"Sales","points":[{"x":1,"y":24,"label":"Jan"},{"x":2,"y":38,"label":"Feb"}]}]}
 {"title":"Traffic","kind":"Line","xAxis":"Time","yAxis":"Log","series":[{"name":"Edge","points":[{"x":1767225600000,"y":12},{"x":1769904000000,"y":940}]}]}
+{"title":"Latency","kind":"Box","series":[{"name":"Asia","points":[],"summary":{"q1":205,"median":228,"q3":252,"lowerWhisker":160,"upperWhisker":318,"outliers":[352,371]}}]}
 ```
 
 Invalid chart semantics return HTTP 400 problem details. Malformed JSON is rejected by ASP.NET Core. The endpoints do not fetch URLs, execute supplied code, save submitted data, or contact outside services. Add application-specific authorization and rate limits when hosting publicly. The sample limits request bodies to 16 MiB.
@@ -316,7 +323,7 @@ Invalid chart semantics return HTTP 400 problem details. Malformed JSON is rejec
 
 Measured by the regression suite, so a change that breaks one of these fails the build:
 
-- Every data mark is a focusable element with an accessible name carrying its series, category and value — `Workspace: Sep, 60.3`. Interactive marks use `role="button"`; histogram bins and box glyphs, which are aggregates, use `role="img"`.
+- Every data mark is a focusable element with an accessible name carrying its series, category and value — `Workspace: Sep, 60.3`. Interactive marks use `role="button"`; histogram bins, box glyphs and the outliers of a supplied box summary, which are aggregates, use `role="img"`.
 - Each chart and graph exposes its title and description as the accessible name of the drawing.
 - Series colors keep at least 3:1 contrast against both the light and the dark chart background, and every text color keeps at least 4.5:1. Heatmap cells carry a hairline so the palest ones stay distinguishable.
 - No element takes a positive tab index. The toolbar status is a live region, legend buttons expose `aria-pressed`, the data toggle exposes `aria-expanded`, and the data table has a caption with scoped column headers.
@@ -343,7 +350,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 ## Supported behavior and limits
 
 - Line, area, scatter, bubble, column, horizontal bar, signed stacked column, donut, heatmap, radar, candlestick, OHLC bar, uncertainty band, histogram, box plot, violin.
-- Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter and bubble charts; log Y applies to line, scatter and bubble charts, because magnitude and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999, and `TimeZone` decides the calendar they are read in. `SkipWeekends` and `TimeSkips` compress a time axis over spans it should not draw, at most 400 listed spans per chart; the axis stays piecewise proportional, so a gap in the data itself still reads as a gap. Irregular tick placement is not implemented.
+- Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC and band charts; log Y applies to line, scatter, bubble, candlestick, OHLC, band, box and violin charts, because magnitude, count and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999, and `TimeZone` decides the calendar they are read in. `SkipWeekends` and `TimeSkips` compress a time axis over spans it should not draw, at most 400 listed spans per chart; the axis stays piecewise proportional, so a gap in the data itself still reads as a gap. Irregular tick placement is not implemented.
 - `MinorGridlines` adds lighter lines between the labelled ticks: four or five divisions per interval on a linear axis depending on its step, the mantissas between decades on a logarithmic one, and none on a time axis, because half of a month is not a boundary anyone reads. Off by default.
 - Explicit limits via XMin/XMax/YMin/YMax. Bars and areas enforce a zero baseline. Null Y preserves gaps in lines/areas and is omitted elsewhere.
 - Line/area min/max sampling preserves original indices and extrema per continuous run; this is not a total chart-wide point budget. CSV always exports original observations.
@@ -351,14 +358,22 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Bubble area is proportional to Size across all series. Radar requires complete, nonnegative series on common categories. Donut accepts one nonnegative series.
 - A trend line applies to line, area, scatter and bubble charts; category, radial and derived kinds refuse it. It is one least-squares line per series, fitted over every observation in the series rather than the zoomed window, and it is not an observation: it raises no point selection, appears in no CSV export and adds no row to the data table. Other fits — moving averages, polynomial, exponential regression — are not implemented.
 - A violin estimates its outline with a Gaussian kernel at Silverman's bandwidth, taking the smaller of the standard deviation and the interquartile range so one long tail cannot smooth the shape away. The estimate is drawn over the observed range and no further, so the outline claims no values the data never had, and it is computed in the space the axis draws in, so a logarithmic axis shapes the violin in logarithms. The widest point of each violin fills its column: widths are comparable within a chart but carry no units, and the quartile bar and median tick carry the numbers. A violin is an aggregate, like a histogram bin or a box: focusable and named, raising no point selection. A series with fewer than two observations, or with no spread, draws its quartile bar and median without an outline. The bandwidth is not configurable, and split or paired violins are not implemented.
-- Candlestick, OHLC bar and histogram accept one series. Candlestick and OHLC bar take the same input: all four prices with High highest and Low lowest, colored by direction rather than by series. An OHLC tick is half the width of a candle body, so the two drawings of one dataset stand in the same columns and can be compared; neither carries a volume pane. Band points need both bounds or neither. Histogram and box read observations from Y and ignore X; box computes its own quartiles, so precomputed five-number summaries are not accepted yet. Histogram bins and box glyphs are labelled, focusable aggregates that report no observation index, so they raise no point selection; candlesticks, OHLC bars and box outliers do.
+- Candlestick and OHLC bar accept one series, and a histogram up to four. Candlestick and OHLC bar take the same input: all four prices with High highest and Low lowest, colored by direction rather than by series. An OHLC tick is half the width of a candle body, so the two drawings of one dataset stand in the same columns and can be compared; neither carries a volume pane. Band points need both bounds or neither. Histogram and box read observations from Y and ignore X. A histogram of several series bins them over one set of edges chosen from the pooled observations and stands their bars side by side; counts are raw, not normalised, so a larger series draws taller bars. A box series may instead carry a precomputed `Summary` and no points: it is drawn as given, claims no observation count, applies to box charts only, and its outliers count towards the 100,000-point limit. Histogram bins and box glyphs are labelled, focusable aggregates that report no observation index, so they raise no point selection; candlesticks, OHLC bars and box outliers computed from observations do, and the outliers of a supplied summary do not.
 - Layered graphs use longest-path levels, then barycenter sweeps that keep the ordering with the fewest crossings found. This is a heuristic, not minimal crossings. Edges spanning several levels bend once per level and are drawn as smooth curves; there is no orthogonal routing, no force simulation and no automatic node overlap removal. Self-loops are allowed in layered graphs and draw as a loop on their node; longer cycles still need the circular layout. Nodes can be dragged or nudged with the arrow keys in the component, which needs an interactive render mode. At most 250 nodes / 2,000 edges; dense graphs can still overlap.
 - Narrow screens use a keyboard-focusable, horizontally scrollable chart viewport to preserve label readability.
 - HTML tooltips on hover and keyboard focus in the component, native SVG tooltips in exported and server-rendered charts, keyboard-focusable data marks, point selection, tables, and accessible labels. See [Accessibility](#accessibility) for what is measured and what is not. This is not a claim of WCAG certification.
-- SVG, PNG and CSV exports. PNG is rasterized in the browser from the same SVG, so it needs an interactive render mode; there is no server-side PNG or PDF rendering, 3D, annotations, or streaming transport yet.
+- SVG, PNG and CSV exports. PNG is rasterized in the browser from the same SVG, so it needs an interactive render mode; there is no server-side PNG or PDF rendering, 3D, or streaming transport yet.
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.17.0 additions
+
+Precomputed box summaries. `ChartSeries.Summary` takes a `BoxSummary` — quartiles, median, whiskers and outliers — computed somewhere else, such as a warehouse that never hands over its rows, and the box chart draws it as given instead of computing one. A series with a summary carries no points, and one with both is refused, because the two could disagree; in JSON, send `"points":[]` beside the summary. The numbers must be finite and ordered, `LowerWhisker <= Q1 <= Median <= Q3 <= UpperWhisker`, and positive on a log axis, which reaches the whiskers and outliers. The outliers are not checked against the whiskers: a host's own rule may put the whiskers at the minimum and maximum, or at the 5th and 95th percentiles, rather than at Tukey's fences, and the chart draws what it is given. The observation count is unknown, so the column reads `Asia (summary)` rather than claiming an `n`, the box's accessible name says it is a supplied summary, and its outliers are focusable, labelled aggregates that raise no point selection, because there is no point behind them. Every other kind refuses a summary; a violin, in particular, cannot estimate a density from five numbers. CSV export and the component's data table list observations, so a summary series adds no rows to either.
+
+Histograms of several distributions. Up to four series share one set of equal-width bins chosen from their pooled observations — `Bins` if set, the automatic rule otherwise — so a bin covers the same range for every series, and their bars stand side by side within it, in their series colours, rather than over one another. Each bar's label names its series, the caption says the bins are shared, and the static SVG adds a legend. `Statistics.SharedBins` returns the same counts without rendering. Past four series the bars are too narrow to read, so a fifth is refused. The bins are fitted to the pooled range, so a narrow series sits in the few bins it reaches, and counts are not normalised, so series of different sizes compare by height only as far as their sizes allow. Overlaid, stacked and density histograms are not implemented.
+
+A single-series histogram and every box chart without a summary render byte for byte as before: the 71 hashed renderings match, and two new ones cover the new cases. The gallery's histogram compares response times before and after a cache, and its box plot adds Asia as a warehouse summary beside the three sampled regions.
 
 ## 0.16.0 additions
 

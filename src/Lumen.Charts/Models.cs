@@ -28,6 +28,11 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// <summary>Draws a least-squares line through this series. Fitted in the space each axis draws in,
     /// so it stays straight on screen; a series with no spread in X draws none.</summary>
     public bool Trend { get; init; }
+    /// <summary>Box charts only. A five-number summary computed elsewhere, such as in a warehouse, drawn as
+    /// given instead of one computed from points, so a series that carries one has no points. Whiskers and
+    /// outliers stand where the summary puts them and are not checked against Tukey's fences, so a host's own
+    /// rule — the minimum and maximum, or the 5th and 95th percentiles — is drawn as that rule.</summary>
+    public BoxSummary? Summary { get; init; }
 
     public static ChartSeries From<T>(string name, IEnumerable<T> items,
         Func<T, double> x, Func<T, double?> y, Func<T, string?>? label = null) =>

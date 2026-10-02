@@ -40,8 +40,9 @@ public static class ChartSvg
         ChartValidation.Validate(spec);
         var w = new SvgWriter { Titles = includeTitles, Style = ResolveStyle(spec), MinorGrid = spec.MinorGridlines };
         var legendColumns = Math.Max(1, (spec.Width - 48) / 180);
-        var legendRows = includeLegend && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Histogram and not ChartKind.Box
-            and not ChartKind.Violin ? (int)Math.Ceiling(spec.Series.Count / (double)legendColumns) : 0;
+        // A histogram of one distribution needs no key; of several, its colours are the only way to tell them apart.
+        var legendRows = includeLegend && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Box and not ChartKind.Violin
+            && (spec.Kind != ChartKind.Histogram || spec.Series.Count > 1) ? (int)Math.Ceiling(spec.Series.Count / (double)legendColumns) : 0;
         Begin(w, spec.Width, spec.Height + legendRows * 22, spec.Title, spec.Description);
         if (!HasData(spec))
             w.Text(spec.Width / 2, spec.Height / 2, "No data to display", "text-anchor='middle'");
@@ -88,7 +89,7 @@ public static class ChartSvg
         (p.Low.HasValue && p.High.HasValue ? $" (band {y.Format(p.Low.Value)} to {y.Format(p.High.Value)})" : "");
     private static bool HasData(ChartSpec spec) => spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc
         ? spec.Series.Any(s => s.Points.Count > 0)
-        : spec.Series.Any(s => s.Points.Any(p => p.Y.HasValue));
+        : spec.Series.Any(s => s.Summary is not null || s.Points.Any(p => p.Y.HasValue));
     private static string N(double n) => SvgWriter.N(n);
     /// <summary>Counts are grouped invariantly, so a host's culture cannot change what the chart reads.</summary>
     private static string Count(int value) => value.ToString("N0", CultureInfo.InvariantCulture);
@@ -406,21 +407,36 @@ public static class ChartSvg
     private static void Aggregate(SvgWriter w, string label, string shape) =>
         w.Add($"<g class='lumen-datum' tabindex='0' role='img' aria-label='{SvgWriter.E(label)}'>{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}{shape}</g>");
 
+    /// <summary>
+    /// Several distributions share one set of bins, chosen from their pooled observations, so a bin covers the
+    /// same range for each. Their bars stand side by side within it rather than over one another, so no bar
+    /// hides another; a single distribution fills each bin with one bar.
+    /// </summary>
     private static void Histogram(SvgWriter w, ChartSpec s)
     {
-        var observations = s.Series[0].Points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray();
-        var bins = Statistics.Bins(observations, s.Bins);
+        var observations = s.Series.Select(series => series.Points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray()).ToArray();
+        var counted = Statistics.SharedBins(observations, s.Bins);
+        var bins = counted[0];
         double left = 76, right = s.Width - 30, top = 78, bottom = s.Height - 76;
         var xs = new Axis(AxisKind.Linear, bins[0].Start, bins[^1].End);
-        var ys = Axis.Create(AxisKind.Linear, bins.Select(b => (double)b.Count), true, s.YMin, s.YMax);
+        var ys = Axis.Create(AxisKind.Linear, counted.SelectMany(set => set).Select(b => (double)b.Count), true, s.YMin, s.YMax);
         Frame(w, s, ys, left, right, top, bottom);
-        var color = SeriesColor(s.Series[0], 0, w.Style);
-        foreach (var bin in bins)
+        var several = s.Series.Count > 1;
+        for (var bi = 0; bi < bins.Count; bi++)
         {
-            double x = xs.Map(bin.Start, left, right), width = xs.Map(bin.End, left, right) - x, y = ys.Map(bin.Count, bottom, top);
-            // Bins are aggregates: they carry a label and keyboard focus but no original-observation index.
-            Aggregate(w, $"{LinearScale.Label(bin.Start)} to {LinearScale.Label(bin.End)}: {bin.Count} observations",
-                $"<rect x='{N(x)}' y='{N(y)}' width='{N(Math.Max(width - 1, .5))}' height='{N(bottom - y)}' fill='{color}'/>");
+            double x = xs.Map(bins[bi].Start, left, right), width = xs.Map(bins[bi].End, left, right) - x;
+            var full = Math.Max(width - 1, .5);
+            // Several bars inset their group, so a bin reads as one group instead of running into the next.
+            var inset = several ? full * .1 : 0;
+            var slot = (full - 2 * inset) / s.Series.Count;
+            for (var si = 0; si < s.Series.Count; si++)
+            {
+                var bin = counted[si][bi];
+                var y = ys.Map(bin.Count, bottom, top);
+                // Bins are aggregates: they carry a label and keyboard focus but no original-observation index.
+                Aggregate(w, $"{(several ? $"{s.Series[si].Name}, " : "")}{LinearScale.Label(bin.Start)} to {LinearScale.Label(bin.End)}: {bin.Count} observations",
+                    $"<rect x='{N(x + inset + si * slot)}' y='{N(y)}' width='{N(slot)}' height='{N(bottom - y)}' fill='{SeriesColor(s.Series[si], si, w.Style)}'/>");
+            }
         }
         var step = Math.Max(1, (int)Math.Ceiling(bins.Count / ((right - left) / 70)));
         for (var i = 0; i <= bins.Count; i += step)
@@ -428,39 +444,53 @@ public static class ChartSvg
             var edge = i < bins.Count ? bins[i].Start : bins[^1].End;
             w.Text(xs.Map(edge, left, right), bottom + 21, LinearScale.Label(edge), "text-anchor='middle' class='lumen-muted'");
         }
-        w.Text(right, 64, $"{observations.Length} observations in {bins.Count} equal-width bins", "text-anchor='end' class='lumen-muted' font-size='11'");
+        var total = observations.Sum(set => set.Length);
+        w.Text(right, 64, several ? $"{total} observations across {s.Series.Count} series in {bins.Count} shared equal-width bins" : $"{total} observations in {bins.Count} equal-width bins",
+            "text-anchor='end' class='lumen-muted' font-size='11'");
     }
 
     private static void Box(SvgWriter w, ChartSpec s)
     {
         var observations = s.Series.Select(series => series.Points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray()).ToArray();
         double left = 76, right = s.Width - 30, top = 78, bottom = s.Height - 76;
-        var ys = Axis.Create(s.YAxis, observations.SelectMany(v => v), s.IncludeZero, s.YMin, s.YMax);
+        // A supplied summary has no observations behind it, so its whiskers and outliers are what the axis must reach.
+        var supplied = s.Series.Select(series => series.Summary).OfType<BoxSummary>()
+            .SelectMany(summary => summary.Outliers.Append(summary.LowerWhisker).Append(summary.UpperWhisker));
+        var ys = Axis.Create(s.YAxis, observations.SelectMany(v => v).Concat(supplied), s.IncludeZero, s.YMin, s.YMax);
         Frame(w, s, ys, left, right, top, bottom);
         var band = (right - left) / s.Series.Count;
         for (var si = 0; si < s.Series.Count; si++)
         {
-            if (observations[si].Length == 0) continue;
-            var summary = Statistics.Summarize(observations[si]);
+            var given = s.Series[si].Summary;
+            if (given is null && observations[si].Length == 0) continue;
+            var summary = given ?? Statistics.Summarize(observations[si]);
             var color = SeriesColor(s.Series[si], si, w.Style);
             var center = left + (si + .5) * band;
             var width = Math.Min(band * .45, 80);
             double q1 = ys.Map(summary.Q1, bottom, top), q3 = ys.Map(summary.Q3, bottom, top);
             double lower = ys.Map(summary.LowerWhisker, bottom, top), upper = ys.Map(summary.UpperWhisker, bottom, top);
             var median = ys.Map(summary.Median, bottom, top);
-            Aggregate(w, $"{s.Series[si].Name}: median {ys.Format(summary.Median)}, quartiles {ys.Format(summary.Q1)} to {ys.Format(summary.Q3)}, whiskers {ys.Format(summary.LowerWhisker)} to {ys.Format(summary.UpperWhisker)}, {summary.Outliers.Count} outliers",
+            Aggregate(w, $"{s.Series[si].Name}{(given is null ? "" : " (supplied summary)")}: median {ys.Format(summary.Median)}, quartiles {ys.Format(summary.Q1)} to {ys.Format(summary.Q3)}, whiskers {ys.Format(summary.LowerWhisker)} to {ys.Format(summary.UpperWhisker)}, {summary.Outliers.Count} outliers",
                 $"<line x1='{N(center)}' y1='{N(upper)}' x2='{N(center)}' y2='{N(lower)}' stroke='{color}' stroke-width='1.5'/>" +
                 $"<line x1='{N(center - width / 4)}' y1='{N(upper)}' x2='{N(center + width / 4)}' y2='{N(upper)}' stroke='{color}' stroke-width='1.5'/>" +
                 $"<line x1='{N(center - width / 4)}' y1='{N(lower)}' x2='{N(center + width / 4)}' y2='{N(lower)}' stroke='{color}' stroke-width='1.5'/>" +
                 $"<rect x='{N(center - width / 2)}' y='{N(Math.Min(q1, q3))}' width='{N(width)}' height='{N(Math.Max(Math.Abs(q1 - q3), 1))}' rx='2' fill='{color}' fill-opacity='.18' stroke='{color}' stroke-width='1.5'/>" +
                 $"<line x1='{N(center - width / 2)}' y1='{N(median)}' x2='{N(center + width / 2)}' y2='{N(median)}' stroke='{color}' stroke-width='2.5'/>");
+            string Mark(double value) => $"<circle cx='{N(center)}' cy='{N(ys.Map(value, bottom, top))}' r='3.5' fill='none' stroke='{color}' stroke-width='1.5'/>";
+            if (given is not null)
+            {
+                // A supplied outlier is a number, not one of the series' points, so it can name no point to select.
+                foreach (var value in given.Outliers) Aggregate(w, $"{s.Series[si].Name} outlier (supplied summary): {ys.Format(value)}", Mark(value));
+                // The observation count is unknown, so the column claims none.
+                w.Text(center, bottom + 21, Short($"{s.Series[si].Name} (summary)", 22), "text-anchor='middle' class='lumen-muted'");
+                continue;
+            }
             var fence = 1.5 * summary.InterquartileRange;
             for (var pi = 0; pi < s.Series[si].Points.Count; pi++)
             {
                 var p = s.Series[si].Points[pi];
                 if (p.Y is not { } value || (value >= summary.Q1 - fence && value <= summary.Q3 + fence)) continue;
-                Datum(w, si, pi, $"{s.Series[si].Name} outlier: {ys.Format(value)}",
-                    $"<circle cx='{N(center)}' cy='{N(ys.Map(value, bottom, top))}' r='3.5' fill='none' stroke='{color}' stroke-width='1.5'/>");
+                Datum(w, si, pi, $"{s.Series[si].Name} outlier: {ys.Format(value)}", Mark(value));
             }
             w.Text(center, bottom + 21, Short($"{s.Series[si].Name} (n={observations[si].Length})", 22), "text-anchor='middle' class='lumen-muted'");
         }

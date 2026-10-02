@@ -1,6 +1,7 @@
 namespace Lumen.Charts;
 
-/// <summary>Quartiles with Tukey whiskers. Outliers are observations beyond 1.5 interquartile ranges from the box.</summary>
+/// <summary>Quartiles, whiskers and outliers. <see cref="Statistics.Summarize"/> uses Tukey whiskers, with outliers
+/// beyond 1.5 interquartile ranges from the box; a summary supplied on <see cref="ChartSeries.Summary"/> may use any rule.</summary>
 public sealed record BoxSummary(double Q1, double Median, double Q3, double LowerWhisker, double UpperWhisker, IReadOnlyList<double> Outliers)
 {
     public double InterquartileRange => Q3 - Q1;
@@ -95,24 +96,30 @@ public static class Statistics
     }
 
     /// <summary>Equal-width bins. Freedman–Diaconis chooses the count when <paramref name="count"/> is null, falling back to Sturges.</summary>
-    public static IReadOnlyList<HistogramBin> Bins(IReadOnlyList<double> values, int? count = null)
+    public static IReadOnlyList<HistogramBin> Bins(IReadOnlyList<double> values, int? count = null) => SharedBins([values], count)[0];
+
+    /// <summary>
+    /// One set of equal-width bins for several sets of observations, so a bin covers the same range in every
+    /// set. The edges are chosen from the pooled observations exactly as <see cref="Bins"/> chooses them for one
+    /// set, and each set is then counted against them; a set with no observations counts zero in every bin.
+    /// </summary>
+    public static IReadOnlyList<IReadOnlyList<HistogramBin>> SharedBins(IReadOnlyList<IReadOnlyList<double>> sets, int? count = null)
     {
-        if (values.Count == 0) throw new ArgumentException("A histogram requires at least one observation.");
+        var sorted = sets.SelectMany(set => set).OrderBy(v => v).ToArray();
+        if (sorted.Length == 0) throw new ArgumentException("A histogram requires at least one observation.");
         if (count is < 1 or > MaxBins) throw new ArgumentException($"Bin counts must be between 1 and {MaxBins}.");
-        var sorted = values.OrderBy(v => v).ToArray();
         double low = sorted[0], high = sorted[^1];
         var identical = low == high;
         if (identical) { low -= .5; high += .5; }
         var bins = count ?? (identical ? 1 : Auto(sorted, high - low));
         var width = (high - low) / bins;
-        var counts = new int[bins];
-        foreach (var value in sorted)
+        return sets.Select(set =>
         {
+            var counts = new int[bins];
             // The final bin includes its upper edge so the maximum observation is counted.
-            var index = Math.Clamp((int)((value - low) / width), 0, bins - 1);
-            counts[index]++;
-        }
-        return Enumerable.Range(0, bins).Select(i => new HistogramBin(low + i * width, low + (i + 1) * width, counts[i])).ToArray();
+            foreach (var value in set) counts[Math.Clamp((int)((value - low) / width), 0, bins - 1)]++;
+            return (IReadOnlyList<HistogramBin>)Enumerable.Range(0, bins).Select(i => new HistogramBin(low + i * width, low + (i + 1) * width, counts[i])).ToArray();
+        }).ToArray();
     }
 
     private static int Auto(double[] sorted, double range)

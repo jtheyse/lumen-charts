@@ -32,6 +32,23 @@ foreach($family in $families){
 }
 $r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $families[0].body
 Verify ($r.Content.StartsWith('Series,X,Y,Label,Size,Open,High,Low,Close')) 'Candlestick CSV exports prices'
+$summary='{"title":"Warehouse","kind":"Box","series":[{"name":"Asia","points":[],"summary":{"q1":205,"median":228,"q3":252,"lowerWhisker":160,"upperWhisker":318,"outliers":[352,371]}}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $summary -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'A precomputed box summary posted as JSON renders'
+Verify ($r.Content.Contains('Asia (supplied summary): median 228, quartiles 205 to 252, whiskers 160 to 318, 2 outliers') -and $r.Content.Contains('>Asia (summary)<') -and -not $r.Content.Contains('data-point=')) 'A supplied summary is drawn as given and names no point'
+foreach($kind in @('Violin','Line')){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $summary.Replace('"kind":"Box"','"kind":"'+$kind+'"') -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400) "A summary on a $kind chart is rejected"
+}
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $summary.Replace('"points":[]','"points":[{"x":0,"y":230}]') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'A series with both points and a summary is rejected'
+$compared='{"title":"Latency","kind":"Histogram","bins":4,"series":[{"name":"Before","points":[{"x":0,"y":1},{"x":1,"y":5},{"x":2,"y":12},{"x":3,"y":25}]},{"name":"After","points":[{"x":0,"y":2},{"x":1,"y":3},{"x":2,"y":4},{"x":3,"y":39}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $compared -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'A two-series histogram renders'
+Verify ($r.Content.Contains('Before, 1 to 10.5: 2 observations') -and $r.Content.Contains('After, 1 to 10.5: 3 observations') -and $r.Content.Contains('>Before<') -and $r.Content.Contains('>After<') -and $r.Content.Contains('8 observations across 2 series in 4 shared equal-width bins')) 'A two-series histogram draws and names both series'
+$five=$compared.Replace('"series":[','"series":[{"name":"A","points":[{"x":0,"y":1}]},{"name":"B","points":[{"x":0,"y":1}]},{"name":"C","points":[{"x":0,"y":1}]},')
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $five -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'A histogram of five series is rejected'
 foreach($bad in @('{"kind":"Candlestick","series":[{"name":"P","points":[{"x":0,"y":1}]}]}','{"kind":"Band","series":[{"name":"F","points":[{"x":0,"y":1,"low":5,"high":2}]}]}','{"kind":"Histogram","bins":0,"series":[{"name":"H","points":[{"x":0,"y":1}]}]}')){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400) 'Invalid family request rejected'
