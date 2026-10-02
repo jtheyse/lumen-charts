@@ -44,6 +44,8 @@ To make a future superiority claim defensible, benchmark equivalent datasets and
 
 ## Next major capabilities, in priority order
 
+Fitness and training charts come first: the research, the gaps it found and the build order are in [FITNESS.md](FITNESS.md). The items below continue after it.
+
 1. Strengthen chart presentation at extreme aspect ratios, dense labels, many series and tiny numeric ranges. Automatic time and base-10 logarithmic scales shipped in 0.2.0 and reference lines and bands in 0.9.0; time zones shipped in 0.11.0, minor gridlines in 0.12.0 and business calendars in 0.13.0; irregular tick placement remains open. A second Y axis shipped in 0.10.0.
 2. Extend the statistical and financial families. Candlestick, uncertainty band, histogram and box plot shipped in 0.3.0 with numerical tests; least-squares trend lines shipped in 0.14.0, violin plots in 0.15.0, OHLC bars in 0.16.0, and precomputed five-number summaries for box plots and histograms of up to four distributions in 0.17.0; volume panes, other regression families, and normalised or overlaid histograms remain open.
 3. Continue the graph work. Barycenter crossing reduction, bend routing for long edges, node dragging and a documented selection API shipped in 0.5.0; orthogonal routing, force-directed placement, node overlap removal, edge bundling and cycle-tolerant layered drawings remain open.
