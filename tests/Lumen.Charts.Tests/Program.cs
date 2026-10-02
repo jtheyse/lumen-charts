@@ -17,7 +17,7 @@ ChartSpec Spec(ChartKind kind=ChartKind.Line)=>new(){Title="Example",Kind=kind,S
 XNamespace ns="http://www.w3.org/2000/svg";
 XDocument Svg(ChartSpec spec)=>XDocument.Parse(ChartSvg.Render(spec));
 ChartSpec Sample(ChartKind kind)=>kind switch{
-    ChartKind.Candlestick=>Spec(kind) with{Series=[new("Price",[ChartPoint.Candle(0,10,12,9,11),ChartPoint.Candle(1,11,13,10,10.5),ChartPoint.Candle(2,10.5,11,8,9)])]},
+    ChartKind.Candlestick or ChartKind.Ohlc=>Spec(kind) with{Series=[new("Price",[ChartPoint.Candle(0,10,12,9,11),ChartPoint.Candle(1,11,13,10,10.5),ChartPoint.Candle(2,10.5,11,8,9)])]},
     ChartKind.Band=>Spec(kind) with{Series=[new("Forecast",[ChartPoint.Interval(0,2,1,3),ChartPoint.Interval(1,5,4,6),ChartPoint.Interval(2,3,2,4)])]},
     ChartKind.Histogram or ChartKind.Box or ChartKind.Violin=>Spec(kind) with{Series=[new("Sample",Enumerable.Range(0,40).Select(i=>new ChartPoint(i,i%7+1)).ToArray())]},
     _=>Spec(kind)};
@@ -1173,6 +1173,92 @@ Test("A violin with one observation still reports it",()=>{
     var doc=Svg(Spec(ChartKind.Violin) with{Series=[new("Single",[new(0,5)])]});
     Check(!doc.ToString().Contains("fill-opacity='.22'"),"a single observation drew a shape");
     Check(doc.Descendants(ns+"g").Any(e=>(string?)e.Attribute("class")=="lumen-datum"),"the column vanished");
+});
+ChartSpec Ohlc()=>Candles() with{Kind=ChartKind.Ohlc};
+XElement[] Marks(ChartSpec spec)=>Svg(spec).Descendants(ns+"g").Where(e=>e.Attribute("data-point") is not null).ToArray();
+double Coord(XElement line,string name)=>(double)line.Attribute(name)!;
+Test("An OHLC bar ticks the open to the left and the close to the right",()=>{
+    var marks=Marks(Ohlc());
+    Check(marks.Length==3);
+    Check(marks.All(m=>m.Elements(ns+"line").Count()==3&&!m.Elements(ns+"rect").Any()),"an OHLC bar is three lines and no body");
+    foreach(var mark in marks)
+    {
+        var lines=mark.Elements(ns+"line").ToArray();
+        var range=lines.Single(l=>Coord(l,"x1")==Coord(l,"x2"));
+        var centre=Coord(range,"x1");
+        var open=lines.Single(l=>Coord(l,"x2")==centre&&Coord(l,"x1")<centre);
+        var close=lines.Single(l=>Coord(l,"x1")==centre&&Coord(l,"x2")>centre);
+        Check(Coord(open,"y1")==Coord(open,"y2")&&Coord(close,"y1")==Coord(close,"y2"),"a price tick is not horizontal");
+        Check(centre-Coord(open,"x1")==Coord(close,"x2")-centre,"the ticks are not the same length");
+        Check(Coord(range,"y1")<Coord(open,"y1")&&Coord(open,"y1")<Coord(range,"y2"),"the open sits outside the high-low range");
+        Check(Coord(range,"y1")<Coord(close,"y1")&&Coord(close,"y1")<Coord(range,"y2"),"the close sits outside the high-low range");
+    }
+});
+Test("An OHLC bar ticks the prices a candle body would start and end at",()=>{
+    var bars=Marks(Ohlc());
+    var bodies=Marks(Candles()).Select(m=>m.Element(ns+"rect")!)
+        .Select(r=>(Top:Coord(r,"y"),Bottom:Coord(r,"y")+Coord(r,"height"))).ToArray();
+    for(var i=0;i<bars.Length;i++)
+    {
+        var lines=bars[i].Elements(ns+"line").ToArray();
+        var centre=Coord(lines.Single(l=>Coord(l,"x1")==Coord(l,"x2")),"x1");
+        var open=lines.Single(l=>Coord(l,"x2")==centre&&Coord(l,"x1")<centre);
+        var close=lines.Single(l=>Coord(l,"x1")==centre&&Coord(l,"x2")>centre);
+        // A rising day closes above it opens, so its close is the top of the body and its open the bottom.
+        var rising=(string?)close.Attribute("stroke")==ChartSvg.RisingColor;
+        Check(Coord(close,"y1")==(rising?bodies[i].Top:bodies[i].Bottom),$"bar {i}: the close is not where the body ends");
+        Check(Coord(open,"y1")==(rising?bodies[i].Bottom:bodies[i].Top),$"bar {i}: the open is not where the body starts");
+    }
+});
+Test("An OHLC bar is coloured by direction, from the style",()=>{
+    var colours=Marks(Ohlc()).Select(m=>m.Elements(ns+"line").Select(l=>(string?)l.Attribute("stroke")).Distinct().Single()).ToArray();
+    Check(colours[0]==ChartSvg.RisingColor&&colours[1]==ChartSvg.FallingColor&&colours[2]==ChartSvg.RisingColor,string.Join(",",colours));
+    var branded=ChartSvg.Render(Ohlc() with{Style=Brand()});
+    Check(branded.Contains("stroke='#2E7D5B'")&&branded.Contains("stroke='#B03A2E'"),"a styled OHLC chart ignores the style's directions");
+});
+Test("An OHLC line spans the full high-low range",()=>{
+    (double Top,double Bottom)[] Ranges(ChartSpec spec)=>Marks(spec)
+        .Select(m=>m.Elements(ns+"line").Single(l=>Coord(l,"x1")==Coord(l,"x2")))
+        .Select(l=>(Coord(l,"y1"),Coord(l,"y2"))).ToArray();
+    var ranges=Ranges(Ohlc());
+    Check(ranges.SequenceEqual(Ranges(Candles())),"the bars and the candles disagree about the range");
+    // Pixel height follows the price range: 13 to 9.2 against 12.5 to 9.5.
+    Check(Math.Abs((ranges[2].Bottom-ranges[2].Top)/(ranges[0].Bottom-ranges[0].Top)-3.8/3)<1e-9,"the line is not proportional to the range");
+});
+Test("An OHLC mark names all four prices",()=>{
+    var label=Marks(Ohlc())[0].Attribute("aria-label")!.Value;
+    Check(label.Contains("open 10")&&label.Contains("high 12.5")&&label.Contains("low 9.5")&&label.Contains("close 11.8"),label);
+    Check(Marks(Ohlc())[0].Element(ns+"title")!.Value==label,"the native tooltip and the accessible name disagree");
+});
+Test("OHLC accepts a time X axis and a log Y axis",()=>{
+    var start=TimeAxis.Value(new DateTimeOffset(2026,1,1,0,0,0,TimeSpan.Zero));
+    var doc=Svg(Ohlc() with{XAxis=AxisKind.Time,YAxis=AxisKind.Log,Series=[new("Price",[
+        ChartPoint.Candle(start,10,12,9,11),ChartPoint.Candle(start+30*86400000d,11,140,10,130),ChartPoint.Candle(start+60*86400000d,130,1400,120,1200)])]});
+    Check(doc.Descendants(ns+"text").Any(e=>e.Value.Contains("Jan")));
+    Check(doc.Descendants(ns+"text").Any(e=>e.Value=="100"));
+    // Weekends left out of the axis, and a reference behind the bars, as the candlestick takes them.
+    var trading=Svg(Ohlc() with{XAxis=AxisKind.Time,SkipWeekends=true,Annotations=[new(AnnotationAxis.Y,11){Label="Open"}],
+        Series=[new("Price",Enumerable.Range(0,10).Select(i=>ChartPoint.Candle(start+i*86400000d,10,12,9,11)).ToArray())]});
+    Check(!trading.Descendants(ns+"text").Any(e=>e.Value=="3 Jan"),"a Saturday was labelled");
+    Check(trading.Descendants(ns+"text").Any(e=>e.Value=="Open: 11"));
+});
+Test("An OHLC chart refuses what a candlestick refuses",()=>{
+    Func<ChartSpec,ChartSpec>[] broken=[
+        s=>s with{Series=[new("P",[new(0,1)])]},
+        s=>s with{Series=[new("P",[ChartPoint.Candle(0,10,10.5,9,11)])]},
+        s=>s with{Series=[new("P",[ChartPoint.Candle(0,10,12,10.5,11)])]},
+        s=>s with{Series=[s.Series[0],s.Series[0] with{Name="Second"}]},
+        s=>s with{Series=[s.Series[0] with{Trend=true}]},
+        s=>s with{Series=[s.Series[0],s.Series[0] with{Name="Second",Secondary=true}]},
+        s=>s with{YAxis=AxisKind.Log,Series=[new("P",[ChartPoint.Candle(0,1,2,0,1.5)])]},
+        s=>s with{Series=[new("P",[ChartPoint.Candle(2,10,12,9,11),ChartPoint.Candle(1,10,12,9,11)])]}];
+    foreach(var kind in (ChartKind[])[ChartKind.Candlestick,ChartKind.Ohlc])
+        foreach(var mutate in broken) Reject(()=>ChartSvg.Render(mutate(Sample(kind))));
+});
+Test("OHLC CSV exports the four prices",()=>{
+    var csv=ChartExport.Csv(Ohlc());
+    Check(csv.StartsWith("Series,X,Y,Label,Size,Open,High,Low,Close"));
+    Check(csv.Contains("10,12.5,9.5,11.8"));
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

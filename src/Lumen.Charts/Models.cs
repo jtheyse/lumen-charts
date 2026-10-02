@@ -1,12 +1,12 @@
 namespace Lumen.Charts;
 
-public enum ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin }
+public enum ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc }
 public enum ChartTheme { Light, Dark }
 
 /// <summary>Null Y is a missing observation, never an implicit zero. Size encodes bubble area.</summary>
 public sealed record ChartPoint(double X, double? Y, string? Label = null, double Size = 1)
 {
-    /// <summary>Candlestick prices. All four are required by that chart kind and ignored by every other one.</summary>
+    /// <summary>Prices. All four are required by the candlestick and OHLC kinds and ignored by every other one.</summary>
     public double? Open { get; init; }
     public double? High { get; init; }
     public double? Low { get; init; }

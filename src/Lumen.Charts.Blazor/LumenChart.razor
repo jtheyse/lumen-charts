@@ -53,10 +53,10 @@
     private int[] visible=[];
     private Axis xAxis;
     private double? viewMin, viewMax;
-    private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Band;
+    private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band;
     private string Value(ChartPoint point) => Spec.Kind switch
     {
-        ChartKind.Candlestick=>$"O {LinearScale.Label(point.Open ?? 0)} · H {LinearScale.Label(point.High ?? 0)} · L {LinearScale.Label(point.Low ?? 0)} · C {LinearScale.Label(point.Close ?? 0)}",
+        ChartKind.Candlestick or ChartKind.Ohlc=>$"O {LinearScale.Label(point.Open ?? 0)} · H {LinearScale.Label(point.High ?? 0)} · L {LinearScale.Label(point.Low ?? 0)} · C {LinearScale.Label(point.Close ?? 0)}",
         _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{LinearScale.Label(point.Y.Value)} ({LinearScale.Label(point.Low.Value)} to {LinearScale.Label(point.High.Value)})",
         _=>point.Y.HasValue?LinearScale.Label(point.Y.Value):"Missing"
     };

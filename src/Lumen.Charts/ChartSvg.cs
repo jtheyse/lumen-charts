@@ -26,7 +26,7 @@ public static class ChartSvg
 {
     /// <summary>Every entry keeps at least a 3:1 contrast against both the light and the dark chart background.</summary>
     public static readonly IReadOnlyList<string> Palette = ChartStyle.Light.Series;
-    /// <summary>Candlestick bodies are colored by direction rather than by series.</summary>
+    /// <summary>Candlestick bodies and OHLC bars are colored by direction rather than by series.</summary>
     public const string RisingColor = "#169B8D", FallingColor = "#D36B84";
     public static string SeriesColor(ChartSeries series, int index) => series.Color ?? Palette[index % Palette.Count];
     public static string SeriesColor(ChartSeries series, int index, ChartStyle style) => series.Color ?? style.SeriesColor(index);
@@ -86,7 +86,7 @@ public static class ChartSvg
     private static string PointLabel(ChartSeries s, ChartPoint p, Axis x, Axis y) =>
         $"{s.Name}: {p.Label ?? x.Format(p.X)}, {(p.Y.HasValue ? y.Format(p.Y.Value) : "missing")}" +
         (p.Low.HasValue && p.High.HasValue ? $" (band {y.Format(p.Low.Value)} to {y.Format(p.High.Value)})" : "");
-    private static bool HasData(ChartSpec spec) => spec.Kind == ChartKind.Candlestick
+    private static bool HasData(ChartSpec spec) => spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc
         ? spec.Series.Any(s => s.Points.Count > 0)
         : spec.Series.Any(s => s.Points.Any(p => p.Y.HasValue));
     private static string N(double n) => SvgWriter.N(n);
@@ -107,7 +107,7 @@ public static class ChartSvg
             weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null);
         var primary = s.Series.Where(series => !series.Secondary).SelectMany(series => series.Points).ToArray();
         var values = primary.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
-        if (s.Kind is ChartKind.Candlestick or ChartKind.Band)
+        if (s.Kind is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band)
             foreach (var p in primary.Where(p => p.Low.HasValue && p.High.HasValue)) { values.Add(p.Low!.Value); values.Add(p.High!.Value); }
         if (s.Kind == ChartKind.StackedColumn)
             foreach (var x in cats)
@@ -192,6 +192,7 @@ public static class ChartSvg
             double At(double y) => scale.Map(y, bottom, top);
             if (s.Kind == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, At, xs, scale, cells, left, right, top, bottom);
             else if (s.Kind == ChartKind.Candlestick) Candles(w, series, X, At, xs, scale);
+            else if (s.Kind == ChartKind.Ohlc) Ohlc(w, series, X, At, xs, scale);
             else if (s.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Band)
             {
                 if (s.Kind == ChartKind.Band) Bands(w, series, color, X, At, s.MaxRenderedPoints);
@@ -341,6 +342,28 @@ public static class ChartSvg
             Datum(w, 0, pi, $"{p.Label ?? xs.Format(p.X)}: open {ys.Format(open)}, high {ys.Format(high)}, low {ys.Format(low)}, close {ys.Format(close)}",
                 $"<line x1='{N(columns[pi])}' y1='{N(Y(high))}' x2='{N(columns[pi])}' y2='{N(Y(low))}' stroke='{color}' stroke-width='1.5'/>" +
                 $"<rect x='{N(columns[pi] - width / 2)}' y='{N(body)}' width='{N(width)}' height='{N(Math.Max(baseline - body, 1))}' rx='1' fill='{color}'/>");
+        }
+    }
+
+    /// <summary>
+    /// The American bar: one vertical line over the day's range, the open ticking out to the left and the
+    /// close to the right. A tick is half the width a candle body takes, so a bar occupies the same column
+    /// and the two drawings of the same prices can be compared side by side.
+    /// </summary>
+    private static void Ohlc(SvgWriter w, ChartSeries series, Func<double, double> X, Func<double, double> Y, Axis xs, Axis ys)
+    {
+        var columns = series.Points.Select(p => X(p.X)).ToArray();
+        var gap = columns.Length > 1 ? Enumerable.Range(1, columns.Length - 1).Min(i => columns[i] - columns[i - 1]) : 30;
+        var tick = Math.Clamp(gap * .34, .5, 17);
+        for (var pi = 0; pi < series.Points.Count; pi++)
+        {
+            var p = series.Points[pi];
+            double open = p.Open!.Value, high = p.High!.Value, low = p.Low!.Value, close = p.Close!.Value;
+            var color = close >= open ? w.Style.Rising : w.Style.Falling;
+            Datum(w, 0, pi, $"{p.Label ?? xs.Format(p.X)}: open {ys.Format(open)}, high {ys.Format(high)}, low {ys.Format(low)}, close {ys.Format(close)}",
+                $"<line x1='{N(columns[pi])}' y1='{N(Y(high))}' x2='{N(columns[pi])}' y2='{N(Y(low))}' stroke='{color}' stroke-width='1.5'/>" +
+                $"<line x1='{N(columns[pi] - tick)}' y1='{N(Y(open))}' x2='{N(columns[pi])}' y2='{N(Y(open))}' stroke='{color}' stroke-width='1.5'/>" +
+                $"<line x1='{N(columns[pi])}' y1='{N(Y(close))}' x2='{N(columns[pi] + tick)}' y2='{N(Y(close))}' stroke='{color}' stroke-width='1.5'/>");
         }
     }
 

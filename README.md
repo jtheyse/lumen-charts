@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.15.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.16.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -122,6 +122,7 @@ The line is fitted in the space the chart draws in, which is what keeps it strai
 | Kind | Input | Rendering |
 |---|---|---|
 | `Candlestick` | One series; every point carries `Open`, `High`, `Low`, `Close` — use `ChartPoint.Candle` | Wick across the low-high range, body from open to close, colored by direction (`ChartSvg.RisingColor` and `FallingColor`) |
+| `Ohlc` | The same as `Candlestick` — one series of `ChartPoint.Candle` points | Vertical line across the low-high range, a tick to the left at the open and a tick to the right at the close, colored by direction |
 | `Band` | `Y` with `Low` and `High` bounds — use `ChartPoint.Interval` | Filled interval behind the central line; points without bounds break the band into runs |
 | `Histogram` | One series of raw observations in `Y`; `X` is ignored | Equal-width bins over a zero baseline. `Bins` sets the count; otherwise Freedman–Diaconis chooses it, falling back to Sturges when the interquartile range is zero |
 | `Box` | One series per distribution, raw observations in `Y`; `X` is ignored | Quartile box, Tukey whiskers at 1.5 interquartile ranges, and outliers as circles |
@@ -341,7 +342,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 
 ## Supported behavior and limits
 
-- Line, area, scatter, bubble, column, horizontal bar, signed stacked column, donut, heatmap, radar, candlestick, uncertainty band, histogram, box plot, violin.
+- Line, area, scatter, bubble, column, horizontal bar, signed stacked column, donut, heatmap, radar, candlestick, OHLC bar, uncertainty band, histogram, box plot, violin.
 - Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter and bubble charts; log Y applies to line, scatter and bubble charts, because magnitude and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999, and `TimeZone` decides the calendar they are read in. `SkipWeekends` and `TimeSkips` compress a time axis over spans it should not draw, at most 400 listed spans per chart; the axis stays piecewise proportional, so a gap in the data itself still reads as a gap. Irregular tick placement is not implemented.
 - `MinorGridlines` adds lighter lines between the labelled ticks: four or five divisions per interval on a linear axis depending on its step, the mantissas between decades on a logarithmic one, and none on a time axis, because half of a month is not a boundary anyone reads. Off by default.
 - Explicit limits via XMin/XMax/YMin/YMax. Bars and areas enforce a zero baseline. Null Y preserves gaps in lines/areas and is omitted elsewhere.
@@ -350,7 +351,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Bubble area is proportional to Size across all series. Radar requires complete, nonnegative series on common categories. Donut accepts one nonnegative series.
 - A trend line applies to line, area, scatter and bubble charts; category, radial and derived kinds refuse it. It is one least-squares line per series, fitted over every observation in the series rather than the zoomed window, and it is not an observation: it raises no point selection, appears in no CSV export and adds no row to the data table. Other fits — moving averages, polynomial, exponential regression — are not implemented.
 - A violin estimates its outline with a Gaussian kernel at Silverman's bandwidth, taking the smaller of the standard deviation and the interquartile range so one long tail cannot smooth the shape away. The estimate is drawn over the observed range and no further, so the outline claims no values the data never had, and it is computed in the space the axis draws in, so a logarithmic axis shapes the violin in logarithms. The widest point of each violin fills its column: widths are comparable within a chart but carry no units, and the quartile bar and median tick carry the numbers. A violin is an aggregate, like a histogram bin or a box: focusable and named, raising no point selection. A series with fewer than two observations, or with no spread, draws its quartile bar and median without an outline. The bandwidth is not configurable, and split or paired violins are not implemented.
-- Candlestick and histogram accept one series. Candlestick requires all four prices with High highest and Low lowest, and colors bodies by direction rather than by series. Band points need both bounds or neither. Histogram and box read observations from Y and ignore X; box computes its own quartiles, so precomputed five-number summaries are not accepted yet. Histogram bins and box glyphs are labelled, focusable aggregates that report no observation index, so they raise no point selection; candlesticks and box outliers do.
+- Candlestick, OHLC bar and histogram accept one series. Candlestick and OHLC bar take the same input: all four prices with High highest and Low lowest, colored by direction rather than by series. An OHLC tick is half the width of a candle body, so the two drawings of one dataset stand in the same columns and can be compared; neither carries a volume pane. Band points need both bounds or neither. Histogram and box read observations from Y and ignore X; box computes its own quartiles, so precomputed five-number summaries are not accepted yet. Histogram bins and box glyphs are labelled, focusable aggregates that report no observation index, so they raise no point selection; candlesticks, OHLC bars and box outliers do.
 - Layered graphs use longest-path levels, then barycenter sweeps that keep the ordering with the fewest crossings found. This is a heuristic, not minimal crossings. Edges spanning several levels bend once per level and are drawn as smooth curves; there is no orthogonal routing, no force simulation and no automatic node overlap removal. Self-loops are allowed in layered graphs and draw as a loop on their node; longer cycles still need the circular layout. Nodes can be dragged or nudged with the arrow keys in the component, which needs an interactive render mode. At most 250 nodes / 2,000 edges; dense graphs can still overlap.
 - Narrow screens use a keyboard-focusable, horizontally scrollable chart viewport to preserve label readability.
 - HTML tooltips on hover and keyboard focus in the component, native SVG tooltips in exported and server-rendered charts, keyboard-focusable data marks, point selection, tables, and accessible labels. See [Accessibility](#accessibility) for what is measured and what is not. This is not a claim of WCAG certification.
@@ -358,6 +359,10 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.16.0 additions
+
+`ChartKind.Ohlc`, the open-high-low-close bar: a vertical line over the day's range with the open ticked out to the left and the close to the right. It is the American alternative to the candlestick, and it reads the same input — one series of `ChartPoint.Candle` points — so switching one kind redraws the same prices. It carries everything the candlestick does: time and log axes, skipped weekends and holidays, annotations, the four-price CSV columns and the same per-mark label. The limits are the candlestick's too: one series, all four prices required, no volume pane. A chart of any other kind is unchanged across the same renderings, which are now 71 rather than 67 because the new kind adds four of its own. The gallery draws the same 30 trading days as the candlestick demonstration, so the two glyphs can be held against each other.
 
 ## 0.15.0 additions
 

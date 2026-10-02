@@ -13,10 +13,10 @@ public static partial class ChartValidation
         if (!Enum.IsDefined(spec.XAxis) || !Enum.IsDefined(spec.YAxis)) throw new ArgumentException("Unknown axis kind.");
         Style(spec.Style);
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");
-        if (spec.XAxis != AxisKind.Linear && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Band))
-            throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick and band charts; the other kinds index or derive their X values.");
-        if (spec.YAxis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Band or ChartKind.Box or ChartKind.Violin))
-            throw new ArgumentException("Log Y axes require line, scatter, bubble, candlestick, band or box charts; magnitude, count and radial charts need a zero baseline.");
+        if (spec.XAxis != AxisKind.Linear && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band))
+            throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC and band charts; the other kinds index or derive their X values.");
+        if (spec.YAxis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Box or ChartKind.Violin))
+            throw new ArgumentException("Log Y axes require line, scatter, bubble, candlestick, OHLC, band or box charts; magnitude, count and radial charts need a zero baseline.");
         if (!Enum.IsDefined(spec.Y2Axis) || spec.Y2Axis == AxisKind.Time) throw new ArgumentException("The secondary axis is numeric or logarithmic; time axes are supported on X only.");
         if (spec.Y2Axis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band))
             throw new ArgumentException("A logarithmic secondary axis requires line, scatter, bubble or band charts.");
@@ -24,7 +24,7 @@ public static partial class ChartValidation
         if (secondary)
         {
             if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Band))
-                throw new ArgumentException("A secondary axis applies to line, area, scatter, bubble, column and band charts; stacked, horizontal, candlestick and radial charts cannot measure against two.");
+                throw new ArgumentException("A secondary axis applies to line, area, scatter, bubble, column and band charts; stacked, horizontal, candlestick, OHLC and radial charts cannot measure against two.");
             if (spec.Series!.All(series => series.Secondary))
                 throw new ArgumentException("A secondary axis needs at least one series on the left to measure against.");
         }
@@ -41,7 +41,7 @@ public static partial class ChartValidation
         {
             if (annotation is null) throw new ArgumentException("Annotations cannot be null.");
             if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column
-                or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Band))
+                or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band))
                 throw new ArgumentException("Annotations apply to charts drawn on an X and Y axis; donut, radar, heatmap, histogram, box and violin charts do not take them yet.");
             if (!Enum.IsDefined(annotation.Axis)) throw new ArgumentException("Unknown annotation axis.");
             if (!Finite(annotation.From) || (annotation.To.HasValue && !Finite(annotation.To.Value)))
@@ -60,8 +60,8 @@ public static partial class ChartValidation
             if (spec.Kind != ChartKind.Scatter) throw new ArgumentException("Density cells apply to scatter charts; the other kinds either draw one mark per category or already sample.");
             if (spec.DensityCells is < 8 or > 200) throw new ArgumentException("DensityCells must be between 8 and 200.");
         }
-        if (spec.Kind is ChartKind.Candlestick or ChartKind.Histogram && spec.Series.Count > 1)
-            throw new ArgumentException("Candlestick and histogram charts accept one series.");
+        if (spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Histogram && spec.Series.Count > 1)
+            throw new ArgumentException("Candlestick, OHLC and histogram charts accept one series.");
         Bounds(spec.XMin, spec.XMax); Bounds(spec.YMin, spec.YMax);
         if (spec.XAxis == AxisKind.Log && (spec.XMin <= 0 || spec.XMax <= 0)) throw new ArgumentException("Log X bounds must be positive.");
         if (spec.YAxis == AxisKind.Log && (spec.YMin <= 0 || spec.YMax <= 0)) throw new ArgumentException("Log Y bounds must be positive.");
@@ -104,11 +104,11 @@ public static partial class ChartValidation
                 if (spec.XAxis == AxisKind.Time && !TimeAxis.InRange(p.X)) throw new ArgumentException("Time X values must be Unix milliseconds between year 1 and year 9999.");
                 if (spec.Kind is ChartKind.Donut or ChartKind.Radar && p.Y < 0)
                     throw new ArgumentException("Donut and radar charts require nonnegative values.");
-                if (spec.Kind == ChartKind.Candlestick) Candle(p, spec.YAxis);
+                if (spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc) Candle(p, spec.YAxis);
                 if (spec.Kind == ChartKind.Band) Interval(p, spec.YAxis);
             }
-            if (spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Candlestick or ChartKind.Band && series.Points.Zip(series.Points.Skip(1)).Any(p => p.First.X > p.Second.X))
-                throw new ArgumentException("Line, area, candlestick and band points must be ordered by X.");
+            if (spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band && series.Points.Zip(series.Points.Skip(1)).Any(p => p.First.X > p.Second.X))
+                throw new ArgumentException("Line, area, candlestick, OHLC and band points must be ordered by X.");
         }
         if (spec.Kind == ChartKind.Donut && spec.Series.Count > 1) throw new ArgumentException("Donut charts accept one series.");
         if (spec.Kind is ChartKind.Bar or ChartKind.Column or ChartKind.StackedColumn or ChartKind.Heatmap or ChartKind.Radar)
@@ -126,11 +126,11 @@ public static partial class ChartValidation
     private static void Candle(ChartPoint p, AxisKind axis)
     {
         if (p.Open is not { } open || p.High is not { } high || p.Low is not { } low || p.Close is not { } close)
-            throw new ArgumentException("Candlestick points require Open, High, Low and Close values.");
+            throw new ArgumentException("Candlestick and OHLC points require Open, High, Low and Close values.");
         if (!Finite(open) || !Finite(high) || !Finite(low) || !Finite(close))
-            throw new ArgumentException("Candlestick prices must be finite.");
+            throw new ArgumentException("Candlestick and OHLC prices must be finite.");
         if (high < Math.Max(open, close) || low > Math.Min(open, close))
-            throw new ArgumentException("Candlestick High must be the highest price and Low the lowest.");
+            throw new ArgumentException("Candlestick and OHLC High must be the highest price and Low the lowest.");
         if (axis == AxisKind.Log && low <= 0) throw new ArgumentException("Log Y axes require positive prices.");
     }
     private static void Interval(ChartPoint p, AxisKind axis)

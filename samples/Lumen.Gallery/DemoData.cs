@@ -38,7 +38,7 @@ public static class DemoData
             series=Enumerable.Range(0,7).Select(d=>new Lumen.Charts.ChartSeries(new[]{"Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"}[d],Enumerable.Range(0,12).Select(h=>new Lumen.Charts.ChartPoint(h,random.Next(5,100),$"{h+8}:00")).ToArray())).ToArray();
             title="Find the busiest moments";desc="Activity by day and hour · darker cells mean higher activity";
         }
-        if(kind==Lumen.Charts.ChartKind.Candlestick)
+        if(kind is Lumen.Charts.ChartKind.Candlestick or Lumen.Charts.ChartKind.Ohlc)
         {
             var open=118.0;var candles=new List<Lumen.Charts.ChartPoint>();var day=new DateTimeOffset(2026,3,2,0,0,0,TimeSpan.Zero);
             var shut=new DateTime(2026,4,3);   // Good Friday, when the exchange does not open.
@@ -55,7 +55,10 @@ public static class DemoData
                 day=day.AddDays(1);
             }
             series=[new("ACME",candles)];
-            title="Follow the market's mood";desc="Simulated daily prices · 30 trading days, with the weekends and Good Friday left out of the axis";
+            title=kind==Lumen.Charts.ChartKind.Candlestick?"Follow the market's mood":"The same prices, bar by bar";
+            desc=kind==Lumen.Charts.ChartKind.Candlestick
+                ? "Simulated daily prices · 30 trading days, with the weekends and Good Friday left out of the axis"
+                : "The same 30 trading days as the candlestick · the tick on the left is the open, the one on the right the close";
             x="Trading day (UTC)";y="Price (ZAR)";
             xKind=Lumen.Charts.AxisKind.Time;weekends=true;holidays=[Lumen.Charts.TimeAxis.Day(shut)];
         }
