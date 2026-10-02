@@ -1,6 +1,6 @@
 namespace Lumen.Gallery;
 
-public enum AxisDemo { Numeric, Time, Log, PowerCurve, Pace }
+public enum AxisDemo { Numeric, Time, Log, PowerCurve, Pace, Zones }
 public enum BrandDemo { Lumen, Harbour, PageCss }
 
 public static class DemoData
@@ -15,6 +15,7 @@ public static class DemoData
     public static bool TimeCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Area or Lumen.Charts.ChartKind.Scatter or Lumen.Charts.ChartKind.Bubble;
     public static bool LogCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Scatter or Lumen.Charts.ChartKind.Bubble;
     public static bool DurationCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line;
+    public static bool ZoneCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Bar;
     public static readonly string[] Months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     public static Lumen.Charts.ChartSpec Create(Lumen.Charts.ChartKind kind,Lumen.Charts.ChartTheme theme,int revision=0,AxisDemo axis=AxisDemo.Numeric)
     {
@@ -144,6 +145,31 @@ public static class DemoData
             spec=spec with{XFormat=Lumen.Charts.ValueFormat.Duration,YFormat=Lumen.Charts.ValueFormat.Duration,YReversed=true,Title="Faster is higher",
                 Description="Pace through a simulated 50-minute run · the axis is reversed, so a quicker kilometre sits higher",XLabel="Elapsed time",YLabel="Pace (min per km)",
                 Series=[new("Pace",pace){Trend=true}],Annotations=[new(Lumen.Charts.AnnotationAxis.Y,300){Label="Target"}]};
+        }
+        if(axis==AxisDemo.Zones&&ZoneCapable(kind))
+        {
+            // An hour's run every 10 seconds: a warm-up, five intervals of four minutes hard and three easy, and a cool-down.
+            // Heart rate lags the effort, closing a fifth of the gap each sample.
+            var heart=Lumen.Charts.ZoneScale.CogganHeartRate(170);var beats=new double[361];var current=96.0;
+            for(var i=0;i<beats.Length;i++)
+            {
+                var t=i*10;var target=t<600?100+t*.075:t<3000?((t-600)%420<240?185:132):118;
+                current+=(target-current)*.2;beats[i]=Math.Round(current+random.Next(-2,3));
+            }
+            if(kind==Lumen.Charts.ChartKind.Line)
+                spec=spec with{XFormat=Lumen.Charts.ValueFormat.Duration,Title="Read the effort as it happened",
+                    Description="Heart rate through a simulated interval run · coloured and shaded by Coggan's five heart-rate zones at a threshold of 170 bpm",
+                    XLabel="Elapsed time",YLabel="Heart rate (bpm)",YZones=heart,Annotations=[],
+                    Series=[new("Heart rate",beats.Select((b,i)=>new Lumen.Charts.ChartPoint(i*10,b)).ToArray()){Zones=heart}]};
+            else
+            {
+                var seconds=Lumen.Charts.Training.TimeInZone(beats,heart,10);
+                var style=theme==Lumen.Charts.ChartTheme.Dark?Lumen.Charts.ChartStyle.Dark:Lumen.Charts.ChartStyle.Light;
+                spec=spec with{YFormat=Lumen.Charts.ValueFormat.Duration,Title="See where the hour went",
+                    Description="Time in each heart-rate zone during the same simulated run · each bar in its zone's colour",
+                    XLabel="Zone",YLabel="Time in zone",Annotations=[],
+                    Series=[new("Time in zone",heart.Zones.Select((zone,i)=>new Lumen.Charts.ChartPoint(i,seconds[i],zone.Name){Color=zone.Color??style.Zones[i]}).ToArray())]};
+            }
         }
         return spec;
     }

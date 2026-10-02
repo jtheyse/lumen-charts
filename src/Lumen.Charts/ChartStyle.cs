@@ -11,6 +11,10 @@ public sealed record ChartStyle
 {
     private static readonly IReadOnlyList<string> DefaultSeries =
         Array.AsReadOnly(new[] { "#5675E7", "#169B8D", "#B87F44", "#A775C8", "#D36B84", "#4F93AD" });
+    // Grey, blue, green, gold, orange, red and purple, as training apps order their zones. Every entry clears 3:1
+    // against both preset backgrounds, so the light and dark presets share one ramp.
+    private static readonly IReadOnlyList<string> DefaultZones =
+        Array.AsReadOnly(new[] { "#848484", "#3F87D9", "#2E9B58", "#A88200", "#DB6A1F", "#DD4B45", "#9E63D3" });
 
     public string Background { get; init; } = "#FFFFFF";
     public string Text { get; init; } = "#26324B";
@@ -21,6 +25,9 @@ public sealed record ChartStyle
     public string Edge { get; init; } = "#8090AD";
     /// <summary>Series colours in order. A series with its own colour keeps it.</summary>
     public IReadOnlyList<string> Series { get; init; } = DefaultSeries;
+    /// <summary>Zone colours from low intensity to high. A zone without its own colour takes the entry at its
+    /// position in its scale, so Coggan's seven power levels use all seven and his five heart-rate levels the first five.</summary>
+    public IReadOnlyList<string> Zones { get; init; } = DefaultZones;
     public string Rising { get; init; } = "#169B8D";
     public string Falling { get; init; } = "#D36B84";
     /// <summary>Heatmap cells are interpolated from this colour at the lowest value…</summary>
@@ -54,7 +61,7 @@ public sealed record ChartStyle
     }
 
     /// <summary>
-    /// Colour pairs below the WCAG 2.1 minimum for this style: 4.5:1 for text, 3:1 for marks and edges.
+    /// Colour pairs below the WCAG 2.1 minimum for this style: 4.5:1 for text, 3:1 for marks, zones and edges.
     /// A brand palette is the most likely source of an inaccessible chart, so check it before shipping.
     /// </summary>
     public IReadOnlyList<ContrastIssue> ContrastIssues()
@@ -68,6 +75,7 @@ public sealed record ChartStyle
         Require("Text", Text, 4.5);
         Require("Muted text", Muted, 4.5);
         for (var i = 0; i < Series.Count; i++) Require($"Series {i + 1}", Series[i], 3);
+        for (var i = 0; i < Zones.Count; i++) Require($"Zone {i + 1}", Zones[i], 3);
         Require("Rising candles", Rising, 3);
         Require("Falling candles", Falling, 3);
         Require("Graph edges", Edge, 3);

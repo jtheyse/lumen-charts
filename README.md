@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.19.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.20.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -10,7 +10,7 @@ Requires the .NET 10 SDK (the reusable packages target .NET 8).
 dotnet run --project samples/Lumen.Gallery --urls http://localhost:5188
 ```
 
-Open http://localhost:5188. The gallery includes chart selection, light/dark themes, refreshed sample data, series filtering, point selection, a numeric / time / log axis switch with a power–duration curve and a reversed pace line on duration axes, X zoom/pan/reset, original-data tables, SVG/PNG/CSV downloads, and network layouts with draggable nodes.
+Open http://localhost:5188. The gallery includes chart selection, light/dark themes, refreshed sample data, series filtering, point selection, a numeric / time / log axis switch with a power–duration curve and a reversed pace line on duration axes, a heart-rate stream coloured and shaded by zone with the time it spent in each zone, X zoom/pan/reset, original-data tables, SVG/PNG/CSV downloads, and network layouts with draggable nodes.
 
 ## Build and verify
 
@@ -223,7 +223,7 @@ foreach (var issue in Brand.ContrastIssues())
     Console.WriteLine($"{issue.Element} {issue.Foreground}: {issue.Ratio}:1, needs {issue.Required}:1");
 ```
 
-`ContrastIssues` applies the WCAG 2.1 minimums — 4.5:1 for text, 3:1 for series, candles and edges — and both built-in presets report none. `LumenBrand` raises `Resolved` with each style it reads, so an application can check a page-supplied brand at run time too.
+`ContrastIssues` applies the WCAG 2.1 minimums — 4.5:1 for text, 3:1 for series, zone colours, candles and edges — and both built-in presets report none. `LumenBrand` raises `Resolved` with each style it reads, so an application can check a page-supplied brand at run time too.
 
 Limits: server rendering cannot read a stylesheet, so `ChartSvg.Render` and the HTTP API need an explicit `ChartStyle`. `LumenBrand` discards transparency, since a chart colour is drawn opaque, and maps series, background, text, muted, grid and candle colours; graph edges and the heatmap ramp come from `Fallback`. Font lists are reduced to letters, digits, spaces, commas and hyphens because they are written into a style attribute; `ChartStyle.FontFamilyFrom` performs that reduction on any CSS value.
 
@@ -266,6 +266,44 @@ ChartSpec revenue = new() {
 `From` alone draws a line, dashed unless `Dashed` is false; adding `To` draws a band. Values are in data coordinates, so an annotation zooms and pans with what it refers to and clips at the plot edge. They render behind the data, take the style's muted colour unless `Color` names one, and each is a focusable, labelled aggregate reading `Target: 55` — the value is always shown, so a reference can never sit somewhere other than where it claims.
 
 Annotations apply to the charts drawn on an X and Y axis. Donut, radar, heatmap, histogram and box charts reject them rather than place them arbitrarily, and an X annotation is refused on a category chart, whose bars sit at indices rather than at values. At most 32 per chart.
+
+### Training zones
+
+A `ZoneScale` from [Training metrics](#training-metrics) draws on a chart in three ways, and any point can carry a colour of its own:
+
+```csharp
+var heart = ZoneScale.CogganHeartRate(thresholdHeartRate: 170);
+
+// Heart rate through a run sampled every 10 seconds, the line coloured by zone over the zones' bands.
+ChartSpec stream = new() {
+    Kind = ChartKind.Line, XFormat = ValueFormat.Duration,
+    YZones = heart,
+    Series = [new("Heart rate", bpm.Select((b, i) => new ChartPoint(i * 10, b)).ToArray()) { Zones = heart }]
+};
+
+// Time in zone: one bar per zone, each in its zone's colour.
+var seconds = Training.TimeInZone(bpm, heart, sampleSeconds: 10);
+ChartSpec timeInZone = new() {
+    Kind = ChartKind.Bar, YFormat = ValueFormat.Duration,
+    Series = [new("Time in zone", heart.Zones.Select((zone, i) =>
+        new ChartPoint(i, seconds[i], zone.Name) { Color = zone.Color ?? ChartStyle.Light.Zones[i] }).ToArray())]
+};
+
+// An elevation profile coloured by a grade the host works out.
+ChartSpec climb = new() {
+    Kind = ChartKind.Area,
+    Series = [new("Elevation", route.Select(p => new ChartPoint(p.Metres, p.Altitude) { Color = Steepness(p.Grade) }).ToArray())]
+};
+```
+
+- **Zone colours.** A `Zone` takes an optional colour, `new Zone("Tempo", 160, "#2E9B58")`. A zone without one takes the style's `Zones` ramp at its position — grey, blue, green, gold, orange, red and purple, from low intensity to high — so Coggan's seven power levels use all seven and his five heart-rate levels the first five. Every entry clears 3:1 against both preset backgrounds, the closest being 3.45:1 on light and 4.10:1 on dark, so the two presets share one ramp, and `ContrastIssues` checks a brand's ramp as it checks its series. A scale with more zones than the ramp must colour the zones past it: the chart refuses rather than give two zones one colour.
+- **Series zones.** `ChartSeries.Zones` colours a line, area, scatter, bubble, column or bar series by the zone each value falls in. A line or area stroke is split where it crosses a bound, at the crossing point interpolated on screen, so each piece changes colour exactly at the threshold, on a logarithmic axis too; a value exactly on a bound belongs to the zone below it, as `ZoneScale.IndexOf` has it. An area keeps its fill in the series colour. Markers and bars take their value's zone colour, and every mark's accessible name, and so its tooltip, names the zone after the value: `Heart rate: 21:40, 148, Tempo`.
+- **Point colours.** `ChartPoint.Color` colours one mark: a column, bar, scatter or bubble mark, a donut slice and its key, or a line or area marker. A point's colour beats its zone's, which beats the series colour. On a line or area a segment takes the colour of the point it starts from, drawn whole even across a zone bound, so a host can colour a line by anything it can compute, such as grade.
+- **Zone bands.** `ChartSpec.YZones` shades each zone along the primary value axis, at low opacity in its colour, behind the data and any annotations. Each band is a focusable, labelled aggregate that reads its zone's range — `Tempo: 141.1 to 159.8`, `Active recovery: up to 115.6`, `VO2max: above 178.5` — in the text colour, because a zone colour only has to clear 3:1 and small text needs 4.5:1. The open bottom zone and the unbounded top one stop at the plot edge, a zone wholly off the axis draws nothing, and the bands never widen the axis. They are drawn by the annotation code, so they clip, pan and zoom as Y annotations do and apply wherever those apply; on a horizontal bar chart they stand upright across the value axis.
+
+In JSON a scale is `{"zones":[{"name":"Easy","upper":140},{"name":"Hard","upper":"Infinity"}]}`. JSON has no number for the unbounded top zone's bound, so it is the string `"Infinity"`, which is also how the library writes it. A scale that breaks its own rules — bounds that do not rise, a bounded top zone — is refused while the JSON is read, so the HTTP API answers 400, as it does for any malformed body.
+
+Limits. A long line is sampled before it is coloured, so a crossing shorter than the sampling resolution can be absorbed: a brief excursion past a bound between two kept points is drawn as those points have it, and raising `MaxRenderedPoints` keeps more of them. The legend shows the series colour, which a zone-coloured series may never draw, and the component's data table and status line read a value without its zone; the zones are named on the bands and in every mark's name. Point colours and series zones are refused where colour already says something: direction on candlesticks and OHLC bars, value on a heatmap, and the series or distribution a mark belongs to on stacked column, radar, band, histogram, box and violin charts. Donuts take point colours but not zones, and a density scatter refuses both, because it shades cells rather than points. A band's label sits at its top right, so a band thinner than a line of text lets its label run into the next, and the data can cross a label. A scale drawn on a chart has at most 32 zones.
 
 ### Dense scatter charts
 
@@ -323,7 +361,7 @@ Dragging a node previews with a transform and commits on release; arrow keys nud
 
 ## Training metrics
 
-`Training` computes the numbers endurance-training charts draw, as Allen and Coggan's *Training and Racing with a Power Meter* and TrainingPeaks define them; [FITNESS.md](docs/FITNESS.md) gives the sources and the published values the tests check against. It draws nothing itself. The results are plain numbers and records for the chart kinds above; the [duration axes](#durations-compact-numbers-and-reversed-axes) arrived in 0.19.0, and the zone colours and mixed marks the training charts need arrive in later releases.
+`Training` computes the numbers endurance-training charts draw, as Allen and Coggan's *Training and Racing with a Power Meter* and TrainingPeaks define them; [FITNESS.md](docs/FITNESS.md) gives the sources and the published values the tests check against. It draws nothing itself. The results are plain numbers and records for the chart kinds above; the [duration axes](#durations-compact-numbers-and-reversed-axes) arrived in 0.19.0, [zones on charts](#training-zones) in 0.20.0, and the mixed marks the training charts need arrive in a later release.
 
 ```csharp
 var zones = ZoneScale.CogganPower(ftp: 290);             // seven levels; each Upper is inclusive
@@ -381,6 +419,7 @@ app.MapLumenCharts();
 {"title":"Traffic","kind":"Line","xAxis":"Time","yAxis":"Log","series":[{"name":"Edge","points":[{"x":1767225600000,"y":12},{"x":1769904000000,"y":940}]}]}
 {"title":"Pace","kind":"Line","xFormat":"Duration","yFormat":"Duration","yReversed":true,"series":[{"name":"Run","points":[{"x":0,"y":305},{"x":600,"y":298}]}]}
 {"title":"Latency","kind":"Box","series":[{"name":"Asia","points":[],"summary":{"q1":205,"median":228,"q3":252,"lowerWhisker":160,"upperWhisker":318,"outliers":[352,371]}}]}
+{"title":"Effort","kind":"Line","yZones":{"zones":[{"name":"Easy","upper":140},{"name":"Hard","upper":"Infinity"}]},"series":[{"name":"Heart rate","zones":{"zones":[{"name":"Easy","upper":140},{"name":"Hard","upper":"Infinity","color":"#DD4B45"}]},"points":[{"x":0,"y":120},{"x":60,"y":158,"color":"#9E63D3"}]}]}
 ```
 
 Invalid chart semantics return HTTP 400 problem details. Malformed JSON is rejected by ASP.NET Core. The endpoints do not fetch URLs, execute supplied code, save submitted data, or contact outside services. Add application-specific authorization and rate limits when hosting publicly. The sample limits request bodies to 16 MiB.
@@ -391,7 +430,7 @@ Measured by the regression suite, so a change that breaks one of these fails the
 
 - Every data mark is a focusable element with an accessible name carrying its series, category and value — `Workspace: Sep, 60.3`. Interactive marks use `role="button"`; histogram bins, box glyphs and the outliers of a supplied box summary, which are aggregates, use `role="img"`.
 - Each chart and graph exposes its title and description as the accessible name of the drawing.
-- Series colors keep at least 3:1 contrast against both the light and the dark chart background, and every text color keeps at least 4.5:1. Heatmap cells carry a hairline so the palest ones stay distinguishable.
+- Series colors and the zone ramp keep at least 3:1 contrast against both the light and the dark chart background, and every text color keeps at least 4.5:1, zone band labels included over their band's tint. Heatmap cells carry a hairline so the palest ones stay distinguishable.
 - No element takes a positive tab index. The toolbar status is a live region, legend buttons expose `aria-pressed`, the data toggle exposes `aria-expanded`, and the data table has a caption with scoped column headers.
 - Keyboard: Tab reaches marks, legend, toolbar and graph nodes; Enter or Space selects a mark or node; Escape hides the tooltip; arrow keys nudge a focused graph node.
 
@@ -432,6 +471,14 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.20.0 additions
+
+Zones on charts, the third step of the build order in [FITNESS.md](docs/FITNESS.md), described under [Training zones](#training-zones). `Zone` takes an optional colour, and `ChartStyle.Zones` gives the zones without one a seven-colour ramp that clears 3:1 on both presets and that `ContrastIssues` now checks. `ChartSeries.Zones` colours a line, area, scatter, bubble, column or bar series by the zone of each value, splitting a line or area stroke exactly where it crosses a bound and naming the zone in every label. `ChartPoint.Color` colours a single mark ahead of its zone and its series, and a line segment from the point it starts at. `ChartSpec.YZones` shades each zone as a labelled band behind the data, through the annotation path, without widening the axis. Between them they draw the activity stream, time in zone, a grade-coloured elevation profile and a zone-coloured scatter. All of it round-trips through the HTTP API's JSON, the unbounded top zone as `"Infinity"`.
+
+A chart that sets none of this renders as before: the 84 hashed renderings match, and so do sixteen more, hashed before the change, that guard sampled lines and areas, markers, donuts, and Y annotations on seven kinds and on log and reversed axes. Five new ones cover a zone-coloured heart-rate stream over its bands in both themes, time-in-zone bars, a grade-coloured area and a zone-coloured scatter. The gallery's line and bar charts add a Heart-rate zones mode: a simulated interval run coloured and shaded by Coggan's heart-rate zones, and the time it spent in each.
+
+Building this found two things. A zone scale checks itself as it is constructed, so a broken one posted to the HTTP API threw from inside the JSON reader and was answered with a server error; it is now reported as invalid JSON, and answered 400. And a Y annotation on a horizontal bar chart has always been drawn across the plot at a vertical position rather than upright at its value. Correcting that would change existing renderings, so it is left for a release of its own; zone bands, which share the annotation code, are drawn upright there.
 
 ## 0.19.0 additions
 

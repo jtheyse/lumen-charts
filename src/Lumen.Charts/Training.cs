@@ -1,9 +1,13 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace Lumen.Charts;
 
 /// <summary>A named training zone. <paramref name="Upper"/> is inclusive: the zone holds every value above the previous
 /// zone's upper bound up to and including its own. The top zone of a scale is unbounded, so its upper bound is
-/// <see cref="double.PositiveInfinity"/>.</summary>
-public sealed record Zone(string Name, double Upper);
+/// <see cref="double.PositiveInfinity"/>, which JSON writes as the string <c>"Infinity"</c>. A zone without a
+/// <paramref name="Color"/> draws in the style's <see cref="ChartStyle.Zones"/> ramp at its position in the scale.</summary>
+public sealed record Zone(string Name, [property: JsonNumberHandling(JsonNumberHandling.AllowNamedFloatingPointLiterals)] double Upper, string? Color = null);
 
 /// <summary>
 /// Ordered zones that between them hold every number. Published tables give whole-percent ranges with a gap between
@@ -13,6 +17,7 @@ public sealed record Zone(string Name, double Upper);
 /// The bounds are kept exact rather than rounded, so active recovery at that FTP ends at 159.5 W, which an integer
 /// table prints as 160.
 /// </summary>
+[JsonConverter(typeof(ZoneScaleJson))]
 public sealed record ZoneScale(IReadOnlyList<Zone> Zones)
 {
     public IReadOnlyList<Zone> Zones { get; } = Checked(Zones);
@@ -53,6 +58,23 @@ public sealed record ZoneScale(IReadOnlyList<Zone> Zones)
         }
         return zones.ToArray();
     }
+}
+
+/// <summary>A scale read from JSON is checked as it is constructed. Its rules are reported as invalid JSON, so a host
+/// answers a request carrying a broken scale as it answers any malformed body, with a 400 rather than a server error.</summary>
+internal sealed class ZoneScaleJson : JsonConverter<ZoneScale>
+{
+    public override ZoneScale Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var shape = JsonSerializer.Deserialize<Shape>(ref reader, options);
+        try { return new(shape?.Zones!); }
+        catch (ArgumentException error) { throw new JsonException(error.Message, error); }
+    }
+
+    public override void Write(Utf8JsonWriter writer, ZoneScale value, JsonSerializerOptions options) =>
+        JsonSerializer.Serialize(writer, new Shape(value.Zones), options);
+
+    private sealed record Shape(IReadOnlyList<Zone>? Zones);
 }
 
 /// <summary>Fitness, fatigue and form for one day. Form is yesterday's fitness minus yesterday's fatigue.</summary>

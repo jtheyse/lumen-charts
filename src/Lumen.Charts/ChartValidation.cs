@@ -49,8 +49,7 @@ public static partial class ChartValidation
         foreach (var annotation in spec.Annotations)
         {
             if (annotation is null) throw new ArgumentException("Annotations cannot be null.");
-            if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column
-                or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band))
+            if (!Annotated(spec.Kind))
                 throw new ArgumentException("Annotations apply to charts drawn on an X and Y axis; donut, radar, heatmap, histogram, box and violin charts do not take them yet.");
             if (!Enum.IsDefined(annotation.Axis)) throw new ArgumentException("Unknown annotation axis.");
             if (!Finite(annotation.From) || (annotation.To.HasValue && !Finite(annotation.To.Value)))
@@ -63,6 +62,13 @@ public static partial class ChartValidation
             if (annotation.Axis == AnnotationAxis.X && spec.XAxis == AxisKind.Time && !TimeAxis.InRange(annotation.From))
                 throw new ArgumentException("Time annotations must be Unix milliseconds between year 1 and year 9999.");
             Text(annotation.Label); Color(annotation.Color);
+        }
+        var style = ChartSvg.ResolveStyle(spec);
+        if (spec.YZones is not null)
+        {
+            if (!Annotated(spec.Kind))
+                throw new ArgumentException("Zone bands apply wherever Y annotations do, on charts drawn on an X and Y axis; donut, radar, heatmap, histogram, box and violin charts refuse them.");
+            Zones(spec.YZones, style);
         }
         if (spec.DensityCells is not null)
         {
@@ -104,6 +110,14 @@ public static partial class ChartValidation
             if (series.Name is null) throw new ArgumentException("Series names cannot be null.");
             Text(series.Name); Color(series.Color);
             if (series.Summary is not null) Summary(series, spec.Kind, spec.YAxis);
+            if (series.Zones is not null)
+            {
+                if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar))
+                    throw new ArgumentException("Series zones apply to line, area, scatter, bubble, column and bar charts; on the other kinds colour already says something else, such as direction, value, a stacked series or a distribution.");
+                Zones(series.Zones, style);
+            }
+            if (spec.DensityCells is not null && (series.Zones is not null || series.Points.Any(p => p?.Color is not null)))
+                throw new ArgumentException("A density scatter shades cells rather than points, so it takes neither zones nor point colours.");
             // A summary's outliers are drawn one mark each, so they count towards the limit like points.
             count += series.Points.Count + (series.Summary?.Outliers.Count ?? 0);
             if (count > MaxPoints) throw new ArgumentException($"At most {MaxPoints} points are supported per chart.");
@@ -111,7 +125,9 @@ public static partial class ChartValidation
             {
                 if (p is null || !Finite(p.X) || (p.Y.HasValue && !Finite(p.Y.Value)) || !Finite(p.Size) || p.Size < 0)
                     throw new ArgumentException("Coordinates must be finite, magnitude <= 1e100; bubble sizes must be nonnegative.");
-                Text(p.Label);
+                Text(p.Label); Color(p.Color);
+                if (p.Color is not null && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Donut))
+                    throw new ArgumentException("Point colours apply to line, area, scatter, bubble, column, bar and donut charts; on the other kinds colour already says something else: direction on candlesticks and OHLC bars, value on a heatmap, and the series or distribution a mark belongs to on stacked column, radar, band, histogram, box and violin charts.");
                 if (spec.XAxis == AxisKind.Log && p.X <= 0) throw new ArgumentException("Log X axes require positive X values.");
                 if ((series.Secondary ? spec.Y2Axis : spec.YAxis) == AxisKind.Log && p.Y.HasValue && p.Y.Value <= 0)
                     throw new ArgumentException("Log Y axes require positive values; use a linear axis for zero or negative data.");
@@ -181,7 +197,8 @@ public static partial class ChartValidation
             Color(color);
         }
         if (style.Series is null || style.Series.Count is 0 or > 32) throw new ArgumentException("A style needs between 1 and 32 series colours.");
-        foreach (var color in style.Series)
+        if (style.Zones is null || style.Zones.Count is 0 or > 32) throw new ArgumentException("A style needs between 1 and 32 zone colours.");
+        foreach (var color in style.Series.Concat(style.Zones))
         {
             if (color is null) throw new ArgumentException("Style colours cannot be null.");
             Color(color);
@@ -189,6 +206,22 @@ public static partial class ChartValidation
         // The font list is written into a style attribute, so anything beyond a plain family list is refused.
         if (style.FontFamily is null || !FontFamily().IsMatch(style.FontFamily))
             throw new ArgumentException("Font families may contain letters, digits, spaces, commas and hyphens, up to 200 characters.");
+    }
+
+    private static bool Annotated(ChartKind kind) => kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble
+        or ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band;
+
+    /// <summary>A zone without its own colour takes the style's ramp at its position, so a scale longer than the ramp
+    /// must colour the zones past it; the alternative, wrapping round, would give two zones one colour.</summary>
+    private static void Zones(ZoneScale scale, ChartStyle style)
+    {
+        if (scale.Zones.Count > 32) throw new ArgumentException("A zone scale drawn on a chart has at most 32 zones.");
+        for (var i = 0; i < scale.Zones.Count; i++)
+        {
+            Text(scale.Zones[i].Name); Color(scale.Zones[i].Color);
+            if (scale.Zones[i].Color is null && i >= style.Zones.Count)
+                throw new ArgumentException($"The style's zone ramp has {style.Zones.Count} colours, so zones past that need colours of their own.");
+        }
     }
 
     internal static bool Finite(double n) => double.IsFinite(n) && Math.Abs(n) <= 1e100;

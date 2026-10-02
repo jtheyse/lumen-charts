@@ -11,6 +11,11 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     public double? High { get; init; }
     public double? Low { get; init; }
     public double? Close { get; init; }
+    /// <summary>This point's mark in its own colour, ahead of a zone colour and the series colour: a column, bar,
+    /// scatter or bubble mark, a donut slice, or a line or area marker together with the segment that starts from it.
+    /// Kinds whose colours mean something else — direction, value or a distribution — refuse it, as do stacked columns,
+    /// whose colours tell the stacked series apart.</summary>
+    public string? Color { get; init; }
 
     public static ChartPoint Candle(double x, double open, double high, double low, double close, string? label = null) =>
         new(x, close, label) { Open = open, High = high, Low = low, Close = close };
@@ -33,6 +38,10 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// outliers stand where the summary puts them and are not checked against Tukey's fences, so a host's own
     /// rule — the minimum and maximum, or the 5th and 95th percentiles — is drawn as that rule.</summary>
     public BoxSummary? Summary { get; init; }
+    /// <summary>Colours this series by the zone each value falls in, and names the zone in each mark's label. A line or
+    /// area stroke is split where it crosses a bound, so each piece changes colour exactly at the threshold; its fill
+    /// keeps the series colour. Applies to line, area, scatter, bubble, column and bar charts.</summary>
+    public ZoneScale? Zones { get; init; }
 
     public static ChartSeries From<T>(string name, IEnumerable<T> items,
         Func<T, double> x, Func<T, double?> y, Func<T, string?>? label = null) =>
@@ -91,6 +100,10 @@ public sealed record ChartSpec
     public bool MinorGridlines { get; init; }
     /// <summary>Reference lines and bands drawn behind the data.</summary>
     public IReadOnlyList<ChartAnnotation> Annotations { get; init; } = [];
+    /// <summary>Shades each zone as a band on the primary value axis, behind the data and any annotations, named
+    /// with its range. The open bottom zone and the unbounded top one stop at the plot edge, and the bands never
+    /// widen the axis. Applies wherever Y annotations do.</summary>
+    public ZoneScale? YZones { get; init; }
 }
 
 public enum AnnotationAxis { X, Y }

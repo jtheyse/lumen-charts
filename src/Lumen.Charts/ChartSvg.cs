@@ -86,7 +86,9 @@ public static class ChartSvg
     private static string PointLabel(ChartSeries s, ChartPoint p) => $"{s.Name}: {p.Label ?? LinearScale.Label(p.X)}, {(p.Y.HasValue ? LinearScale.Label(p.Y.Value) : "missing")}";
     private static string PointLabel(ChartSeries s, ChartPoint p, Axis x, Axis y) =>
         $"{s.Name}: {p.Label ?? x.Format(p.X)}, {(p.Y.HasValue ? y.Format(p.Y.Value) : "missing")}" +
+        (s.Zones is { } zones && p.Y is { } value ? $", {zones.Zones[zones.IndexOf(value)].Name}" : "") +
         (p.Low.HasValue && p.High.HasValue ? $" (band {y.Format(p.Low.Value)} to {y.Format(p.High.Value)})" : "");
+    private static string ZoneColor(ChartStyle style, ZoneScale zones, int index) => zones.Zones[index].Color ?? style.Zones[index];
     private static bool HasData(ChartSpec spec) => spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc
         ? spec.Series.Any(s => s.Points.Count > 0)
         : spec.Series.Any(s => s.Summary is not null || s.Points.Any(p => p.Y.HasValue));
@@ -183,6 +185,7 @@ public static class ChartSvg
         const double bleed = 6;
         w.Add($"<svg x='{N(left-bleed)}' y='{N(top-bleed)}' width='{N(right-left+2*bleed)}' height='{N(bottom-top+2*bleed)}' viewBox='{N(left-bleed)} {N(top-bleed)} {N(right-left+2*bleed)} {N(bottom-top+2*bleed)}' overflow='hidden'>");
         // Behind the data, and inside the clip, so a reference pans and zooms with what it refers to.
+        if (s.YZones is { } bands) ZoneBands(w, bands, horizontal ? v => ys.Map(v, left, right) : Y, ys, horizontal, left, right, top, bottom);
         foreach (var annotation in s.Annotations) Annotate(w, annotation, X, Y, xs, ys, left, right, top, bottom);
         var positive = cats.ToDictionary(x => x, _ => 0d); var negative = cats.ToDictionary(x => x, _ => 0d);
         for (var si = 0; si < s.Series.Count; si++)
@@ -191,6 +194,8 @@ public static class ChartSvg
             // Each series is measured against its own axis from here on.
             var scale = series.Secondary ? ys2 : ys;
             double At(double y) => scale.Map(y, bottom, top);
+            // A point's own colour beats its zone's, which beats the series colour.
+            string Ink(ChartPoint p) => p.Color ?? (series.Zones is { } zones ? ZoneColor(w.Style, zones, zones.IndexOf(p.Y!.Value)) : color);
             if (s.Kind == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, At, xs, scale, cells, left, right, top, bottom);
             else if (s.Kind == ChartKind.Candlestick) Candles(w, series, X, At, xs, scale);
             else if (s.Kind == ChartKind.Ohlc) Ohlc(w, series, X, At, xs, scale);
@@ -208,11 +213,13 @@ public static class ChartSvg
                     var path = string.Join(" ", indices.Select((i, n) => $"{(n == 0 ? "M" : "L")}{N(X(run[i].X))},{N(At(run[i].Y!.Value))}"));
                     if (s.Kind == ChartKind.Area)
                         w.Add($"<path d='{path} L{N(X(run[^1].X))},{N(At(0))} L{N(X(run[0].X))},{N(At(0))} Z' fill='{color}' fill-opacity='.12'/>");
-                    w.Add($"<path d='{path}' fill='none' stroke='{color}' stroke-width='2.5' stroke-linejoin='round'/>");
+                    if (series.Zones is null && indices.All(i => run[i].Color is null))
+                        w.Add($"<path d='{path}' fill='none' stroke='{color}' stroke-width='2.5' stroke-linejoin='round'/>");
+                    else Stroke(w, series.Zones, run, indices, color, X, At);
                     foreach (var i in indices)
                     {
                         var p = run[i];
-                        Datum(w, si, start + i, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(p.Y!.Value))}' r='{(indices.Count > 80 ? "2" : "4")}' fill='{color}'/>");
+                        Datum(w, si, start + i, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(p.Y!.Value))}' r='{(indices.Count > 80 ? "2" : "4")}' fill='{Ink(p)}'/>");
                     }
                     start = end;
                 }
@@ -240,12 +247,13 @@ public static class ChartSvg
                         rx = left + ci * band + band * .14 + (stacked ? 0 : si * width); ry = Math.Min(At(basis), At(basis + y));
                         rw = width; rh = Math.Abs(At(basis + y) - At(basis));
                     }
-                    Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<rect x='{N(rx)}' y='{N(ry)}' width='{N(rw)}' height='{N(rh)}' rx='2' fill='{color}'/>");
+                    Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<rect x='{N(rx)}' y='{N(ry)}' width='{N(rw)}' height='{N(rh)}' rx='2' fill='{Ink(p)}'/>");
                 }
                 else
                 {
                     var radius = s.Kind == ChartKind.Bubble ? Math.Sqrt(p.Size / Math.Max(maxSize, double.Epsilon)) * 22 : 4;
-                    Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(y))}' r='{N(radius)}' fill='{color}' fill-opacity='.7' stroke='{color}'/>");
+                    var ink = Ink(p);
+                    Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(y))}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'/>");
                 }
             }
             if (series.Trend) Trend(w, series, color, X, At, left, right, scale.Reversed);
@@ -270,6 +278,69 @@ public static class ChartSvg
         w.Add($"<path class='lumen-trend' d='M{N(left)},{N(fit.Predict(left))} L{N(right)},{N(fit.Predict(right))}' " +
             $"fill='none' stroke='{color}' stroke-width='2' stroke-dasharray='7 5' stroke-opacity='.85' role='img' aria-label='{SvgWriter.E(label)}'>" +
             $"{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}</path>");
+    }
+
+    /// <summary>
+    /// The stroke of one sampled run in the colours its points call for. With zones, a segment that crosses a bound is
+    /// split where it crosses, interpolated on screen so the split lies on the drawn segment on any axis, and each piece
+    /// takes the colour of the zone it lies in; a value exactly on a bound belongs to the zone below, as
+    /// <see cref="ZoneScale.IndexOf"/> has it. A segment that starts from a point with its own colour is drawn whole in
+    /// that colour, and without zones the others keep the series colour. Pieces of one colour in a row share a path.
+    /// </summary>
+    private static void Stroke(SvgWriter w, ZoneScale? zones, ChartPoint[] run, IReadOnlyList<int> indices, string color, Func<double, double> X, Func<double, double> Y)
+    {
+        var paths = new List<(string Ink, StringBuilder Path)>();
+        void Piece(string ink, double x1, double y1, double x2, double y2)
+        {
+            if (paths.Count == 0 || paths[^1].Ink != ink) paths.Add((ink, new StringBuilder($"M{N(x1)},{N(y1)}")));
+            paths[^1].Path.Append($" L{N(x2)},{N(y2)}");
+        }
+        for (var n = 1; n < indices.Count; n++)
+        {
+            ChartPoint a = run[indices[n - 1]], b = run[indices[n]];
+            double xa = X(a.X), ya = Y(a.Y!.Value), xb = X(b.X), yb = Y(b.Y!.Value);
+            if (a.Color is not null || zones is null) { Piece(a.Color ?? color, xa, ya, xb, yb); continue; }
+            int from = zones.IndexOf(a.Y!.Value), to = zones.IndexOf(b.Y!.Value);
+            // Values a rounding error apart can straddle a bound and still land on one pixel row, leaving nothing to split.
+            if (ya == yb) to = from;
+            double x = xa, y = ya, done = 0;
+            for (var zone = from; zone != to; zone += Math.Sign(to - from))
+            {
+                var bound = Y(zones.Zones[to > from ? zone : zone - 1].Upper);
+                var t = (bound - ya) / (yb - ya);
+                var cross = xa + t * (xb - xa);
+                if (t > done) Piece(ZoneColor(w.Style, zones, zone), x, y, cross, bound);
+                (x, y, done) = (cross, bound, t);
+            }
+            if (done < 1) Piece(ZoneColor(w.Style, zones, to), x, y, xb, yb);
+        }
+        foreach (var (ink, path) in paths) w.Add($"<path d='{path}' fill='none' stroke='{ink}' stroke-width='2.5' stroke-linejoin='round'/>");
+    }
+
+    /// <summary>
+    /// Each zone as a band on the value axis, drawn through the annotation path so it clips, pans and zooms as a Y
+    /// annotation does. Every band is clamped to the axis — the open bottom zone and the unbounded top one included —
+    /// so the bands never widen it and each label stays inside the plot, but the label reads the zone's own range
+    /// rather than the clamp. Labels take the text colour: a zone colour only has to clear 3:1, and small text needs 4.5:1.
+    /// </summary>
+    private static void ZoneBands(SvgWriter w, ZoneScale scale, Func<double, double> at, Axis ys, bool horizontal, double left, double right, double top, double bottom)
+    {
+        for (var i = 0; i < scale.Zones.Count; i++)
+        {
+            double? lower = i > 0 ? scale.Zones[i - 1].Upper : null, upper = i < scale.Zones.Count - 1 ? scale.Zones[i].Upper : null;
+            double from = Math.Max(lower ?? ys.Min, ys.Min), to = Math.Min(upper ?? ys.Max, ys.Max);
+            if (to <= from) continue;
+            var reading = (lower, upper) switch
+            {
+                (null, null) => "every value",
+                (null, { } u) => $"up to {ys.Format(u)}",
+                ({ } l, null) => $"above {ys.Format(l)}",
+                ({ } l, { } u) => $"{ys.Format(l)} to {ys.Format(u)}"
+            };
+            // A horizontal bar chart measures along X, so there the bands stand upright.
+            Annotate(w, new(horizontal ? AnnotationAxis.X : AnnotationAxis.Y, from) { To = to, Label = scale.Zones[i].Name, Color = ZoneColor(w.Style, scale, i) },
+                at, at, ys, ys, left, right, top, bottom, reading, w.Style.Text);
+        }
     }
 
     /// <summary>One shaded cell per occupied region. Cells are square in pixels, and a cell's opacity
@@ -300,14 +371,16 @@ public static class ChartSvg
         }
     }
 
+    /// <summary>Draws one reference. <paramref name="reading"/> replaces the values it would otherwise read out, and
+    /// <paramref name="ink"/> its label's colour.</summary>
     private static void Annotate(SvgWriter w, ChartAnnotation annotation, Func<double, double> X, Func<double, double> Y,
-        Axis xs, Axis ys, double left, double right, double top, double bottom)
+        Axis xs, Axis ys, double left, double right, double top, double bottom, string? reading = null, string? ink = null)
     {
         var horizontal = annotation.Axis == AnnotationAxis.Y;
         var axis = horizontal ? ys : xs;
         var colour = annotation.Color ?? w.Style.Muted;
         var at = horizontal ? Y(annotation.From) : X(annotation.From);
-        string shape, reading;
+        string shape;
         double labelX, labelY; string anchor;
         if (annotation.To is { } to)
         {
@@ -315,7 +388,7 @@ public static class ChartSvg
             double x = horizontal ? left : Math.Min(at, other), y = horizontal ? Math.Min(at, other) : top;
             double width = horizontal ? right - left : Math.Abs(other - at), height = horizontal ? Math.Abs(other - at) : bottom - top;
             shape = $"<rect x='{N(x)}' y='{N(y)}' width='{N(width)}' height='{N(height)}' fill='{colour}' fill-opacity='.12'/>";
-            reading = $"{axis.Format(annotation.From)} to {axis.Format(to)}";
+            reading ??= $"{axis.Format(annotation.From)} to {axis.Format(to)}";
             (labelX, labelY, anchor) = horizontal ? (right - 6, y + 13, "end") : (x + 6, top + 13, "start");
         }
         else
@@ -326,11 +399,11 @@ public static class ChartSvg
             // along its whole length rather than only where a dash happens to fall.
             shape = $"<line x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{colour}' stroke-opacity='0' stroke-width='12'/>" +
                 $"<line x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{colour}' stroke-width='1.5'{dash}/>";
-            reading = axis.Format(annotation.From);
+            reading ??= axis.Format(annotation.From);
             (labelX, labelY, anchor) = horizontal ? (right - 6, at - 6, "end") : (at + 6, top + 13, "start");
         }
         var label = annotation.Label is null ? reading : $"{annotation.Label}: {reading}";
-        Aggregate(w, label, shape + $"<text x='{N(labelX)}' y='{N(labelY)}' text-anchor='{anchor}' fill='{colour}' font-size='11'>{SvgWriter.E(label)}</text>");
+        Aggregate(w, label, shape + $"<text x='{N(labelX)}' y='{N(labelY)}' text-anchor='{anchor}' fill='{ink ?? colour}' font-size='11'>{SvgWriter.E(label)}</text>");
     }
 
     private static void Candles(SvgWriter w, ChartSeries series, Func<double, double> X, Func<double, double> Y, Axis xs, Axis ys)
@@ -557,7 +630,7 @@ public static class ChartSvg
             var large = sweep > Math.PI ? 1 : 0;
             string At(double radius, double a) => $"{N(cx + radius * Math.Cos(a))},{N(cy + radius * Math.Sin(a))}";
             var path = $"M{At(r,angle)} A{N(r)},{N(r)} 0 {large} 1 {At(r,end)} L{At(inner,end)} A{N(inner)},{N(inner)} 0 {large} 0 {At(inner,angle)} Z";
-            var color = w.Style.SeriesColor(i);
+            var color = p.Color ?? w.Style.SeriesColor(i);
             Datum(w, 0, i, $"{p.Label ?? LinearScale.Label(p.X)}: {LinearScale.Label(p.Y.Value)} ({p.Y / total:P1})", $"<path d='{path}' fill='{color}'/>");
             if (i < 10)
             {

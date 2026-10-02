@@ -72,7 +72,7 @@ Cross-cutting work comes first, because each piece unlocks several charts. Each 
 
 1. **Training metrics** — normalized power, intensity factor, training stress, the fitness–fatigue–form model, time in zone, mean-maximal curves, the critical-power fit, rolling baselines, and a zone scale with Coggan's power and heart-rate levels. Computation only, tested against the values above. Shipped in 0.18.0.
 2. **Axis formats** — elapsed duration, pace, duration-labelled logarithmic ticks, compact numbers, and inverted axes. Unlocks the power curve, pace streams, splits and record progressions. Shipped in 0.19.0.
-3. **Zones on charts** — zone bands behind a line, a line coloured by zone, and bars and markers coloured from a zone scale. Unlocks the activity stream, time in zone, grade-coloured elevation and baseline trends.
+3. **Zones on charts** — zone bands behind a line, a line coloured by zone, and bars and markers coloured from a zone scale. Unlocks the activity stream, time in zone, grade-coloured elevation and baseline trends. Shipped in 0.20.0.
 4. **Several marks in one chart** — lines, areas, columns and points together, and a band whose edges are series. Unlocks performance management, load against target, elevation behind pace and the Activity Path. The volume pane on the existing roadmap is the same need with panels stacked instead of overlaid, so synchronised panels belong here too.
 5. **Gauges and rings.**
 6. **State timelines and range columns** — hypnograms, intraday states, sleep timing and minimum–maximum bars.

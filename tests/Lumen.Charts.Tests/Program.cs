@@ -1936,6 +1936,261 @@ Test("Axes at extreme magnitudes finish their ticks",()=>{
     });
     Check(work.Wait(TimeSpan.FromSeconds(20)),"an axis near 1e21 did not finish");
 });
+// 0.20.0: zones on charts. The plot runs from x 76 to 870 and y 344 to 78; with Y fixed at 100 to 200 a value v sits at PY(v).
+ZoneScale Effort()=>new([new("Easy",120),new("Steady",140),new("Hard",160),new("Max",double.PositiveInfinity)]);
+string[] Ramp=[..ChartStyle.Light.Zones];
+double PY(double value)=>344-(value-100)/100*266;
+ChartSpec Effortful(params double[] values)=>Spec() with{YMin=100,YMax=200,Series=[new("Heart rate",values.Select((v,i)=>new ChartPoint(i,v)).ToArray()){Zones=Effort()}]};
+(string Ink,(double X,double Y)[] Points)[] Strokes(XDocument doc)=>doc.Descendants(ns+"path")
+    .Where(p=>(string?)p.Attribute("fill")=="none"&&(string?)p.Attribute("stroke-width")=="2.5")
+    .Select(p=>((string)p.Attribute("stroke")!,p.Attribute("d")!.Value.Split(' ').Select(c=>c[1..].Split(','))
+        .Select(c=>(double.Parse(c[0],CultureInfo.InvariantCulture),double.Parse(c[1],CultureInfo.InvariantCulture))).ToArray())).ToArray();
+void Matches((double X,double Y)[] actual,params (double X,double Y)[] expected)
+{
+    Check(actual.Length==expected.Length,$"{actual.Length} points where {expected.Length} were expected");
+    for(var i=0;i<actual.Length;i++)
+        Check(Math.Abs(actual[i].X-expected[i].X)<1e-6&&Math.Abs(actual[i].Y-expected[i].Y)<1e-6,$"({actual[i].X}, {actual[i].Y}) is not ({expected[i].X}, {expected[i].Y})");
+}
+XElement[] Points(XDocument doc)=>doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).Select(g=>g.Elements().Last()).ToArray();
+string Tint(string colour,string background,double opacity)=>"#"+string.Concat(new[]{1,3,5}.Select(at=>
+    ((int)Math.Round(Convert.ToInt32(background.Substring(at,2),16)*(1-opacity)+Convert.ToInt32(colour.Substring(at,2),16)*opacity)).ToString("X2")));
+Test("A line crossing zone bounds is split exactly where it crosses each, and each piece takes its zone's colour",()=>{
+    // 110 to 150 crosses 120 a quarter of the way along and 140 three quarters of the way.
+    var up=Strokes(Svg(Effortful(110,150)));
+    Check(up.Select(s=>s.Ink).SequenceEqual(Ramp[..3]),string.Join(",",up.Select(s=>s.Ink)));
+    Matches(up[0].Points,(76,PY(110)),(274.5,PY(120)));
+    Matches(up[1].Points,(274.5,PY(120)),(671.5,PY(140)));
+    Matches(up[2].Points,(671.5,PY(140)),(870,PY(150)));
+    var down=Strokes(Svg(Effortful(150,110)));
+    Check(down.Select(s=>s.Ink).SequenceEqual(Ramp[..3].Reverse()));
+    Matches(down[0].Points,(76,PY(150)),(274.5,PY(140)));
+    Matches(down[1].Points,(274.5,PY(140)),(671.5,PY(120)));
+    Matches(down[2].Points,(671.5,PY(120)),(870,PY(110)));
+    // Crossing three bounds in one segment splits it into four pieces.
+    Check(Strokes(Svg(Effortful(105,195))).Select(s=>s.Ink).SequenceEqual(Ramp[..4]));
+    // On a log axis the segment is straight on screen, not in the data, so the split is interpolated on screen:
+    // 100 is half way from 10 to 1000 there, against a tenth of the way in the data.
+    var log=Strokes(Svg(Spec() with{YAxis=AxisKind.Log,YMin=10,YMax=1000,Series=[new("S",[new(0,10),new(1,1000)]){Zones=new([new("Low",100),new("High",double.PositiveInfinity)])}]}));
+    Check(log.Length==2);
+    Matches(log[0].Points,(76,344),(473,211));
+    Matches(log[1].Points,(473,211),(870,78));
+});
+Test("A value exactly on a bound takes the lower zone, as ZoneScale.IndexOf does",()=>{
+    Check(Effort().IndexOf(120)==0&&Effort().IndexOf(Math.BitIncrement(120))==1);
+    var doc=Svg(Effortful(110,120,130,120,110));
+    var strokes=Strokes(doc);
+    // Rising to the bound and falling back to it stay below it; leaving it upwards starts the zone above at once.
+    Check(strokes.Select(s=>s.Ink).SequenceEqual([Ramp[0],Ramp[1],Ramp[0]]),string.Join(",",strokes.Select(s=>s.Ink)));
+    Matches(strokes[0].Points,(76,PY(110)),(274.5,PY(120)));
+    Matches(strokes[1].Points,(274.5,PY(120)),(473,PY(130)),(671.5,PY(120)));
+    Matches(strokes[2].Points,(671.5,PY(120)),(870,PY(110)));
+    var marks=doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).ToArray();
+    Check((string?)marks[1].Element(ns+"circle")!.Attribute("fill")==Ramp[0]&&marks[1].Attribute("aria-label")!.Value=="Heart rate: 1, 120, Easy");
+    Check((string?)marks[2].Element(ns+"circle")!.Attribute("fill")==Ramp[1]&&marks[2].Attribute("aria-label")!.Value=="Heart rate: 2, 130, Steady");
+});
+Test("A point's own colour beats its zone's, which beats the series colour",()=>{
+    var series=new ChartSeries("Effort",[new(0,110){Color="#ABCDEF"},new(1,130),new(2,150)],"#123456"){Zones=Effort()};
+    var line=Svg(Spec() with{YMin=100,YMax=200,Series=[series]});
+    Check(Points(line).Select(m=>(string?)m.Attribute("fill")).SequenceEqual(["#ABCDEF",Ramp[1],Ramp[2]]));
+    // The segment from the coloured point is drawn whole in its colour although it crosses 120; the next splits at 140.
+    var strokes=Strokes(line);
+    Check(strokes.Select(s=>s.Ink).SequenceEqual(["#ABCDEF",Ramp[1],Ramp[2]]),string.Join(",",strokes.Select(s=>s.Ink)));
+    Matches(strokes[0].Points,(76,PY(110)),(473,PY(130)));
+    foreach(var kind in (ChartKind[])[ChartKind.Area,ChartKind.Scatter,ChartKind.Bubble,ChartKind.Column,ChartKind.Bar])
+    {
+        var marks=Points(Svg(Spec(kind) with{Series=[series]}));
+        Check(marks.Select(m=>(string?)m.Attribute("fill")).SequenceEqual(["#ABCDEF",Ramp[1],Ramp[2]]),$"{kind} fills");
+        if(kind is ChartKind.Scatter or ChartKind.Bubble) Check(marks.Select(m=>(string?)m.Attribute("stroke")).SequenceEqual(["#ABCDEF",Ramp[1],Ramp[2]]),$"{kind} outlines");
+    }
+    // Without zones a point with no colour keeps the series colour, and a segment the colour of the point it starts from.
+    var plain=Svg(Spec() with{Series=[series with{Zones=null,Points=[new(0,110),new(1,130){Color="#ABCDEF"},new(2,150),new(3,140){Color="#FEDCBA"}]}]});
+    Check(Points(plain).Select(m=>(string?)m.Attribute("fill")).SequenceEqual(["#123456","#ABCDEF","#123456","#FEDCBA"]));
+    Check(Strokes(plain).Select(s=>s.Ink).SequenceEqual(["#123456","#ABCDEF","#123456"]));
+    Check(Strokes(Svg(Spec() with{Series=[series with{Zones=null,Points=[new(0,1),new(1,2)]}]})).Single().Ink=="#123456");
+});
+Test("An area keeps its fill in the series colour while its stroke follows the zones",()=>{
+    var doc=Svg(Effortful(110,150) with{Kind=ChartKind.Area,YMin=0});
+    Check((string?)doc.Descendants(ns+"path").Single(p=>(string?)p.Attribute("fill-opacity")==".12").Attribute("fill")==ChartStyle.Light.Series[0]);
+    Check(Strokes(doc).Select(s=>s.Ink).SequenceEqual(Ramp[..3]));
+});
+Test("A long zone-coloured line colours its sampled segments by the zone each piece lies in",()=>{
+    var values=Enumerable.Range(0,6000).Select(i=>Math.Round(150+40*Math.Sin(i/37.0)+i%7,2)).ToArray();
+    var doc=Svg(Effortful(values) with{MaxRenderedPoints=400});
+    var marks=doc.Descendants(ns+"g").Count(g=>g.Attribute("data-point") is not null);
+    Check(marks is > 100 and <= 400,$"{marks} marks");
+    var pieces=0;
+    foreach(var (ink,points) in Strokes(doc))
+        for(var i=1;i<points.Length;i++)
+        {
+            // A piece lies within one zone, so its midpoint names the zone.
+            var value=100+(344-(points[i-1].Y+points[i].Y)/2)/266*100;
+            Check(ink==Ramp[Effort().IndexOf(value)],$"a piece around {value:0.##} is drawn in {ink}");
+            pieces++;
+        }
+    Check(pieces>marks,$"{pieces} pieces for {marks} sampled points");
+});
+Test("Zone bands are built from the scale, clamped to the plot, and leave the axis range alone",()=>{
+    var data=Spec() with{Series=[new("S",[new(0,105),new(1,150),new(2,130)])]};
+    string[] Ticks(XDocument doc)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="end"&&(string?)t.Attribute("class")=="lumen-muted").Select(t=>t.Value).ToArray();
+    XDocument plain=Svg(data),zoned=Svg(data with{YZones=Effort()});
+    Check(Ticks(plain).Length>=2&&Ticks(plain).SequenceEqual(Ticks(zoned)),"the bands moved the axis");
+    Check(plain.Descendants(ns+"circle").Select(c=>(string?)c.Attribute("cy")).SequenceEqual(zoned.Descendants(ns+"circle").Select(c=>(string?)c.Attribute("cy"))));
+    var doc=Svg(data with{YMin=100,YMax=150,YZones=Effort()});
+    var bands=doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("role")=="img").ToArray();
+    // The open bottom stops at the axis minimum and Hard at the maximum; Max lies wholly above the plot and is left out.
+    // Each reads its zone's own range, not the clamp.
+    Check(bands.Select(b=>b.Attribute("aria-label")!.Value).SequenceEqual(["Easy: up to 120","Steady: 120 to 140","Hard: 140 to 160"]),string.Join(" | ",bands.Select(b=>b.Attribute("aria-label")!.Value)));
+    double Py(double v)=>344-(v-100)/50*266;
+    (double From,double To)[] spans=[(100,120),(120,140),(140,150)];
+    for(var i=0;i<3;i++)
+    {
+        var rect=bands[i].Element(ns+"rect")!;
+        Check(Math.Abs((double)rect.Attribute("y")!-Py(spans[i].To))<1e-6&&Math.Abs((double)rect.Attribute("height")!-(Py(spans[i].From)-Py(spans[i].To)))<1e-6,$"band {i} spans the wrong values");
+        Check((double)rect.Attribute("x")! ==76&&(double)rect.Attribute("width")! ==794&&(string?)rect.Attribute("fill")==Ramp[i]&&(string?)rect.Attribute("fill-opacity")==".12");
+        Check((string?)bands[i].Element(ns+"text")!.Attribute("fill")==ChartStyle.Light.Text&&bands[i].Element(ns+"text")!.Value==bands[i].Attribute("aria-label")!.Value);
+    }
+    // The unbounded top zone runs to the top of the plot.
+    var high=Svg(data with{YMin=100,YMax=200,YZones=Effort()}).Descendants(ns+"g").Single(g=>(string?)g.Attribute("aria-label")=="Max: above 160").Element(ns+"rect")!;
+    Check((double)high.Attribute("y")! ==78&&Math.Abs((double)high.Attribute("height")!-(PY(160)-78))<1e-6);
+    // Behind the data and behind any annotation.
+    var labels=Svg(data with{YZones=Effort(),Annotations=[new(AnnotationAxis.Y,125){Label="Target"}]}).Descendants(ns+"g").Select(g=>(string?)g.Attribute("aria-label") ?? "").ToList();
+    Check(labels.FindIndex(l=>l.StartsWith("Hard"))<labels.FindIndex(l=>l.StartsWith("Target"))&&labels.FindIndex(l=>l.StartsWith("Target"))<labels.FindIndex(l=>l.StartsWith("S:")));
+    // On a reversed axis the lowest zone sits at the top.
+    Check((double)Svg(data with{YMin=100,YMax=150,YReversed=true,YZones=Effort()}).Descendants(ns+"g").Single(g=>(string?)g.Attribute("aria-label")=="Easy: up to 120").Element(ns+"rect")!.Attribute("y")! ==78);
+    // A horizontal bar chart measures along X, so its bands stand upright across the value axis.
+    var bar=Svg(Spec(ChartKind.Bar) with{Series=[new("S",[new(0,5),new(1,30)])],YZones=new([new("Low",10),new("High",double.PositiveInfinity)])});
+    var low=bar.Descendants(ns+"g").Single(g=>(string?)g.Attribute("aria-label")=="Low: up to 10").Element(ns+"rect")!;
+    Check((double)low.Attribute("x")! ==160&&Math.Abs((double)low.Attribute("width")!-710/3d)<1e-6&&(double)low.Attribute("y")! ==78&&(double)low.Attribute("height")! ==266);
+    // A bound a log axis cannot reach sits off it rather than breaking the drawing.
+    var log=ChartSvg.Render(Spec() with{YAxis=AxisKind.Log,Series=[new("S",[new(0,10),new(1,1000)])],YZones=new([new("Below",-5),new("Small",100),new("Large",double.PositiveInfinity)])});
+    Check(!log.Contains("NaN")&&!log.Contains("Below:")&&log.Contains("Small: -5 to 100")&&log.Contains("Large: above 100"));
+    Check(ChartSvg.Render(Spec() with{YZones=new([new("All",double.PositiveInfinity)])}).Contains("All: every value"));
+});
+Test("Labels and tooltips name the zone after the value",()=>{
+    var heart=ZoneScale.CogganHeartRate(170);
+    var stream=Spec() with{XFormat=ValueFormat.Duration,Series=[new("Heart rate",[new(0,98),new(10,152),new(20,171)]){Zones=heart}]};
+    foreach(var kind in (ChartKind[])[ChartKind.Line,ChartKind.Area,ChartKind.Scatter,ChartKind.Bubble])
+    {
+        var marks=Svg(stream with{Kind=kind}).Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).ToArray();
+        Check(marks.Select(m=>m.Attribute("aria-label")!.Value).SequenceEqual(["Heart rate: 0:00, 98, Active recovery","Heart rate: 0:10, 152, Tempo","Heart rate: 0:20, 171, Lactate threshold"]),$"{kind}");
+        Check(marks.All(m=>m.Element(ns+"title")!.Value==m.Attribute("aria-label")!.Value));
+    }
+    foreach(var kind in (ChartKind[])[ChartKind.Column,ChartKind.Bar])
+        Check(ChartSvg.Render(stream with{Kind=kind,XFormat=ValueFormat.Number}).Contains("aria-label='Heart rate: 10, 152, Tempo'"),$"{kind}");
+    // The component's own tooltips read the accessible name.
+    Check(Operate(stream,_=>Task.CompletedTask).Contains("Heart rate: 0:10, 152, Tempo"));
+    Check(!ChartSvg.Render(stream with{Series=[stream.Series[0] with{Zones=null}]}).Contains("Tempo"));
+});
+Test("A zone without a colour takes the style's ramp at its position, and one with a colour keeps it",()=>{
+    var scale=new ZoneScale([new("A",10),new("B",20,"#123456"),new("C",double.PositiveInfinity)]);
+    var spec=Spec(ChartKind.Column) with{Series=[new("S",[new(0,5),new(1,15),new(2,25)]){Zones=scale}]};
+    string?[] Fills(ChartSpec chart)=>Points(Svg(chart)).Select(m=>(string?)m.Attribute("fill")).ToArray();
+    Check(Fills(spec).SequenceEqual([Ramp[0],"#123456",Ramp[2]]));
+    Check(Fills(spec with{Theme=ChartTheme.Dark}).SequenceEqual([ChartStyle.Dark.Zones[0],"#123456",ChartStyle.Dark.Zones[2]]));
+    var brand=Brand() with{Zones=["#111111","#222222","#333333"]};
+    Check(Fills(spec with{Style=brand}).SequenceEqual(["#111111","#123456","#333333"]));
+    Check(RenderInside(brand,spec).Contains("fill='#333333'"),"a cascaded ramp did not reach the component");
+});
+Test("The zone ramp clears 3:1 on both presets, and its band labels 4.5:1 over their tint",()=>{
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark})
+    {
+        Check(style.Zones.Count>=7);
+        foreach(var colour in style.Zones)
+        {
+            Check(Contrast(colour,style.Background)>=3,$"{colour} on {style.Background} is {Contrast(colour,style.Background):0.00}");
+            // A band is its zone colour at .12 over the background, and its label is drawn in the text colour.
+            Check(Contrast(style.Text,Tint(colour,style.Background,.12))>=4.5,$"a label over {colour} is {Contrast(style.Text,Tint(colour,style.Background,.12)):0.00}");
+        }
+        Check(!style.ContrastIssues().Any(i=>i.Element.StartsWith("Zone")));
+    }
+    Check(Contrast(Ramp[0],LightBackground)>=3&&Contrast(Ramp[0],DarkBackground)>=3);
+    var issues=(ChartStyle.Light with{Zones=["#3F87D9","#FFD60A"]}).ContrastIssues();
+    Check(issues.Count==1&&issues[0].Element=="Zone 2"&&issues[0].Foreground=="#FFD60A"&&issues[0].Required==3&&issues[0].Ratio<2);
+});
+Test("Point colours draw time in zone and colour by a derived value",()=>{
+    var heart=ZoneScale.CogganHeartRate(170);
+    var seconds=Training.TimeInZone(Enumerable.Range(0,600).Select(i=>100+i*.15).ToArray(),heart);
+    var bars=Svg(Spec(ChartKind.Bar) with{YFormat=ValueFormat.Duration,
+        Series=[new("Time in zone",heart.Zones.Select((zone,i)=>new ChartPoint(i,seconds[i],zone.Name){Color=zone.Color ?? ChartStyle.Light.Zones[i]}).ToArray())]});
+    Check(Points(bars).Select(m=>(string?)m.Attribute("fill")).SequenceEqual(Ramp[..5]));
+    Check(bars.Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")==$"Time in zone: Tempo, {new Axis(AxisKind.Linear,0,1){ValueFormat=ValueFormat.Duration}.Format(seconds[2])}"));
+    var donut=Svg(Spec(ChartKind.Donut) with{Series=[new("Mix",[new(0,3,"A"){Color="#ABCDEF"},new(1,2,"B")])]});
+    Check(Points(donut).Select(m=>(string?)m.Attribute("fill")).SequenceEqual(["#ABCDEF",ChartStyle.Light.Series[1]]));
+    Check(donut.Descendants(ns+"circle").Select(c=>(string?)c.Attribute("fill")).SequenceEqual(["#ABCDEF",ChartStyle.Light.Series[1]]),"the donut's key lost the colour");
+    // An elevation profile coloured by grade: each segment takes the colour of the point it starts from, the fill the series'.
+    double[] grades=[0,2,6,9,4,-3];
+    string Grade(double grade)=>grade>=6?"#DD4B45":grade>=2?"#DB6A1F":"#2E9B58";
+    var profile=Svg(Spec(ChartKind.Area) with{Series=[new("Elevation",grades.Select((g,i)=>new ChartPoint(i,100+i*5){Color=Grade(g)}).ToArray())]});
+    Check(Strokes(profile).Select(s=>s.Ink).SequenceEqual(["#2E9B58","#DB6A1F","#DD4B45","#DB6A1F"]),string.Join(",",Strokes(profile).Select(s=>s.Ink)));
+    Check((string?)profile.Descendants(ns+"path").Single(p=>(string?)p.Attribute("fill-opacity")==".12").Attribute("fill")==ChartStyle.Light.Series[0]);
+});
+Test("Zones and point colours are refused where colour already means something else",()=>{
+    bool Accepts(ChartSpec chart){try{ChartSvg.Render(chart);return true;}catch(ArgumentException){return false;}}
+    foreach(var kind in Enum.GetValues<ChartKind>())
+    {
+        var sample=Sample(kind);
+        var zoned=sample with{Series=sample.Series.Select(s=>s with{Zones=Effort()}).ToArray()};
+        var coloured=sample with{Series=sample.Series.Select(s=>s with{Points=s.Points.Select(p=>p with{Color="#ABCDEF"}).ToArray()}).ToArray()};
+        Check(Accepts(zoned)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar),$"zones on {kind}");
+        Check(Accepts(coloured)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Donut),$"point colours on {kind}");
+        // Zone bands go wherever a Y annotation goes, and nowhere else.
+        Check(Accepts(sample with{YZones=Effort()})==Accepts(sample with{Annotations=[new(AnnotationAxis.Y,1)]}),$"zone bands on {kind}");
+    }
+    Check(!Accepts(Sample(ChartKind.Donut) with{YZones=Effort()})&&Accepts(Sample(ChartKind.StackedColumn) with{YZones=Effort()}));
+    Reject(()=>ChartSvg.Render(Spec() with{Series=[new("S",[new(0,1){Color="red"}])]}));
+    Reject(()=>ChartSvg.Render(Spec() with{Series=[new("S",[new(0,1){Color="#ABC' onload='x"}])]}));
+    Reject(()=>ChartSvg.Render(Spec() with{Series=[new("S",[new(0,1)]){Zones=new([new("A",double.PositiveInfinity,"#12345")])}]}));
+    Reject(()=>ChartSvg.Render(Spec() with{YZones=new([new("A",double.PositiveInfinity,"blue")])}));
+    Reject(()=>ChartSvg.Render(Spec() with{YZones=new([new("Bad\u0001",double.PositiveInfinity)])}));
+    Reject(()=>ChartSvg.Render(Spec() with{Style=ChartStyle.Light with{Zones=[]}}));
+    Reject(()=>ChartSvg.Render(Spec() with{Style=ChartStyle.Light with{Zones=null!}}));
+    Reject(()=>ChartSvg.Render(Spec() with{Style=ChartStyle.Light with{Zones=["#12345G"]}}));
+    Reject(()=>ChartSvg.Render(Spec() with{Style=ChartStyle.Light with{Zones=Enumerable.Repeat("#123456",33).ToArray()}}));
+    // A density scatter shades cells, so there is no mark for a zone or a point to colour.
+    Reject(()=>ChartSvg.Render(Cloud(100,20) with{Series=[Cloud(100,20).Series[0] with{Zones=Effort()}]}));
+    Reject(()=>ChartSvg.Render(Cloud(100,20) with{Series=[Cloud(100,20).Series[0] with{Points=[new(0,1){Color="#ABCDEF"}]}]}));
+    // Zones past the end of the ramp need colours of their own rather than repeating one.
+    var eight=new ZoneScale(Enumerable.Range(0,8).Select(i=>new Zone($"Z{i+1}",i<7?i*10:double.PositiveInfinity)).ToArray());
+    Reject(()=>ChartSvg.Render(Spec() with{YZones=eight}));
+    Reject(()=>ChartSvg.Render(Spec() with{Series=[Spec().Series[0] with{Zones=eight}]}));
+    Check(Accepts(Spec() with{YZones=new(eight.Zones.Select((z,i)=>i==7?z with{Color="#123456"}:z).ToArray())}));
+    Reject(()=>ChartSvg.Render(Spec() with{Style=ChartStyle.Light with{Zones=["#3F87D9"]},YZones=Effort()}));
+    Reject(()=>ChartSvg.Render(Spec() with{YZones=new(Enumerable.Range(0,33).Select(i=>new Zone($"Z{i}",i<32?i:double.PositiveInfinity,"#123456")).ToArray())}));
+});
+Test("Zones, zone colours and point colours survive JSON, the top bound as Infinity",()=>{
+    var options=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web){Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}};
+    var spec=Spec() with{YZones=Effort(),Style=ChartStyle.Light with{Zones=["#3F87D9","#2E9B58","#A88200","#DD4B45"]},
+        Series=[new("Effort",[new(0,110){Color="#ABCDEF"},new(1,150)]){Zones=new([new("Low",130,"#123456"),new("High",double.PositiveInfinity)])}]};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,options);
+    Check(json.Contains("\"yZones\":{\"zones\":[{\"name\":\"Easy\",\"upper\":120,\"color\":null}")&&json.Contains("\"upper\":\"Infinity\"")
+        &&json.Contains("\"color\":\"#ABCDEF\"")&&json.Contains("{\"name\":\"Low\",\"upper\":130,\"color\":\"#123456\"}")&&json.Contains("\"zones\":[\"#3F87D9\""),json);
+    Check(ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,options)!)==ChartSvg.Render(spec),"the zones changed in transit");
+    var written="{\"kind\":\"Line\",\"yZones\":{\"zones\":[{\"name\":\"Easy\",\"upper\":120},{\"name\":\"Hard\",\"upper\":\"Infinity\"}]},"+
+        "\"series\":[{\"name\":\"S\",\"zones\":{\"zones\":[{\"name\":\"Easy\",\"upper\":120},{\"name\":\"Hard\",\"upper\":\"Infinity\",\"color\":\"#123456\"}]},\"points\":[{\"x\":0,\"y\":110},{\"x\":1,\"y\":130,\"color\":\"#ABCDEF\"}]}]}";
+    var read=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,options)!;
+    Check(read.YZones!.Zones[1].Upper==double.PositiveInfinity&&read.Series[0].Zones!.Zones[1].Color=="#123456"&&read.Series[0].Points[1].Color=="#ABCDEF");
+    var svg=ChartSvg.Render(read);
+    Check(svg.Contains("Hard: above 120")&&svg.Contains("S: 1, 130, Hard")&&svg.Contains("fill='#ABCDEF'")&&svg.Contains("stroke='#848484'"),"hand-written JSON lost its zones");
+    // A scale that breaks its own rules is invalid JSON, which a host answers as a bad request rather than a server error.
+    foreach(var broken in (string[])["{\"zones\":[{\"name\":\"A\",\"upper\":5},{\"name\":\"B\",\"upper\":3}]}","{\"zones\":[]}","{}","{\"zones\":[{\"name\":\"A\",\"upper\":5}]}","{\"zones\":[null]}"])
+    {
+        try{System.Text.Json.JsonSerializer.Deserialize<ZoneScale>(broken,options);throw new Exception($"{broken} was accepted");}
+        catch(System.Text.Json.JsonException){}
+    }
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"style\":{\"background\":\"#FFFFFF\"},\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",options)!;
+    Check(old.YZones is null&&old.Series[0].Zones is null&&old.Series[0].Points[0].Color is null&&old.Style!.Zones.SequenceEqual(ChartStyle.Light.Zones));
+});
+Test("A chart that asks for no zones or point colours draws as before",()=>{
+    foreach(var kind in Enum.GetValues<ChartKind>())
+    {
+        var svg=ChartSvg.Render(Sample(kind));
+        // The ramp reaches neither the stylesheet nor a mark until a zone asks for it.
+        Check(svg==ChartSvg.Render(Sample(kind) with{Style=ChartStyle.Light with{Zones=["#010203"]}}),$"{kind} moved with the ramp");
+        Check(!Ramp.Any(svg.Contains),$"{kind} drew a zone colour");
+    }
+    var doc=Svg(Spec() with{Series=[new("S",[new(0,2),new(1,3),new(2,null),new(3,1),new(4,2)])]});
+    Check(Strokes(doc).Select(s=>s.Ink).SequenceEqual([ChartStyle.Light.Series[0],ChartStyle.Light.Series[0]]),"a plain line no longer draws one stroke per run");
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

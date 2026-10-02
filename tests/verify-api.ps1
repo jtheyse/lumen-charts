@@ -122,6 +122,20 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify ($r.Content.Contains('background:#F6F3EE') -and $r.Content.Contains("fill='#1D4E89'") -and $r.Content.Contains('font-family:Georgia,serif')) 'A style in the request brands the SVG'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Line","style":{"fontFamily":"Arial;background:url(x)"},"series":[{"name":"S","points":[{"x":0,"y":1}]}]}' -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400) 'A style that could escape the markup is rejected'
+$zoned='{"title":"Effort","kind":"Line","yZones":{"zones":[{"name":"Easy","upper":120},{"name":"Steady","upper":140},{"name":"Hard","upper":"Infinity"}]},"series":[{"name":"Heart rate","zones":{"zones":[{"name":"Easy","upper":120},{"name":"Steady","upper":140},{"name":"Hard","upper":"Infinity"}]},"points":[{"x":0,"y":110},{"x":1,"y":150},{"x":2,"y":130}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $zoned
+$strokes=@([regex]::Matches($r.Content,"fill='none' stroke='(#[0-9A-F]{6})' stroke-width='2.5'")|ForEach-Object{$_.Groups[1].Value}|Sort-Object -Unique)
+Verify ($strokes.Count -ge 3 -and $r.Content.Contains('Heart rate: 1, 150, Hard')) 'A zone-coloured line posted as JSON changes stroke colour at its bounds and names each zone'
+Verify ($r.Content.Contains('>Easy: up to 120<') -and $r.Content.Contains('>Steady: 120 to 140<') -and $r.Content.Contains('>Hard: above 140<')) 'Zone bands render their names and ranges'
+$coloured='{"title":"Time in zone","kind":"Bar","yFormat":"Duration","series":[{"name":"Time","points":[{"x":0,"y":600,"label":"Easy","color":"#848484"},{"x":1,"y":1500,"label":"Steady","color":"#3F87D9"},{"x":2,"y":300,"label":"Hard","color":"#2E9B58"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $coloured
+Verify ($r.Content.Contains("fill='#848484'") -and $r.Content.Contains("fill='#3F87D9'") -and $r.Content.Contains("fill='#2E9B58'") -and $r.Content.Contains('Time: Steady, 25:00')) 'Point colours posted as JSON colour their bars'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"StackedColumn","series":[{"name":"A","zones":{"zones":[{"name":"All","upper":"Infinity"}]},"points":[{"x":0,"y":1}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'Zones on a stacked column are rejected'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Candlestick","series":[{"name":"P","points":[{"x":0,"open":10,"high":12,"low":9,"close":11,"color":"#123456"}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'A point colour on a candlestick is rejected'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $zoned.Replace('"upper":140','"upper":100') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'A zone scale whose bounds do not rise is a bad request, not a server error'
 $graph='{"nodes":[{"id":"a","label":"Start"},{"id":"b","label":"End"}],"edges":[{"source":"a","target":"b"}],"layout":"Layered"}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType application/json -Body $graph
 Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'Graph SVG'
