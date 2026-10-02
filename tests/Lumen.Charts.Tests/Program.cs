@@ -1430,6 +1430,273 @@ Test("A histogram takes at most four series",()=>{
     try { ChartSvg.Render(Spec(ChartKind.Histogram) with{Series=Enumerable.Range(0,5).Select(Set).ToArray()}); throw new Exception("five series were drawn"); }
     catch(ArgumentException error) { Check(error.Message.Contains("at most four"),error.Message); }
 });
+bool Near(double actual,double expected,double tolerance=1e-9)=>Math.Abs(actual-expected)<=tolerance*Math.Max(1,Math.Abs(expected));
+DateOnly Day(int offset)=>new DateOnly(2026,3,2).AddDays(offset);
+// An hour of varied riding: a slow swell, noise, and a 20-second surge every five minutes.
+double[] Ride(){var random=new Random(7);return Enumerable.Range(0,3600).Select(i=>150+100*Math.Sin(i/40.0)+random.Next(0,120)+(i%300<20?400:0d)).ToArray();}
+string[] power=["Active recovery","Endurance","Tempo","Lactate threshold","VO2max","Anaerobic capacity","Neuromuscular"];
+Test("Coggan's power levels reproduce the worked example for an FTP of 290 W",()=>{
+    var scale=ZoneScale.CogganPower(290);
+    Check(scale.Zones.Select(z=>z.Name).SequenceEqual(power),"the levels are misnamed or misordered");
+    var rounded=scale.Zones.Take(5).Select(z=>Math.Round(z.Upper,MidpointRounding.AwayFromZero)).ToArray();
+    Check(rounded.SequenceEqual([160d,218,261,305,348]),string.Join(", ",rounded));
+    Check(scale.Zones[5].Upper==435&&double.IsPositiveInfinity(scale.Zones[6].Upper),"anaerobic capacity or the top level is wrong");
+});
+Test("A zone holds its own upper bound and starts just above the previous one",()=>{
+    var scale=ZoneScale.CogganPower(290);
+    for(var i=0;i<6;i++)
+    {
+        var bound=scale.Zones[i].Upper;
+        Check(scale.IndexOf(bound)==i,$"{bound} W left its own zone");
+        Check(scale.IndexOf(Math.BitDecrement(bound))==i,$"just below {bound} W left the zone");
+        Check(scale.IndexOf(Math.BitIncrement(bound))==i+1,$"just above {bound} W stayed in the zone");
+    }
+    Check(scale.IndexOf(-5)==0&&scale.IndexOf(0)==0&&scale.IndexOf(5000)==6&&scale.IndexOf(double.PositiveInfinity)==6);
+    Check(scale.IndexOf(double.NaN)==-1,"NaN was put in a zone");
+    // The bounds are exact, so 160 W, which an integer table prints as recovery's limit, is already endurance.
+    Check(scale.IndexOf(159)==0&&scale.IndexOf(159.5)==0&&scale.IndexOf(160)==1&&scale.IndexOf(217)==1&&scale.IndexOf(218)==2);
+});
+Test("Coggan's heart-rate levels follow threshold heart rate",()=>{
+    var scale=ZoneScale.CogganHeartRate(170);
+    Check(scale.Zones.Select(z=>z.Name).SequenceEqual(power.Take(5)),"the levels are misnamed or misordered");
+    double[] bounds=[115.6,141.1,159.8,178.5];
+    for(var i=0;i<4;i++)Check(Near(scale.Zones[i].Upper,bounds[i]),$"level {i+1} ends at {scale.Zones[i].Upper}");
+    Check(double.IsPositiveInfinity(scale.Zones[4].Upper));
+    Check(scale.IndexOf(115)==0&&scale.IndexOf(116)==1&&scale.IndexOf(159)==2&&scale.IndexOf(160)==3&&scale.IndexOf(178)==3&&scale.IndexOf(179)==4);
+});
+Test("A zone scale refuses what it cannot order",()=>{
+    var top=new Zone("Top",double.PositiveInfinity);
+    Reject(()=>new ZoneScale([]));
+    Reject(()=>new ZoneScale(null!));
+    Reject(()=>new ZoneScale([new("Easy",100),new("Hard",100),top]));
+    Reject(()=>new ZoneScale([new("Easy",200),new("Hard",100),top]));
+    Reject(()=>new ZoneScale([new("",100),top]));
+    Reject(()=>new ZoneScale([new(" ",100),top]));
+    Reject(()=>new ZoneScale([null!,top]));
+    Reject(()=>new ZoneScale([new("Easy",100),new("Hard",200)]));
+    Reject(()=>new ZoneScale([new("Easy",double.NaN),top]));
+    Reject(()=>new ZoneScale([new("Easy",double.NegativeInfinity),top]));
+    Reject(()=>new ZoneScale([new("Easy",100),new("Hard",double.PositiveInfinity),top]));
+    foreach(var threshold in new[]{0,-250,double.NaN,double.PositiveInfinity})
+    {
+        Reject(()=>ZoneScale.CogganPower(threshold));
+        Reject(()=>ZoneScale.CogganHeartRate(threshold));
+    }
+    Check(new ZoneScale([top]).IndexOf(-1e300)==0,"a single unbounded zone does not hold everything");
+});
+Test("Normalized power of a steady effort is that effort",()=>{
+    Check(Near(Training.NormalizedPower(Enumerable.Repeat(237.4,3600).ToArray())!.Value,237.4));
+    Check(Near(Training.NormalizedPower(Enumerable.Repeat(200d,30).ToArray())!.Value,200),"one whole window is not enough");
+});
+Test("Normalized power averages over 30 seconds before taking the fourth power",()=>{
+    // Every 30-second window of alternating 0 and 400 W holds fifteen of each, so every average is 200 W;
+    // raising the samples themselves would give 400 / 2^(1/4), about 336 W.
+    Check(Near(Training.NormalizedPower(Enumerable.Range(0,600).Select(i=>i%2==0?0d:400).ToArray())!.Value,200));
+    // Every 10 seconds the window is three samples, so 100, 200, 300 and 400 W average to 200 and 300 W.
+    Check(Near(Training.NormalizedPower([100d,200,300,400],10)!.Value,263.8975964004231));
+});
+Test("Normalized power is never below the plain mean of its rolling averages",()=>{
+    var ride=Ride();
+    var averages=Enumerable.Range(0,ride.Length-29).Select(i=>ride.Skip(i).Take(30).Average()).ToArray();
+    var np=Training.NormalizedPower(ride)!.Value;
+    Check(np>averages.Average()+1,$"NP {np} against a mean of {averages.Average()}");
+    Check(Near(np,Math.Pow(averages.Average(a=>Math.Pow(a,4)),.25)),"the running window disagrees with averaging each window afresh");
+});
+Test("Normalized power needs one whole window, counted in samples",()=>{
+    Check(Training.NormalizedPower([]) is null&&Training.NormalizedPower(Enumerable.Repeat(250d,29).ToArray()) is null);
+    // Every 5 seconds the window is six samples; every 12, two and a half rounds up to three.
+    Check(Training.NormalizedPower([100d,200,300,400,500],5) is null&&Near(Training.NormalizedPower([100d,200,300,400,500,600],5)!.Value,350));
+    Check(Training.NormalizedPower([100d,200],12) is null&&Near(Training.NormalizedPower([100d,200,300],12)!.Value,200));
+    // A sample longer than 30 seconds is a window of its own.
+    Check(Near(Training.NormalizedPower([100d,300],60)!.Value,Math.Pow((Math.Pow(100,4)+Math.Pow(300,4))/2,.25)));
+    Reject(()=>Training.NormalizedPower(Ride(),0));
+    Reject(()=>Training.NormalizedPower(Ride(),-1));
+    Reject(()=>Training.NormalizedPower(Ride(),double.NaN));
+    Reject(()=>Training.NormalizedPower([..Ride(),double.NaN]));
+    Reject(()=>Training.NormalizedPower([..Ride(),double.PositiveInfinity]));
+});
+Test("An hour at threshold scores 100 training stress",()=>{
+    Check(Training.StressScore(3600,250,250)==100&&Training.IntensityFactor(250,250)==1);
+    Check(Near(Training.StressScore(1800,250,250),50)&&Near(Training.StressScore(3600,275,250),121));
+    foreach(var (seconds,np,ftp) in new[]{(5400d,210d,260d),(2700d,305d,280d),(600d,90d,300d)})
+        Check(Near(Training.StressScore(seconds,np,ftp),seconds/3600*Math.Pow(np/ftp,2)*100),"training stress is not hours × IF² × 100");
+    Reject(()=>Training.IntensityFactor(200,0));
+    Reject(()=>Training.IntensityFactor(200,double.NaN));
+    Reject(()=>Training.IntensityFactor(-1,250));
+    Reject(()=>Training.IntensityFactor(double.PositiveInfinity,250));
+    Reject(()=>Training.StressScore(-1,200,250));
+    Reject(()=>Training.StressScore(double.NaN,200,250));
+    Reject(()=>Training.StressScore(3600,200,-250));
+});
+Test("Allen and Coggan's 7:09:27 ride at NP 198 W and IF 0.859 scores 528.5 within rounding",()=>{
+    var seconds=7*3600+9*60+27d;
+    // FTP is NP / IF. An IF printed to three places lies between 0.8585 and 0.8595.
+    double low=Training.StressScore(seconds,198,198/.8585),high=Training.StressScore(seconds,198,198/.8595);
+    Check(low<=528.5&&528.5<=high,$"{low} to {high}");
+    Check(Math.Abs(Training.StressScore(seconds,198,198/.859)-528.5)<.5);
+});
+Test("Fitness, fatigue and form follow the published recurrence day by day",()=>{
+    var load=Training.Load([(Day(0),100),(Day(1),50),(Day(3),70)]);
+    Check(load.Select(d=>d.Day).SequenceEqual([Day(0),Day(1),Day(2),Day(3)]),"the days are not consecutive");
+    Check(load.Select(d=>d.Stress).SequenceEqual([100d,50,0,70]));
+    Check(Near(load[0].Fitness,100/42d)&&Near(load[0].Fatigue,100/7d));
+    // Worked by hand: fitness moves a 42nd of the way to the day's stress, fatigue a 7th, form is yesterday's difference.
+    double[] fitness=[2.380952380952381,3.5147392290249435,3.431054961667207,5.016029843532273];
+    double[] fatigue=[14.285714285714286,19.387755102040817,16.61807580174927,24.244064972927944];
+    double[] form=[0,-11.904761904761905,-15.873015873015873,-13.187020840082063];
+    for(var i=0;i<4;i++)Check(Near(load[i].Fitness,fitness[i])&&Near(load[i].Fatigue,fatigue[i])&&Near(load[i].Form,form[i]),$"day {i+1}: {load[i]}");
+});
+Test("Form is yesterday's fitness minus yesterday's fatigue",()=>{
+    var load=Training.Load(Enumerable.Range(0,30).Select(i=>(Day(i),(double)(i*37%120))),fitness:40,fatigue:55);
+    Check(load[0].Form==-15,"the first day's form is not the seeds'");
+    for(var i=1;i<load.Count;i++)Check(load[i].Form==load[i-1].Fitness-load[i-1].Fatigue,$"day {i+1}");
+    Check(Training.Load([(Day(0),60),(Day(1),500)])[1].Form==Training.Load([(Day(0),60),(Day(1),0)])[1].Form,"a day's own training moved its form");
+});
+Test("Days without training count as zero and one day's entries add up",()=>{
+    var gap=Training.Load([(Day(0),80),(Day(5),60)]);
+    Check(gap.Count==6&&gap.Skip(1).Take(4).All(d=>d.Stress==0),"the gap was not filled");
+    Check(gap.SequenceEqual(Training.Load([(Day(0),80),(Day(1),0),(Day(2),0),(Day(3),0),(Day(4),0),(Day(5),60)])),"a filled day differs from a written zero");
+    Check(gap.SequenceEqual(Training.Load([(Day(5),25),(Day(0),30),(Day(5),35),(Day(0),50)])),"entries on one day were not added, or order mattered");
+    Check(Training.Load([]).Count==0);
+});
+Test("Steady training draws fitness and fatigue to it and form back to zero",()=>{
+    var load=Training.Load(Enumerable.Range(0,400).Select(i=>(Day(i),80d)));
+    for(var i=1;i<load.Count;i++)
+        Check(load[i].Fitness>load[i-1].Fitness&&load[i].Fitness<80&&load[i].Fatigue>=load[i-1].Fatigue&&load[i].Fatigue<=80,$"day {i+1}: {load[i]}");
+    Check(load.All(d=>d.Fatigue>d.Fitness)&&load.Skip(1).All(d=>d.Form<0),"fatigue did not lead fitness");
+    Check(Math.Abs(load[^1].Fitness-80)<.01&&Math.Abs(load[^1].Fatigue-80)<1e-9&&Math.Abs(load[^1].Form)<.01,load[^1].ToString());
+    Check(load[10].Form<load[100].Form&&load[100].Form<load[^1].Form,"form did not recover");
+});
+Test("Seeds and time constants change the load model as Allen and Coggan describe",()=>{
+    // Seeded at the typical daily stress, an athlete holding it starts at zero form and stays there.
+    Check(Training.Load(Enumerable.Range(0,60).Select(i=>(Day(i),80d)),fitness:80,fatigue:80).All(d=>d.Fitness==80&&d.Fatigue==80&&d.Form==0));
+    var quick=Training.Load([(Day(0),100)],fatigueDays:4)[0];
+    Check(Near(quick.Fatigue,25)&&Near(quick.Fitness,100/42d),quick.ToString());
+    var custom=Training.Load([(Day(0),100)],fitness:50,fatigue:20,fitnessDays:28,fatigueDays:10)[0];
+    Check(Near(custom.Fitness,51.785714285714285)&&Near(custom.Fatigue,28)&&custom.Form==30,custom.ToString());
+    // After a hard week and a rest week, a short fatigue constant has shed more fatigue than a long one.
+    var block=Enumerable.Range(0,14).Select(i=>(Day(i),i<7?150d:0)).ToArray();
+    Check(Training.Load(block,fatigueDays:4)[^1].Form>Training.Load(block,fatigueDays:12)[^1].Form);
+});
+Test("The load model refuses what it cannot run",()=>{
+    Reject(()=>Training.Load([(Day(0),double.NaN)]));
+    Reject(()=>Training.Load([(Day(0),double.PositiveInfinity)]));
+    Reject(()=>Training.Load([(Day(0),-1)]));
+    Reject(()=>Training.Load([(Day(0),50)],fitness:double.NaN));
+    Reject(()=>Training.Load([(Day(0),50)],fatigue:double.PositiveInfinity));
+    Reject(()=>Training.Load([(Day(0),50)],fitnessDays:0));
+    Reject(()=>Training.Load([(Day(0),50)],fitnessDays:double.PositiveInfinity));
+    Reject(()=>Training.Load([(Day(0),50)],fatigueDays:-7));
+    Reject(()=>Training.Load([(Day(0),50)],fatigueDays:double.NaN));
+});
+Test("Time in zone counts each finite sample once",()=>{
+    // At FTP 200 the bounds are 110, 150, 180, 210, 240 and 300 W.
+    double[] samples=[90,100,-5,120,130,140,160,200,205,230,260,400,double.NaN,double.PositiveInfinity,double.NegativeInfinity];
+    var seconds=Training.TimeInZone(samples,ZoneScale.CogganPower(200),2);
+    Check(seconds.SequenceEqual([6d,6,2,4,2,2,2]),string.Join(", ",seconds));
+    var ride=Ride();
+    var whole=Training.TimeInZone(ride,ZoneScale.CogganPower(250));
+    Check(whole.Count==7&&whole.Sum()==3600,"an hour did not add up to an hour");
+    Check(Training.TimeInZone([..ride,double.NaN,double.NaN],ZoneScale.CogganPower(250),.5).Sum()==1800,"dropouts were counted");
+    Check(Training.TimeInZone(Enumerable.Repeat(150d,90).ToArray(),ZoneScale.CogganHeartRate(160)).SequenceEqual([0d,0,90,0,0]));
+    Reject(()=>Training.TimeInZone(ride,ZoneScale.CogganPower(250),0));
+    Reject(()=>Training.TimeInZone(ride,ZoneScale.CogganPower(250),double.NaN));
+});
+Test("A mean-maximal curve finds the best average for each duration",()=>{
+    var ride=Ride();
+    long[] chain=[1,5,10,30,60,120,600,1200,3600];
+    var curve=Training.MeanMaximal(ride,chain.Select(d=>(double)d));
+    Check(curve.Select(p=>p.Seconds).SequenceEqual(chain.Select(d=>(double)d)));
+    foreach(var (seconds,value) in curve)
+    {
+        var width=(int)seconds;
+        var best=Enumerable.Range(0,ride.Length-width+1).Max(i=>ride.Skip(i).Take(width).Average());
+        Check(Near(value,best),$"{seconds} s: {value} against {best}");
+    }
+    // Each duration here is a multiple of the one before, and over such a chain the best average cannot rise.
+    for(var i=1;i<curve.Count;i++)Check(curve[i].Value<=curve[i-1].Value,$"the curve rose from {curve[i-1].Seconds} to {curve[i].Seconds} s");
+    Check(Near(curve[^1].Value,ride.Average()),"the whole record is not its own average");
+});
+Test("A mean-maximal curve can rise between durations that are not multiples",()=>{
+    // Five seconds hard, five easy and five hard: every 10-second window holds five hard seconds, the 15-second one ten.
+    double[] surges=[..Enumerable.Repeat(1000d,5),..Enumerable.Repeat(0d,5),..Enumerable.Repeat(1000d,5),..Enumerable.Repeat(0d,30)];
+    var curve=Training.MeanMaximal(surges,[10,15]);
+    Check(Near(curve[0].Value,500)&&Near(curve[1].Value,10000/15d),string.Join(", ",curve));
+});
+Test("A steady record is flat and a spike stays at the short durations",()=>{
+    var flat=Training.MeanMaximal(Enumerable.Repeat(260.5,3600).ToArray(),Training.StandardDurations);
+    Check(flat.Select(p=>p.Seconds).SequenceEqual(Training.StandardDurations.Where(d=>d<=3600)),"durations past the record were kept");
+    Check(flat.All(p=>Near(p.Value,260.5)),"a steady record is not flat");
+    var spiked=Enumerable.Repeat(200d,600).ToArray();
+    for(var i=300;i<305;i++)spiked[i]=1000;
+    var curve=Training.MeanMaximal(spiked,[1,5,10,60,600,601]).ToDictionary(p=>p.Seconds,p=>p.Value);
+    Check(curve.Count==5&&curve[1]==1000&&curve[5]==1000,"the spike is missing at the short end");
+    Check(Near(curve[10],600)&&Near(curve[60],(5000+55*200)/60d)&&Near(curve[600],(5000+595*200)/600d),"the spike spread too far or too little");
+});
+Test("A mean-maximal curve counts durations in whole samples",()=>{
+    // Every 2 seconds: one second is shorter than a sample, three rounds half up to two samples, and the record is 20 seconds.
+    double[] samples=[100,300,200,400,100,100,100,100,100,100];
+    var curve=Training.MeanMaximal(samples,[1,2,3,4,20,21],2);
+    Check(curve.Select(p=>p.Seconds).SequenceEqual([2d,3,4,20]),string.Join(", ",curve));
+    Check(curve[0].Value==400&&curve[1].Value==300&&curve[2].Value==300&&Near(curve[3].Value,160));
+    Check(Training.MeanMaximal([],Training.StandardDurations).Count==0);
+    Reject(()=>Training.MeanMaximal(samples,[double.NaN]));
+    Reject(()=>Training.MeanMaximal([100d,double.NaN],[1]));
+    Reject(()=>Training.MeanMaximal(samples,[1],0));
+    Reject(()=>Training.MeanMaximal(samples,[1],double.PositiveInfinity));
+});
+Test("Critical power recovers CP and W′ from efforts built from the model",()=>{
+    double Model(double seconds)=>250+20000/seconds;
+    var efforts=new[]{180d,300,600,1200}.Select(t=>(t,Model(t))).ToArray();
+    var fit=Training.CriticalPower(efforts)!;
+    Check(Near(fit.CriticalPower,250)&&Near(fit.WPrime,20000)&&fit.Count==4&&Near(fit.R2,1),fit.ToString());
+    // Efforts outside 3 to 20 minutes are ignored, however far off the model they are; the window's ends are inside it.
+    Check(Training.CriticalPower([..efforts,(5,1200),(60,600),(179.9,100),(1200.1,100),(3600,100)])==fit,"an effort outside the window moved the fit");
+    var start=Training.CriticalPower([..efforts,(180,100)])!;var end=Training.CriticalPower([..efforts,(1200,100)])!;
+    Check(start.Count==5&&end.Count==5&&start.CriticalPower!=250&&end.CriticalPower!=250,"an effort at the window's edge was ignored");
+    // A mean-maximal curve feeds it directly: an hour that settles at 300 W after a hard start fits a CP near 300 W.
+    var settled=Training.CriticalPower(Training.MeanMaximal(Enumerable.Range(0,3600).Select(i=>i<200?380d:300).ToArray(),Training.StandardDurations))!;
+    Check(settled.Count==4&&Math.Abs(settled.CriticalPower-300)<5,settled.ToString());
+});
+Test("Critical power needs two different durations between 3 and 20 minutes",()=>{
+    Check(Training.CriticalPower([]) is null);
+    Check(Training.CriticalPower([(300,320)]) is null);
+    Check(Training.CriticalPower([(300,320),(300,330)]) is null);
+    Check(Training.CriticalPower([(60,500),(3600,220),(300,320)]) is null);
+    Reject(()=>Training.CriticalPower([(300,double.NaN),(600,280)]));
+    Reject(()=>Training.CriticalPower([(double.PositiveInfinity,200),(600,280)]));
+});
+bool Held(RollingWindow? window,double mean,double deviation,int count)=>window is not null&&Near(window.Mean,mean)&&Near(window.Deviation,deviation)&&window.Count==count;
+Test("A rolling window gives the mean and sample deviation of the values present",()=>{
+    var windows=Statistics.Rolling([2d,4,null,8,6],3,2);
+    Check(windows[0] is null,"one value met a minimum of two");
+    Check(Held(windows[1],3,Math.Sqrt(2),2)&&Held(windows[2],3,Math.Sqrt(2),2)&&Held(windows[3],6,Math.Sqrt(8),2)&&Held(windows[4],7,Math.Sqrt(2),2),string.Join(" | ",windows));
+    var full=Statistics.Rolling([1d,2,3,4,5],3);
+    Check(full[0] is null&&full[1] is null&&Held(full[2],2,1,3)&&Held(full[3],3,1,3)&&Held(full[4],4,1,3),string.Join(" | ",full));
+    Check(Held(Statistics.Rolling([2d,4,4,4,5,5,7,9],8)[7],5,Math.Sqrt(32/7d),8),"the deviation does not divide by n - 1");
+    // Precision survives a large level with a small spread.
+    Check(Held(Statistics.Rolling([1e9+1,1e9+2,1e9+3],3)[2],1e9+2,1,3),"a large level swamped the spread");
+});
+Test("A rolling window skips missing values and waits for its minimum",()=>{
+    Check(Statistics.Rolling([2d,4,null,8,6],3).All(w=>w is null),"a window with a gap met the default minimum of the whole window");
+    var average=Statistics.Rolling([10d,20,30,40],2,1);
+    Check(Held(average[0],10,0,1)&&Held(average[1],15,Math.Sqrt(50),2)&&Held(average[2],25,Math.Sqrt(50),2)&&Held(average[3],35,Math.Sqrt(50),2),string.Join(" | ",average));
+    var random=new Random(11);
+    var values=Enumerable.Range(0,500).Select(i=>random.Next(5)==0?(double?)null:50+random.NextDouble()*20).ToArray();
+    var rolled=Statistics.Rolling(values,7,3);
+    for(var i=0;i<values.Length;i++)
+    {
+        var present=values.Skip(Math.Max(0,i-6)).Take(Math.Min(7,i+1)).OfType<double>().ToArray();
+        if(present.Length<3){Check(rolled[i] is null,$"entry {i} met the minimum with {present.Length}");continue;}
+        var mean=present.Average();
+        Check(Held(rolled[i],mean,Math.Sqrt(present.Sum(v=>(v-mean)*(v-mean))/(present.Length-1)),present.Length),$"entry {i}: {rolled[i]}");
+    }
+    Reject(()=>Statistics.Rolling([1d,2],0));
+    Reject(()=>Statistics.Rolling([1d,2],3,0));
+    Reject(()=>Statistics.Rolling([1d,2],3,4));
+    Reject(()=>Statistics.Rolling([1d,double.NaN],2,1));
+    Reject(()=>Statistics.Rolling([1d,double.PositiveInfinity],2,1));
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

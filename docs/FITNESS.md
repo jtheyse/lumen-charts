@@ -70,7 +70,7 @@ Test values are given where a source provides them, because each is something th
 
 Cross-cutting work comes first, because each piece unlocks several charts. Each release is independently useful and is checked the same way as the rest of the library: executable assertions, the hashed rendering baseline, HTTP checks and the browser suite.
 
-1. **Training metrics** — normalized power, intensity factor, training stress, the fitness–fatigue–form model, time in zone, mean-maximal curves, the critical-power fit, rolling baselines, and a zone scale with Coggan's power and heart-rate levels. Computation only, tested against the values above.
+1. **Training metrics** — normalized power, intensity factor, training stress, the fitness–fatigue–form model, time in zone, mean-maximal curves, the critical-power fit, rolling baselines, and a zone scale with Coggan's power and heart-rate levels. Computation only, tested against the values above. Shipped in 0.18.0.
 2. **Axis formats** — elapsed duration, pace, duration-labelled logarithmic ticks, compact numbers, and inverted axes. Unlocks the power curve, pace streams, splits and record progressions.
 3. **Zones on charts** — zone bands behind a line, a line coloured by zone, and bars and markers coloured from a zone scale. Unlocks the activity stream, time in zone, grade-coloured elevation and baseline trends.
 4. **Several marks in one chart** — lines, areas, columns and points together, and a band whose edges are series. Unlocks performance management, load against target, elevation behind pace and the Activity Path. The volume pane on the existing roadmap is the same need with panels stacked instead of overlaid, so synchronised panels belong here too.

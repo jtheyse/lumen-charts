@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.17.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.18.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -289,6 +289,39 @@ Layered graphs assign longest-path levels, add one routing point per level a lon
 
 Dragging a node previews with a transform and commits on release; arrow keys nudge a focused node by eight units and Enter selects it. Moved positions are kept until the node set or layout changes, and the toolbar's Reset layout restores the computed ones. Rendering itself stays static: `GraphEngine.Render(spec)` needs no browser, and the second argument accepts stored positions if your application persists them.
 
+## Training metrics
+
+`Training` computes the numbers endurance-training charts draw, as Allen and Coggan's *Training and Racing with a Power Meter* and TrainingPeaks define them; [FITNESS.md](docs/FITNESS.md) gives the sources and the published values the tests check against. It draws nothing itself. The results are plain numbers and records for the chart kinds above, and the axis formats, zone colours and mixed marks the training charts need arrive in later releases.
+
+```csharp
+var zones = ZoneScale.CogganPower(ftp: 290);             // seven levels; each Upper is inclusive
+double? np = Training.NormalizedPower(watts);            // one sample a second
+double stress = Training.StressScore(watts.Count, np!.Value, ftp: 290);
+var minutes = Training.TimeInZone(watts, zones).Select(s => s / 60);
+var curve = Training.MeanMaximal(watts, Training.StandardDurations);
+CriticalPowerFit? cp = Training.CriticalPower(curve);
+
+// Fitness and fatigue as lines, form against the right-hand axis.
+var load = Training.Load(rides.Select(r => (r.Day, r.Stress)));
+double When(LoadDay d) => TimeAxis.Value(new DateTimeOffset(d.Day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+ChartSpec performance = new() {
+    Kind = ChartKind.Line, XAxis = AxisKind.Time, YLabel = "Training stress per day", Y2Label = "Form",
+    Series = [ChartSeries.From("Fitness", load, When, d => d.Fitness),
+              ChartSeries.From("Fatigue", load, When, d => d.Fatigue),
+              ChartSeries.From("Form", load, When, d => d.Form) with { Secondary = true }]
+};
+```
+
+- **Zones.** A `ZoneScale` is a list of `Zone`s whose `Upper` is inclusive: a value belongs to the first zone whose bound is at least the value, so each zone runs from above the previous bound up to its own, and the last zone must be unbounded. Published tables print whole-percent ranges with a gap between them, and this is the rule that reproduces Coggan's worked example — at an FTP of 290 W, 160, 218, 261, 305 and 348 W once rounded half up. The bounds are kept exact, so active recovery at that FTP ends at 159.5 W rather than the 160 a printed table shows. `CogganPower` and `CogganHeartRate` build Coggan's seven power levels and five heart-rate levels from a threshold.
+- **Normalized power, intensity and stress.** Normalized power is a 30-second rolling average raised to the fourth power, averaged, and its fourth root. The window is 30 seconds rounded half up to whole samples, and a record shorter than one window gives null. The sources define neither gaps nor a changing recording rate, so pass one uniformly sampled series with any gaps filled or cut. `IntensityFactor` is normalized power over FTP and `StressScore` is hours × IF² × 100.
+- **Fitness, fatigue and form.** `Load` runs TrainingPeaks' daily recurrence: fitness moves a 42nd of the way toward each day's stress, fatigue a 7th, and form is yesterday's fitness minus yesterday's fatigue. Every day from the first entry to the last is returned, a day without an entry counting as zero, and one day's entries are added together, so planned workouts are simply later entries. Both time constants and both starting values are parameters, because Allen and Coggan suggest tuning fatigue between about 4 and 12 days and seeding an athlete with no history at their typical daily stress, which starts form at zero.
+- **Time in zone** is seconds per zone, in the scale's order. NaN and infinite samples count in no zone.
+- **Mean-maximal curves** give the best average over each duration, rounded to whole samples; a duration shorter than one sample or longer than the record is left out. The curve is not forced downhill: between durations that are not multiples of one another a longer one can score higher, and it is reported as the data has it.
+- **Critical power** fits Monod's model, total work = W′ + CP × time, to the efforts lasting 3 to 20 minutes, and is null without two different durations among them. The model overestimates what can be held for short efforts, and its R squared is near 1 for any plausible set of efforts, so it says little about the fit.
+- **Rolling baselines.** `Statistics.Rolling` gives each entry the mean, sample standard deviation and count of the values in its trailing window, skipping missing ones and returning null below a minimum count; with a minimum of one it is a moving average.
+
+Not implemented, because no source used here defines them: heart-rate and running training stress (TRIMP, hrTSS, rTSS), grade-adjusted pace, W′ balance, Friel's zones, and the vendors' own load, strain, recovery and readiness scores.
+
 ## HTTP API
 
 Reference `Lumen.Charts.AspNetCore` and add:
@@ -356,7 +389,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Line/area min/max sampling preserves original indices and extrema per continuous run; this is not a total chart-wide point budget. CSV always exports original observations.
 - Up to 100,000 input points, 32 series; 100 categories/slices. Sampling holds a line or area chart at its mark budget, so the browser cost is the same for 1,000 points as for 100,000: about 33 ms either way on the machine in [the measurements](docs/PERFORMANCE.md). Scatter and bubble render every point by default, which is comfortable to about 10,000; 50,000 points means 150,000 DOM elements and 12 MB of markup, and 100,000 means 300,000 elements and 25 MB. A scatter chart can set `DensityCells` to aggregate instead, which takes 100,000 points to 6,504 elements and 33 ms. Bubble has no equivalent, because binning would destroy the size encoding. There is no GPU acceleration and no million-point claim.
 - Bubble area is proportional to Size across all series. Radar requires complete, nonnegative series on common categories. Donut accepts one nonnegative series.
-- A trend line applies to line, area, scatter and bubble charts; category, radial and derived kinds refuse it. It is one least-squares line per series, fitted over every observation in the series rather than the zoomed window, and it is not an observation: it raises no point selection, appears in no CSV export and adds no row to the data table. Other fits — moving averages, polynomial, exponential regression — are not implemented.
+- A trend line applies to line, area, scatter and bubble charts; category, radial and derived kinds refuse it. It is one least-squares line per series, fitted over every observation in the series rather than the zoomed window, and it is not an observation: it raises no point selection, appears in no CSV export and adds no row to the data table. Other fits — moving averages, polynomial, exponential regression — are not drawn; `Statistics.Rolling` computes a moving average a host can draw as a series of its own.
 - A violin estimates its outline with a Gaussian kernel at Silverman's bandwidth, taking the smaller of the standard deviation and the interquartile range so one long tail cannot smooth the shape away. The estimate is drawn over the observed range and no further, so the outline claims no values the data never had, and it is computed in the space the axis draws in, so a logarithmic axis shapes the violin in logarithms. The widest point of each violin fills its column: widths are comparable within a chart but carry no units, and the quartile bar and median tick carry the numbers. A violin is an aggregate, like a histogram bin or a box: focusable and named, raising no point selection. A series with fewer than two observations, or with no spread, draws its quartile bar and median without an outline. The bandwidth is not configurable, and split or paired violins are not implemented.
 - Candlestick and OHLC bar accept one series, and a histogram up to four. Candlestick and OHLC bar take the same input: all four prices with High highest and Low lowest, colored by direction rather than by series. An OHLC tick is half the width of a candle body, so the two drawings of one dataset stand in the same columns and can be compared; neither carries a volume pane. Band points need both bounds or neither. Histogram and box read observations from Y and ignore X. A histogram of several series bins them over one set of edges chosen from the pooled observations and stands their bars side by side; counts are raw, not normalised, so a larger series draws taller bars. A box series may instead carry a precomputed `Summary` and no points: it is drawn as given, claims no observation count, applies to box charts only, and its outliers count towards the 100,000-point limit. Histogram bins and box glyphs are labelled, focusable aggregates that report no observation index, so they raise no point selection; candlesticks, OHLC bars and box outliers computed from observations do, and the outliers of a supplied summary do not.
 - Layered graphs use longest-path levels, then barycenter sweeps that keep the ordering with the fewest crossings found. This is a heuristic, not minimal crossings. Edges spanning several levels bend once per level and are drawn as smooth curves; there is no orthogonal routing, no force simulation and no automatic node overlap removal. Self-loops are allowed in layered graphs and draw as a loop on their node; longer cycles still need the circular layout. Nodes can be dragged or nudged with the arrow keys in the component, which needs an interactive render mode. At most 250 nodes / 2,000 edges; dense graphs can still overlap.
@@ -366,6 +399,10 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.18.0 additions
+
+Training metrics, the first step of the build order in [FITNESS.md](docs/FITNESS.md). They are computation only, so nothing draws differently: the 73 hashed renderings match. `ZoneScale` holds ordered, named zones and builds Coggan's seven power levels and five heart-rate levels from a threshold; `Training` computes normalized power, intensity factor and training stress, the fitness–fatigue–form model, time in zone, mean-maximal curves and a critical-power fit; and `Statistics.Rolling` gives the trailing mean and deviation a baseline band needs, which is also the moving average planned under the regression families. Each is checked against what the sources publish where they publish a value: Coggan's zones at an FTP of 290 W, an hour at threshold scoring 100, Allen and Coggan's seven-hour ride scoring 528.5 within the rounding of its intensity factor, and TrainingPeaks' recurrence worked by hand over four days. Where the sources leave a choice open it is made and documented — which zone a value in a published gap belongs to, how normalized power counts its window in samples, and what form is on the first day. Heart-rate and running training stress, grade-adjusted pace, W′ balance and the vendors' own scores are left out because no source defines them. There is no gallery demonstration yet; the charts these numbers feed come in later releases.
 
 ## 0.17.0 additions
 

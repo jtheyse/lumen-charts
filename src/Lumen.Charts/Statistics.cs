@@ -15,6 +15,9 @@ public sealed record LinearFit(double Slope, double Intercept, double R2, int Co
     public double Predict(double x) => Intercept + Slope * x;
 }
 
+/// <summary>The mean and sample standard deviation of the values present in one trailing window, and how many there were.</summary>
+public sealed record RollingWindow(double Mean, double Deviation, int Count);
+
 public static class Statistics
 {
     /// <summary>
@@ -37,6 +40,40 @@ public static class Statistics
         if (sxx == 0) return null;
         var slope = sxy / sxx;
         return new(slope, meanY - slope * meanX, syy == 0 ? 1 : Math.Clamp(sxy * sxy / (sxx * syy), 0, 1), data.Length);
+    }
+
+    /// <summary>
+    /// A trailing window over a series with gaps, for a baseline band or a moving average. Entry i summarises the
+    /// <paramref name="window"/> entries ending at i, skipping missing ones, and is null wherever fewer than
+    /// <paramref name="minimum"/> values are present, or fewer than the whole window when no minimum is given. The
+    /// deviation is the sample standard deviation, dividing by n − 1, and zero for a single value. Totals are kept
+    /// relative to the first value, so a large level with a small spread keeps its precision.
+    /// </summary>
+    public static IReadOnlyList<RollingWindow?> Rolling(IReadOnlyList<double?> values, int window, int? minimum = null)
+    {
+        if (window < 1) throw new ArgumentOutOfRangeException(nameof(window));
+        var least = minimum ?? window;
+        if (least < 1 || least > window) throw new ArgumentOutOfRangeException(nameof(minimum));
+        var origin = values.FirstOrDefault(v => v.HasValue) ?? 0;
+        double sum = 0, squares = 0;
+        var count = 0;
+        var result = new RollingWindow?[values.Count];
+        for (var i = 0; i < values.Count; i++)
+        {
+            if (values[i] is { } added)
+            {
+                if (!double.IsFinite(added)) throw new ArgumentException("Values must be finite; leave a missing one null.");
+                sum += added - origin; squares += (added - origin) * (added - origin); count++;
+            }
+            if (i >= window && values[i - window] is { } removed)
+            {
+                sum -= removed - origin; squares -= (removed - origin) * (removed - origin); count--;
+            }
+            if (count < least) continue;
+            var mean = sum / count;
+            result[i] = new(origin + mean, count > 1 ? Math.Sqrt(Math.Max(0, (squares - sum * mean) / (count - 1))) : 0, count);
+        }
+        return result;
     }
 
     public const int MaxBins = 100;
