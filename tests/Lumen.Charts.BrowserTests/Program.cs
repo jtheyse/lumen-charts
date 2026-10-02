@@ -226,6 +226,46 @@ if (await stream.CountAsync() > 0)
         await page.WaitForFunctionAsync("x => document.querySelector(`.lumen-chart [data-series='0'][data-point='120'] circle`)?.getAttribute('cx') === x", before[0]);
     });
 
+    // The stream hides its markers, so a reading is reached only through its invisible target.
+    await Test("A hidden marker still takes focus, draws its focus ring and reads its value", async () =>
+    {
+        var mark = chart.Locator(".lumen-datum[data-series='0'][data-point='120']");
+        var label = await mark.GetAttributeAsync("aria-label");
+        await mark.FocusAsync();
+        await tooltip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        Check(await tooltip.TextContentAsync() == label, "the tooltip does not read the hidden marker's value");
+        var drawn = await mark.Locator("circle").EvaluateAsync<string[]>("c => [getComputedStyle(c).fillOpacity, getComputedStyle(c).strokeWidth]");
+        Check(drawn[0] == "0" && drawn[1] == "3px", $"the marker is not hidden with a focus ring: {string.Join(", ", drawn)}");
+        await page.Keyboard.PressAsync("Escape");
+    });
+
+    await Test("Export PNG keeps the gradient the heart-rate line is coloured with", async () =>
+    {
+        var download = await page.RunAndWaitForDownloadAsync(async () => await Tool("Export PNG").ClickAsync());
+        var bytes = await File.ReadAllBytesAsync((await download.PathAsync())!);
+        // The zone bands behind the line are faint tints, so strongly coloured pixels in the top pane are the line's: a gradient
+        // lost in rasterizing would leave the line unpainted and almost none of them.
+        var coloured = await page.EvaluateAsync<int>(@"async png => {
+            const image = new Image();
+            image.src = 'data:image/png;base64,' + png;
+            await image.decode();
+            const canvas = document.createElement('canvas');
+            canvas.width = image.width; canvas.height = image.height;
+            const context = canvas.getContext('2d');
+            context.drawImage(image, 0, 0);
+            const svg = document.querySelector('.lumen-chart svg');
+            const scale = image.width / Number(svg.getAttribute('viewBox').split(' ')[2]);
+            const pane = svg.querySelector(':scope > svg');
+            const [x, y, w, h] = ['x', 'y', 'width', 'height'].map(name => Math.round(Number(pane.getAttribute(name)) * scale));
+            const data = context.getImageData(x, y, w, h).data;
+            let count = 0;
+            for (let i = 0; i < data.length; i += 4)
+                if (Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2]) > 100) count++;
+            return count;
+        }", Convert.ToBase64String(bytes));
+        Check(coloured > 2000, $"only {coloured} strongly coloured pixels in the heart-rate pane");
+    });
+
     await Test("axe-core reports no WCAG A or AA violation on a chart with panes", Sweep);
 }
 else Console.WriteLine("SKIP pane checks: this host offers no chart with panes");
@@ -265,6 +305,19 @@ if (await theme.CountAsync() > 0)
     });
 }
 else Console.WriteLine("SKIP dark-theme axe sweep: this host has no theme switch");
+
+// Midnight is a brand a host chooses to offer, so it too is found by the button that names it.
+var midnight = page.GetByRole(AriaRole.Button, new() { Name = "Midnight", Exact = true });
+if (await midnight.CountAsync() > 0)
+{
+    await Test("axe-core reports no WCAG A or AA violation in the Midnight brand", async () =>
+    {
+        await midnight.First.ClickAsync();
+        await page.WaitForFunctionAsync("() => document.querySelector('.lumen-chart svg')?.getAttribute('style')?.includes('background:#0B0E14')");
+        await Sweep();
+    });
+}
+else Console.WriteLine("SKIP Midnight axe sweep: this host offers no Midnight brand");
 
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed. ({address})");
 foreach (var failure in failures) Console.Error.WriteLine(failure);

@@ -1,17 +1,27 @@
 using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Lumen.Charts;
 
 internal sealed class SvgWriter
 {
     private readonly StringBuilder output = new();
+    private readonly StringBuilder definitions = new();
+    private readonly Dictionary<string, string> gradients = [];
+    private int definitionsAt;
+    private string? prefix;
     /// <summary>Native SVG tooltips. Hosts that draw their own tooltips render marks without them.</summary>
     public bool Titles { get; init; } = true;
     public ChartStyle Style { get; init; } = ChartStyle.Light;
     /// <summary>Charts that draw no minor lines carry no rule for them.</summary>
     public bool MinorGrid { get; init; }
+    /// <summary>The chart being drawn, whose hash names its gradients.</summary>
+    public ChartSpec? Spec { get; init; }
     public static string N(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     public static string E(string? value) => WebUtility.HtmlEncode(value ?? "");
     public void Add(string value) => output.Append(value);
@@ -19,7 +29,24 @@ internal sealed class SvgWriter
         Add($"<text x='{N(x)}' y='{N(y)}' {attributes}>{E(text)}</text>");
     public void Line(double x1, double y1, double x2, double y2, string attributes = "") =>
         Add($"<line x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' {attributes}/>");
-    public override string ToString() => output.ToString();
+    /// <summary>Where the definitions go if the chart turns out to need any.</summary>
+    public void MarkDefinitions() => definitionsAt = output.Length;
+    /// <summary>
+    /// Defines a gradient, given as its element without an ID, and returns the ID to paint with. Several charts share one
+    /// page, so the ID starts with a hash of the chart's own spec: two different charts cannot collide, and two identical
+    /// ones define identical gradients. A gradient asked for twice is defined once.
+    /// </summary>
+    public string Gradient(string element)
+    {
+        if (gradients.TryGetValue(element, out var id)) return id;
+        prefix ??= ChartSvg.IdPrefix(Spec!);
+        id = $"{prefix}-{gradients.Count}";
+        gradients[element] = id;
+        definitions.Append(element.Insert("<linearGradient".Length, $" id='{id}'"));
+        return id;
+    }
+    public override string ToString() =>
+        definitions.Length == 0 ? output.ToString() : output.ToString().Insert(definitionsAt, $"<defs>{definitions}</defs>");
 }
 
 public static class ChartSvg
@@ -42,11 +69,20 @@ public static class ChartSvg
             Y2Label = spec.Y2Label, Y2Axis = spec.Y2Axis, Y2Min = spec.Y2Min, Y2Max = spec.Y2Max, Y2Format = spec.Y2Format, Y2Reversed = spec.Y2Reversed }
         : spec.Panes[index - 1];
 
+    // Fixed here rather than taken from a host, so the same spec always hashes to the same IDs. Every property exists on
+    // every record, so leaving out the nulls loses nothing, and it halves the text a long series makes.
+    private static readonly JsonSerializerOptions Hashing = new() { TypeInfoResolver = new DefaultJsonTypeInfoResolver(), DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+    /// <summary>The prefix of every ID a chart defines: <c>lumen-</c> and the first twelve hex digits of the SHA-256 of
+    /// its spec as JSON.</summary>
+    internal static string IdPrefix(ChartSpec spec) =>
+        "lumen-" + Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(spec, Hashing)))[..12].ToLowerInvariant();
+
     /// <summary>Renders a chart. <paramref name="includeTitles"/> controls the native SVG tooltip on each mark.</summary>
     public static string Render(ChartSpec spec, bool includeLegend = true, bool includeTitles = true)
     {
         ChartValidation.Validate(spec);
-        var w = new SvgWriter { Titles = includeTitles, Style = ResolveStyle(spec), MinorGrid = spec.MinorGridlines };
+        var style = ResolveStyle(spec);
+        var w = new SvgWriter { Titles = includeTitles, Style = style, MinorGrid = spec.MinorGridlines && style.Gridlines != GridLine.Hidden, Spec = spec };
         var legendColumns = Math.Max(1, (spec.Width - 48) / 180);
         // A histogram of one distribution needs no key; of several, its colours are the only way to tell them apart.
         var legendRows = includeLegend && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Box and not ChartKind.Violin
@@ -83,13 +119,16 @@ public static class ChartSvg
         w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{style.Grid};--lumen-muted:{style.Muted};width:100%;height:auto;display:block;background:{style.Background};color:{style.Text};font-family:{style.FontFamily};font-size:12px' fill='currentColor'>");
         w.Add($"<title>{SvgWriter.E(title)}</title><desc>{SvgWriter.E(description)}</desc>");
         w.Add("<style>.lumen-svg .lumen-grid{stroke:var(--lumen-grid);stroke-width:1}"+(w.MinorGrid?".lumen-svg .lumen-grid-minor{stroke:var(--lumen-grid);stroke-width:1;stroke-opacity:.45}":"")+".lumen-svg .lumen-muted{fill:var(--lumen-muted)}.lumen-svg .lumen-datum{outline:none;cursor:pointer}.lumen-svg .lumen-datum:focus{stroke:currentColor;stroke-width:3}.lumen-svg .lumen-datum:hover{filter:brightness(.87)}.lumen-svg .lumen-node{cursor:grab;outline:none}.lumen-svg .lumen-node:focus circle{stroke-width:4}.lumen-svg .lumen-node:active{cursor:grabbing}</style>");
+        w.MarkDefinitions();
         w.Text(24, 28, title, "font-size='17' font-weight='600'");
         w.Text(24, 49, description, "class='lumen-muted' font-size='11'");
     }
 
-    private static void Datum(SvgWriter w, int series, int index, string label, string shape)
+    /// <summary>A focusable, labelled data mark. <paramref name="attributes"/> are presentation attributes on the group, which
+    /// its shapes inherit and the focus rule overrides, so a hollow marker still shows the focus ring.</summary>
+    private static void Datum(SvgWriter w, int series, int index, string label, string shape, string attributes = "")
     {
-        w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-series='{series}' data-point='{index}' aria-label='{SvgWriter.E(label)}'>{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}{shape}</g>");
+        w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-series='{series}' data-point='{index}' aria-label='{SvgWriter.E(label)}'{attributes}>{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}{shape}</g>");
     }
     private static string PointLabel(ChartSeries s, ChartPoint p) => $"{s.Name}: {p.Label ?? LinearScale.Label(p.X)}, {(p.Y.HasValue ? LinearScale.Label(p.Y.Value) : "missing")}";
     private static string PointLabel(ChartSeries s, ChartPoint p, Axis x, Axis y) =>
@@ -110,7 +149,9 @@ public static class ChartSvg
         var horizontal = s.Kind == ChartKind.Bar;
         var category = s.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn;
         var secondary = s.Series.Any(series => series.Secondary);
-        var left = horizontal ? 160d : 76d; var right = s.Width - (secondary ? 76d : 30d);
+        // A Y axis on the right takes the margin a secondary axis would, and gives the left one back.
+        var flipped = s.YAxisSide == AxisSide.Right;
+        var left = horizontal ? 160d : flipped ? 30d : 76d; var right = s.Width - (secondary || flipped ? 76d : 30d);
         var points = s.Series.SelectMany(x => x.Points).ToArray();
         var bubbles = s.Series.Where(x => Mark(s, x) == ChartKind.Bubble).SelectMany(x => x.Points).ToArray();
         var maxSize = bubbles.Length == 0 ? 0 : bubbles.Max(point => point.Size);
@@ -127,27 +168,28 @@ public static class ChartSvg
             {
                 foreach (var minor in ys.MinorTicks())
                 {
-                    if (horizontal) { var x = ys.Map(minor, left, right); w.Line(x, top, x, bottom, "class='lumen-grid-minor'"); }
-                    else { var y = Y(minor); w.Line(left, y, right, y, "class='lumen-grid-minor'"); }
+                    if (horizontal) { var x = ys.Map(minor, left, right); Gridline(w, x, top, x, bottom, minor: true); }
+                    else { var y = Y(minor); Gridline(w, left, y, right, y, minor: true); }
                 }
                 if (!category && !horizontal)
                     foreach (var minor in xs.MinorTicks())
                     {
                         var x = X(minor);
-                        w.Line(x, top, x, bottom, "class='lumen-grid-minor'");
+                        Gridline(w, x, top, x, bottom, minor: true);
                     }
             }
-            foreach (var (tick, label) in ys.Ticks())
+            var ticks = ys.Ticks();
+            for (var i = 0; i < ticks.Count; i++)
             {
                 if (horizontal)
                 {
-                    var x = ys.Map(tick, left, right); w.Line(x, top, x, bottom, "class='lumen-grid'");
-                    w.Text(x, bottom + 20, label, "text-anchor='middle' class='lumen-muted'");
+                    var x = ys.Map(ticks[i].Value, left, right); Gridline(w, x, top, x, bottom);
+                    if (Labelled(s, ticks, i)) w.Text(x, bottom + 20, ticks[i].Label, "text-anchor='middle' class='lumen-muted'");
                 }
                 else
                 {
-                    var y = Y(tick); w.Line(left, y, right, y, "class='lumen-grid'");
-                    w.Text(left - 12, y + 4, label, "text-anchor='end' class='lumen-muted'");
+                    var y = Y(ticks[i].Value); Gridline(w, left, y, right, y);
+                    YTick(w, s, ticks, i, y, left, right);
                 }
             }
             // Ticks on the right, but no second set of gridlines: one grid is what a reader can follow.
@@ -177,7 +219,7 @@ public static class ChartSvg
                 }
                 w.Text((left + right) / 2, bottom + 44, horizontal ? s.YLabel : s.XLabel, "text-anchor='middle' class='lumen-muted'");
             }
-            w.Text(20, (top + bottom) / 2, horizontal ? s.XLabel : pane.Label, $"text-anchor='middle' transform='rotate(-90 20 {N((top + bottom) / 2)})' class='lumen-muted'");
+            YTitle(w, s, horizontal ? s.XLabel : pane.Label, top, bottom);
             if (paired)
                 w.Text(s.Width - 16, (top + bottom) / 2, pane.Y2Label, $"text-anchor='middle' transform='rotate(90 {N(s.Width - 16)} {N((top + bottom) / 2)})' class='lumen-muted'");
         }
@@ -193,12 +235,29 @@ public static class ChartSvg
             return X(cats[after - 1]) + (from - cats[after - 1]) / (cats[after] - cats[after - 1]) * (X(cats[after]) - X(cats[after - 1]));
         }
         // Nested SVG provides a local clipping viewport without global clip-path IDs, one for each pane. It is inset by
-        // one marker radius so a mark on the first or last value is drawn whole and stays hoverable.
-        const double bleed = 6;
+        // one marker radius so a mark on the first or last value is drawn whole and stays hoverable, or by the ring of a
+        // highlighted last point where there is one.
         for (var k = 0; k < plots.Length; k++)
         {
             var (pane, top, bottom, ys, ys2, _) = plots[k];
             double Y(double y) => ys.Map(y, bottom, top);
+            var bleed = s.Series.Any(series => series.Pane == k && series.HighlightLast) ? 12d : 6d;
+            // Value labels are drawn over the clip, so the label of the tallest column can rise into the margin above the
+            // plot; a label whose column the plot does not show is left out with it.
+            var named = new StringBuilder();
+            void Name(double x, double y, string text, string anchor) =>
+                named.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='{anchor}' font-size='11' aria-hidden='true'>{SvgWriter.E(text)}</text>");
+            // A column's label fits across the column, so it never runs into its neighbours'.
+            void Above(double x, double width, double far, bool up, string text)
+            {
+                if (Wide(text) > width || x + width / 2 < left || x + width / 2 > right || far < top - .5 || far > bottom + .5) return;
+                Name(x + width / 2, up ? far - 5 : far + 12, text, "middle");
+            }
+            void Beside(double far, double y, double height, bool up, string text)
+            {
+                if (Wide(text) > (up ? right - far : far - left) - 6) return;
+                Name(up ? far + 6 : far - 6, y + height / 2 + 4, text, up ? "start" : "end");
+            }
             w.Add($"<svg x='{N(left-bleed)}' y='{N(top-bleed)}' width='{N(right-left+2*bleed)}' height='{N(bottom-top+2*bleed)}' viewBox='{N(left-bleed)} {N(top-bleed)} {N(right-left+2*bleed)} {N(bottom-top+2*bleed)}' overflow='hidden'>");
             // Behind the data, and inside the clip, so a reference pans and zooms with what it refers to.
             Func<double, double> value = horizontal ? v => ys.Map(v, left, right) : Y;
@@ -218,6 +277,12 @@ public static class ChartSvg
                 var at = columns.SelectMany(i => s.Series[i].Points).Select(p => p.X).Distinct().Select(X).Order().ToArray();
                 slot = Math.Clamp((at.Length > 1 ? Enumerable.Range(1, at.Length - 1).Min(i => at[i] - at[i - 1]) : 30) * .7, 1, 34);
             }
+            // A stack's far end on each side of zero belongs to the last series stacked there.
+            var outer = new Dictionary<(double X, bool Up), int>();
+            if (s.Kind == ChartKind.StackedColumn)
+                foreach (var i in columns)
+                    foreach (var p in s.Series[i].Points)
+                        if (p.Y is { } v && v != 0) outer[(p.X, v > 0)] = i;
             // Bands first, then areas, columns and candles, lines, and points last, so the broad marks stand behind the narrow
             // ones. Series keep their order within each, so a chart of one kind draws in series order.
             foreach (var si in Enumerable.Range(0, s.Series.Count).Where(i => s.Series[i].Pane == k).OrderBy(i => Layer(Mark(s, s.Series[i]))))
@@ -226,8 +291,9 @@ public static class ChartSvg
                 // Each series is measured against its own axis from here on.
                 var scale = series.Secondary ? ys2 : ys;
                 double At(double y) => scale.Map(y, bottom, top);
-                // A point's own colour beats its zone's, which beats the series colour.
-                string Ink(ChartPoint p) => p.Color ?? (series.Zones is { } zones ? ZoneColor(w.Style, zones, zones.IndexOf(p.Y!.Value)) : color);
+                var paint = series.Gradient is { } stops ? $"url(#{w.Gradient(ByValue(stops, At))})" : color;
+                // A point's own colour beats its zone's, which beats the series colour or gradient.
+                string Ink(ChartPoint p) => p.Color ?? (series.Zones is { } zones ? ZoneColor(w.Style, zones, zones.IndexOf(p.Y!.Value)) : paint);
                 if (mark == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, At, xs, scale, cells, left, right, top, bottom);
                 else if (mark == ChartKind.Candlestick) Candles(w, si, series, X, At, xs, scale);
                 else if (mark == ChartKind.Ohlc) Ohlc(w, si, series, X, At, xs, scale);
@@ -235,6 +301,9 @@ public static class ChartSvg
                 {
                     if (mark == ChartKind.Band) Bands(w, series, color, X, At, s.MaxRenderedPoints);
                     var projected = series.ProjectedFrom is { } from ? Projected(from) : double.PositiveInfinity;
+                    var width = N(series.StrokeWidth ?? 2.5);
+                    var fill = mark == ChartKind.Area && series.Fill == AreaFill.Fade ? $"fill='url(#{w.Gradient(Fade(color, At(0), top, bottom))})'" : $"fill='{color}' fill-opacity='.12'";
+                    var last = series.HighlightLast ? Enumerable.Range(0, series.Points.Count).LastOrDefault(i => series.Points[i].Y.HasValue, -1) : -1;
                     // Sample each continuous run independently, preserving missing-observation gaps.
                     var start = 0;
                     while (start < series.Points.Count)
@@ -243,16 +312,26 @@ public static class ChartSvg
                         var end = start; while (end < series.Points.Count && series.Points[end].Y.HasValue) end++;
                         var run = series.Points.Skip(start).Take(end - start).ToArray();
                         var indices = Sampling.MinMax(run, s.MaxRenderedPoints);
-                        var path = string.Join(" ", indices.Select((i, n) => $"{(n == 0 ? "M" : "L")}{N(X(run[i].X))},{N(At(run[i].Y!.Value))}"));
+                        var (path, line) = Trace(series.Curve, run, indices, X, At, y => scale.Invert(y, bottom, top));
                         if (mark == ChartKind.Area)
-                            w.Add($"<path d='{path} L{N(X(run[^1].X))},{N(At(0))} L{N(X(run[0].X))},{N(At(0))} Z' fill='{color}' fill-opacity='.12'/>");
+                            w.Add($"<path d='{path} L{N(X(run[^1].X))},{N(At(0))} L{N(X(run[0].X))},{N(At(0))} Z' {fill}/>");
                         if (series.Zones is null && series.ProjectedFrom is null && indices.All(i => run[i].Color is null))
-                            w.Add($"<path d='{path}' fill='none' stroke='{color}' stroke-width='2.5' stroke-linejoin='round'/>");
-                        else Stroke(w, series.Zones, run, indices, color, X, At, projected);
+                            w.Add($"<path d='{path}' fill='none' stroke='{paint}' stroke-width='{width}' stroke-linejoin='round'/>");
+                        else Stroke(w, series.Zones, line, paint, At, projected, width);
                         foreach (var i in indices)
                         {
                             var p = run[i];
-                            Datum(w, si, start + i, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(p.Y!.Value))}' r='{(indices.Count > 80 ? "2" : "4")}' fill='{Ink(p)}'/>");
+                            string cx = N(X(p.X)), cy = N(At(p.Y!.Value)), ink = Ink(p), r = indices.Count > 80 ? "2" : "4";
+                            // A hidden marker keeps an invisible target, so the point can still be focused, hovered and announced.
+                            var (shape, attributes) = start + i == last
+                                ? ($"<circle cx='{cx}' cy='{cy}' r='10' fill='{ink}' fill-opacity='.2'/><circle cx='{cx}' cy='{cy}' r='5.5' fill='{ink}' stroke='{w.Style.Background}' stroke-width='2'/>", "")
+                                : series.Markers switch
+                                {
+                                    MarkerStyle.None => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{ink}' fill-opacity='0'/>", ""),
+                                    MarkerStyle.Hollow => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{w.Style.Background}'/>", $" stroke='{ink}' stroke-width='2'"),
+                                    _ => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", "")
+                                };
+                            Datum(w, si, start + i, PointLabel(series,p,xs,scale), shape, attributes);
                         }
                         start = end;
                     }
@@ -280,25 +359,200 @@ public static class ChartSvg
                             rx = left + ci * band + band * .14 + (stacked ? 0 : place * width); ry = Math.Min(At(basis), At(basis + y));
                             rw = width; rh = Math.Abs(At(basis + y) - At(basis));
                         }
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<rect x='{N(rx)}' y='{N(ry)}' width='{N(rw)}' height='{N(rh)}' rx='2' fill='{Ink(p)}'/>");
+                        var end = horizontal ? y >= 0 ? End.Right : End.Left : y >= 0 ? End.Top : End.Bottom;
+                        var outermost = !stacked || outer.TryGetValue((p.X, y > 0), out var last) && last == si;
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale), Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost));
+                        if (series.ValueLabels)
+                        {
+                            if (horizontal) Beside(y >= 0 ? rx + rw : rx, ry, rh, y >= 0, scale.Format(y));
+                            else Above(rx, rw, At(y), y >= 0, scale.Format(y));
+                        }
                     }
                     else if (place >= 0)
                     {
                         // Centred on its X within the slot, rising from zero on the series' own axis.
                         var width = slot / columns.Length;
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<rect x='{N(X(p.X) - slot / 2 + place * width)}' y='{N(Math.Min(At(0), At(y)))}' width='{N(width)}' height='{N(Math.Abs(At(y) - At(0)))}' rx='2' fill='{Ink(p)}'/>");
+                        var x = X(p.X) - slot / 2 + place * width;
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale), Bar(w, x, Math.Min(At(0), At(y)), width, Math.Abs(At(y) - At(0)), y >= 0 ? End.Top : End.Bottom, Ink(p), series.Fill));
+                        if (series.ValueLabels) Above(x, width, At(y), y >= 0, scale.Format(y));
                     }
                     else
                     {
                         var radius = mark == ChartKind.Bubble ? Math.Sqrt(p.Size / Math.Max(maxSize, double.Epsilon)) * 22 : 4;
                         var ink = Ink(p);
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(y))}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'/>");
+                        string cx = N(X(p.X)), cy = N(At(y));
+                        var (shape, attributes) = mark != ChartKind.Scatter ? ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'/>", "") : series.Markers switch
+                        {
+                            MarkerStyle.Filled => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}'/>", ""),
+                            MarkerStyle.Hollow => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{w.Style.Background}'/>", $" stroke='{ink}' stroke-width='2'"),
+                            _ => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'/>", "")
+                        };
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale), shape, attributes);
                     }
                 }
                 if (series.Trend) Trend(w, series, color, X, At, left, right, scale.Reversed);
             }
             w.Add("</svg>");
+            w.Add(named.ToString());
         }
+    }
+
+    /// <summary>A main Y axis tick label, on the side the spec puts the axis, unless the spec labels only the ends.</summary>
+    private static void YTick(SvgWriter w, ChartSpec s, IReadOnlyList<(double Value, string Label)> ticks, int i, double y, double left, double right)
+    {
+        if (!Labelled(s, ticks, i)) return;
+        if (s.YAxisSide == AxisSide.Right) w.Text(right + 12, y + 4, ticks[i].Label, "text-anchor='start' class='lumen-muted'");
+        else w.Text(left - 12, y + 4, ticks[i].Label, "text-anchor='end' class='lumen-muted'");
+    }
+    private static bool Labelled(ChartSpec s, IReadOnlyList<(double Value, string Label)> ticks, int i) =>
+        s.YTickLabels == TickLabels.All || i == 0 || i == ticks.Count - 1;
+    /// <summary>A main Y axis title, read upwards on the left or downwards on the right.</summary>
+    private static void YTitle(SvgWriter w, ChartSpec s, string label, double top, double bottom)
+    {
+        var x = s.YAxisSide == AxisSide.Right ? s.Width - 16 : 20;
+        w.Text(x, (top + bottom) / 2, label, $"text-anchor='middle' transform='rotate({(s.YAxisSide == AxisSide.Right ? "90" : "-90")} {N(x)} {N((top + bottom) / 2)})' class='lumen-muted'");
+    }
+    /// <summary>A gridline of an X and Y axis in the style's stroke; a hidden grid draws none.</summary>
+    private static void Gridline(SvgWriter w, double x1, double y1, double x2, double y2, bool minor = false)
+    {
+        if (w.Style.Gridlines == GridLine.Hidden) return;
+        w.Line(x1, y1, x2, y2, (minor ? "class='lumen-grid-minor'" : "class='lumen-grid'") + w.Style.Gridlines switch
+        {
+            GridLine.Dotted => " stroke-dasharray='1 3'",
+            GridLine.Dashed => " stroke-dasharray='4 4'",
+            _ => ""
+        });
+    }
+    /// <summary>A generous width for 11 px text, so a label judged to fit does: digits and most letters at .62 em, wider
+    /// than in the common sans and serif faces, punctuation narrower and the widest letters wider.</summary>
+    private static double Wide(string text) =>
+        text.Sum(c => c is '.' or ',' or ':' or ' ' ? .3 : c is '-' ? .36 : c is 'm' or 'M' or 'w' or 'W' ? .9 : .62) * 11;
+
+    private enum End { Top, Bottom, Right, Left }
+
+    /// <summary>
+    /// A column or bar whose far end is <paramref name="end"/>. Without a bar radius it is a rectangle with 2 px corners all
+    /// round. With one it is a path whose far end is rounded, the radius clamped to half the bar's width and to its length,
+    /// and whose baseline end is square; a segment inside a stack, not <paramref name="outermost"/>, is square at both.
+    /// </summary>
+    private static string Bar(SvgWriter w, double x, double y, double width, double height, End end, string ink, AreaFill fill, bool outermost = true)
+    {
+        var paint = fill == AreaFill.Fade ? $"url(#{w.Gradient(Lighter(ink, end))})" : ink;
+        if (w.Style.BarRadius is not { } radius) return $"<rect x='{N(x)}' y='{N(y)}' width='{N(width)}' height='{N(height)}' rx='2' fill='{paint}'/>";
+        var upright = end is End.Top or End.Bottom;
+        var r = outermost ? Math.Min(radius, Math.Min((upright ? width : height) / 2, upright ? height : width)) : 0;
+        string Arc(double toX, double toY) => r > 0 ? $" A{N(r)},{N(r)} 0 0 1 {N(toX)},{N(toY)}" : "";
+        double right = x + width, bottom = y + height;
+        var d = end switch
+        {
+            End.Top => $"M{N(x)},{N(bottom)} L{N(x)},{N(y + r)}{Arc(x + r, y)} L{N(right - r)},{N(y)}{Arc(right, y + r)} L{N(right)},{N(bottom)} Z",
+            End.Bottom => $"M{N(right)},{N(y)} L{N(right)},{N(bottom - r)}{Arc(right - r, bottom)} L{N(x + r)},{N(bottom)}{Arc(x, bottom - r)} L{N(x)},{N(y)} Z",
+            End.Right => $"M{N(x)},{N(y)} L{N(right - r)},{N(y)}{Arc(right, y + r)} L{N(right)},{N(bottom - r)}{Arc(right - r, bottom)} L{N(x)},{N(bottom)} Z",
+            _ => $"M{N(right)},{N(bottom)} L{N(x + r)},{N(bottom)}{Arc(x, bottom - r)} L{N(x)},{N(y + r)}{Arc(x + r, y)} L{N(right)},{N(y)} Z"
+        };
+        return $"<path d='{d}' fill='{paint}'/>";
+    }
+
+    /// <summary>A column's fade on its own box: its colour at the baseline, lighter towards the far end, up or down.</summary>
+    private static string Lighter(string ink, End end)
+    {
+        var (from, to) = end == End.Top ? (1, 0) : (0, 1);
+        return $"<linearGradient x1='0' y1='{from}' x2='0' y2='{to}'><stop offset='0' stop-color='{ink}'/><stop offset='1' stop-color='{ink}' stop-opacity='.6'/></linearGradient>";
+    }
+
+    /// <summary>An area's fade across its pane: the series colour at .35 opacity at the top of the plot and none at the
+    /// baseline, and back to .35 at the bottom when the axis runs below zero, so a fill under zero fades the same way.</summary>
+    private static string Fade(string color, double baseline, double top, double bottom)
+    {
+        var at = (baseline - top) / (bottom - top);
+        string Stop(double offset, string opacity) => $"<stop offset='{N(offset)}' stop-color='{color}' stop-opacity='{opacity}'/>";
+        var stops = at >= 1 ? Stop(0, ".35") + Stop(1, "0") : at <= 0 ? Stop(0, "0") + Stop(1, ".35") : Stop(0, ".35") + Stop(at, "0") + Stop(1, ".35");
+        return $"<linearGradient gradientUnits='userSpaceOnUse' x1='0' y1='{N(top)}' x2='0' y2='{N(bottom)}'>{stops}</linearGradient>";
+    }
+
+    /// <summary>
+    /// A gradient by value, laid out in the plot's own coordinates up the series' axis, so each stop sits at the height its
+    /// value is drawn at, on a logarithmic or reversed axis too. Past the first and last stops their colours carry on.
+    /// </summary>
+    private static string ByValue(IReadOnlyList<ColorStop> stops, Func<double, double> at)
+    {
+        double from = at(stops[0].Value), to = at(stops[^1].Value);
+        // Stops a rounding error apart can land on one pixel row, where only the last colour can show.
+        var span = to - from;
+        var body = string.Concat(stops.Select(stop => $"<stop offset='{N(span == 0 ? 1 : (at(stop.Value) - from) / span)}' stop-color='{stop.Color}'/>"));
+        return $"<linearGradient gradientUnits='userSpaceOnUse' x1='0' y1='{N(from)}' x2='0' y2='{N(to)}'>{body}</linearGradient>";
+    }
+
+    private readonly record struct Vertex(double X, double Y, double Value, string? Color);
+
+    /// <summary>
+    /// The path a run's sampled points draw for <paramref name="curve"/>, and the polyline that follows it, along which
+    /// zone colours and a projection are split. A step holds each value to the next point and rises or falls there, so its
+    /// polyline is exact. A smooth curve is Steffen's monotone cubic through the points on screen: between two points it
+    /// stays within their values, and it is level at every peak and dip, so it invents neither. Its polyline is cut every
+    /// few pixels, close enough that a split at an interpolated crossing lies on the curve. Points at one X are joined
+    /// straight. Every piece keeps the colour of the point its stretch starts from. A step's corner keeps that point's value
+    /// too, and a cut in a smooth curve reads its value back from its height through <paramref name="value"/>, so zone
+    /// colours follow the curve.
+    /// </summary>
+    private static (string Path, Vertex[] Line) Trace(LineCurve curve, ChartPoint[] run, IReadOnlyList<int> indices,
+        Func<double, double> X, Func<double, double> Y, Func<double, double> value)
+    {
+        var at = indices.Select(i => new Vertex(X(run[i].X), Y(run[i].Y!.Value), run[i].Y!.Value, run[i].Color)).ToArray();
+        string Polyline(IEnumerable<Vertex> line) => string.Join(" ", line.Select((v, n) => $"{(n == 0 ? "M" : "L")}{N(v.X)},{N(v.Y)}"));
+        if (curve == LineCurve.Linear) return (Polyline(at), at);
+        var traced = new List<Vertex> { at[0] };
+        if (curve == LineCurve.Step)
+        {
+            for (var n = 1; n < at.Length; n++)
+            {
+                if (at[n].X != at[n - 1].X && at[n].Y != at[n - 1].Y) traced.Add(at[n - 1] with { X = at[n].X });
+                traced.Add(at[n]);
+            }
+            return (Polyline(traced), traced.ToArray());
+        }
+        var path = new StringBuilder($"M{N(at[0].X)},{N(at[0].Y)}");
+        void Cubic(int first, int last)
+        {
+            var count = last - first + 1;
+            if (count < 2) return;
+            double Width(int i) => at[first + i + 1].X - at[first + i].X;
+            double Slope(int i) => (at[first + i + 1].Y - at[first + i].Y) / Width(i);
+            var m = new double[count];
+            for (var i = 1; i < count - 1; i++)
+            {
+                double before = Slope(i - 1), after = Slope(i);
+                var mean = (before * Width(i) + after * Width(i - 1)) / (Width(i - 1) + Width(i));
+                m[i] = (Math.Sign(before) + Math.Sign(after)) * Math.Min(Math.Min(Math.Abs(before), Math.Abs(after)), .5 * Math.Abs(mean));
+            }
+            m[0] = count > 2 ? (3 * Slope(0) - m[1]) / 2 : Slope(0);
+            m[^1] = count > 2 ? (3 * Slope(count - 2) - m[^2]) / 2 : Slope(count - 2);
+            for (var i = 0; i < count - 1; i++)
+            {
+                Vertex a = at[first + i], b = at[first + i + 1];
+                var third = (b.X - a.X) / 3;
+                double x1 = a.X + third, y1 = a.Y + m[i] * third, x2 = b.X - third, y2 = b.Y - m[i + 1] * third;
+                path.Append($" C{N(x1)},{N(y1)} {N(x2)},{N(y2)} {N(b.X)},{N(b.Y)}");
+                // The control polygon is at least as long as the curve, so cutting it every 3 px bounds each chord.
+                var steps = Math.Clamp((int)Math.Ceiling((double.Hypot(x1 - a.X, y1 - a.Y) + double.Hypot(x2 - x1, y2 - y1) + double.Hypot(b.X - x2, b.Y - y2)) / 3), 1, 32);
+                for (var k = 1; k < steps; k++)
+                {
+                    double t = (double)k / steps, u = 1 - t;
+                    var y = u * u * u * a.Y + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * b.Y;
+                    traced.Add(new(a.X + t * (b.X - a.X), y, value(y), a.Color));
+                }
+                traced.Add(b);
+            }
+        }
+        var stretch = 0;
+        for (var n = 1; n <= at.Length; n++)
+        {
+            if (n < at.Length && at[n].X > at[n - 1].X) continue;
+            Cubic(stretch, n - 1);
+            if (n < at.Length) { path.Append($" L{N(at[n].X)},{N(at[n].Y)}"); traced.Add(at[n]); }
+            stretch = n;
+        }
+        return (path.ToString(), traced.ToArray());
     }
 
     /// <summary>
@@ -363,15 +617,15 @@ public static class ChartSvg
     }
 
     /// <summary>
-    /// The stroke of one sampled run in the colours its points call for. With zones, a segment that crosses a bound is
-    /// split where it crosses, interpolated on screen so the split lies on the drawn segment on any axis, and each piece
-    /// takes the colour of the zone it lies in; a value exactly on a bound belongs to the zone below, as
-    /// <see cref="ZoneScale.IndexOf"/> has it. A segment that starts from a point with its own colour is drawn whole in
-    /// that colour, and without zones the others keep the series colour. From the screen position <paramref name="projected"/>
-    /// onward the stroke is dashed, a piece that reaches it split there on the drawn segment. Pieces of one colour and
-    /// style in a row share a path.
+    /// The stroke of one sampled run in the colours its points call for, along the polyline <see cref="Trace"/> draws for
+    /// its curve. With zones, a segment that crosses a bound is split where it crosses, interpolated on screen so the split
+    /// lies on the drawn segment on any axis, and each piece takes the colour of the zone it lies in; a value exactly on a
+    /// bound belongs to the zone below, as <see cref="ZoneScale.IndexOf"/> has it. A segment that starts from a point with
+    /// its own colour is drawn whole in that colour, and without zones the others keep the series colour. From the screen
+    /// position <paramref name="projected"/> onward the stroke is dashed, a piece that reaches it split there on the drawn
+    /// segment. Pieces of one colour and style in a row share a path.
     /// </summary>
-    private static void Stroke(SvgWriter w, ZoneScale? zones, ChartPoint[] run, IReadOnlyList<int> indices, string color, Func<double, double> X, Func<double, double> Y, double projected)
+    private static void Stroke(SvgWriter w, ZoneScale? zones, IReadOnlyList<Vertex> line, string color, Func<double, double> Y, double projected, string width)
     {
         var paths = new List<(string Ink, bool Dashed, StringBuilder Path)>();
         void Add(string ink, bool dashed, double x1, double y1, double x2, double y2)
@@ -389,12 +643,12 @@ public static class ChartSvg
             }
             else Add(ink, x1 >= projected, x1, y1, x2, y2);
         }
-        for (var n = 1; n < indices.Count; n++)
+        for (var n = 1; n < line.Count; n++)
         {
-            ChartPoint a = run[indices[n - 1]], b = run[indices[n]];
-            double xa = X(a.X), ya = Y(a.Y!.Value), xb = X(b.X), yb = Y(b.Y!.Value);
+            Vertex a = line[n - 1], b = line[n];
+            double xa = a.X, ya = a.Y, xb = b.X, yb = b.Y;
             if (a.Color is not null || zones is null) { Piece(a.Color ?? color, xa, ya, xb, yb); continue; }
-            int from = zones.IndexOf(a.Y!.Value), to = zones.IndexOf(b.Y!.Value);
+            int from = zones.IndexOf(a.Value), to = zones.IndexOf(b.Value);
             // Values a rounding error apart can straddle a bound and still land on one pixel row, leaving nothing to split.
             if (ya == yb) to = from;
             double x = xa, y = ya, done = 0;
@@ -409,7 +663,7 @@ public static class ChartSvg
             if (done < 1) Piece(ZoneColor(w.Style, zones, to), x, y, xb, yb);
         }
         foreach (var (ink, dashed, path) in paths)
-            w.Add($"<path d='{path}' fill='none' stroke='{ink}' stroke-width='2.5' stroke-linejoin='round'{(dashed ? " stroke-dasharray='6 4'" : "")}/>");
+            w.Add($"<path d='{path}' fill='none' stroke='{ink}' stroke-width='{width}' stroke-linejoin='round'{(dashed ? " stroke-dasharray='6 4'" : "")}/>");
     }
 
     private static int Layer(ChartKind mark) => mark switch { ChartKind.Band => 0, ChartKind.Area => 1, ChartKind.Column or ChartKind.Candlestick or ChartKind.Ohlc => 2, ChartKind.Line => 3, _ => 4 };
@@ -578,17 +832,21 @@ public static class ChartSvg
             foreach (var minor in ys.MinorTicks())
             {
                 var y = ys.Map(minor, bottom, top);
-                w.Line(left, y, right, y, "class='lumen-grid-minor'");
+                Gridline(w, left, y, right, y, minor: true);
             }
-        foreach (var (tick, label) in ys.Ticks())
+        var ticks = ys.Ticks();
+        for (var i = 0; i < ticks.Count; i++)
         {
-            var y = ys.Map(tick, bottom, top);
-            w.Line(left, y, right, y, "class='lumen-grid'");
-            w.Text(left - 12, y + 4, label, "text-anchor='end' class='lumen-muted'");
+            var y = ys.Map(ticks[i].Value, bottom, top);
+            Gridline(w, left, y, right, y);
+            YTick(w, s, ticks, i, y, left, right);
         }
         w.Text((left + right) / 2, bottom + 44, s.XLabel, "text-anchor='middle' class='lumen-muted'");
-        w.Text(20, (top + bottom) / 2, s.YLabel, $"text-anchor='middle' transform='rotate(-90 20 {N((top + bottom) / 2)})' class='lumen-muted'");
+        YTitle(w, s, s.YLabel, top, bottom);
     }
+
+    /// <summary>The plot's edges across a chart that derives its X axis, leaving room for the Y axis on its side.</summary>
+    private static (double Left, double Right) Across(ChartSpec s) => s.YAxisSide == AxisSide.Right ? (30, s.Width - 76) : (76, s.Width - 30);
 
     private static void Aggregate(SvgWriter w, string label, string shape) =>
         w.Add($"<g class='lumen-datum' tabindex='0' role='img' aria-label='{SvgWriter.E(label)}'>{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}{shape}</g>");
@@ -603,7 +861,7 @@ public static class ChartSvg
         var observations = s.Series.Select(series => series.Points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray()).ToArray();
         var counted = Statistics.SharedBins(observations, s.Bins);
         var bins = counted[0];
-        double left = 76, right = s.Width - 30, top = 78, bottom = s.Height - 76;
+        var (left, right) = Across(s); double top = 78, bottom = s.Height - 76;
         var xs = new Axis(AxisKind.Linear, bins[0].Start, bins[^1].End);
         var ys = Axis.Create(AxisKind.Linear, counted.SelectMany(set => set).Select(b => (double)b.Count), true, s.YMin, s.YMax);
         Frame(w, s, ys, left, right, top, bottom);
@@ -638,7 +896,7 @@ public static class ChartSvg
     private static void Box(SvgWriter w, ChartSpec s)
     {
         var observations = s.Series.Select(series => series.Points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray()).ToArray();
-        double left = 76, right = s.Width - 30, top = 78, bottom = s.Height - 76;
+        var (left, right) = Across(s); double top = 78, bottom = s.Height - 76;
         // A supplied summary has no observations behind it, so its whiskers and outliers are what the axis must reach.
         var supplied = s.Series.Select(series => series.Summary).OfType<BoxSummary>()
             .SelectMany(summary => summary.Outliers.Append(summary.LowerWhisker).Append(summary.UpperWhisker));
@@ -691,7 +949,7 @@ public static class ChartSvg
     private static void Violin(SvgWriter w, ChartSpec s)
     {
         var observations = s.Series.Select(series => series.Points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray()).ToArray();
-        double left = 76, right = s.Width - 30, top = 78, bottom = s.Height - 76;
+        var (left, right) = Across(s); double top = 78, bottom = s.Height - 76;
         var ys = Axis.Create(s.YAxis, observations.SelectMany(v => v), s.IncludeZero, s.YMin, s.YMax) with { ValueFormat = s.YFormat, Reversed = s.YReversed };
         Frame(w, s, ys, left, right, top, bottom);
         var band = (right - left) / s.Series.Count;

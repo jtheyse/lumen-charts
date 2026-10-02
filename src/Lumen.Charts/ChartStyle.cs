@@ -2,6 +2,10 @@ using System.Globalization;
 
 namespace Lumen.Charts;
 
+/// <summary>How the gridlines of a chart drawn on X and Y axes are stroked. <see cref="Hidden"/> leaves them out and keeps
+/// the tick labels.</summary>
+public enum GridLine { Solid, Dotted, Dashed, Hidden }
+
 /// <summary>
 /// Every colour and the typeface a chart draws with. Set it on a <see cref="ChartSpec"/> or
 /// <see cref="GraphSpec"/> to render a host application's brand into the SVG itself, so exported
@@ -36,11 +40,31 @@ public sealed record ChartStyle
     public string HeatmapHigh { get; init; } = "#4069D0";
     /// <summary>A CSS font-family list without quotes, such as <c>Inter, Segoe UI, sans-serif</c>.</summary>
     public string FontFamily { get; init; } = "Segoe UI,Arial,sans-serif";
+    /// <summary>The horizontal and vertical gridlines of a chart drawn on X and Y axes, major and minor. A radar's rings
+    /// and spokes are its scale and stay solid.</summary>
+    public GridLine Gridlines { get; init; }
+    /// <summary>Rounds the far end of every column and bar, the end away from its baseline, which is the bottom of a negative
+    /// column; the baseline end stays square. It is clamped to half the bar's width, where the end is a semicircle, and to
+    /// the bar's length, so a large radius draws capsules. A stacked column rounds only its outermost segment. Null keeps
+    /// the 2 px corners all round.</summary>
+    public double? BarRadius { get; init; }
 
     /// <summary>The default look, identical to <see cref="ChartTheme.Light"/>.</summary>
     public static ChartStyle Light { get; } = new();
     /// <summary>Identical to <see cref="ChartTheme.Dark"/>.</summary>
     public static ChartStyle Dark { get; } = new() { Background = "#171E2E", Text = "#E8ECF6", Muted = "#AAB8CF", Grid = "#303B50" };
+    /// <summary>
+    /// A near-black chart with vivid colours, dotted gridlines and capsule bars, in the manner of WHOOP and Oura. Every
+    /// series, zone, candle and edge colour clears 3:1 against the background, and both text colours clear 4.5:1.
+    /// </summary>
+    public static ChartStyle Midnight { get; } = new()
+    {
+        Background = "#0B0E14", Text = "#F3F5F9", Muted = "#9BA4B5", Grid = "#353C49", Edge = "#7D879A",
+        Series = Array.AsReadOnly(new[] { "#4C9DFF", "#2FE0A0", "#FFC23D", "#FF5D8F", "#B18CFF", "#2CD3F0" }),
+        Zones = Array.AsReadOnly(new[] { "#8E97A8", "#4C9DFF", "#36D27A", "#F5C518", "#FF8A3D", "#FF5A5A", "#C38BFF" }),
+        Rising = "#2FE0A0", Falling = "#FF5D6E", HeatmapLow = "#1A2638", HeatmapHigh = "#4C9DFF",
+        Gridlines = GridLine.Dotted, BarRadius = 9999
+    };
 
     public string SeriesColor(int index) => Series[index % Series.Count];
 

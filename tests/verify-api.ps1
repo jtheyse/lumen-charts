@@ -163,6 +163,16 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('Panes[k - 1]')) 'A series in a pane no ChartPane describes is rejected'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Column","panes":[{"label":"Below"}],"series":[{"name":"A","points":[{"x":0,"y":1}]},{"name":"B","pane":1,"points":[{"x":0,"y":2}]}]}' -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('continuous X axis')) 'Panes on a column chart are rejected'
+$finish='{"title":"Finish","kind":"Area","style":{"gridlines":"Dotted"},"series":[{"name":"Climb","curve":"Smooth","fill":"Fade","markers":"None","points":[{"x":0,"y":10},{"x":1,"y":30},{"x":2,"y":20},{"x":3,"y":40}]},{"name":"Heart rate","kind":"Line","curve":"Smooth","strokeWidth":3,"highlightLast":true,"gradient":[{"value":10,"color":"#3F87D9"},{"value":40,"color":"#DD4B45"}],"points":[{"x":0,"y":12},{"x":1,"y":25},{"x":2,"y":38},{"x":3,"y":30}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $finish -SkipHttpErrorCheck
+$gradients=@(([xml]$r.Content).SelectNodes('//*[local-name()="linearGradient"]'))
+$paints=@([regex]::Matches($r.Content,"url\(([^)]*)\)")|ForEach-Object{$_.Groups[1].Value}|Sort-Object -Unique)
+Verify ($r.StatusCode -eq 200 -and $gradients.Count -eq 2 -and $r.Content.Contains(' C') -and $r.Content.Contains("stroke-dasharray='1 3'") -and $r.Content.Contains("r='10'")) 'A smooth, faded, gradient chart posted as JSON renders its gradients'
+Verify ($paints.Count -eq 2 -and @($paints|Where-Object{-not $_.StartsWith('#')}).Count -eq 0 -and @($gradients|Where-Object{$paints -notcontains ('#'+$_.id)}).Count -eq 0 -and -not $r.Content.Contains('href') -and ([regex]::Matches($r.Content,'http://')).Count -eq 1) 'A chart with gradients stays self-contained'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $finish.Replace('"strokeWidth":3,','"strokeWidth":3,"zones":{"zones":[{"name":"Low","upper":20},{"name":"High","upper":"Infinity"}]},') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('one or the other')) 'A gradient together with zones is rejected'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $finish.Replace('"strokeWidth":3','"strokeWidth":20') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('0.5 and 12')) 'A stroke width of 20 is rejected'
 $graph='{"nodes":[{"id":"a","label":"Start"},{"id":"b","label":"End"}],"edges":[{"source":"a","target":"b"}],"layout":"Layered"}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType application/json -Body $graph
 Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'Graph SVG'

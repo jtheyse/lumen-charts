@@ -30,6 +30,15 @@ public static partial class ChartValidation
         if ((spec.YReversed || spec.Y2Reversed) && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Box or ChartKind.Violin))
             throw new ArgumentException("A reversed Y axis applies to line, scatter, bubble, band, candlestick, OHLC, box and violin charts. Column, bar, stacked column, area and histogram charts draw from a zero baseline, which a reversed axis would hang from the top, and donut, heatmap and radar charts have no Y axis.");
         var secondary = spec.Series?.Any(series => series?.Secondary == true) == true;
+        if (!Enum.IsDefined(spec.YAxisSide) || !Enum.IsDefined(spec.YTickLabels)) throw new ArgumentException("Unknown Y axis side or tick labelling.");
+        if (spec.YAxisSide == AxisSide.Right)
+        {
+            if (spec.Kind is ChartKind.Bar or ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar)
+                throw new ArgumentException("The Y axis moves to the right on charts that draw it up the side; a horizontal bar chart draws its value axis along the bottom, and donut, heatmap and radar charts have none.");
+            if (secondary) throw new ArgumentException("A secondary series measures against the right-hand edge, so a chart with one keeps its Y axis on the left.");
+        }
+        if (spec.YTickLabels != TickLabels.All && spec.Kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar)
+            throw new ArgumentException("Tick labels apply to a Y axis, which donut, heatmap and radar charts do not have.");
         if (secondary)
         {
             if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Band))
@@ -127,6 +136,7 @@ public static partial class ChartValidation
             if (series.Trend && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble))
                 throw new ArgumentException("A trend line applies to series drawn as lines, areas, scatter points or bubbles; the other kinds place their marks by index or derive their own values.");
             if (series.Summary is not null) Summary(series, spec.Kind, spec.YAxis);
+            Finish(series, mark, measure);
             if (series.Zones is not null)
             {
                 if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar))
@@ -221,6 +231,45 @@ public static partial class ChartValidation
         if (pane.YZones is not null) Zones(pane.YZones, style);
     }
 
+    /// <summary>Each finishing touch applies to the marks that can show it.</summary>
+    private static void Finish(ChartSeries series, ChartKind mark, AxisKind axis)
+    {
+        if (!Enum.IsDefined(series.Curve) || !Enum.IsDefined(series.Fill) || !Enum.IsDefined(series.Markers))
+            throw new ArgumentException("Unknown curve, fill or marker style.");
+        if (series.StrokeWidth is { } width)
+        {
+            if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Band))
+                throw new ArgumentException("A stroke width applies to series drawn as lines, areas or bands.");
+            if (!(width is >= .5 and <= 12)) throw new ArgumentException("A stroke width must be between 0.5 and 12 pixels.");
+        }
+        if (series.Curve != LineCurve.Linear && mark is not (ChartKind.Line or ChartKind.Area))
+            throw new ArgumentException("A smooth or stepped curve applies to series drawn as lines or areas.");
+        if (series.Fill != AreaFill.Flat && mark is not (ChartKind.Area or ChartKind.Column))
+            throw new ArgumentException("A faded fill applies to series drawn as areas or columns.");
+        if (series.Markers != MarkerStyle.Auto && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter))
+            throw new ArgumentException("Marker styles apply to series drawn as lines, areas or scatter points; a bubble's marker is its size, and the other kinds draw no markers.");
+        if (series.Markers == MarkerStyle.None && mark == ChartKind.Scatter)
+            throw new ArgumentException("A scatter series is drawn as its markers, so it cannot hide them.");
+        if (series.HighlightLast && mark is not (ChartKind.Line or ChartKind.Area))
+            throw new ArgumentException("Highlighting the last point applies to series drawn as lines or areas.");
+        if (series.ValueLabels && mark is not (ChartKind.Column or ChartKind.Bar))
+            throw new ArgumentException("Value labels apply to series drawn as columns or bars.");
+        if (series.Gradient is not { } stops) return;
+        if (mark is not (ChartKind.Line or ChartKind.Area))
+            throw new ArgumentException("A gradient colours a stroke and its markers, so it applies to series drawn as lines or areas.");
+        if (series.Zones is not null)
+            throw new ArgumentException("Zones colour a stroke in steps and a gradient colours it continuously, so a series takes one or the other.");
+        if (stops.Count is < 2 or > 32) throw new ArgumentException("A gradient needs between 2 and 32 colour stops.");
+        for (var i = 0; i < stops.Count; i++)
+        {
+            if (stops[i] is null || stops[i].Color is null) throw new ArgumentException("Colour stops and their colours cannot be null.");
+            Color(stops[i].Color);
+            if (!Finite(stops[i].Value)) throw new ArgumentException("Colour stop values must be finite, magnitude <= 1e100.");
+            if (i > 0 && stops[i].Value <= stops[i - 1].Value) throw new ArgumentException("Colour stop values must rise strictly.");
+            if (axis == AxisKind.Log && stops[i].Value <= 0) throw new ArgumentException("Log Y axes require positive colour stop values.");
+        }
+    }
+
     private static void Candle(ChartPoint p, AxisKind axis)
     {
         if (p.Open is not { } open || p.High is not { } high || p.Low is not { } low || p.Close is not { } close)
@@ -271,6 +320,9 @@ public static partial class ChartValidation
             if (color is null) throw new ArgumentException("Style colours cannot be null.");
             Color(color);
         }
+        if (!Enum.IsDefined(style.Gridlines)) throw new ArgumentException("Unknown gridline style.");
+        if (style.BarRadius is { } radius && (!Finite(radius) || radius < 0))
+            throw new ArgumentException("A bar radius must be finite and nonnegative; each bar clamps it to half its width, so a large one draws capsules.");
         // The font list is written into a style attribute, so anything beyond a plain family list is refused.
         if (style.FontFamily is null || !FontFamily().IsMatch(style.FontFamily))
             throw new ArgumentException("Font families may contain letters, digits, spaces, commas and hyphens, up to 200 characters.");

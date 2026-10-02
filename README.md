@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.22.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.23.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -10,7 +10,7 @@ Requires the .NET 10 SDK (the reusable packages target .NET 8).
 dotnet run --project samples/Lumen.Gallery --urls http://localhost:5188
 ```
 
-Open http://localhost:5188. The gallery includes chart selection, light/dark themes, refreshed sample data, series filtering, point selection, a numeric / time / log axis switch with a power–duration curve and a reversed pace line on duration axes, a heart-rate stream coloured and shaded by zone with the time it spent in each zone, a performance management chart of fitness, fatigue and form over daily training stress with two planned weeks projected, weekly load against a target range, an activity stream of heart rate, pace and climb in three panes over one elapsed-time axis, candlestick and OHLC charts with a five-day average and volume in a pane beneath, X zoom/pan/reset, original-data tables, SVG/PNG/CSV downloads, and network layouts with draggable nodes.
+Open http://localhost:5188. The gallery includes chart selection, light/dark themes, refreshed sample data, series filtering, point selection, a Midnight brand beside the Lumen, Harbour and page-CSS ones, a numeric / time / log axis switch with a power–duration curve and a reversed pace line on duration axes, a heart-rate stream coloured and shaded by zone with the time it spent in each zone, a performance management chart of fitness, fatigue and form over daily training stress with two planned weeks projected, weekly load against a target range, an activity stream of heart rate, pace and climb in three panes over one elapsed-time axis, the heart rate coloured by its value and the climb a smooth faded area, candlestick and OHLC charts with a five-day average and volume in a pane beneath, X zoom/pan/reset, original-data tables, SVG/PNG/CSV downloads, and network layouts with draggable nodes.
 
 ## Build and verify
 
@@ -31,7 +31,7 @@ pwsh tests/Lumen.Charts.BrowserTests/bin/Release/net10.0/playwright.ps1 install 
 dotnet run --project tests/Lumen.Charts.BrowserTests -c Release --no-build -- http://localhost:5188
 ```
 
-It uses component selectors, so the same checks, the axe sweep included, run against the gallery and against the WebAssembly host on port 5199. Some depend on the host. The brand check runs where the page wraps its charts in `LumenBrand`; a second axe sweep runs with the dark theme on where the page has a theme button, which the suite finds by its name and presses as a user would; and where the page offers an activity stream behind buttons named for the line chart and the stream, the suite opens it, checks that zooming and panning move its three panes together, and sweeps it with axe. A host without one says SKIP rather than failing: the gallery skips the brand check, so it runs seventeen, and the WebAssembly page the dark sweep and the panes, so it runs fifteen. It stays outside the solution so the ordinary build needs no browser download.
+It uses component selectors, so the same checks, the axe sweep included, run against the gallery and against the WebAssembly host on port 5199. Some depend on the host. The brand check runs where the page wraps its charts in `LumenBrand`; a second axe sweep runs with the dark theme on where the page has a theme button, which the suite finds by its name and presses as a user would; where the page offers an activity stream behind buttons named for the line chart and the stream, the suite opens it, checks that zooming and panning move its three panes together, that a hidden marker still takes focus, draws its focus ring and reads its value, and that a PNG export keeps the gradient its heart-rate line is coloured with, and sweeps it with axe; and where the page offers a Midnight brand, a fourth sweep runs with it on. A host without one says SKIP rather than failing: the gallery skips the brand check, so it runs twenty, and the WebAssembly page the dark sweep, the activity stream and Midnight, so it runs fifteen. It stays outside the solution so the ordinary build needs no browser download.
 
 The repository NuGet.Config restores from nuget.org for one dependency: `Lumen.Charts.Blazor` references `Microsoft.AspNetCore.Components.Web` (8.0.0) rather than the ASP.NET Core shared framework, because a WebAssembly host has no shared framework to reference. `Lumen.Charts` and `Lumen.Charts.AspNetCore` add no packages of their own. With the gallery running, execute `./tests/verify-api.ps1` for HTTP integration checks.
 
@@ -188,7 +188,7 @@ Charts can draw in a host application's colours and typeface. A `ChartStyle` hol
 
 1. **`ChartSpec.Style`** or **`GraphSpec.Style`** — one chart, anywhere, including server rendering and the HTTP API.
 2. **A cascaded `ChartStyle`** — every chart and graph beneath it in a Blazor tree.
-3. **`Theme`** — the built-in `Light` and `Dark`, used when neither of the above is set. `ChartStyle.Light` and `ChartStyle.Dark` reproduce them exactly.
+3. **`Theme`** — the built-in `Light` and `Dark`, used when neither of the above is set. `ChartStyle.Light` and `ChartStyle.Dark` reproduce them exactly, and `ChartStyle.Midnight` is a third preset, described under [Finish and styling](#finish-and-styling).
 
 ```csharp
 public static readonly ChartStyle Brand = new() {
@@ -223,9 +223,55 @@ foreach (var issue in Brand.ContrastIssues())
     Console.WriteLine($"{issue.Element} {issue.Foreground}: {issue.Ratio}:1, needs {issue.Required}:1");
 ```
 
-`ContrastIssues` applies the WCAG 2.1 minimums — 4.5:1 for text, 3:1 for series, zone colours, candles and edges — and both built-in presets report none. `LumenBrand` raises `Resolved` with each style it reads, so an application can check a page-supplied brand at run time too.
+`ContrastIssues` applies the WCAG 2.1 minimums — 4.5:1 for text, 3:1 for series, zone colours, candles and edges — and all three built-in presets report none. `LumenBrand` raises `Resolved` with each style it reads, so an application can check a page-supplied brand at run time too.
 
 Limits: server rendering cannot read a stylesheet, so `ChartSvg.Render` and the HTTP API need an explicit `ChartStyle`. `LumenBrand` discards transparency, since a chart colour is drawn opaque, and maps series, background, text, muted, grid and candle colours; graph edges and the heatmap ramp come from `Fallback`. Font lists are reduced to letters, digits, spaces, commas and hyphens because they are written into a style attribute; `ChartStyle.FontFamilyFrom` performs that reduction on any CSS value.
+
+### Finish and styling
+
+The phone apps in [FITNESS.md](docs/FITNESS.md) finish their charts the same way: smooth lines over a fade, a line coloured by its value, the latest reading ringed, capsule bars with their values at the ends, quiet dotted gridlines, and the Y axis on the right labelled at its ends. Each is an option here. All of them are off by default, and a chart that sets none draws exactly as before.
+
+```csharp
+ChartSpec recovery = new() {
+    Kind = ChartKind.Line, Style = ChartStyle.Midnight,      // near-black, vivid, dotted grid, capsule bars
+    YAxisSide = AxisSide.Right, YTickLabels = TickLabels.Ends,
+    Series = [
+        new("Resting heart rate", nights) {
+            Curve = LineCurve.Smooth, StrokeWidth = 3,
+            Markers = MarkerStyle.None, HighlightLast = true,
+            Gradient = [new(48, "#2FE0A0"), new(56, "#FFC23D"), new(64, "#FF5D6E")]
+        },
+        new("Weekly average", weeks) { Kind = ChartKind.Area, Curve = LineCurve.Step, Fill = AreaFill.Fade }
+    ]
+};
+
+ChartSpec weekly = new() {
+    Kind = ChartKind.Column,
+    Style = ChartStyle.Light with { BarRadius = 9999, Gridlines = GridLine.Dotted },   // capsules
+    Series = [new("Load", load) { ValueLabels = true, Fill = AreaFill.Fade }]
+};
+```
+
+- **`StrokeWidth`** sets a line, area or band stroke from 0.5 to 12 pixels, zone and projected pieces included; null keeps 2.5. Markers keep their size.
+- **`Curve`** draws a line or area `Smooth` or as a `Step`, its fill, zone colours and projection with it. Smooth is Steffen's monotone cubic, computed on screen: between two points it stays within their values, and it is level at every peak and dip, so it never overshoots a reading or invents one. Step holds each value until the next point and then rises or falls to it. A missing value breaks either, as it breaks a line. Zone colours and a projection are split along a copy of the curve cut every 3 pixels of its control polygon, so each split lies within a fraction of a pixel of the curve; a step's splits are exact.
+- **`Fill = AreaFill.Fade`** shades an area from its colour at 0.35 opacity at the top of the plot to nothing at its baseline, and back towards the bottom when the axis runs below zero, so a fill under zero fades away from zero too. A faded column keeps its colour at the baseline and lightens to 0.6 opacity at its far end.
+- **`Gradient`** colours a line or area stroke and its markers continuously by value. It is a vertical gradient laid out in the plot's own coordinates through the series' own axis, so each stop sits exactly at its value's height, on a logarithmic, reversed or right-hand axis too, and past the first and last stops their colours carry on. Stops rise strictly, at least two and at most 32, in `#RRGGBB`. A series takes a gradient or `Zones`, not both: zones colour in steps and name the zone in each label, while a gradient colours continuously and adds nothing to a label, which already reads the value.
+- **`Markers`** are `Auto` (each kind's own), `Hollow`, `Filled` or `None`. A hidden marker is still there: every point keeps its focusable, labelled mark, with a transparent target the size of the marker, so keyboard and screen-reader users reach each reading and the focus ring still draws. A scatter series is its markers, so it refuses `None`.
+- **`HighlightLast`** draws the last reading of a line or area larger, with a soft ring at low opacity, even when the other markers are hidden. Its pane's clip widens to 12 pixels so the ring is drawn whole at the plot's edge.
+- **`ValueLabels`** writes each column's or bar's value just past its far end, in its axis's format and the style's text colour. A label that would not fit across its column, or within the plot beside its bar, is left out rather than overlapping. The labels are hidden from assistive technology, because each bar's accessible name already reads its value.
+- **`ChartStyle.BarRadius`** rounds the far end of every column and bar — the bottom of a negative column, the left of a negative bar — and keeps the baseline end square. It is clamped to half the bar's width, which makes a semicircle, and to the bar's length, so a large radius draws capsules; a stack rounds only its outermost segment on each side of zero. Null keeps the 2 px corners.
+- **`ChartStyle.Gridlines`** is `Solid`, `Dotted`, `Dashed` or `Hidden`. It changes the horizontal and vertical gridlines, minor ones included, and nothing else; `Hidden` keeps the tick labels.
+- **`ChartSpec.YAxisSide = AxisSide.Right`** labels the main Y axis of every pane on the right and gives the left margin back. A chart with a secondary series refuses it, because the right edge is taken, and so does a horizontal bar chart, whose value axis runs along the bottom.
+- **`ChartSpec.YTickLabels = TickLabels.Ends`** labels only the lowest and highest tick of the main Y axis and keeps every gridline; a secondary axis labels all of its own.
+- **`ChartStyle.Midnight`** is a third preset: a near-black background, `#0B0E14`, with a vivid palette, dotted gridlines and capsule bars. Its six series colours measure 6.64:1 to 11.99:1 against the background, its zone ramp 6.31:1 to 11.85:1, its candles 6.48:1 and 11.31:1 and its edges 5.34:1, and its text and muted text 17.7:1 and 7.7:1, so `ContrastIssues` reports nothing.
+
+Gradients need IDs, which Lumen had avoided because several charts share one page. A chart that uses a gradient or a fade defines each once, in a `<defs>` block after its stylesheet, named `lumen-`, the first twelve hex digits of the SHA-256 of its spec serialized as JSON with options fixed in the library, and a counter. The same spec always yields the same IDs, two different charts cannot collide, and two identical charts define identical gradients, so whichever a reference resolves to paints the same. A chart that uses neither has no ID and no `<defs>`. The SVG stays self-contained: every reference is to a fragment of the same document, so the PNG export, which rasterizes that SVG through a canvas, keeps the gradients, and the browser suite checks that it does.
+
+In JSON: `"curve":"Smooth"`, `"fill":"Fade"`, `"markers":"None"`, `"highlightLast":true`, `"valueLabels":true`, `"strokeWidth":3` and `"gradient":[{"value":120,"color":"#3F87D9"},{"value":180,"color":"#DD4B45"}]` on a series; `"yAxisSide":"Right"` and `"yTickLabels":"Ends"` on the chart; `"gridlines":"Dotted"` and `"barRadius":8` in its style.
+
+Each option is refused where it cannot apply: a stroke width outside 0.5 to 12 or on a mark without a stroke, a curve on anything but a line or area, a fade on anything but an area or a column, a marker style on anything but a line, area or scatter, a highlight on anything but a line or area, value labels on anything but columns and bars, and a gradient on anything but a line or area, beside zones, with fewer than two stops or stops that do not rise, or with a stop at or below zero on a logarithmic axis. A negative or non-finite bar radius is refused too.
+
+Limits. A smooth curve passes through the sampled points, so on a long line it smooths what sampling kept. Step is step-after only. A gradient colours by the Y value alone, not by X or by another measure, and leaves the fill, the legend swatch and the component's data table in the series colour. A faded column's tip is lighter than the colour `ContrastIssues` measures, so a palette that only just clears 3:1 falls below it there. Horizontal bars and stacked columns cannot fade, and stacked columns take no value labels. Value labels are fitted by an estimate of their width rather than measured, since the server has no fonts; it holds for Segoe UI, Arial, Georgia and Times New Roman, but a wide face such as Verdana draws labels up to about a tenth wider, so a label that only just fits can touch its neighbour. The bar radius applies to every column and bar a style draws; candle bodies, box plots, histogram bins and legend swatches keep their corners. A radar's rings and spokes are its scale and keep their solid lines, and annotations keep their own dashes. A highlighted series' pane clips 12 pixels outside the plot rather than 6, so a zoomed line runs that much further past the edge. Hashing serializes the spec on every render that uses a gradient or a fade, which measured about 8 ms more at 10,000 points and 20 ms at 100,000 for this release, through System.Text.Json's reflection-based resolver, which a host that trims away reflection metadata must keep. Two identical charts share gradient IDs, which is harmless while both are displayed; if the first is hidden with `display:none`, a browser may not paint the second's gradients, so give such charts different titles.
 
 ### A second axis
 
@@ -503,13 +549,13 @@ Invalid chart semantics return HTTP 400 problem details. Malformed JSON is rejec
 
 Measured by the regression suite, so a change that breaks one of these fails the build:
 
-- Every data mark is a focusable element with an accessible name carrying its series, category and value — `Workspace: Sep, 60.3`. Interactive marks use `role="button"`; histogram bins, box glyphs and the outliers of a supplied box summary, which are aggregates, use `role="img"`.
+- Every data mark is a focusable element with an accessible name carrying its series, category and value — `Workspace: Sep, 60.3`. A series whose markers are hidden keeps each one as a transparent target, so its points are reached and announced as any others are. Interactive marks use `role="button"`; histogram bins, box glyphs and the outliers of a supplied box summary, which are aggregates, use `role="img"`.
 - Each chart and graph exposes its title and description as the accessible name of the drawing.
-- Series colors and the zone ramp keep at least 3:1 contrast against both the light and the dark chart background, and every text color keeps at least 4.5:1, zone band labels included over their band's tint. Heatmap cells carry a hairline so the palest ones stay distinguishable.
+- Series colors and the zone ramp keep at least 3:1 contrast against both the light and the dark chart background, and Midnight's against its own, and every text color keeps at least 4.5:1, zone band labels included over their band's tint. Heatmap cells carry a hairline so the palest ones stay distinguishable.
 - No element takes a positive tab index. The toolbar status is a live region, legend buttons expose `aria-pressed`, the data toggle exposes `aria-expanded`, and the data table has a caption with scoped column headers.
 - Keyboard: Tab reaches marks, legend, toolbar and graph nodes; Enter or Space selects a mark or node; Escape hides the tooltip; arrow keys nudge a focused graph node.
 
-Confirmed in a browser accessibility tree: each mark appears as a named button, the chart appears as a named group, and both status regions announce. Every continuous-integration run also sweeps both sample hosts with axe-core, and the gallery a second time in its dark theme and a third on its activity stream's panes, restricted to the WCAG 2.0 and 2.1 A and AA rules, and fails on any violation.
+Confirmed in a browser accessibility tree: each mark appears as a named button, the chart appears as a named group, and both status regions announce. Every continuous-integration run also sweeps both sample hosts with axe-core, and the gallery a second time in its dark theme, a third on its activity stream's panes and a fourth in its Midnight brand, restricted to the WCAG 2.0 and 2.1 A and AA rules, and fails on any violation.
 
 Not done, and not claimed: no screen-reader run (NVDA, JAWS or VoiceOver), no WCAG conformance statement, and no testing with speech or magnification software. An automated sweep catches only what automation can see — roughly a third of the success criteria — so a clean axe run is a floor, not a certificate. One known rough edge: a chart with many marks produces many tab stops — 1,200 at the default sampling budget — so keyboard users reaching content past a chart may prefer the data table, which stays a single stop and holds the original observations.
 
@@ -546,6 +592,12 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.23.0 additions
+
+The finish of a fitness app, from the phone conventions in [FITNESS.md](docs/FITNESS.md), described under [Finish and styling](#finish-and-styling). On a series: `StrokeWidth`; `Curve`, smooth as a monotone cubic on screen or stepped, which a fill, zone colours and a projection follow; `Fill`, which fades an area or a column; `Gradient`, which colours a line or area and its markers by value through the series' own axis; `Markers`, which can hide them while keeping every point focusable and announced; `HighlightLast`; and `ValueLabels`, left out where they would not fit. On a style: `BarRadius`, which rounds only a bar's far end and makes capsules, and `Gridlines`, dotted, dashed or hidden. On a chart: `YAxisSide` and `YTickLabels`, for an axis on the right labelled at its ends. `ChartStyle.Midnight` is a near-black preset whose vivid colours clear 3:1 for every mark and 4.5:1 for text. Gradients brought the library's first SVG IDs, named after a hash of the chart's spec so that charts sharing a page cannot collide, and written only by a chart that uses one. All of it round-trips through the HTTP API's JSON.
+
+A chart that sets none of this renders as before, without an ID: the 143 hashed renderings match, and so do thirty more, hashed before the change, that guard the stylesheet in each preset and a brand, columns and bars with negative values on category and continuous axes, stacked ends, scatter and line markers, minor gridlines on lines, bars, time axes and the frame the statistical kinds share, areas below zero, a radar's rings, and panes. Sixteen new ones cover a smooth faded area, step lines with hollow markers, gradients on a logarithmic axis and on a reversed pace axis, capsule columns with value labels and fades, hidden markers, highlighted last readings, dotted gridlines with the axis on the right labelled at its ends, a smooth zone-coloured line with a projection, horizontal bars with dashed gridlines, stacked capsules, a box plot with its axis on the right and no grid, scatter markers, and Midnight on the performance management chart, weekly volume and the activity stream. The gallery's brand switcher adds Midnight; its activity stream colours heart rate by value over the zone bands and draws the climb as a smooth faded area, with the markers hidden; its performance management chart rings the fitness to arrive with; and under the Lumen brand its weekly load stands as capsules. The heart-rate zones and the other demonstrations stay plain, so the difference shows.
 
 ## 0.22.0 additions
 

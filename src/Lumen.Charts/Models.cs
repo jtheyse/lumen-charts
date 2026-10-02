@@ -2,6 +2,22 @@ namespace Lumen.Charts;
 
 public enum ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc }
 public enum ChartTheme { Light, Dark }
+/// <summary>How a line or area runs from one point to the next. <see cref="Smooth"/> is a monotone cubic drawn on screen,
+/// so between two points it stays within their values and never invents a peak or a dip. <see cref="Step"/> holds each
+/// value until the next point, then rises or falls to it.</summary>
+public enum LineCurve { Linear, Smooth, Step }
+/// <summary><see cref="Fade"/> shades an area from the series colour at the top of the plot to nothing at its baseline,
+/// and a column from its colour at the baseline to a lighter tint at its far end.</summary>
+public enum AreaFill { Flat, Fade }
+/// <summary>The marks on a line, area or scatter series. <see cref="Auto"/> draws each kind's own; <see cref="None"/>
+/// draws nothing visible but keeps every point a focusable, labelled mark with an invisible target.</summary>
+public enum MarkerStyle { Auto, None, Hollow, Filled }
+/// <summary>The edge the main Y axis is labelled on.</summary>
+public enum AxisSide { Left, Right }
+/// <summary><see cref="Ends"/> labels only the lowest and highest tick of the main Y axis; every tick keeps its gridline.</summary>
+public enum TickLabels { All, Ends }
+/// <summary>A colour a gradient takes at <paramref name="Value"/>, measured on the axis of the series it colours.</summary>
+public sealed record ColorStop(double Value, string Color);
 
 /// <summary>Null Y is a missing observation, never an implicit zero. Size encodes bubble area.</summary>
 public sealed record ChartPoint(double X, double? Y, string? Label = null, double Size = 1)
@@ -56,6 +72,25 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// <summary>The pane this series is drawn in, counted from the top. Pane 0 is the main plot, set up by the spec's own
     /// Y properties; pane k above 0 is set up by <see cref="ChartSpec.Panes"/>[k - 1]. Every pane shares the X axis.</summary>
     public int Pane { get; init; }
+    /// <summary>The width of a line, area or band stroke, from 0.5 to 12 pixels. Null draws 2.5.</summary>
+    public double? StrokeWidth { get; init; }
+    /// <summary>How a line or area runs between its points, its fill and any zone colours or projection following it. A
+    /// missing value still breaks it.</summary>
+    public LineCurve Curve { get; init; }
+    /// <summary>Fades an area or a column series instead of filling it flat.</summary>
+    public AreaFill Fill { get; init; }
+    /// <summary>Colours a line or area stroke and its markers continuously by value, each stop landing at its value's height
+    /// on the series' own axis, logarithmic or reversed included. Stops rise strictly, at least two of them; a series takes
+    /// this or <see cref="Zones"/>, not both. Labels are unchanged, because they already read the value.</summary>
+    public IReadOnlyList<ColorStop>? Gradient { get; init; }
+    /// <summary>The markers on a line, area or scatter series.</summary>
+    public MarkerStyle Markers { get; init; }
+    /// <summary>Draws the last point of a line or area larger, with a soft ring round it, as phone apps mark the latest
+    /// reading. It shows even when the other markers are hidden.</summary>
+    public bool HighlightLast { get; init; }
+    /// <summary>Writes each column's or bar's value just past its far end, in its axis's format. A label that would not fit
+    /// within its column's width, or within the plot beside a bar, is left out.</summary>
+    public bool ValueLabels { get; init; }
 
     public static ChartSeries From<T>(string name, IEnumerable<T> items,
         Func<T, double> x, Func<T, double?> y, Func<T, string?>? label = null) =>
@@ -91,6 +126,12 @@ public sealed record ChartSpec
     /// from a zero baseline refuse it.</summary>
     public bool YReversed { get; init; }
     public bool Y2Reversed { get; init; }
+    /// <summary>Labels the main Y axis of every pane on the right, as phone apps do. A chart with a secondary series keeps it
+    /// on the left, because the right edge is taken; a horizontal bar chart, whose value axis runs along the bottom, and the
+    /// charts without a Y axis refuse it.</summary>
+    public AxisSide YAxisSide { get; init; }
+    /// <summary>Which ticks of the main Y axis carry a label. Gridlines stay at every tick; a secondary axis labels all of its own.</summary>
+    public TickLabels YTickLabels { get; init; }
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];
     public string XLabel { get; init; } = "";
     public string YLabel { get; init; } = "";

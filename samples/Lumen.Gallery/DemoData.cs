@@ -1,7 +1,7 @@
 namespace Lumen.Gallery;
 
 public enum AxisDemo { Numeric, Time, Log, PowerCurve, Pace, Zones, Performance, Target, Stream }
-public enum BrandDemo { Lumen, Harbour, PageCss }
+public enum BrandDemo { Lumen, Harbour, PageCss, Midnight }
 
 public static class DemoData
 {
@@ -195,7 +195,7 @@ public static class DemoData
             spec=spec with{XAxis=Lumen.Charts.AxisKind.Time,Title="Arrive fresh",
                 Description="Fitness, fatigue and form from twelve weeks of simulated training · the last two weeks are planned, so they are drawn dashed",
                 XLabel="Day (UTC)",YLabel="Training stress per day",Y2Label="Form",Annotations=[],
-                Series=[Lumen.Charts.ChartSeries.From("Fitness",load,d=>When(d.Day),d=>Math.Round(d.Fitness,1)) with{ProjectedFrom=planned},
+                Series=[Lumen.Charts.ChartSeries.From("Fitness",load,d=>When(d.Day),d=>Math.Round(d.Fitness,1)) with{ProjectedFrom=planned,HighlightLast=true},
                     Lumen.Charts.ChartSeries.From("Fatigue",load,d=>When(d.Day),d=>Math.Round(d.Fatigue,1)) with{ProjectedFrom=planned},
                     Lumen.Charts.ChartSeries.From("Form",load,d=>When(d.Day),d=>Math.Round(d.Form,1)) with{Kind=Lumen.Charts.ChartKind.Area,Secondary=true,ProjectedFrom=planned},
                     Lumen.Charts.ChartSeries.From("Daily stress",load,d=>When(d.Day),d=>d.Stress) with{Kind=Lumen.Charts.ChartKind.Column}]};
@@ -226,11 +226,15 @@ public static class DemoData
                 climb[i]=Math.Round(20+14*Math.Sin(t/700.0)+5*Math.Sin(t/190.0),1);
             }
             Lumen.Charts.ChartPoint[] Over(double[] values)=>values.Select((v,i)=>new Lumen.Charts.ChartPoint(i*10,v)).ToArray();
+            // The line takes each zone's colour from the middle of its band, and blends between them.
+            var ramp=Lumen.Charts.ChartStyle.Light.Zones;
+            Lumen.Charts.ColorStop[] effort=[new(105,ramp[0]),new(128,ramp[1]),new(150,ramp[2]),new(169,ramp[3]),new(185,ramp[4])];
             spec=spec with{XFormat=Lumen.Charts.ValueFormat.Duration,Height=640,Title="See the whole run at once",
-                Description="Heart rate, pace and climb through a simulated interval run · three panes share the elapsed time, so zooming moves them together",
+                Description="Heart rate, pace and climb through a simulated interval run · three panes share the elapsed time, so zooming moves them together · heart rate coloured by its value",
                 XLabel="Elapsed time",YLabel="Heart rate (bpm)",YZones=heart,Annotations=[new(Lumen.Charts.AnnotationAxis.X,600){To=3000,Label="Intervals"}],
                 Panes=[new(){Label="Pace (min/km)",Weight=.6,YFormat=Lumen.Charts.ValueFormat.Duration,YReversed=true},new(){Label="Climb (m)",Weight=.4}],
-                Series=[new("Heart rate",Over(beats)){Zones=heart},new("Pace",Over(paces)){Pane=1},new("Climb",Over(climb)){Pane=2,Kind=Lumen.Charts.ChartKind.Area}]};
+                Series=[new("Heart rate",Over(beats)){Gradient=effort,Markers=Lumen.Charts.MarkerStyle.None},new("Pace",Over(paces)){Pane=1,Markers=Lumen.Charts.MarkerStyle.None},
+                    new("Climb",Over(climb)){Pane=2,Kind=Lumen.Charts.ChartKind.Area,Curve=Lumen.Charts.LineCurve.Smooth,Fill=Lumen.Charts.AreaFill.Fade,Markers=Lumen.Charts.MarkerStyle.None}]};
         }
         return spec;
     }
