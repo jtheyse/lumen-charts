@@ -57,7 +57,7 @@
     private string Value(ChartSeries series,ChartPoint point)
     {
         var y=Measure(series);
-        return Spec.Kind switch
+        return (series.Kind ?? Spec.Kind) switch
         {
             ChartKind.Candlestick or ChartKind.Ohlc=>$"O {y.Format(point.Open ?? 0)} · H {y.Format(point.High ?? 0)} · L {y.Format(point.Low ?? 0)} · C {y.Format(point.Close ?? 0)}",
             _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Y.Value)} ({y.Format(point.Low.Value)} to {y.Format(point.High.Value)})",

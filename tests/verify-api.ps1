@@ -140,6 +140,21 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify ($r.StatusCode -eq 400) 'A point colour on a candlestick is rejected'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $zoned.Replace('"upper":140','"upper":100') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400) 'A zone scale whose bounds do not rise is a bad request, not a server error'
+$mixed='{"title":"Training","kind":"Line","y2Label":"Form","series":[{"name":"Fitness","projectedFrom":2,"points":[{"x":0,"y":40},{"x":1,"y":42},{"x":2,"y":45},{"x":3,"y":44}]},{"name":"Stress","kind":"Column","points":[{"x":0,"y":80},{"x":1,"y":0},{"x":2,"y":120},{"x":3,"y":60}]},{"name":"Form","kind":"Area","secondary":true,"points":[{"x":0,"y":-5},{"x":1,"y":3},{"x":2,"y":-1},{"x":3,"y":2}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $mixed
+$xml=[xml]$r.Content
+$bars=@($xml.SelectNodes('//*[local-name()="g"][starts-with(@aria-label,"Stress: ")]/*[local-name()="rect"]'))
+$strokes=@($xml.SelectNodes('//*[local-name()="path"][@fill="none"][@stroke-width="2.5"]'))
+Verify ($r.StatusCode -eq 200 -and $bars.Count -eq 4 -and $strokes.Count -ge 2 -and $r.Content.Contains("fill-opacity='.12'")) 'A mixed chart posted as JSON renders its lines, its columns and its area'
+Verify (@($strokes|Where-Object{$_.GetAttribute('stroke-dasharray') -eq '6 4'}).Count -ge 1 -and $r.Content.Contains('Fitness: 3, 44, projected') -and -not $r.Content.Contains('Fitness: 1, 42, projected')) 'A projected series posted as JSON renders a dashed stroke and names its projected marks'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $mixed.Replace('"kind":"Line",','"kind":"Line","yAxis":"Log",').Replace('{"x":1,"y":0}','{"x":1,"y":10}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('logarithmic')) 'A column series on a log axis is rejected'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Donut","series":[{"name":"S","kind":"Line","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('own kind')) 'A series kind on a donut is rejected'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Line","series":[{"name":"S","kind":"Column","projectedFrom":1,"points":[{"x":0,"y":1},{"x":1,"y":2}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('lines or areas')) 'A projection on a column series is rejected'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body '{"kind":"Line","series":[{"name":"Load","points":[{"x":0,"y":5}]},{"name":"Target","kind":"Band","points":[{"x":0,"y":5,"low":4,"high":6}]}]}'
+Verify ($r.Content.StartsWith('Series,X,Y,Label,Size,Low,High') -and $r.Content.Contains('"Load",0,5,"",1,,') -and $r.Content.Contains('"Target",0,5,"",1,4,6')) 'CSV carries the edges of a band drawn on a line chart'
 $graph='{"nodes":[{"id":"a","label":"Start"},{"id":"b","label":"End"}],"edges":[{"source":"a","target":"b"}],"layout":"Layered"}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType application/json -Body $graph
 Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'Graph SVG'

@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.20.1. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.21.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -10,7 +10,7 @@ Requires the .NET 10 SDK (the reusable packages target .NET 8).
 dotnet run --project samples/Lumen.Gallery --urls http://localhost:5188
 ```
 
-Open http://localhost:5188. The gallery includes chart selection, light/dark themes, refreshed sample data, series filtering, point selection, a numeric / time / log axis switch with a power–duration curve and a reversed pace line on duration axes, a heart-rate stream coloured and shaded by zone with the time it spent in each zone, X zoom/pan/reset, original-data tables, SVG/PNG/CSV downloads, and network layouts with draggable nodes.
+Open http://localhost:5188. The gallery includes chart selection, light/dark themes, refreshed sample data, series filtering, point selection, a numeric / time / log axis switch with a power–duration curve and a reversed pace line on duration axes, a heart-rate stream coloured and shaded by zone with the time it spent in each zone, a performance management chart of fitness, fatigue and form over daily training stress with two planned weeks projected, weekly load against a target range, X zoom/pan/reset, original-data tables, SVG/PNG/CSV downloads, and network layouts with draggable nodes.
 
 ## Build and verify
 
@@ -307,6 +307,44 @@ In JSON a scale is `{"zones":[{"name":"Easy","upper":140},{"name":"Hard","upper"
 
 Limits. A long line is sampled before it is coloured, so a crossing shorter than the sampling resolution can be absorbed: a brief excursion past a bound between two kept points is drawn as those points have it, and raising `MaxRenderedPoints` keeps more of them. The legend shows the series colour, which a zone-coloured series may never draw, and the component's data table and status line read a value without its zone; the zones are named on the bands and in every mark's name. Point colours and series zones are refused where colour already says something: direction on candlesticks and OHLC bars, value on a heatmap, and the series or distribution a mark belongs to on stacked column, radar, band, histogram, box and violin charts. Donuts take point colours but not zones, and a density scatter refuses both, because it shades cells rather than points. A band's label sits at its top right, so a band thinner than a line of text lets its label run into the next, and the data can cross a label. A scale drawn on a chart has at most 32 zones.
 
+### Several marks in one chart
+
+A series can draw as something other than its chart. `ChartSeries.Kind` takes a line, area, column, scatter or band, and the chart's own kind still lays out X: line, area, scatter, bubble and band charts place every series along a continuous axis — numeric, logarithmic or time — and a column chart places them by category. The performance management chart draws fitness and fatigue as lines over each day's training stress as columns, with form as an area against the right-hand axis and the planned days dashed:
+
+```csharp
+var load = Training.Load(days.Select(d => (d.Day, d.Stress)));   // planned workouts are later entries
+double When(LoadDay d) => TimeAxis.Value(new DateTimeOffset(d.Day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+var planned = TimeAxis.Value(new DateTimeOffset(firstPlannedDay.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+
+ChartSpec performance = new() {
+    Kind = ChartKind.Line, XAxis = AxisKind.Time,
+    YLabel = "Training stress per day", Y2Label = "Form",
+    Series = [
+        ChartSeries.From("Fitness", load, When, d => d.Fitness) with { ProjectedFrom = planned },
+        ChartSeries.From("Fatigue", load, When, d => d.Fatigue) with { ProjectedFrom = planned },
+        ChartSeries.From("Form", load, When, d => d.Form) with { Kind = ChartKind.Area, Secondary = true, ProjectedFrom = planned },
+        ChartSeries.From("Daily stress", load, When, d => d.Stress) with { Kind = ChartKind.Column }
+    ]
+};
+
+// Weekly volume by category, with its four-week average through the middle of each week's column.
+ChartSpec weekly = new() {
+    Kind = ChartKind.Column,
+    Series = [new("Volume", weeks), new("Four-week average", averages) { Kind = ChartKind.Line }]
+};
+```
+
+- **Columns on a continuous axis.** A column series on a line, area, scatter, bubble or band chart draws one bar centred on each X, rising from zero on its own axis, left or right. A bar is 0.7 of the smallest gap on screen between neighbouring X values, clamped to between 1 and 34 pixels as a candle body is, so daily columns fill their days at any zoom. Several column series share one slot per X and stand side by side in it, in series order; the slot is sized from the closest two X values any of them has, so no two slots overlap. X values must be unique within a column series.
+- **Lines, areas, points and bands on a column chart** connect or mark the centre of each category, which is where its columns stand, so a weekly column chart can carry its average as a line or its target as a band. Only column series share a category's slot.
+- **Drawing order.** Bands are drawn first, then areas, columns and lines, and scatter points and bubbles last, so the broad marks stand behind the narrow ones. Series keep their order within each group, so a chart of one kind draws exactly as it did.
+- **Axes.** An axis that carries a column or area series includes zero, and refuses to be logarithmic, reversed or bounded away from zero, as a column or area chart does, because those marks draw from a zero baseline. The other axis is free: the line on the left of a chart with columns on the right can still be logarithmic or reversed. Each series is measured against its own axis, as before.
+- **Everything per series follows the mark.** Zones, point colours, trend lines, the order X must run in and a band's bounds are checked and drawn for the mark a series draws rather than the chart's kind: columns on a line chart take their zone colours, a line on a column chart takes a trend fitted through the category centres, and a band on a line chart refuses point colours as a band chart does. Tooltips, accessible names and the component's data table and status line read each series against its own axis. CSV adds the `Low,High` columns whenever any series draws a band.
+- **Projections.** `ChartSeries.ProjectedFrom` dashes a line or area stroke from that X onward, for planned workouts carried forward. The stroke is split exactly where the drawn segment reaches the X, interpolated on screen as zone crossings are, so on a logarithmic axis too; on a column chart, which places categories by index, a projection between two is interpolated between their centres. Markers and fill are drawn as before, each mark from the projection on is named `projected` — `Fitness: 24 Aug 2026, 84.3, projected` — and the other marks refuse one.
+
+Line, area, scatter, bubble, band and column charts take a series kind; horizontal bars, stacked columns, candlesticks, OHLC bars and the radial and statistical kinds refuse it, because they lay out every series of a chart together. A series cannot be drawn as a bubble, which shares one size scale across its chart, nor as one of those kinds. In JSON a series kind is a string and a projection a number: `{"name":"Form","kind":"Area","secondary":true,"projectedFrom":1787529600000,"points":[…]}`.
+
+Limits. Panes stacked over one X axis — fitness above, form below, or a volume pane under prices — are not part of this release; every series shares one plot. A column at either end of a continuous axis is centred on its X, so a wide one is cut by the plot edge, as an end candle is; set `XMin` and `XMax` half a step beyond the data to show it whole. A band series is drawn whole in its place, so its central line and markers stand behind any columns. The legend draws every series as a square whatever its mark, and the component's data table and status line do not say that a value is projected.
+
 ### Dense scatter charts
 
 A scatter chart draws every observation, which stops being readable long before it stops being fast: fifty thousand points saturate into solid shapes, and an overlapping series disappears underneath the one drawn after it. Setting `DensityCells` bins the plot into a square grid and shades one cell per occupied region instead:
@@ -363,7 +401,7 @@ Dragging a node previews with a transform and commits on release; arrow keys nud
 
 ## Training metrics
 
-`Training` computes the numbers endurance-training charts draw, as Allen and Coggan's *Training and Racing with a Power Meter* and TrainingPeaks define them; [FITNESS.md](docs/FITNESS.md) gives the sources and the published values the tests check against. It draws nothing itself. The results are plain numbers and records for the chart kinds above; the [duration axes](#durations-compact-numbers-and-reversed-axes) arrived in 0.19.0, [zones on charts](#training-zones) in 0.20.0, and the mixed marks the training charts need arrive in a later release.
+`Training` computes the numbers endurance-training charts draw, as Allen and Coggan's *Training and Racing with a Power Meter* and TrainingPeaks define them; [FITNESS.md](docs/FITNESS.md) gives the sources and the published values the tests check against. It draws nothing itself. The results are plain numbers and records for the chart kinds above; the [duration axes](#durations-compact-numbers-and-reversed-axes) arrived in 0.19.0, [zones on charts](#training-zones) in 0.20.0, and [several marks in one chart](#several-marks-in-one-chart) in 0.21.0, which draws the example below as the apps do, with daily stress as columns, form as an area and planned days dashed.
 
 ```csharp
 var zones = ZoneScale.CogganPower(ftp: 290);             // seven levels; each Upper is inclusive
@@ -422,6 +460,7 @@ app.MapLumenCharts();
 {"title":"Pace","kind":"Line","xFormat":"Duration","yFormat":"Duration","yReversed":true,"series":[{"name":"Run","points":[{"x":0,"y":305},{"x":600,"y":298}]}]}
 {"title":"Latency","kind":"Box","series":[{"name":"Asia","points":[],"summary":{"q1":205,"median":228,"q3":252,"lowerWhisker":160,"upperWhisker":318,"outliers":[352,371]}}]}
 {"title":"Effort","kind":"Line","yZones":{"zones":[{"name":"Easy","upper":140},{"name":"Hard","upper":"Infinity"}]},"series":[{"name":"Heart rate","zones":{"zones":[{"name":"Easy","upper":140},{"name":"Hard","upper":"Infinity","color":"#DD4B45"}]},"points":[{"x":0,"y":120},{"x":60,"y":158,"color":"#9E63D3"}]}]}
+{"title":"Training","kind":"Line","xAxis":"Time","y2Label":"Form","series":[{"name":"Fitness","projectedFrom":1787529600000,"points":[{"x":1787443200000,"y":86.4},{"x":1787529600000,"y":84.3},{"x":1787616000000,"y":83.3}]},{"name":"Daily stress","kind":"Column","points":[{"x":1787443200000,"y":91},{"x":1787529600000,"y":48},{"x":1787616000000,"y":60}]},{"name":"Form","kind":"Area","secondary":true,"points":[{"x":1787443200000,"y":-6.2},{"x":1787529600000,"y":3.1},{"x":1787616000000,"y":4}]}]}
 ```
 
 Invalid chart semantics return HTTP 400 problem details. Malformed JSON is rejected by ASP.NET Core. The endpoints do not fetch URLs, execute supplied code, save submitted data, or contact outside services. Add application-specific authorization and rate limits when hosting publicly. The sample limits request bodies to 16 MiB.
@@ -456,14 +495,14 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 
 ## Supported behavior and limits
 
-- Line, area, scatter, bubble, column, horizontal bar, signed stacked column, donut, heatmap, radar, candlestick, OHLC bar, uncertainty band, histogram, box plot, violin.
+- Line, area, scatter, bubble, column, horizontal bar, signed stacked column, donut, heatmap, radar, candlestick, OHLC bar, uncertainty band, histogram, box plot, violin. Lines, areas, columns, scatter points and bands can share one line, area, scatter, bubble, band or column chart, each series naming its own mark; panes stacked over one X axis are not implemented.
 - Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC and band charts; log Y applies to line, scatter, bubble, candlestick, OHLC, band, box and violin charts, because magnitude, count and radial charts need a zero baseline. Log axes reject zero and negative values. `XFormat`, `YFormat` and `Y2Format` write values as durations in seconds or as compact numbers on linear and log axes, never on a time axis; a linear duration axis steps by a second at the finest and rounds what it shows to the second, and histograms, donuts, heatmaps and radar charts take no format. `YReversed` and `Y2Reversed` apply to line, scatter, bubble, band, candlestick, OHLC, box and violin charts, and only Y axes reverse. Time values must be Unix milliseconds between year 1 and year 9999, and `TimeZone` decides the calendar they are read in. `SkipWeekends` and `TimeSkips` compress a time axis over spans it should not draw, at most 400 listed spans per chart; the axis stays piecewise proportional, so a gap in the data itself still reads as a gap. Irregular tick placement is not implemented.
 - `MinorGridlines` adds lighter lines between the labelled ticks: four or five divisions per interval on a linear axis depending on its step, the mantissas between decades on a logarithmic one, and none on a time axis, because half of a month is not a boundary anyone reads. Off by default.
 - Explicit limits via XMin/XMax/YMin/YMax. Bars and areas enforce a zero baseline. Null Y preserves gaps in lines/areas and is omitted elsewhere.
 - Line/area min/max sampling preserves original indices and extrema per continuous run; this is not a total chart-wide point budget. CSV always exports original observations.
 - Up to 100,000 input points, 32 series; 100 categories/slices. Sampling holds a line or area chart at its mark budget, so the browser cost is the same for 1,000 points as for 100,000: about 33 ms either way on the machine in [the measurements](docs/PERFORMANCE.md). Scatter and bubble render every point by default, which is comfortable to about 10,000; 50,000 points means 150,000 DOM elements and 12 MB of markup, and 100,000 means 300,000 elements and 25 MB. A scatter chart can set `DensityCells` to aggregate instead, which takes 100,000 points to 6,504 elements and 33 ms. Bubble has no equivalent, because binning would destroy the size encoding. There is no GPU acceleration and no million-point claim.
 - Bubble area is proportional to Size across all series. Radar requires complete, nonnegative series on common categories. Donut accepts one nonnegative series.
-- A trend line applies to line, area, scatter and bubble charts; category, radial and derived kinds refuse it. It is one least-squares line per series, fitted over every observation in the series rather than the zoomed window, and it is not an observation: it raises no point selection, appears in no CSV export and adds no row to the data table. Other fits — moving averages, polynomial, exponential regression — are not drawn; `Statistics.Rolling` computes a moving average a host can draw as a series of its own.
+- A trend line applies to series drawn as lines, areas, scatter points or bubbles; columns, bars, bands and the radial and derived kinds refuse it. It is one least-squares line per series, fitted over every observation in the series rather than the zoomed window, and it is not an observation: it raises no point selection, appears in no CSV export and adds no row to the data table. Other fits — moving averages, polynomial, exponential regression — are not drawn; `Statistics.Rolling` computes a moving average a host can draw as a series of its own.
 - A violin estimates its outline with a Gaussian kernel at Silverman's bandwidth, taking the smaller of the standard deviation and the interquartile range so one long tail cannot smooth the shape away. The estimate is drawn over the observed range and no further, so the outline claims no values the data never had, and it is computed in the space the axis draws in, so a logarithmic axis shapes the violin in logarithms. The widest point of each violin fills its column: widths are comparable within a chart but carry no units, and the quartile bar and median tick carry the numbers. A violin is an aggregate, like a histogram bin or a box: focusable and named, raising no point selection. A series with fewer than two observations, or with no spread, draws its quartile bar and median without an outline. The bandwidth is not configurable, and split or paired violins are not implemented.
 - Candlestick and OHLC bar accept one series, and a histogram up to four. Candlestick and OHLC bar take the same input: all four prices with High highest and Low lowest, colored by direction rather than by series. An OHLC tick is half the width of a candle body, so the two drawings of one dataset stand in the same columns and can be compared; neither carries a volume pane. Band points need both bounds or neither. Histogram and box read observations from Y and ignore X. A histogram of several series bins them over one set of edges chosen from the pooled observations and stands their bars side by side; counts are raw, not normalised, so a larger series draws taller bars. A box series may instead carry a precomputed `Summary` and no points: it is drawn as given, claims no observation count, applies to box charts only, and its outliers count towards the 100,000-point limit. Histogram bins and box glyphs are labelled, focusable aggregates that report no observation index, so they raise no point selection; candlesticks, OHLC bars and box outliers computed from observations do, and the outliers of a supplied summary do not.
 - Layered graphs use longest-path levels, then barycenter sweeps that keep the ordering with the fewest crossings found. This is a heuristic, not minimal crossings. Edges spanning several levels bend once per level and are drawn as smooth curves; there is no orthogonal routing, no force simulation and no automatic node overlap removal. Self-loops are allowed in layered graphs and draw as a loop on their node; longer cycles still need the circular layout. Nodes can be dragged or nudged with the arrow keys in the component, which needs an interactive render mode. At most 250 nodes / 2,000 edges; dense graphs can still overlap.
@@ -473,6 +512,14 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.21.0 additions
+
+Several marks in one chart, the first half of the fourth step of the build order in [FITNESS.md](docs/FITNESS.md), described under [Several marks in one chart](#several-marks-in-one-chart). `ChartSeries.Kind` draws a series as a line, area, column, scatter or band on a line, area, scatter, bubble, band or column chart, whose own kind still lays out X. Columns on a continuous axis take their width from the closest gap between X values, as candles do, and several stand side by side; lines, points and bands on a column chart mark the category centres. Bands are drawn first, then areas, columns, lines and points. An axis that carries columns or an area includes zero and, as a column chart's does, refuses to be logarithmic, reversed or bounded away from zero. Zones, point colours, trend lines, labels, the component's data table and CSV's band columns follow the mark a series draws rather than the chart's kind. `ChartSeries.ProjectedFrom` dashes a line or area from an X onward, split exactly where the stroke reaches it, and names each mark from there projected. Between them they draw the performance management chart, load against a target range, and a weekly column chart with its average. All of it round-trips through the HTTP API's JSON. Panes stacked over one X axis, the second half of that step, come later.
+
+A chart that sets none of this renders as before: the 106 hashed renderings match, and so do thirteen more, hashed before the change, that guard the series loop and its order, each axis's zero, category slots with three series, bands on both axes, signed stacks, three horizontal bars, small bubbles, trends beside a secondary series and a density note over two series. Five new ones cover a performance management chart built with `Training.Load` in both themes, load against a moving target band on a time axis, and a weekly column chart with its average line, alone and beside a second column series. The gallery's line chart adds a Fitness and fatigue mode — twelve simulated weeks through the load model and two planned weeks dashed — and its column chart a Load against target mode.
+
+Building this found one defect older than it. A band chart checked every series' band bounds against the left axis, so a band measured on a logarithmic right-hand axis accepted a bound of zero or below and drew `NaN` into the SVG. Each band's bounds are now checked against the axis that measures it, which a band drawn on another kind of chart needed anyway.
 
 ## 0.20.1 fixes
 

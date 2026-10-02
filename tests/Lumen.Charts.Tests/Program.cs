@@ -2213,6 +2213,303 @@ Test("A horizontal bar chart draws a value reference upright at its value, its l
     // X stays refused: a category chart places its bars by index, not at values.
     Reject(()=>ChartSvg.Render(Spec(ChartKind.Bar) with{Annotations=[new(AnnotationAxis.X,1)]}));
 });
+// 0.21.0: several marks in one chart. Without a right-hand axis the plot runs from x 76 to 870, with one to 824, and y 344 to 78.
+XElement[] Rects(XDocument doc,int series)=>doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null&&(string?)g.Attribute("data-series")==series.ToString(CultureInfo.InvariantCulture))
+    .Select(g=>g.Element(ns+"rect")).OfType<XElement>().ToArray();
+(double Left,double Right) Spans(XElement rect)=>(Attr(rect,"x"),Attr(rect,"x")+Attr(rect,"width"));
+bool Close(double actual,double expected)=>Math.Abs(actual-expected)<1e-6;
+(bool Dashed,string Ink,(double X,double Y)[] Points)[] Dashes(XDocument doc)=>doc.Descendants(ns+"path")
+    .Where(p=>(string?)p.Attribute("fill")=="none"&&(string?)p.Attribute("stroke-width")=="2.5")
+    .Select(p=>(p.Attribute("stroke-dasharray") is not null,(string)p.Attribute("stroke")!,p.Attribute("d")!.Value.Split(' ').Select(c=>c[1..].Split(','))
+        .Select(c=>(double.Parse(c[0],CultureInfo.InvariantCulture),double.Parse(c[1],CultureInfo.InvariantCulture))).ToArray())).ToArray();
+string[] Labels(XDocument doc)=>doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).Select(g=>(string)g.Attribute("aria-label")!).ToArray();
+string[] Ticks(XDocument doc,string anchor)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")==anchor&&(string?)t.Attribute("class")=="lumen-muted").Select(t=>t.Value).ToArray();
+Test("A column series on a continuous axis centres one bar on each X, 0.7 of the closest gap wide, rising from zero",()=>{
+    var doc=Svg(Spec() with{YMin=-10,YMax=30,Series=[new("Level",[new(0,12),new(100,18)]),
+        new("Load",[new(0,10),new(20,-5),new(25,20),new(60,15),new(100,8)]){Kind=ChartKind.Column}]});
+    var bars=Rects(doc,1);
+    double[] at=[0,20,25,60,100];
+    Check(bars.Length==5,$"{bars.Length} bars");
+    // X runs 0 to 100 across 794 pixels, so the closest two values, 20 and 25, are 39.7 pixels apart.
+    for(var i=0;i<5;i++)
+        Check(Close(Attr(bars[i],"width"),39.7*.7)&&Close(Attr(bars[i],"x")+Attr(bars[i],"width")/2,76+at[i]*7.94),$"bar {i} is not centred on its X at the width its gap allows");
+    // With Y fixed at -10 to 30 zero sits at 277.5: a positive value rises from it and a negative one hangs below it.
+    double At(double value)=>344-(value+10)/40*266;
+    Check(Close(Attr(bars[0],"y"),At(10))&&Close(Attr(bars[0],"height"),At(0)-At(10)),"a positive column does not rise from zero");
+    Check(Close(Attr(bars[1],"y"),At(0))&&Close(Attr(bars[1],"height"),At(-5)-At(0)),"a negative column does not hang from zero");
+    Check(Labels(doc).Contains("Load: 25, 20"),"a column does not name its X and value");
+    // Clamped as candle bodies are: at most 34 pixels and at least one, and 21 for a lone column.
+    double[] Widths(params double[] columns)=>Rects(Svg(Spec() with{Series=[new("Level",[new(0,1),new(1000,2)]),
+        new("Load",columns.Select(x=>new ChartPoint(x,1)).ToArray()){Kind=ChartKind.Column}]}),1).Select(b=>Attr(b,"width")).ToArray();
+    Check(Widths(0,500,1000).All(width=>width==34),"a wide gap is not clamped to 34 pixels");
+    Check(Widths(0,.5,1000).All(width=>width==1),"a narrow gap is not clamped to one pixel");
+    Check(Widths(500).Single()==21,"a lone column is not 21 pixels wide");
+});
+Test("Column series on a continuous axis stand side by side in one slot per X and never overlap",()=>{
+    var doc=Svg(Spec() with{Series=[new("A",[new(0,3),new(4,5),new(100,4)]){Kind=ChartKind.Column},new("Level",[new(0,1),new(100,2)]),
+        new("B",[new(2,2),new(6,6),new(100,7)]){Kind=ChartKind.Column}]});
+    XElement[] a=Rects(doc,0),b=Rects(doc,2);
+    // The closest X values any column has are 2 apart, 15.88 pixels, so a slot is 0.7 of that and each of the two column
+    // series takes half of it; the line takes no share. Slots sized from each series' own gap would overlap here.
+    Check(a.Length==3&&b.Length==3&&a.Concat(b).All(r=>Close(Attr(r,"width"),15.88*.7/2)),"the slot is not shared by the two column series alone");
+    var spans=a.Concat(b).Select(Spans).OrderBy(s=>s.Left).ToArray();
+    for(var i=1;i<spans.Length;i++) Check(spans[i].Left>=spans[i-1].Right-1e-9,$"columns at {spans[i-1].Left} and {spans[i].Left} overlap");
+    // Where both have a column they stand in series order, the pair centred on the X.
+    Check(Close(Spans(a[2]).Right,Spans(b[2]).Left)&&Close((Spans(a[2]).Left+Spans(b[2]).Right)/2,870),"the pair at 100 is not centred on it");
+});
+Test("An axis that carries columns or an area includes zero, and one that carries only lines need not",()=>{
+    var spec=Spec() with{Series=[new("Level",[new(0,100),new(1,120)]),new("Load",[new(0,50),new(1,60)]){Kind=ChartKind.Column,Secondary=true}]};
+    var doc=Svg(spec);
+    Check(Ticks(doc,"start").Contains("0")&&!Ticks(doc,"end").Contains("0"),"columns on the right did not bring zero to the right axis alone");
+    // Each column is measured on its own axis: here the right one, from 0 at the foot of the plot to 100 at its top.
+    var bars=Rects(Svg(spec with{Y2Min=0,Y2Max=100}),1);
+    Check(Close(Attr(bars[0],"y"),344-.5*266)&&Close(Attr(bars[0],"height"),.5*266)&&Close(Attr(bars[1],"height"),.6*266),"a column on the right is not measured on the right-hand axis");
+    var swapped=Svg(spec with{Series=[spec.Series[0] with{Kind=ChartKind.Area},spec.Series[1] with{Kind=null}]});
+    Check(Ticks(swapped,"end").Contains("0")&&!Ticks(swapped,"start").Contains("0"),"an area on the left did not bring zero to the left axis alone");
+    var scatter=Svg(Spec(ChartKind.Scatter) with{Series=[new("Dots",[new(0,100),new(1,120)]),new("Bars",[new(0,105),new(1,110)]){Kind=ChartKind.Column}]});
+    Check(Ticks(scatter,"end").Contains("0"),"columns on a scatter chart float above zero");
+});
+Test("Bands are drawn first, then areas, columns, lines and points, each group in series order",()=>{
+    var doc=Svg(Spec() with{Series=[
+        new("Dots",[new(0,4),new(1,5)]){Kind=ChartKind.Scatter},
+        new("Line one",[new(0,3),new(1,4)]),
+        new("Bars",[new(0,2),new(1,3)]){Kind=ChartKind.Column},
+        new("Fill",[new(0,1),new(1,2)]){Kind=ChartKind.Area},
+        new("Line two",[new(0,6),new(1,7)]),
+        new("Range",[ChartPoint.Interval(0,5,4,6),ChartPoint.Interval(1,6,5,7)]){Kind=ChartKind.Band}]});
+    var drawn=doc.Descendants(ns+"g").Select(g=>(string?)g.Attribute("data-series")).OfType<string>().Distinct().ToArray();
+    Check(drawn.SequenceEqual(["5","3","2","1","4","0"]),string.Join(",",drawn));
+    // The band's fill is the first shape in the plot and the area's comes next, both before any column, and the columns before the first line.
+    var shapes=doc.Descendants().Where(e=>e.Name==ns+"path"||e.Name==ns+"rect").ToArray();
+    int First(Func<XElement,bool> match)=>Array.FindIndex(shapes,e=>match(e));
+    int band=First(e=>(string?)e.Attribute("fill-opacity")==".16"),fill=First(e=>(string?)e.Attribute("fill-opacity")==".12"),
+        column=First(e=>e.Name==ns+"rect"&&(string?)e.Parent!.Attribute("data-series")=="2"),stroke=First(e=>(string?)e.Attribute("stroke")==ChartStyle.Light.Series[1]&&(string?)e.Attribute("fill")=="none");
+    Check(band==0&&band<fill&&fill<column&&column<stroke,$"band {band}, area {fill}, column {column}, line {stroke}");
+});
+Test("A projection dashes a line from the exact point where it reaches its X, and leaves the markers as they were",()=>{
+    var plan=Spec() with{YMin=0,YMax=20,Series=[new("Plan",[new(0,10),new(4,20),new(8,0),new(10,10)]){ProjectedFrom=5}]};
+    var unprojected=plan with{Series=[plan.Series[0] with{ProjectedFrom=null}]};
+    // X runs 0 to 10 across 794 pixels and Y 0 to 20 across 266, so 4 to 8 reaches X 5 a quarter of the way along, at 15.
+    double Px(double x)=>76+x*79.4; double Py(double y)=>344-y*13.3;
+    var doc=Svg(plan);var pieces=Dashes(doc);
+    Check(pieces.Select(p=>p.Dashed).SequenceEqual([false,true]),"the stroke is not one solid piece and one dashed");
+    Matches(pieces[0].Points,(Px(0),Py(10)),(Px(4),Py(20)),(Px(5),Py(15)));
+    Matches(pieces[1].Points,(Px(5),Py(15)),(Px(8),Py(0)),(Px(10),Py(10)));
+    Check(doc.Descendants(ns+"path").Single(p=>p.Attribute("stroke-dasharray") is not null).Attribute("stroke-dasharray")!.Value=="6 4");
+    // The markers stay where they were, and from the projection on each is named projected.
+    Check(Points(doc).Select(c=>c.ToString()).SequenceEqual(Points(Svg(unprojected)).Select(c=>c.ToString())),"the markers moved");
+    Check(Labels(doc).SequenceEqual(["Plan: 0, 10","Plan: 4, 20","Plan: 8, 0, projected","Plan: 10, 10, projected"]),string.Join(" | ",Labels(doc)));
+    // On a point the stroke splits there; before the first everything is dashed; past the last nothing is, and the chart draws as without one.
+    var at=Dashes(Svg(plan with{Series=[plan.Series[0] with{ProjectedFrom=4}]}));
+    Matches(at[0].Points,(Px(0),Py(10)),(Px(4),Py(20)));Matches(at[1].Points,(Px(4),Py(20)),(Px(8),Py(0)),(Px(10),Py(10)));
+    Check(Dashes(Svg(plan with{Series=[plan.Series[0] with{ProjectedFrom=-3}]})).Select(p=>p.Dashed).SequenceEqual([true]),"a projection before the data leaves a solid piece");
+    Check(ChartSvg.Render(plan with{Series=[plan.Series[0] with{ProjectedFrom=11}]})==ChartSvg.Render(unprojected),"a projection past the data changed the chart");
+    // On a logarithmic axis 10 lies half way between 1 and 100 on screen, so the split is half way along the drawn
+    // segment, at 20, rather than at 11.8 where interpolating the data would put it.
+    var curve=Dashes(Svg(Spec() with{XAxis=AxisKind.Log,YMin=0,YMax=40,Series=[new("Curve",[new(1,10),new(100,30)]){ProjectedFrom=10}]}));
+    Matches(curve[0].Points,(76,344-10*6.65),(473,344-20*6.65));Matches(curve[1].Points,(473,344-20*6.65),(870,344-30*6.65));
+    // An area keeps its fill whole.
+    var area=plan with{Kind=ChartKind.Area};
+    string Fill(ChartSpec spec)=>Svg(spec).Descendants(ns+"path").Single(p=>(string?)p.Attribute("fill-opacity")==".12").Attribute("d")!.Value;
+    Check(Fill(area)==Fill(area with{Series=[area.Series[0] with{ProjectedFrom=null}]})&&Dashes(Svg(area)).Select(p=>p.Dashed).SequenceEqual([false,true]),"the area's fill moved or its stroke was not dashed");
+    // With zones, the pieces past the projection are dashed in their own zone colours.
+    var zoned=Dashes(Svg(Effortful(110,150) with{Series=[Effortful(110,150).Series[0] with{ProjectedFrom=.5}]}));
+    Check(zoned.Select(p=>(p.Ink,p.Dashed)).SequenceEqual([(Ramp[0],false),(Ramp[1],false),(Ramp[1],true),(Ramp[2],true)]),string.Join(",",zoned.Select(p=>(p.Ink,p.Dashed))));
+    Matches(zoned[1].Points,(76+794*.25,PY(120)),(473,PY(130)));Matches(zoned[2].Points,(473,PY(130)),(76+794*.75,PY(140)));
+    // A category chart places categories by index, so a projection between two is interpolated between their centres.
+    var weekly=Dashes(Svg(Spec(ChartKind.Column) with{Series=[new("Volume",[new(0,6),new(1,8),new(2,7),new(3,9)]),
+        new("Plan",[new(0,6),new(1,7),new(2,7),new(3,8)]){Kind=ChartKind.Line,ProjectedFrom=1.5}]}));
+    Check(weekly.Length==2&&Close(weekly[0].Points[^1].X,473)&&Close(weekly[1].Points[0].X,473),"the projection is not half way between the second and third categories");
+});
+Test("Lines, points and bands on a category chart mark the centre of each category, where its columns stand",()=>{
+    var doc=Svg(Spec(ChartKind.Column) with{Series=[
+        new("Volume",[new(0,6,"W1"),new(1,8,"W2"),new(2,7,"W3"),new(3,9,"W4")]),
+        new("Average",[new(0,6,"W1"),new(1,7,"W2"),new(2,7,"W3"),new(3,7.5,"W4")]){Kind=ChartKind.Line},
+        new("Last year",[new(0,5,"W1"),new(1,9,"W2"),new(2,8,"W3"),new(3,10,"W4")]),
+        new("Races",[new(1,4,"W2"),new(3,3,"W4")]){Kind=ChartKind.Scatter},
+        new("Range",[ChartPoint.Interval(0,6,5,7,"W1"),ChartPoint.Interval(1,7,6,8,"W2"),ChartPoint.Interval(2,7,6,8,"W3"),ChartPoint.Interval(3,8,7,9,"W4")]){Kind=ChartKind.Band}]});
+    // Four categories across 794 pixels: each is 198.5 wide and centred at 76 + 198.5 (i + 0.5).
+    double Centre(double i)=>76+198.5*(i+.5);
+    bool AtCentres(IEnumerable<double> xs,params double[] categories)=>xs.Count()==categories.Length&&xs.Zip(categories).All(p=>Close(p.First,Centre(p.Second)));
+    double[] Cx(int series)=>doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("data-series")==series.ToString(CultureInfo.InvariantCulture)).Select(g=>Attr(g.Element(ns+"circle")!,"cx")).ToArray();
+    Check(AtCentres(Cx(1),0,1,2,3)&&AtCentres(Dashes(doc).Single(p=>p.Ink==ChartStyle.Light.Series[1]).Points.Select(p=>p.X),0,1,2,3),"the line is off the centres");
+    Check(AtCentres(Cx(3),1,3)&&AtCentres(Cx(4),0,1,2,3),"the points are off the centres");
+    var edge=doc.Descendants(ns+"path").Single(p=>(string?)p.Attribute("fill-opacity")==".16").Attribute("d")!.Value.Split(' ').Where(c=>c!="Z").Select(c=>double.Parse(c[1..].Split(',')[0],CultureInfo.InvariantCulture));
+    Check(AtCentres(edge.Distinct().Order(),0,1,2,3),"the band's edges are off the centres");
+    // The two column series share each category's slot side by side, centred on it; the other marks take no share.
+    XElement[] volume=Rects(doc,0),last=Rects(doc,2);
+    for(var i=0;i<4;i++)
+        Check(Close(Attr(volume[i],"width"),198.5*.72/2)&&Close(Spans(volume[i]).Right,Spans(last[i]).Left)&&Close((Spans(volume[i]).Left+Spans(last[i]).Right)/2,Centre(i)),$"category {i}'s columns are not side by side about its centre");
+});
+Test("Zones, point colours and trend lines follow the mark a series draws, not the chart's kind",()=>{
+    // Columns on a line chart take their zones' colours and name their zones.
+    var zoned=Svg(Spec() with{YMin=0,YMax=200,Series=[new("Heart rate",[new(0,110),new(2,150)]),new("Effort",[new(0,110),new(1,130),new(2,170)]){Kind=ChartKind.Column,Zones=Effort()}]});
+    Check(Rects(zoned,1).Select(r=>(string?)r.Attribute("fill")).SequenceEqual([Ramp[0],Ramp[1],Ramp[3]]),"the columns ignore their zones");
+    Check(Labels(zoned).Contains("Effort: 2, 170, Max"),"a column does not name its zone");
+    // A line on a band chart splits its stroke at the bounds, as it would on a line chart; the band, drawn first, keeps its colour.
+    var banded=Svg(Spec(ChartKind.Band) with{YMin=100,YMax=200,Series=[new("Range",[ChartPoint.Interval(0,130,120,140),ChartPoint.Interval(1,135,125,145)]),
+        new("Heart rate",[new(0,110),new(1,150)]){Kind=ChartKind.Line,Zones=Effort()}]});
+    Check(Dashes(banded).Select(p=>p.Ink).SequenceEqual([ChartStyle.Light.Series[0],..Ramp[..3]]),string.Join(",",Dashes(banded).Select(p=>p.Ink)));
+    // A point colour on that line is drawn; a band refuses one, and zones, wherever it is drawn.
+    Check(ChartSvg.Render(Spec(ChartKind.Band) with{Series=[new("Range",[ChartPoint.Interval(0,1,0,2)]),new("Line",[new(0,1){Color="#123456"},new(1,2)]){Kind=ChartKind.Line}]}).Contains("stroke='#123456'"));
+    Reject(()=>ChartSvg.Render(Spec() with{Series=[new("Range",[ChartPoint.Interval(0,1,0,2) with{Color="#123456"}]){Kind=ChartKind.Band}]}));
+    Reject(()=>ChartSvg.Render(Spec() with{Series=[new("Range",[ChartPoint.Interval(0,1,0,2)]){Kind=ChartKind.Band,Zones=Effort()}]}));
+    // A line on a column chart takes a trend, fitted through the category centres; a column on a line chart takes none.
+    var trended=Svg(Spec(ChartKind.Column) with{Series=[new("Volume",[new(0,6),new(1,8),new(2,7)]),new("Average",[new(0,6),new(1,7),new(2,8)]){Kind=ChartKind.Line,Trend=true}]});
+    var trend=trended.Descendants(ns+"path").Single(p=>(string?)p.Attribute("class")=="lumen-trend");
+    var ends=trend.Attribute("d")!.Value.Split(' ').Select(c=>double.Parse(c[1..].Split(',')[1],CultureInfo.InvariantCulture)).ToArray();
+    // 6, 7 and 8 lie on a line, so the fit passes the middle category's centre, the middle of the plot, at 7 on an axis from 0 to 8.
+    Check(trend.Attribute("aria-label")!.Value=="Average trend: rising, R squared 1.00"&&Close((ends[0]+ends[1])/2,344-7/8d*266),"the trend is not fitted through the centres");
+    Reject(()=>ChartSvg.Render(Spec() with{Series=[new("Bars",[new(0,1),new(1,2)]){Kind=ChartKind.Column,Trend=true}]}));
+    Reject(()=>ChartSvg.Render(Spec() with{Series=[new("Range",[ChartPoint.Interval(0,1,0,2),ChartPoint.Interval(1,2,1,3)]){Kind=ChartKind.Band,Trend=true}]}));
+    // A density scatter counts the points it aggregates, not a line drawn over them.
+    var cloud=Cloud(400,20);
+    Check(ChartSvg.Render(cloud with{Series=[..cloud.Series,new("Fit",[new(0,0),new(1,1)]){Kind=ChartKind.Line}]}).Contains($"{cloud.Series[0].Points.Count(p=>p.Y.HasValue)} observations aggregated"),"the density note counts the line");
+});
+Test("Marks beside others keep their own measure: a band's edges reach its axis, and bubbles are sized against bubbles alone",()=>{
+    ChartSeries Range(bool secondary)=>new("Range",[ChartPoint.Interval(0,15,5,90),ChartPoint.Interval(1,16,6,95)]){Kind=ChartKind.Band,Secondary=secondary};
+    var left=Svg(Spec() with{Series=[new("Level",[new(0,10),new(1,20)]),Range(false)]});
+    var right=Svg(Spec() with{Series=[new("Level",[new(0,10),new(1,20)]),Range(true)]});
+    Check(Ticks(left,"end").Contains("75")&&Ticks(right,"start").Contains("75")&&!Ticks(right,"end").Contains("75"),"a band's edges did not reach its own axis");
+    // A scatter series on a bubble chart draws plain points, and its sizes do not shrink the bubbles.
+    var bubbles=Spec(ChartKind.Bubble) with{Series=[new("Bubbles",[new(0,2,Size:10),new(1,3,Size:40)])]};
+    var beside=bubbles with{Series=[..bubbles.Series,new("Dots",[new(0,1,Size:1000),new(1,4,Size:1000)]){Kind=ChartKind.Scatter}]};
+    double[] Radii(ChartSpec spec,int series)=>Svg(spec).Descendants(ns+"g").Where(g=>(string?)g.Attribute("data-series")==series.ToString(CultureInfo.InvariantCulture)).Select(g=>Attr(g.Element(ns+"circle")!,"r")).ToArray();
+    Check(Radii(beside,0).SequenceEqual(Radii(bubbles,0))&&Radii(bubbles,0)[1]==22,"the points' sizes shrank the bubbles");
+    Check(Radii(beside,1).All(r=>r==4),"a scatter series on a bubble chart drew bubbles");
+});
+Test("CSV carries band edges whenever a series draws a band, and only then",()=>{
+    string[] Rows(ChartSpec spec)=>ChartExport.Csv(spec).Split('\n').Select(r=>r.TrimEnd('\r')).Where(r=>r.Length>0).ToArray();
+    var mixed=Rows(Spec() with{Series=[new("Level",[new(0,5),new(1,6)]),new("Range",[ChartPoint.Interval(0,5,4,6),ChartPoint.Interval(1,6,5,7)]){Kind=ChartKind.Band}]});
+    Check(mixed.SequenceEqual(["Series,X,Y,Label,Size,Low,High","\"Level\",0,5,\"\",1,,","\"Level\",1,6,\"\",1,,","\"Range\",0,5,\"\",1,4,6","\"Range\",1,6,\"\",1,5,7"]),string.Join(" | ",mixed));
+    var category=Rows(Spec(ChartKind.Column) with{Series=[new("Volume",[new(0,6)]),new("Range",[ChartPoint.Interval(0,6,5,7)]){Kind=ChartKind.Band}]});
+    Check(category[0]=="Series,X,Y,Label,Size,Low,High"&&category[1]=="\"Volume\",0,6,\"\",1,,"&&category[2]=="\"Range\",0,6,\"\",1,5,7",string.Join(" | ",category));
+    // A band chart whose series all draw as something else has no band to carry; one that overrides nothing keeps its edges.
+    Check(Rows(Bands() with{Series=[Bands().Series[0] with{Kind=ChartKind.Line}]})[0]=="Series,X,Y,Label,Size");
+    Check(Rows(Bands())[0]=="Series,X,Y,Label,Size,Low,High"&&Rows(Bands())[1]=="\"Forecast\",0,10,\"\",1,8,12");
+    Check(Rows(Candles())[0]=="Series,X,Y,Label,Size,Open,High,Low,Close"&&Rows(Spec())[0]=="Series,X,Y,Label,Size");
+});
+Test("Series kinds and projections are refused where they cannot draw, each with its reason",()=>{
+    string Refusal(ChartSpec spec){try{ChartSvg.Render(spec);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
+    // Six kinds lay out X by value or by category and take a series' own kind; the rest draw every series one way.
+    foreach(var kind in Enum.GetValues<ChartKind>())
+    {
+        var lined=Sample(kind) with{Series=Sample(kind).Series.Select(s=>s with{Kind=ChartKind.Line}).ToArray()};
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Column) ChartSvg.Render(lined);
+        else Check(Refusal(lined).Contains("own kind"),$"{kind}: {Refusal(lined)}");
+    }
+    // A series can be a line, area, column, scatter or band, and nothing else.
+    foreach(var mark in Enum.GetValues<ChartKind>().Append((ChartKind)99))
+    {
+        var spec=Spec() with{Series=[new("S",[new(0,1),new(1,2)]){Kind=mark}]};
+        if(mark is ChartKind.Line or ChartKind.Area or ChartKind.Column or ChartKind.Scatter or ChartKind.Band) ChartSvg.Render(spec);
+        else Check(Refusal(spec).Contains("can be drawn as"),$"{mark}: {Refusal(spec)}");
+    }
+    // Columns and areas draw from zero, on whichever axis measures them; the other axis stays free.
+    var left=Spec() with{Series=[new("Level",[new(0,10),new(1,20)]),new("Load",[new(0,5),new(1,8)]){Kind=ChartKind.Column}]};
+    var right=Spec() with{Series=[new("Level",[new(0,10),new(1,20)]),new("Form",[new(0,5),new(1,8)]){Kind=ChartKind.Area,Secondary=true}]};
+    Check(Refusal(left with{YAxis=AxisKind.Log}).Contains("logarithmic")&&Refusal(right with{Y2Axis=AxisKind.Log}).Contains("logarithmic"));
+    Check(Refusal(left with{YReversed=true}).Contains("reversed")&&Refusal(right with{Y2Reversed=true}).Contains("reversed"));
+    Check(Refusal(left with{YMin=1}).Contains("zero baseline")&&Refusal(right with{Y2Max=-1}).Contains("zero baseline")&&Refusal(left with{YMax=-1}).Contains("zero baseline"));
+    ChartSvg.Render(right with{YAxis=AxisKind.Log,YReversed=true,YMin=5});
+    ChartSvg.Render(left with{Y2Reversed=true,Y2Min=3,Series=[..left.Series,new("Rate",[new(0,4),new(1,6)]){Secondary=true}]});
+    // A projection dashes a stroke, so only lines and areas take one, and it must start somewhere on the X axis.
+    foreach(var mark in (ChartKind[])[ChartKind.Column,ChartKind.Scatter,ChartKind.Band])
+        Check(Refusal(Spec() with{Series=[new("S",[new(0,1),new(1,2)]){Kind=mark,ProjectedFrom=.5}]}).Contains("lines or areas"),$"{mark}");
+    foreach(var kind in (ChartKind[])[ChartKind.Scatter,ChartKind.Bubble,ChartKind.Column,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Band,ChartKind.Candlestick])
+        Check(Refusal(Sample(kind) with{Series=[Sample(kind).Series[0] with{ProjectedFrom=0}]}).Contains("lines or areas"),$"{kind}");
+    foreach(var start in (double[])[double.NaN,double.PositiveInfinity,1e101])
+        Check(Refusal(Spec() with{Series=[Spec().Series[0] with{ProjectedFrom=start}]}).Contains("finite"),$"{start}");
+    Check(Refusal(Spec() with{XAxis=AxisKind.Log,Series=[new("S",[new(1,1),new(2,2)]){ProjectedFrom=0}]}).Contains("positive projection"));
+    Check(Refusal(TimeSpec(Utc(2026,1,1),3_600_000,5) with{Series=[TimeSpec(Utc(2026,1,1),3_600_000,5).Series[0] with{ProjectedFrom=1e18}]}).Contains("year 9999"));
+    // Two columns at one X would stand in one place.
+    Check(Refusal(Spec() with{Series=[new("S",[new(0,1),new(0,2)]){Kind=ChartKind.Column}]}).Contains("unique X"));
+    // Trends, zones, point colours, ordering and band bounds follow the mark.
+    Check(Refusal(Spec() with{Series=[new("S",[new(0,1),new(1,2)]){Kind=ChartKind.Column,Trend=true}]}).Contains("trend line"));
+    Check(Refusal(Spec() with{Series=[new("S",[new(0,1),new(1,2)]){Kind=ChartKind.Band,Zones=Effort()}]}).Contains("zones"));
+    Check(Refusal(Spec() with{Series=[new("S",[new(0,1){Color="#123456"},new(1,2)]){Kind=ChartKind.Band}]}).Contains("Point colours"));
+    Check(Refusal(Spec(ChartKind.Scatter) with{Series=[new("S",[new(1,1),new(0,2)]){Kind=ChartKind.Line}]}).Contains("ordered"));
+    ChartSvg.Render(Spec() with{Series=[Spec().Series[0],new("S",[new(1,1),new(0,2)]){Kind=ChartKind.Scatter}]});
+    Check(Refusal(Spec() with{Series=[new("S",[new(0,1){Low=2}]){Kind=ChartKind.Band}]}).Contains("both Low and High"));
+    Check(Refusal(Spec() with{Y2Axis=AxisKind.Log,Series=[new("L",[new(0,1)]),new("S",[ChartPoint.Interval(0,1,-1,2)]){Kind=ChartKind.Band,Secondary=true}]}).Contains("positive band bounds"));
+});
+Test("A series that names its chart's own kind draws exactly as one that names none",()=>{
+    foreach(var kind in (ChartKind[])[ChartKind.Line,ChartKind.Area,ChartKind.Scatter,ChartKind.Band,ChartKind.Column])
+    {
+        var named=Sample(kind) with{Series=Sample(kind).Series.Select(s=>s with{Kind=kind}).ToArray()};
+        Check(ChartSvg.Render(named)==ChartSvg.Render(Sample(kind))&&ChartExport.Csv(named)==ChartExport.Csv(Sample(kind)),$"{kind}");
+    }
+    var paired=Paired() with{Series=Paired().Series.Select(s=>s with{Kind=ChartKind.Line}).ToArray()};
+    Check(ChartSvg.Render(paired)==ChartSvg.Render(Paired()),"a secondary series that names its kind moved");
+    Check(new ChartSeries("S",[]).Kind is null&&new ChartSeries("S",[]).ProjectedFrom is null);
+});
+Test("A performance management chart from the load model: fitness and fatigue over daily stress, form on the right, two planned weeks projected",()=>{
+    var start=new DateOnly(2026,6,1);
+    double When(DateOnly day)=>TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue),TimeSpan.Zero));
+    // Six weeks done and two planned, each a rest day, two hard days and easy ones between.
+    var load=Training.Load(Enumerable.Range(0,56).Select(i=>(start.AddDays(i),(double)((i%7) switch{0=>0,2=>120,5=>150,_=>60}))),40,40);
+    var planned=When(start.AddDays(42));
+    var doc=Svg(new ChartSpec{Kind=ChartKind.Line,XAxis=AxisKind.Time,YLabel="Training stress",Y2Label="Form",Series=[
+        ChartSeries.From("Fitness",load,d=>When(d.Day),d=>d.Fitness) with{ProjectedFrom=planned},
+        ChartSeries.From("Fatigue",load,d=>When(d.Day),d=>d.Fatigue) with{ProjectedFrom=planned},
+        ChartSeries.From("Form",load,d=>When(d.Day),d=>d.Form) with{Kind=ChartKind.Area,Secondary=true,ProjectedFrom=planned},
+        ChartSeries.From("Daily stress",load,d=>When(d.Day),d=>d.Stress) with{Kind=ChartKind.Column}]});
+    // With the right-hand axis the plot runs from 76 to 824, so the 56 days are 748/55 pixels apart.
+    double Px(int day)=>76+day*748/55d;
+    var bars=Rects(doc,3);
+    Check(bars.Length==56,$"{bars.Length} columns");
+    for(var i=0;i<56;i++)
+        Check(Close(Attr(bars[i],"width"),748/55d*.7)&&Close(Attr(bars[i],"x")+Attr(bars[i],"width")/2,Px(i)),$"day {i}'s column is not centred on its day");
+    // Each column is its day's stress from zero on the left axis: one baseline, and height over stress one scale for every day.
+    var scale=bars.Select((b,i)=>Attr(b,"height")/Math.Max(load[i].Stress,1)).Where((_,i)=>load[i].Stress>0).ToArray();
+    Check(scale.All(s=>Math.Abs(s-scale[0])<1e-6)&&bars.Where((_,i)=>load[i].Stress==0).All(b=>Attr(b,"height")==0),"a column is not its day's stress");
+    Check(bars.All(b=>Close(Attr(b,"y")+Attr(b,"height"),Attr(bars[0],"y")+Attr(bars[0],"height"))),"the columns do not share one baseline");
+    // Form is an area from zero on the right axis, behind the columns, which stand behind the lines.
+    Check(Ticks(doc,"start").Contains("0")&&Ticks(doc,"end").Contains("0"),"an axis leaves out zero");
+    var order=doc.Descendants(ns+"g").Select(g=>(string?)g.Attribute("data-series")).OfType<string>().Distinct().ToArray();
+    Check(order.SequenceEqual(["2","3","0","1"]),string.Join(",",order));
+    // Fitness, fatigue and form are dashed from the first planned day to the last.
+    foreach(var series in new[]{0,1,2})
+    {
+        var pieces=Dashes(doc).Where(p=>p.Ink==ChartStyle.Light.Series[series]).ToArray();
+        Check(pieces.Select(p=>p.Dashed).SequenceEqual([false,true])&&Close(pieces[0].Points[^1].X,Px(42))&&Close(pieces[1].Points[0].X,Px(42))&&Close(pieces[1].Points[^1].X,Px(55)),
+            $"series {series} is not dashed from the first planned day");
+    }
+    var labels=Labels(doc);
+    Check(labels.Contains($"Fitness: 13 Jul 2026, {LinearScale.Label(load[42].Fitness)}, projected")&&labels.Contains($"Fitness: 12 Jul 2026, {LinearScale.Label(load[41].Fitness)}")
+        &&labels.Contains($"Form: 13 Jul 2026, {LinearScale.Label(load[42].Form)}, projected")&&labels.Contains("Daily stress: 1 Jun 2026, 0")&&labels.Contains("Daily stress: 3 Jun 2026, 120"),"the marks are misnamed");
+});
+Test("The component's data table and status line read each series of a mixed chart in its own mark and units",()=>{
+    double June(int day)=>Utc(2026,6,day);
+    var spec=Spec() with{XAxis=AxisKind.Time,Y2Format=ValueFormat.Duration,Series=[
+        new("Stress",[new(June(1),80),new(June(2),0),new(June(3),120),new(June(4),60)]){Kind=ChartKind.Column},
+        new("Fitness",[new(June(1),40.5),new(June(2),39.6),new(June(3),41.2),new(June(4),41.6)]){ProjectedFrom=June(3)},
+        new("Ride time",[new(June(1),3600),new(June(2),0),new(June(3),5400),new(June(4),2700)]){Kind=ChartKind.Area,Secondary=true},
+        new("Target",[ChartPoint.Interval(June(1),40,30,50),ChartPoint.Interval(June(2),41,31,51),ChartPoint.Interval(June(3),42,32,52),ChartPoint.Interval(June(4),43,33,53)]){Kind=ChartKind.Band}]};
+    var html=Operate(spec,async chart=>{
+        typeof(LumenChart).GetField("showData",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.SetValue(chart,true);
+        await chart.SelectPoint(0,2);
+    });
+    Check(html.Contains("<tr><td>Stress</td><td>3 Jun 2026</td><td>120</td></tr>")&&html.Contains("<tr><td>Ride time</td><td>3 Jun 2026</td><td>1:30:00</td></tr>")
+        &&html.Contains("<tr><td>Target</td><td>2 Jun 2026</td><td>41 (31 to 51)</td></tr>"),"the table does not read each series in its own units");
+    Check(html.Contains("Stress: 3 Jun 2026 = 120"),"the status line does not read the column");
+    Check(html.Contains("Fitness: 3 Jun 2026, 41.2, projected")&&html.Contains("stroke-dasharray='6 4'"),"the component lost the projection");
+});
+Test("Series kinds and projections survive JSON, and a request that names neither keeps the defaults",()=>{
+    var options=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web){Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}};
+    var spec=Spec() with{Y2Label="Form",Series=[new("Fitness",[new(0,40),new(1,42),new(2,45)]){ProjectedFrom=1.5},
+        new("Stress",[new(0,80),new(1,0),new(2,120)]){Kind=ChartKind.Column},new("Form",[new(0,-5),new(1,3),new(2,-1)]){Kind=ChartKind.Area,Secondary=true}]};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,options);
+    Check(json.Contains("\"kind\":\"Column\"")&&json.Contains("\"kind\":\"Area\"")&&json.Contains("\"projectedFrom\":1.5"),json);
+    Check(ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,options)!)==ChartSvg.Render(spec),"the marks changed in transit");
+    var written="{\"kind\":\"Line\",\"series\":[{\"name\":\"Fitness\",\"projectedFrom\":1,\"points\":[{\"x\":0,\"y\":40},{\"x\":1,\"y\":42},{\"x\":2,\"y\":45}]},"+
+        "{\"name\":\"Stress\",\"kind\":\"Column\",\"points\":[{\"x\":0,\"y\":80},{\"x\":1,\"y\":0},{\"x\":2,\"y\":120}]}]}";
+    var read=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,options)!;
+    var svg=ChartSvg.Render(read);
+    Check(read.Series[1].Kind==ChartKind.Column&&read.Series[0].ProjectedFrom==1&&svg.Contains("stroke-dasharray='6 4'")&&svg.Contains("aria-label='Stress: 2, 120'><title>Stress: 2, 120</title><rect"),"hand-written JSON lost its marks");
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",options)!;
+    Check(old.Series[0].Kind is null&&old.Series[0].ProjectedFrom is null);
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

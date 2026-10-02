@@ -40,8 +40,16 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     public BoxSummary? Summary { get; init; }
     /// <summary>Colours this series by the zone each value falls in, and names the zone in each mark's label. A line or
     /// area stroke is split where it crosses a bound, so each piece changes colour exactly at the threshold; its fill
-    /// keeps the series colour. Applies to line, area, scatter, bubble, column and bar charts.</summary>
+    /// keeps the series colour. Applies to series drawn as lines, areas, scatter points, bubbles, columns and bars.</summary>
     public ZoneScale? Zones { get; init; }
+    /// <summary>Draws this series as a line, area, column, scatter or band instead of the chart's kind, so fitness lines
+    /// can stand over daily stress columns. The chart's kind still lays out X: line, area, scatter, bubble and band charts
+    /// place every series along a continuous axis, and column charts by category. Null draws the chart's kind.</summary>
+    public ChartKind? Kind { get; init; }
+    /// <summary>Dashes a line or area stroke from this X onward, such as planned workouts projected forward. The stroke is
+    /// split exactly where it reaches the X, and each mark from there on is named projected; markers and fill are drawn
+    /// as before.</summary>
+    public double? ProjectedFrom { get; init; }
 
     public static ChartSeries From<T>(string name, IEnumerable<T> items,
         Func<T, double> x, Func<T, double?> y, Func<T, string?>? label = null) =>
@@ -53,6 +61,7 @@ public sealed record ChartSpec
     public string Title { get; init; } = "Untitled chart";
     public string Description { get; init; } = "";
     public string Source { get; init; } = "";
+    /// <summary>Lays out X for every series, and draws each series that names no kind of its own.</summary>
     public ChartKind Kind { get; init; } = ChartKind.Line;
     public ChartTheme Theme { get; init; }
     /// <summary>A host application's colours and typeface. When set it replaces <see cref="Theme"/>.</summary>

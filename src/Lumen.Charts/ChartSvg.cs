@@ -33,6 +33,8 @@ public static class ChartSvg
     /// <summary>The style a spec draws with: its own, or the preset for its theme.</summary>
     public static ChartStyle ResolveStyle(ChartSpec spec) => spec.Style ?? Preset(spec.Theme);
     internal static ChartStyle Preset(ChartTheme theme) => theme == ChartTheme.Dark ? ChartStyle.Dark : ChartStyle.Light;
+    /// <summary>The mark a series draws: its own kind, or the chart's.</summary>
+    internal static ChartKind Mark(ChartSpec spec, ChartSeries series) => series.Kind ?? spec.Kind;
 
     /// <summary>Renders a chart. <paramref name="includeTitles"/> controls the native SVG tooltip on each mark.</summary>
     public static string Render(ChartSpec spec, bool includeLegend = true, bool includeTitles = true)
@@ -54,7 +56,7 @@ public static class ChartSvg
         else if (spec.Kind == ChartKind.Box) Box(w, spec);
         else Cartesian(w, spec);
         if (spec.Kind == ChartKind.Scatter && spec.DensityCells is not null)
-            w.Text(spec.Width - 30, 64, $"{Count(spec.Series.Sum(series => series.Points.Count(p => p.Y.HasValue)))} observations aggregated into {spec.DensityCells} cells across",
+            w.Text(spec.Width - 30, 64, $"{Count(spec.Series.Where(series => Mark(spec, series) == ChartKind.Scatter).Sum(series => series.Points.Count(p => p.Y.HasValue)))} observations aggregated into {spec.DensityCells} cells across",
                 "text-anchor='end' class='lumen-muted' font-size='11'");
         w.Text(24, spec.Height - 12, spec.Source, "class='lumen-muted' font-size='11'");
         if (legendRows > 0)
@@ -87,6 +89,7 @@ public static class ChartSvg
     private static string PointLabel(ChartSeries s, ChartPoint p, Axis x, Axis y) =>
         $"{s.Name}: {p.Label ?? x.Format(p.X)}, {(p.Y.HasValue ? y.Format(p.Y.Value) : "missing")}" +
         (s.Zones is { } zones && p.Y is { } value ? $", {zones.Zones[zones.IndexOf(value)].Name}" : "") +
+        (s.ProjectedFrom is { } from && p.X >= from ? ", projected" : "") +
         (p.Low.HasValue && p.High.HasValue ? $" (band {y.Format(p.Low.Value)} to {y.Format(p.High.Value)})" : "");
     private static string ZoneColor(ChartStyle style, ZoneScale zones, int index) => zones.Zones[index].Color ?? style.Zones[index];
     private static bool HasData(ChartSpec spec) => spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc
@@ -104,14 +107,17 @@ public static class ChartSvg
         var left = horizontal ? 160d : 76d; var right = s.Width - (secondary ? 76d : 30d);
         var top = 78d; var bottom = s.Height - 76d;
         var points = s.Series.SelectMany(x => x.Points).ToArray();
-        var maxSize = points.Length == 0 ? 0 : points.Max(point => point.Size);
+        var bubbles = s.Series.Where(x => Mark(s, x) == ChartKind.Bubble).SelectMany(x => x.Points).ToArray();
+        var maxSize = bubbles.Length == 0 ? 0 : bubbles.Max(point => point.Size);
         var cats = points.Select(p => p.X).Distinct().Order().ToArray();
         var xs = Axis.Create(s.XAxis, points.Select(p => p.X), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone),
             weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null) with { ValueFormat = s.XFormat };
         var primary = s.Series.Where(series => !series.Secondary).SelectMany(series => series.Points).ToArray();
         var values = primary.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
-        if (s.Kind is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band)
-            foreach (var p in primary.Where(p => p.Low.HasValue && p.High.HasValue)) { values.Add(p.Low!.Value); values.Add(p.High!.Value); }
+        // Prices and band edges reach the axis of the series that carries them.
+        IEnumerable<ChartPoint> Bounded(bool right) => s.Series.Where(x => x.Secondary == right && (s.Kind is ChartKind.Candlestick or ChartKind.Ohlc || Mark(s, x) == ChartKind.Band))
+            .SelectMany(x => x.Points).Where(p => p.Low.HasValue && p.High.HasValue);
+        foreach (var p in Bounded(false)) { values.Add(p.Low!.Value); values.Add(p.High!.Value); }
         if (s.Kind == ChartKind.StackedColumn)
             foreach (var x in cats)
             {
@@ -119,12 +125,13 @@ public static class ChartSvg
                 values.Add(points.Where(p => p.X == x && p.Y < 0).Sum(p => p.Y!.Value));
             }
         var zero = s.IncludeZero || category || s.Kind == ChartKind.Area;
-        var ys = Axis.Create(s.YAxis, values, zero, s.YMin, s.YMax) with { ValueFormat = s.YFormat, Reversed = s.YReversed };
+        // An axis that carries columns or an area measures them from zero, whatever kind the chart is.
+        bool Filled(bool right) => s.Series.Any(x => x.Secondary == right && Mark(s, x) is ChartKind.Column or ChartKind.Area);
+        var ys = Axis.Create(s.YAxis, values, zero || Filled(false), s.YMin, s.YMax) with { ValueFormat = s.YFormat, Reversed = s.YReversed };
         var second = s.Series.Where(series => series.Secondary).SelectMany(series => series.Points).ToArray();
         var secondValues = second.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
-        if (s.Kind == ChartKind.Band)
-            foreach (var p in second.Where(p => p.Low.HasValue && p.High.HasValue)) { secondValues.Add(p.Low!.Value); secondValues.Add(p.High!.Value); }
-        var ys2 = secondary ? Axis.Create(s.Y2Axis, secondValues, zero, s.Y2Min, s.Y2Max) with { ValueFormat = s.Y2Format, Reversed = s.Y2Reversed } : ys;
+        foreach (var p in Bounded(true)) { secondValues.Add(p.Low!.Value); secondValues.Add(p.High!.Value); }
+        var ys2 = secondary ? Axis.Create(s.Y2Axis, secondValues, zero || Filled(true), s.Y2Min, s.Y2Max) with { ValueFormat = s.Y2Format, Reversed = s.Y2Reversed } : ys;
         double X(double x) => category ? left + (Array.IndexOf(cats, x) + .5) / cats.Length * (right - left) : xs.Map(x, left, right);
         double Y(double y) => ys.Map(y, bottom, top);
         if (s.MinorGridlines)
@@ -192,20 +199,42 @@ public static class ChartSvg
             if (horizontal) Annotate(w, annotation with { Axis = AnnotationAxis.X }, value, value, ys, ys, left, right, top, bottom, inside: true);
             else Annotate(w, annotation, X, Y, xs, ys, left, right, top, bottom);
         var positive = cats.ToDictionary(x => x, _ => 0d); var negative = cats.ToDictionary(x => x, _ => 0d);
-        for (var si = 0; si < s.Series.Count; si++)
+        // Column series share each slot side by side. On a continuous axis a slot takes its width from the closest two X
+        // values any column series has, as a candle does from its own, so no two slots overlap.
+        var columns = Enumerable.Range(0, s.Series.Count).Where(i => Mark(s, s.Series[i]) is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn).ToArray();
+        var slot = 0d;
+        if (!category && columns.Length > 0)
         {
-            var series = s.Series[si]; var color = SeriesColor(series, si, w.Style);
+            var at = columns.SelectMany(i => s.Series[i].Points).Select(p => p.X).Distinct().Select(X).Order().ToArray();
+            slot = Math.Clamp((at.Length > 1 ? Enumerable.Range(1, at.Length - 1).Min(i => at[i] - at[i - 1]) : 30) * .7, 1, 34);
+        }
+        // A category chart places categories by index, so a projection starting between two is interpolated between them.
+        double Projected(double from)
+        {
+            if (!category) return X(from);
+            var after = Array.FindIndex(cats, c => c >= from);
+            if (after < 0) return double.PositiveInfinity;
+            if (cats[after] == from) return X(from);
+            if (after == 0) return double.NegativeInfinity;
+            return X(cats[after - 1]) + (from - cats[after - 1]) / (cats[after] - cats[after - 1]) * (X(cats[after]) - X(cats[after - 1]));
+        }
+        // Bands first, then areas, columns, lines, and points last, so the broad marks stand behind the narrow ones. Series
+        // keep their order within each, so a chart of one kind draws in series order.
+        foreach (var si in Enumerable.Range(0, s.Series.Count).OrderBy(i => Layer(Mark(s, s.Series[i]))))
+        {
+            var series = s.Series[si]; var color = SeriesColor(series, si, w.Style); var mark = Mark(s, series); var place = Array.IndexOf(columns, si);
             // Each series is measured against its own axis from here on.
             var scale = series.Secondary ? ys2 : ys;
             double At(double y) => scale.Map(y, bottom, top);
             // A point's own colour beats its zone's, which beats the series colour.
             string Ink(ChartPoint p) => p.Color ?? (series.Zones is { } zones ? ZoneColor(w.Style, zones, zones.IndexOf(p.Y!.Value)) : color);
-            if (s.Kind == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, At, xs, scale, cells, left, right, top, bottom);
+            if (mark == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, At, xs, scale, cells, left, right, top, bottom);
             else if (s.Kind == ChartKind.Candlestick) Candles(w, series, X, At, xs, scale);
             else if (s.Kind == ChartKind.Ohlc) Ohlc(w, series, X, At, xs, scale);
-            else if (s.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Band)
+            else if (mark is ChartKind.Line or ChartKind.Area or ChartKind.Band)
             {
-                if (s.Kind == ChartKind.Band) Bands(w, series, color, X, At, s.MaxRenderedPoints);
+                if (mark == ChartKind.Band) Bands(w, series, color, X, At, s.MaxRenderedPoints);
+                var projected = series.ProjectedFrom is { } from ? Projected(from) : double.PositiveInfinity;
                 // Sample each continuous run independently, preserving missing-observation gaps.
                 var start = 0;
                 while (start < series.Points.Count)
@@ -215,11 +244,11 @@ public static class ChartSvg
                     var run = series.Points.Skip(start).Take(end - start).ToArray();
                     var indices = Sampling.MinMax(run, s.MaxRenderedPoints);
                     var path = string.Join(" ", indices.Select((i, n) => $"{(n == 0 ? "M" : "L")}{N(X(run[i].X))},{N(At(run[i].Y!.Value))}"));
-                    if (s.Kind == ChartKind.Area)
+                    if (mark == ChartKind.Area)
                         w.Add($"<path d='{path} L{N(X(run[^1].X))},{N(At(0))} L{N(X(run[0].X))},{N(At(0))} Z' fill='{color}' fill-opacity='.12'/>");
-                    if (series.Zones is null && indices.All(i => run[i].Color is null))
+                    if (series.Zones is null && series.ProjectedFrom is null && indices.All(i => run[i].Color is null))
                         w.Add($"<path d='{path}' fill='none' stroke='{color}' stroke-width='2.5' stroke-linejoin='round'/>");
-                    else Stroke(w, series.Zones, run, indices, color, X, At);
+                    else Stroke(w, series.Zones, run, indices, color, X, At, projected);
                     foreach (var i in indices)
                     {
                         var p = run[i];
@@ -232,30 +261,36 @@ public static class ChartSvg
             {
                 var p = series.Points[pi]; if (!p.Y.HasValue) continue;
                 var y = p.Y.Value;
-                if (category)
+                if (category && place >= 0)
                 {
                     var ci = Array.IndexOf(cats, p.X);
                     var band = (horizontal ? bottom - top : right - left) / cats.Length;
                     var stacked = s.Kind == ChartKind.StackedColumn;
-                    var width = band * .72 / (stacked ? 1 : s.Series.Count);
+                    var width = band * .72 / (stacked ? 1 : columns.Length);
                     var basis = 0d;
                     if (stacked) { var dict = y >= 0 ? positive : negative; basis = dict[p.X]; dict[p.X] += y; }
                     double rx, ry, rw, rh;
                     if (horizontal)
                     {
-                        rx = ys.Map(Math.Min(0, y), left, right); ry = top + ci * band + band * .14 + si * width;
+                        rx = ys.Map(Math.Min(0, y), left, right); ry = top + ci * band + band * .14 + place * width;
                         rw = Math.Abs(ys.Map(y, left, right) - ys.Map(0, left, right)); rh = width;
                     }
                     else
                     {
-                        rx = left + ci * band + band * .14 + (stacked ? 0 : si * width); ry = Math.Min(At(basis), At(basis + y));
+                        rx = left + ci * band + band * .14 + (stacked ? 0 : place * width); ry = Math.Min(At(basis), At(basis + y));
                         rw = width; rh = Math.Abs(At(basis + y) - At(basis));
                     }
                     Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<rect x='{N(rx)}' y='{N(ry)}' width='{N(rw)}' height='{N(rh)}' rx='2' fill='{Ink(p)}'/>");
                 }
+                else if (place >= 0)
+                {
+                    // Centred on its X within the slot, rising from zero on the series' own axis.
+                    var width = slot / columns.Length;
+                    Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<rect x='{N(X(p.X) - slot / 2 + place * width)}' y='{N(Math.Min(At(0), At(y)))}' width='{N(width)}' height='{N(Math.Abs(At(y) - At(0)))}' rx='2' fill='{Ink(p)}'/>");
+                }
                 else
                 {
-                    var radius = s.Kind == ChartKind.Bubble ? Math.Sqrt(p.Size / Math.Max(maxSize, double.Epsilon)) * 22 : 4;
+                    var radius = mark == ChartKind.Bubble ? Math.Sqrt(p.Size / Math.Max(maxSize, double.Epsilon)) * 22 : 4;
                     var ink = Ink(p);
                     Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(y))}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'/>");
                 }
@@ -289,15 +324,27 @@ public static class ChartSvg
     /// split where it crosses, interpolated on screen so the split lies on the drawn segment on any axis, and each piece
     /// takes the colour of the zone it lies in; a value exactly on a bound belongs to the zone below, as
     /// <see cref="ZoneScale.IndexOf"/> has it. A segment that starts from a point with its own colour is drawn whole in
-    /// that colour, and without zones the others keep the series colour. Pieces of one colour in a row share a path.
+    /// that colour, and without zones the others keep the series colour. From the screen position <paramref name="projected"/>
+    /// onward the stroke is dashed, a piece that reaches it split there on the drawn segment. Pieces of one colour and
+    /// style in a row share a path.
     /// </summary>
-    private static void Stroke(SvgWriter w, ZoneScale? zones, ChartPoint[] run, IReadOnlyList<int> indices, string color, Func<double, double> X, Func<double, double> Y)
+    private static void Stroke(SvgWriter w, ZoneScale? zones, ChartPoint[] run, IReadOnlyList<int> indices, string color, Func<double, double> X, Func<double, double> Y, double projected)
     {
-        var paths = new List<(string Ink, StringBuilder Path)>();
+        var paths = new List<(string Ink, bool Dashed, StringBuilder Path)>();
+        void Add(string ink, bool dashed, double x1, double y1, double x2, double y2)
+        {
+            if (paths.Count == 0 || paths[^1].Ink != ink || paths[^1].Dashed != dashed) paths.Add((ink, dashed, new StringBuilder($"M{N(x1)},{N(y1)}")));
+            paths[^1].Path.Append($" L{N(x2)},{N(y2)}");
+        }
         void Piece(string ink, double x1, double y1, double x2, double y2)
         {
-            if (paths.Count == 0 || paths[^1].Ink != ink) paths.Add((ink, new StringBuilder($"M{N(x1)},{N(y1)}")));
-            paths[^1].Path.Append($" L{N(x2)},{N(y2)}");
+            if (x1 < projected && projected < x2)
+            {
+                var y = y1 + (projected - x1) / (x2 - x1) * (y2 - y1);
+                Add(ink, false, x1, y1, projected, y);
+                Add(ink, true, projected, y, x2, y2);
+            }
+            else Add(ink, x1 >= projected, x1, y1, x2, y2);
         }
         for (var n = 1; n < indices.Count; n++)
         {
@@ -318,8 +365,11 @@ public static class ChartSvg
             }
             if (done < 1) Piece(ZoneColor(w.Style, zones, to), x, y, xb, yb);
         }
-        foreach (var (ink, path) in paths) w.Add($"<path d='{path}' fill='none' stroke='{ink}' stroke-width='2.5' stroke-linejoin='round'/>");
+        foreach (var (ink, dashed, path) in paths)
+            w.Add($"<path d='{path}' fill='none' stroke='{ink}' stroke-width='2.5' stroke-linejoin='round'{(dashed ? " stroke-dasharray='6 4'" : "")}/>");
     }
+
+    private static int Layer(ChartKind mark) => mark switch { ChartKind.Band => 0, ChartKind.Area => 1, ChartKind.Column => 2, ChartKind.Line => 3, _ => 4 };
 
     /// <summary>
     /// Each zone as a band on the value axis, drawn through the annotation path so it clips, pans and zooms as a Y

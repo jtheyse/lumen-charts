@@ -1,6 +1,6 @@
 namespace Lumen.Gallery;
 
-public enum AxisDemo { Numeric, Time, Log, PowerCurve, Pace, Zones }
+public enum AxisDemo { Numeric, Time, Log, PowerCurve, Pace, Zones, Performance, Target }
 public enum BrandDemo { Lumen, Harbour, PageCss }
 
 public static class DemoData
@@ -16,6 +16,8 @@ public static class DemoData
     public static bool LogCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Scatter or Lumen.Charts.ChartKind.Bubble;
     public static bool DurationCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line;
     public static bool ZoneCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Bar;
+    public static bool PerformanceCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line;
+    public static bool TargetCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Column;
     public static readonly string[] Months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     public static Lumen.Charts.ChartSpec Create(Lumen.Charts.ChartKind kind,Lumen.Charts.ChartTheme theme,int revision=0,AxisDemo axis=AxisDemo.Numeric)
     {
@@ -170,6 +172,38 @@ public static class DemoData
                     XLabel="Zone",YLabel="Time in zone",Annotations=[],
                     Series=[new("Time in zone",heart.Zones.Select((zone,i)=>new Lumen.Charts.ChartPoint(i,seconds[i],zone.Name){Color=zone.Color??style.Zones[i]}).ToArray())]};
             }
+        }
+        if(axis==AxisDemo.Performance&&PerformanceCapable(kind))
+        {
+            // Twelve weeks of simulated training and two planned. Each week has a rest day, two hard days and a long ride,
+            // and builds on the last except every fourth, which eases; the planned weeks taper towards a race.
+            var start=new DateOnly(2026,6,1);
+            var days=Enumerable.Range(0,98).Select(i=>{
+                var week=i/7;var scale=week>=12?(week==12?.75:.45):week%4==3?.6:1+week*.04;
+                var day=(i%7) switch{0=>0d,1=>65,2=>100,3=>55,4=>115,5=>175,_=>80};
+                return (start.AddDays(i),day==0?0:Math.Round(day*scale+random.Next(-12,13)));}).ToArray();
+            var load=Lumen.Charts.Training.Load(days,fitness:60,fatigue:60);
+            double When(DateOnly day)=>Lumen.Charts.TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue),TimeSpan.Zero));
+            var planned=When(start.AddDays(84));
+            spec=spec with{XAxis=Lumen.Charts.AxisKind.Time,Title="Arrive fresh",
+                Description="Fitness, fatigue and form from twelve weeks of simulated training · the last two weeks are planned, so they are drawn dashed",
+                XLabel="Day (UTC)",YLabel="Training stress per day",Y2Label="Form",Annotations=[],
+                Series=[Lumen.Charts.ChartSeries.From("Fitness",load,d=>When(d.Day),d=>Math.Round(d.Fitness,1)) with{ProjectedFrom=planned},
+                    Lumen.Charts.ChartSeries.From("Fatigue",load,d=>When(d.Day),d=>Math.Round(d.Fatigue,1)) with{ProjectedFrom=planned},
+                    Lumen.Charts.ChartSeries.From("Form",load,d=>When(d.Day),d=>Math.Round(d.Form,1)) with{Kind=Lumen.Charts.ChartKind.Area,Secondary=true,ProjectedFrom=planned},
+                    Lumen.Charts.ChartSeries.From("Daily stress",load,d=>When(d.Day),d=>d.Stress) with{Kind=Lumen.Charts.ChartKind.Column}]};
+        }
+        if(axis==AxisDemo.Target&&TargetCapable(kind))
+        {
+            // Twelve weeks of simulated load, every fourth an easy week, against an illustrative range of 80 to 130 percent
+            // of the four weeks before it; the first week is measured against an assumed 360.
+            var weekly=Enumerable.Range(0,12).Select(i=>380d+i*22+(i%4==3?-170:0)+random.Next(-40,41)).ToArray();
+            double Before(int i)=>i==0?360:weekly.Skip(Math.Max(0,i-4)).Take(i-Math.Max(0,i-4)).Average();
+            string Week(int i)=>new DateOnly(2026,6,1).AddDays(i*7).ToString("d MMM",System.Globalization.CultureInfo.InvariantCulture);
+            spec=spec with{Title="Build without spiking",Description="Simulated weekly training stress against a range of 80 to 130 % of the four weeks before",
+                XLabel="Week beginning",YLabel="Training stress per week",Annotations=[],
+                Series=[new("Weekly load",weekly.Select((w,i)=>new Lumen.Charts.ChartPoint(i,w,Week(i))).ToArray()),
+                    new("Target range",Enumerable.Range(0,12).Select(i=>Lumen.Charts.ChartPoint.Interval(i,Math.Round(Before(i)),Math.Round(Before(i)*.8),Math.Round(Before(i)*1.3),Week(i))).ToArray()){Kind=Lumen.Charts.ChartKind.Band}]};
         }
         return spec;
     }

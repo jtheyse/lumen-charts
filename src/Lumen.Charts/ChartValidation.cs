@@ -41,8 +41,6 @@ public static partial class ChartValidation
         if (spec.IncludeZero && (spec.XAxis == AxisKind.Log || spec.YAxis == AxisKind.Log)) throw new ArgumentException("Log axes cannot include zero.");
         Text(spec.Title); Text(spec.Description); Text(spec.Source); Text(spec.XLabel); Text(spec.YLabel);
         if (spec.Series is null || spec.Series.Count > 32) throw new ArgumentException("Provide at most 32 series.");
-        if (spec.Series.Any(series => series?.Trend == true) && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble))
-            throw new ArgumentException("A trend line applies to line, area, scatter and bubble charts; the other kinds place their marks by index or derive their own values.");
         if (spec.MaxRenderedPoints is < 16 or > 5000) throw new ArgumentException("MaxRenderedPoints must be between 16 and 5000.");
         if (spec.Bins is < 1 or > Statistics.MaxBins) throw new ArgumentException($"Bins must be between 1 and {Statistics.MaxBins}.");
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
@@ -109,15 +107,35 @@ public static partial class ChartValidation
                 throw new ArgumentException(series?.Summary is null ? "Series and points cannot be null." : "A series with a summary still needs a points list; pass an empty one.");
             if (series.Name is null) throw new ArgumentException("Series names cannot be null.");
             Text(series.Name); Color(series.Color);
+            if (series.Kind is { } own)
+            {
+                if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Column))
+                    throw new ArgumentException("A series' own kind applies to line, area, scatter, bubble, band and column charts; horizontal bar, stacked column, candlestick, OHLC, donut, heatmap, radar, histogram, box and violin charts draw every series one way.");
+                if (own is not (ChartKind.Line or ChartKind.Area or ChartKind.Column or ChartKind.Scatter or ChartKind.Band))
+                    throw new ArgumentException("A series can be drawn as a line, area, column, scatter or band; bubbles share one size scale across a chart, and the other kinds lay out a whole chart rather than one series.");
+            }
+            // Everything a series carries is checked against the mark it draws, which is the chart's kind unless it names its own.
+            var mark = ChartSvg.Mark(spec, series);
+            if (series.Trend && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble))
+                throw new ArgumentException("A trend line applies to series drawn as lines, areas, scatter points or bubbles; the other kinds place their marks by index or derive their own values.");
             if (series.Summary is not null) Summary(series, spec.Kind, spec.YAxis);
             if (series.Zones is not null)
             {
-                if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar))
-                    throw new ArgumentException("Series zones apply to line, area, scatter, bubble, column and bar charts; on the other kinds colour already says something else, such as direction, value, a stacked series or a distribution.");
+                if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar))
+                    throw new ArgumentException("Series zones apply to series drawn as lines, areas, scatter points, bubbles, columns and bars; on the other kinds colour already says something else, such as direction, value, a stacked series or a distribution.");
                 Zones(series.Zones, style);
             }
-            if (spec.DensityCells is not null && (series.Zones is not null || series.Points.Any(p => p?.Color is not null)))
+            if (spec.DensityCells is not null && mark == ChartKind.Scatter && (series.Zones is not null || series.Points.Any(p => p?.Color is not null)))
                 throw new ArgumentException("A density scatter shades cells rather than points, so it takes neither zones nor point colours.");
+            if (series.ProjectedFrom is { } from)
+            {
+                if (mark is not (ChartKind.Line or ChartKind.Area))
+                    throw new ArgumentException("A projection dashes a stroke, so it applies to series drawn as lines or areas.");
+                if (!Finite(from)) throw new ArgumentException("A projection must start at a finite X, magnitude <= 1e100.");
+                if (spec.XAxis == AxisKind.Log && from <= 0) throw new ArgumentException("Log X axes require a positive projection start.");
+                if (spec.XAxis == AxisKind.Time && !TimeAxis.InRange(from))
+                    throw new ArgumentException("A projection on a time axis must start at Unix milliseconds between year 1 and year 9999.");
+            }
             // A summary's outliers are drawn one mark each, so they count towards the limit like points.
             count += series.Points.Count + (series.Summary?.Outliers.Count ?? 0);
             if (count > MaxPoints) throw new ArgumentException($"At most {MaxPoints} points are supported per chart.");
@@ -126,8 +144,8 @@ public static partial class ChartValidation
                 if (p is null || !Finite(p.X) || (p.Y.HasValue && !Finite(p.Y.Value)) || !Finite(p.Size) || p.Size < 0)
                     throw new ArgumentException("Coordinates must be finite, magnitude <= 1e100; bubble sizes must be nonnegative.");
                 Text(p.Label); Color(p.Color);
-                if (p.Color is not null && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Donut))
-                    throw new ArgumentException("Point colours apply to line, area, scatter, bubble, column, bar and donut charts; on the other kinds colour already says something else: direction on candlesticks and OHLC bars, value on a heatmap, and the series or distribution a mark belongs to on stacked column, radar, band, histogram, box and violin charts.");
+                if (p.Color is not null && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Donut))
+                    throw new ArgumentException("Point colours apply to series drawn as lines, areas, scatter points, bubbles, columns, bars and donut slices; on the other kinds colour already says something else: direction on candlesticks and OHLC bars, value on a heatmap, and the series or distribution a mark belongs to on stacked column, radar, band, histogram, box and violin charts.");
                 if (spec.XAxis == AxisKind.Log && p.X <= 0) throw new ArgumentException("Log X axes require positive X values.");
                 if ((series.Secondary ? spec.Y2Axis : spec.YAxis) == AxisKind.Log && p.Y.HasValue && p.Y.Value <= 0)
                     throw new ArgumentException("Log Y axes require positive values; use a linear axis for zero or negative data.");
@@ -135,10 +153,13 @@ public static partial class ChartValidation
                 if (spec.Kind is ChartKind.Donut or ChartKind.Radar && p.Y < 0)
                     throw new ArgumentException("Donut and radar charts require nonnegative values.");
                 if (spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc) Candle(p, spec.YAxis);
-                if (spec.Kind == ChartKind.Band) Interval(p, spec.YAxis);
+                if (mark == ChartKind.Band) Interval(p, series.Secondary ? spec.Y2Axis : spec.YAxis);
             }
-            if (spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band && series.Points.Zip(series.Points.Skip(1)).Any(p => p.First.X > p.Second.X))
+            if ((mark is ChartKind.Line or ChartKind.Area or ChartKind.Band || spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc) && series.Points.Zip(series.Points.Skip(1)).Any(p => p.First.X > p.Second.X))
                 throw new ArgumentException("Line, area, candlestick, OHLC and band points must be ordered by X.");
+            // Two columns at one X would stand in one place; a category chart already refuses that for every series.
+            if (mark == ChartKind.Column && spec.Kind != ChartKind.Column && series.Points.Select(p => p.X).Distinct().Count() != series.Points.Count)
+                throw new ArgumentException("Columns on a continuous axis need unique X values within each series.");
         }
         if (spec.Kind == ChartKind.Donut && spec.Series.Count > 1) throw new ArgumentException("Donut charts accept one series.");
         if (spec.Kind is ChartKind.Bar or ChartKind.Column or ChartKind.StackedColumn or ChartKind.Heatmap or ChartKind.Radar)
@@ -151,6 +172,14 @@ public static partial class ChartValidation
         if (spec.Kind == ChartKind.Donut && count > 100) throw new ArgumentException("Donut charts support at most 100 slices.");
         if (spec.Kind is ChartKind.Bar or ChartKind.Column or ChartKind.StackedColumn or ChartKind.Area or ChartKind.Histogram)
             if (spec.YMin > 0 || spec.YMax < 0 || spec.Y2Min > 0 || spec.Y2Max < 0) throw new ArgumentException("Magnitude charts require a zero baseline.");
+        // The rules above follow the chart's kind; a series drawn as columns or an area on another kind meets them on its own axis.
+        foreach (var series in spec.Series.Where(series => ChartSvg.Mark(spec, series) is ChartKind.Column or ChartKind.Area))
+        {
+            var (axis, reversed, min, max) = series.Secondary ? (spec.Y2Axis, spec.Y2Reversed, spec.Y2Min, spec.Y2Max) : (spec.YAxis, spec.YReversed, spec.YMin, spec.YMax);
+            if (axis == AxisKind.Log) throw new ArgumentException("Column and area series draw from a zero baseline, which a logarithmic axis cannot show; measure them against a linear one.");
+            if (reversed) throw new ArgumentException("Column and area series draw from a zero baseline, which a reversed axis would hang from the top.");
+            if (min > 0 || max < 0) throw new ArgumentException("Column and area series draw from a zero baseline, so the bounds of their axis must include zero.");
+        }
     }
 
     private static void Candle(ChartPoint p, AxisKind axis)
