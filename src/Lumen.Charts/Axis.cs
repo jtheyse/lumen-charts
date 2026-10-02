@@ -4,6 +4,13 @@ namespace Lumen.Charts;
 
 public enum AxisKind { Linear, Log, Time }
 
+/// <summary>
+/// How an axis writes its values. <see cref="Duration"/> reads them as seconds: m:ss and h:mm:ss on a linear
+/// axis, 1s, 5m and 1h on a logarithmic one. <see cref="Compact"/> writes 1.2k, 3.4M and 1.5B. A time axis
+/// writes its calendar and takes neither.
+/// </summary>
+public enum ValueFormat { Number, Duration, Compact }
+
 /// <summary>Time axis values are Unix milliseconds. Ticks and labels are UTC; local time zones are not applied.</summary>
 public static class TimeAxis
 {
@@ -83,6 +90,11 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     public TimeZoneInfo? Zone { get; init; }
     /// <summary>Spans the axis leaves out, such as the weekends between trading days. Ordered and non-overlapping.</summary>
     public IReadOnlyList<TimeSkip> Skips { get; init; } = [];
+    /// <summary>How ticks, tooltips and tables write a value. A time axis ignores it and writes its calendar.</summary>
+    public ValueFormat ValueFormat { get; init; }
+    /// <summary>Maps the minimum to the end of the pixel interval instead of its start, so on a Y axis the
+    /// smallest value sits at the top. Everything placed through <see cref="Map"/> follows.</summary>
+    public bool Reversed { get; init; }
 
     private const double Second = 1000, Minute = 60 * Second, Hour = 60 * Minute, Day = 24 * Hour;
     private static readonly (double Step, string Format)[] FixedSteps =
@@ -93,6 +105,15 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         (Hour, "HH:mm"), (2 * Hour, "HH:mm"), (3 * Hour, "HH:mm"), (6 * Hour, "HH:mm"), (12 * Hour, "HH:mm"),
         (Day, "d MMM"), (2 * Day, "d MMM"), (7 * Day, "d MMM"), (14 * Day, "d MMM"), (28 * Day, "d MMM")
     ];
+    /// <summary>Round durations in seconds for a linear axis, each with the parts its minor lines divide it into.</summary>
+    private static readonly (double Step, int Parts)[] DurationSteps =
+    [
+        (1, 5), (2, 4), (5, 5), (10, 5), (15, 3), (30, 6), (60, 4), (120, 4), (300, 5), (600, 5), (900, 3), (1800, 6),
+        (3600, 4), (7200, 4), (10800, 3), (21600, 6), (43200, 4)
+    ];
+    /// <summary>Round durations for a logarithmic axis. Past five hours every whole hour is one too.</summary>
+    private static readonly double[] LogDurations = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 7200, 10800, 14400, 18000];
+    private static readonly (double Size, string Suffix)[] Magnitudes = [(1e3, "k"), (1e6, "M"), (1e9, "B"), (1e12, "T")];
 
     public static Axis Create(AxisKind kind, IEnumerable<double> values, bool zero = false, double? min = null, double? max = null,
         TimeZoneInfo? zone = null, bool weekends = false, IEnumerable<TimeSkip>? skips = null)
@@ -122,6 +143,7 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
 
     public double Map(double value, double start, double end)
     {
+        if (Reversed) (start, end) = (end, start);
         if (Skips.Count == 0)
             return start + (Transform(value) - Transform(Min)) / (Transform(Max) - Transform(Min)) * (end - start);
         double from = Elapsed(Min), to = Elapsed(Max);
@@ -157,6 +179,7 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     /// <summary>Reverses <see cref="Map"/> for a position in the same pixel interval.</summary>
     public double Invert(double position, double start, double end)
     {
+        if (Reversed) (start, end) = (end, start);
         var fraction = (position - start) / (end - start);
         if (Skips.Count > 0)
         {
@@ -170,7 +193,51 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     /// <summary>Label for a data value, used by tooltips and tables.</summary>
     public string Format(double value) => Kind == AxisKind.Time
         ? Local(value).ToString(Max - Min < 2 * Day ? "d MMM yyyy HH:mm" : "d MMM yyyy", CultureInfo.InvariantCulture)
-        : LinearScale.Label(value);
+        : Label(value);
+
+    private string Label(double value) => ValueFormat switch
+    {
+        ValueFormat.Duration => Kind == AxisKind.Log ? Span(value) : Clock(value),
+        ValueFormat.Compact => Compact(value),
+        _ => LinearScale.Label(value)
+    };
+
+    /// <summary>Seconds as m:ss below an hour and h:mm:ss from an hour up, rounded half up to the second.</summary>
+    private static string Clock(double seconds)
+    {
+        var total = Math.Round(Math.Abs(seconds), MidpointRounding.AwayFromZero);
+        var sign = seconds < 0 && total > 0 ? "-" : "";
+        double hours = Math.Floor(total / 3600), minutes = Math.Floor(total % 3600 / 60), rest = total % 60;
+        return hours == 0
+            ? string.Create(CultureInfo.InvariantCulture, $"{sign}{minutes}:{rest:00}")
+            : string.Create(CultureInfo.InvariantCulture, $"{sign}{hours}:{minutes:00}:{rest:00}");
+    }
+
+    /// <summary>Seconds as the largest units they hold: 1s, 20m, 1h, and 2h30m when a value is not a whole unit.
+    /// Below a minute a fraction is kept, to two places.</summary>
+    private static string Span(double seconds)
+    {
+        var size = Math.Abs(seconds);
+        var sign = seconds < 0 ? "-" : "";
+        if (Math.Round(size, 2) < 60) return sign + size.ToString("0.##", CultureInfo.InvariantCulture) + "s";
+        var total = Math.Round(size, MidpointRounding.AwayFromZero);
+        return sign + Part(Math.Floor(total / 3600), "h") + Part(Math.Floor(total % 3600 / 60), "m") + Part(total % 60, "s");
+        static string Part(double amount, string unit) => amount > 0 ? amount.ToString(CultureInfo.InvariantCulture) + unit : "";
+    }
+
+    /// <summary>1.2k, 3.4M, 1.5B and 2T, with at most one decimal. A value that rounds to a thousand of one unit
+    /// is written in the next, so 999,999 reads 1M rather than 1000k.</summary>
+    private static string Compact(double value)
+    {
+        if (Math.Abs(value) < 1000) return LinearScale.Label(value);
+        foreach (var (size, suffix) in Magnitudes)
+        {
+            // Counting in tenths keeps the rounding exact: 1050 is 10.5 tenths of a thousand, not 1.0499999.
+            var tenths = Math.Round(Math.Abs(value) / (size / 10), MidpointRounding.AwayFromZero);
+            if (tenths < 10_000) return (value < 0 ? "-" : "") + (tenths / 10).ToString("0.#", CultureInfo.InvariantCulture) + suffix;
+        }
+        return LinearScale.Label(value);
+    }
 
     /// <summary>The moment as the axis's zone shows it, which is UTC when no zone is set.</summary>
     private DateTime Local(double value)
@@ -193,8 +260,18 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     /// <summary>Tick values inside the domain with their axis labels. Time ticks fall on calendar boundaries.</summary>
     public IReadOnlyList<(double Value, string Label)> Ticks(int count = 5)
     {
-        if (Kind == AxisKind.Log) return LogTicks(count);
-        if (Kind != AxisKind.Time) return new LinearScale(Min, Max).Ticks(count).Select(v => (v, LinearScale.Label(v))).ToArray();
+        if (Kind == AxisKind.Log) return ValueFormat == ValueFormat.Duration ? LogDurationTicks(count) : LogTicks(count);
+        if (Kind != AxisKind.Time)
+        {
+            var axis = this;
+            if (ValueFormat != ValueFormat.Duration) return new LinearScale(Min, Max).Ticks(count).Select(v => (v, axis.Label(v))).ToArray();
+            var target = Math.Max(2, count);
+            var step = DurationStep(target);
+            var first = Math.Ceiling(Min / step);
+            // Counted in whole steps, so a huge value whose next step rounds to itself cannot loop for ever.
+            return Enumerable.Range(0, target).Select(i => (first + i) * step).Where(value => value <= axis.Max)
+                .Select(value => (value, Clock(value))).ToArray();
+        }
         var ticks = TimeTicks(count);
         if (Skips.Count == 0) return ticks;
         var skips = Skips;
@@ -204,12 +281,14 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     /// <summary>
     /// Values between the labelled ticks, for a lighter grid. A linear axis divides each interval into
     /// four or five depending on its step, a log axis marks the mantissas between decades, and a time
-    /// axis has none, because half of a month is not a boundary anyone reads.
+    /// axis has none, because half of a month is not a boundary anyone reads. A duration axis divides
+    /// its steps into round durations, and has none when logarithmic, where a mantissa of 20 minutes
+    /// is no duration anyone reads either.
     /// </summary>
     public IReadOnlyList<double> MinorTicks(int count = 5)
     {
         var major = Ticks(count).Select(t => t.Value).ToArray();
-        if (Kind == AxisKind.Time || major.Length < 2) return [];
+        if (Kind == AxisKind.Time || major.Length < 2 || (Kind == AxisKind.Log && ValueFormat == ValueFormat.Duration)) return [];
         var result = new List<double>();
         if (Kind == AxisKind.Log)
         {
@@ -224,8 +303,10 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         }
         var step = major[1] - major[0];
         var magnitude = Math.Pow(10, Math.Floor(Math.Log10(Math.Abs(step))));
-        var divisions = Math.Abs(step / magnitude - 2) < .01 || Math.Abs(step / magnitude - 2.5) < .01 ? 4 : 5;
-        for (var value = major[0] - step; value < Max; value += step)
+        var divisions = ValueFormat == ValueFormat.Duration ? Parts(step)
+            : Math.Abs(step / magnitude - 2) < .01 || Math.Abs(step / magnitude - 2.5) < .01 ? 4 : 5;
+        // Counted as well as summed: near 1e21 a step can be too small to move the value, which would never reach Max.
+        for (var (value, interval) = (major[0] - step, 0); value < Max && interval <= major.Length; value += step, interval++)
             for (var division = 1; division < divisions; division++)
             {
                 var minor = value + step * division / divisions;
@@ -240,6 +321,7 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     {
         // Decades fully inside the domain. One or two of them are subdivided at 2 and 5 instead.
         double low = Min, high = Max;
+        var axis = this;
         var lowest = (int)Math.Ceiling(Math.Log10(low) - 1e-9);
         var highest = (int)Math.Floor(Math.Log10(high) + 1e-9);
         var result = new List<(double, string)>();
@@ -254,8 +336,56 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         return result;
         void Add(double value)
         {
-            if (value >= low * (1 - 1e-9) && value <= high * (1 + 1e-9)) result.Add((value, LinearScale.Label(value)));
+            if (value >= low * (1 - 1e-9) && value <= high * (1 + 1e-9)) result.Add((value, axis.Label(value)));
         }
+    }
+
+    /// <summary>The smallest round duration that puts no more than <paramref name="target"/> ticks on the axis.</summary>
+    private double DurationStep(int target)
+    {
+        double min = Min, max = Max;
+        bool Fits(double step) => Math.Floor(max / step) - Math.Ceiling(min / step) + 1 <= target;
+        foreach (var (step, _) in DurationSteps) if (Fits(step)) return step;
+        // Past twelve hours the steps are whole days, and any fewer than this always give too many ticks.
+        const double day = 86400;
+        var days = Math.Floor((max - min) / day / (target + 1)) + 1;
+        for (var tries = 0; tries < 1000 && !Fits(days * day); tries++) days++;
+        // A span of centuries settles for a step that fits rather than trying every day count on the way.
+        while (!Fits(days * day)) days *= 2;
+        return days * day;
+    }
+
+    /// <summary>The parts a duration step divides into, so its minor lines land on round durations too: a
+    /// minute into quarters, an hour into quarters, a day into six-hour parts and a few days into days.</summary>
+    private static int Parts(double step)
+    {
+        foreach (var (ladder, parts) in DurationSteps) if (ladder == step) return parts;
+        var days = step / 86400;
+        return days == 1 ? 4 : days <= 7 ? (int)days : 1;
+    }
+
+    /// <summary>
+    /// Round durations inside the range, thinned to about <paramref name="count"/> evenly spaced on screen.
+    /// The ladder values nearest each end are always kept, so the axis is labelled to its edges.
+    /// </summary>
+    private IReadOnlyList<(double, string)> LogDurationTicks(int count)
+    {
+        double low = Min * (1 - 1e-9), high = Max * (1 + 1e-9);
+        // Every whole hour past five is on the ladder, so only the two beside a value are listed.
+        IEnumerable<double> Ladder(double near) => LogDurations
+            .Concat(new[] { Math.Floor(near / 3600), Math.Ceiling(near / 3600) }.Where(hours => hours >= 6).Select(hours => hours * 3600))
+            .Where(value => value >= low && value <= high);
+        var ends = Ladder(Min).Concat(Ladder(Max)).ToArray();
+        if (ends.Length == 0) return [];
+        double first = Math.Log10(ends.Min()), last = Math.Log10(ends.Max());
+        var target = Math.Max(2, count);
+        var picked = new SortedSet<double>();
+        for (var i = 0; i < target; i++)
+        {
+            var at = first + i * (last - first) / (target - 1);
+            picked.Add(Ladder(Math.Pow(10, at)).MinBy(value => Math.Abs(Math.Log10(value) - at)));
+        }
+        return picked.Select(value => (value, Span(value))).ToArray();
     }
 
     private IReadOnlyList<(double, string)> TimeTicks(int count)

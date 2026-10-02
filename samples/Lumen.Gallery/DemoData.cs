@@ -1,6 +1,6 @@
 namespace Lumen.Gallery;
 
-public enum AxisDemo { Numeric, Time, Log }
+public enum AxisDemo { Numeric, Time, Log, PowerCurve, Pace }
 public enum BrandDemo { Lumen, Harbour, PageCss }
 
 public static class DemoData
@@ -14,6 +14,7 @@ public static class DemoData
     };
     public static bool TimeCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Area or Lumen.Charts.ChartKind.Scatter or Lumen.Charts.ChartKind.Bubble;
     public static bool LogCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Scatter or Lumen.Charts.ChartKind.Bubble;
+    public static bool DurationCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line;
     public static readonly string[] Months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     public static Lumen.Charts.ChartSpec Create(Lumen.Charts.ChartKind kind,Lumen.Charts.ChartTheme theme,int revision=0,AxisDemo axis=AxisDemo.Numeric)
     {
@@ -119,9 +120,31 @@ public static class DemoData
                 new(Lumen.Charts.AnnotationAxis.X,7){To=9,Label="Campaign"}]};
         if(axis==AxisDemo.Numeric&&kind is Lumen.Charts.ChartKind.Column or Lumen.Charts.ChartKind.Bar)
             spec=spec with{Annotations=[new(Lumen.Charts.AnnotationAxis.Y,55){Label="Target"}]};
+        // Thousands of requests read as 1k and 10k.
         if(axis==AxisDemo.Log&&LogCapable(kind))
-            spec=spec with{YAxis=Lumen.Charts.AxisKind.Log,MinorGridlines=true,YLabel="Requests per minute (log scale)",Description="Traffic spanning several orders of magnitude",
+            spec=spec with{YAxis=Lumen.Charts.AxisKind.Log,YFormat=Lumen.Charts.ValueFormat.Compact,MinorGridlines=true,YLabel="Requests per minute (log scale)",Description="Traffic spanning several orders of magnitude",
                 Series=spec.Series.Select((s,si)=>s with{Points=s.Points.Select((p,i)=>p with{Y=Math.Round(Math.Pow(10,si*.6+i*.3)+random.Next(1,9),2)}).ToArray()}).ToArray()};
+        if(axis==AxisDemo.PowerCurve&&DurationCapable(kind))
+        {
+            // Two simulated two-hour rides at one sample a second: a sprint every half hour, a 20-minute effort and a 5-minute one.
+            double[] Ride(double ftp)=>Enumerable.Range(0,7200).Select(t=>Math.Round(ftp*(t%1800<20?2.5:t%1800<60?1.6:t>=1800&&t<3000?1.02:t>=4000&&t<4300?1.15:.72)+random.Next(-20,21))).ToArray();
+            Lumen.Charts.ChartSeries Curve(string name,IReadOnlyList<(double Seconds,double Value)> curve)=>Lumen.Charts.ChartSeries.From(name,curve,p=>p.Seconds,p=>(double?)Math.Round(p.Value));
+            var recent=Lumen.Charts.Training.MeanMaximal(Ride(255),Lumen.Charts.Training.StandardDurations);
+            var earlier=Lumen.Charts.Training.MeanMaximal(Ride(240),Lumen.Charts.Training.StandardDurations);
+            var fit=Lumen.Charts.Training.CriticalPower(recent);
+            spec=spec with{XAxis=Lumen.Charts.AxisKind.Log,XFormat=Lumen.Charts.ValueFormat.Duration,Title="Find what you can hold",
+                Description="Best average power for every duration · two simulated two-hour rides",XLabel="Duration (log scale)",YLabel="Power (W)",
+                Series=[Curve("This month",recent),Curve("Last month",earlier)],
+                Annotations=fit is null?[]:[new(Lumen.Charts.AnnotationAxis.Y,Math.Round(fit.CriticalPower)){Label="Critical power"}]};
+        }
+        if(axis==AxisDemo.Pace&&DurationCapable(kind))
+        {
+            // A 50-minute run every 30 seconds, in seconds per kilometre: a hilly middle and a faster finish.
+            var pace=Enumerable.Range(0,101).Select(i=>new Lumen.Charts.ChartPoint(i*30,Math.Round(302+16*Math.Sin(i/8.0)-(i>80?18:0)+random.Next(-5,6)))).ToArray();
+            spec=spec with{XFormat=Lumen.Charts.ValueFormat.Duration,YFormat=Lumen.Charts.ValueFormat.Duration,YReversed=true,Title="Faster is higher",
+                Description="Pace through a simulated 50-minute run · the axis is reversed, so a quicker kilometre sits higher",XLabel="Elapsed time",YLabel="Pace (min per km)",
+                Series=[new("Pace",pace){Trend=true}],Annotations=[new(Lumen.Charts.AnnotationAxis.Y,300){Label="Target"}]};
+        }
         return spec;
     }
     public static Lumen.Charts.GraphSpec Graph(Lumen.Charts.GraphLayout layout,Lumen.Charts.ChartTheme theme)=>new()

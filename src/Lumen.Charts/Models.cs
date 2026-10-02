@@ -58,6 +58,15 @@ public sealed record ChartSpec
     public IReadOnlyList<TimeSkip> TimeSkips { get; init; } = [];
     public AxisKind YAxis { get; init; } = AxisKind.Linear;
     public AxisKind Y2Axis { get; init; } = AxisKind.Linear;
+    /// <summary>How each axis writes its values, in ticks, tooltips and the data table. Duration reads values as
+    /// seconds and Compact writes 1.2k; a time X axis keeps <see cref="ValueFormat.Number"/>. CSV keeps raw numbers.</summary>
+    public ValueFormat XFormat { get; init; }
+    public ValueFormat YFormat { get; init; }
+    public ValueFormat Y2Format { get; init; }
+    /// <summary>Puts the smallest value at the top, so a faster pace — a smaller number — sits higher. Kinds drawn
+    /// from a zero baseline refuse it.</summary>
+    public bool YReversed { get; init; }
+    public bool Y2Reversed { get; init; }
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];
     public string XLabel { get; init; } = "";
     public string YLabel { get; init; } = "";

@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.18.0. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.19.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -10,7 +10,7 @@ Requires the .NET 10 SDK (the reusable packages target .NET 8).
 dotnet run --project samples/Lumen.Gallery --urls http://localhost:5188
 ```
 
-Open http://localhost:5188. The gallery includes chart selection, light/dark themes, refreshed sample data, series filtering, point selection, a numeric / time / log axis switch, X zoom/pan/reset, original-data tables, SVG/PNG/CSV downloads, and network layouts with draggable nodes.
+Open http://localhost:5188. The gallery includes chart selection, light/dark themes, refreshed sample data, series filtering, point selection, a numeric / time / log axis switch with a power–duration curve and a reversed pace line on duration axes, X zoom/pan/reset, original-data tables, SVG/PNG/CSV downloads, and network layouts with draggable nodes.
 
 ## Build and verify
 
@@ -103,6 +103,38 @@ ChartSpec prices = new() {
 Weekends are counted in `TimeZone`, so a market's weekend is its own rather than UTC's, and they are worked out over the axis range the chart settles on, including after a zoom. Ticks inside a skipped span are not drawn, which is why a weekday axis carries no Saturday label. Two consequences are worth knowing: a moment inside a skipped span has no position of its own and sits where the span opens, and reading a position back — which is what a zoom does — gives the moment the axis resumes at. `TimeAxis.Weekends`, `TimeAxis.Day` and `TimeAxis.Normalise` are public if you want to build the spans yourself.
 
 Log ticks are decades, subdivided at 2 and 5 across one or two decades. `Axis.Create`, `Axis.Map`, `Axis.Invert`, `Axis.Ticks` and `Axis.Format` are public if you need the geometry without SVG. CSV exports of a time chart add an `XTime` column with ISO 8601 UTC timestamps beside the numeric X column.
+
+#### Durations, compact numbers and reversed axes
+
+`XFormat`, `YFormat` and `Y2Format` choose how an axis writes its values, whatever its kind: `ValueFormat.Number` (the default), `ValueFormat.Duration`, which reads values as seconds, or `ValueFormat.Compact`, which writes 1.2k, 3.4M and 1.5B. `YReversed` and `Y2Reversed` put the smallest value at the top, so a faster pace — a smaller number — sits higher:
+
+```csharp
+ChartSpec power = new() {
+    Kind = ChartKind.Line,
+    XAxis = AxisKind.Log, XFormat = ValueFormat.Duration,    // 1s, 10s, 1m, 10m, 1h
+    XLabel = "Duration", YLabel = "Power (W)",
+    Series = [ChartSeries.From("Best", Training.MeanMaximal(watts, Training.StandardDurations),
+        p => p.Seconds, p => (double?)p.Value)]
+};
+
+ChartSpec pace = new() {
+    Kind = ChartKind.Line,
+    XFormat = ValueFormat.Duration,                     // elapsed time: 0:00, 15:00, 1:00:00
+    YFormat = ValueFormat.Duration, YReversed = true,   // 4:45 above 5:15
+    XLabel = "Elapsed time", YLabel = "Pace (min per km)",
+    Series = [new("Pace", samples)]
+};
+```
+
+On a linear axis a duration reads `m:ss` below an hour and `h:mm:ss` from an hour up — `0:00`, `5:30`, `1:02:05`, and `48:00:00` for two days — rounded half up to the second, with a minus sign when negative. Its ticks step through 1, 2, 5, 10, 15 and 30 seconds, the same in minutes, then 1, 2, 3, 6 and 12 hours and whole days, taking the smallest step that puts no more ticks on the axis than were asked for. Minor gridlines divide a step into round durations too: a minute into quarters, fifteen minutes into fives, a day into six-hour parts. Pace is a duration per unit, so 300 reads `5:00`; the unit belongs in the axis title.
+
+On a logarithmic axis — the power–duration curve — ticks come from 1, 2, 5, 10, 15 and 30 seconds, 1, 2, 5, 10, 20 and 30 minutes, 1, 2, 3, 4 and 5 hours and every whole hour after that. Those inside the range are thinned to about five, spaced evenly on screen, always keeping the round duration nearest each end, and read `1s`, `30s`, `1m`, `20m`, `1h`, or `2h30m` for a value between units. A range that ends between two of them is labelled to the last one inside it, so the four-hour end of `Training.StandardDurations` reads `4h`. There are no minor gridlines, because the mantissas between non-decade ticks are no duration anyone reads.
+
+Compact keeps the tick positions a plain axis would choose and changes only the words: at most one decimal, a trailing `.0` dropped, plain numbers below 1000, then k, M, B and T. A value that rounds to a thousand of one unit is written in the next, so 999,999 reads `1M`. With one decimal, ticks a quarter of a unit apart read unevenly — `1.3k`, `1.5k`, `1.8k`.
+
+Tooltips, accessible names, annotation labels, the static SVG, and the component's data table and status line all read in the axis's format; CSV keeps the raw numbers, seconds included. A time axis writes its own calendar and refuses both formats. An X format applies where X is a value — line, area, scatter, bubble, candlestick, OHLC and band charts — and a Y format wherever a Y axis measures values; donut, heatmap and radar charts have no such axis, and a histogram's counts observations, so they refuse one.
+
+Reversal is a property of `Axis` that `Map` and `Invert` honour, so gridlines, ticks, marks, annotations, trend lines and zoom follow it without any of them knowing. A trend line still names the direction of the data: on a reversed pace axis, a line climbing the screen is a pace that is falling. It applies to line, scatter, bubble, band, candlestick, OHLC, box and violin charts. Column, bar, stacked column, area and histogram charts refuse it, because they draw from a zero baseline and a reversed one would hang their bars from the top.
 
 ### Trend lines
 
@@ -291,7 +323,7 @@ Dragging a node previews with a transform and commits on release; arrow keys nud
 
 ## Training metrics
 
-`Training` computes the numbers endurance-training charts draw, as Allen and Coggan's *Training and Racing with a Power Meter* and TrainingPeaks define them; [FITNESS.md](docs/FITNESS.md) gives the sources and the published values the tests check against. It draws nothing itself. The results are plain numbers and records for the chart kinds above, and the axis formats, zone colours and mixed marks the training charts need arrive in later releases.
+`Training` computes the numbers endurance-training charts draw, as Allen and Coggan's *Training and Racing with a Power Meter* and TrainingPeaks define them; [FITNESS.md](docs/FITNESS.md) gives the sources and the published values the tests check against. It draws nothing itself. The results are plain numbers and records for the chart kinds above; the [duration axes](#durations-compact-numbers-and-reversed-axes) arrived in 0.19.0, and the zone colours and mixed marks the training charts need arrive in later releases.
 
 ```csharp
 var zones = ZoneScale.CogganPower(ftp: 290);             // seven levels; each Upper is inclusive
@@ -347,6 +379,7 @@ app.MapLumenCharts();
 ```json
 {"title":"Revenue","kind":"Column","series":[{"name":"Sales","points":[{"x":1,"y":24,"label":"Jan"},{"x":2,"y":38,"label":"Feb"}]}]}
 {"title":"Traffic","kind":"Line","xAxis":"Time","yAxis":"Log","series":[{"name":"Edge","points":[{"x":1767225600000,"y":12},{"x":1769904000000,"y":940}]}]}
+{"title":"Pace","kind":"Line","xFormat":"Duration","yFormat":"Duration","yReversed":true,"series":[{"name":"Run","points":[{"x":0,"y":305},{"x":600,"y":298}]}]}
 {"title":"Latency","kind":"Box","series":[{"name":"Asia","points":[],"summary":{"q1":205,"median":228,"q3":252,"lowerWhisker":160,"upperWhisker":318,"outliers":[352,371]}}]}
 ```
 
@@ -383,7 +416,7 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 ## Supported behavior and limits
 
 - Line, area, scatter, bubble, column, horizontal bar, signed stacked column, donut, heatmap, radar, candlestick, OHLC bar, uncertainty band, histogram, box plot, violin.
-- Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC and band charts; log Y applies to line, scatter, bubble, candlestick, OHLC, band, box and violin charts, because magnitude, count and radial charts need a zero baseline. Log axes reject zero and negative values. Time values must be Unix milliseconds between year 1 and year 9999, and `TimeZone` decides the calendar they are read in. `SkipWeekends` and `TimeSkips` compress a time axis over spans it should not draw, at most 400 listed spans per chart; the axis stays piecewise proportional, so a gap in the data itself still reads as a gap. Irregular tick placement is not implemented.
+- Linear, base-10 logarithmic and UTC time axes on X and Y, and an optional second Y axis on the right; category labels on categorical charts. Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC and band charts; log Y applies to line, scatter, bubble, candlestick, OHLC, band, box and violin charts, because magnitude, count and radial charts need a zero baseline. Log axes reject zero and negative values. `XFormat`, `YFormat` and `Y2Format` write values as durations in seconds or as compact numbers on linear and log axes, never on a time axis; a linear duration axis steps by a second at the finest and rounds what it shows to the second, and histograms, donuts, heatmaps and radar charts take no format. `YReversed` and `Y2Reversed` apply to line, scatter, bubble, band, candlestick, OHLC, box and violin charts, and only Y axes reverse. Time values must be Unix milliseconds between year 1 and year 9999, and `TimeZone` decides the calendar they are read in. `SkipWeekends` and `TimeSkips` compress a time axis over spans it should not draw, at most 400 listed spans per chart; the axis stays piecewise proportional, so a gap in the data itself still reads as a gap. Irregular tick placement is not implemented.
 - `MinorGridlines` adds lighter lines between the labelled ticks: four or five divisions per interval on a linear axis depending on its step, the mantissas between decades on a logarithmic one, and none on a time axis, because half of a month is not a boundary anyone reads. Off by default.
 - Explicit limits via XMin/XMax/YMin/YMax. Bars and areas enforce a zero baseline. Null Y preserves gaps in lines/areas and is omitted elsewhere.
 - Line/area min/max sampling preserves original indices and extrema per continuous run; this is not a total chart-wide point budget. CSV always exports original observations.
@@ -399,6 +432,16 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.19.0 additions
+
+Axis formats and reversed axes, the second step of the build order in [FITNESS.md](docs/FITNESS.md), described under [Durations, compact numbers and reversed axes](#durations-compact-numbers-and-reversed-axes). `ValueFormat` and `ChartSpec.XFormat`, `YFormat` and `Y2Format` write an axis's values as durations — `m:ss` and `h:mm:ss` with ticks on round durations on a linear axis, `1s`, `5m` and `1h` on a logarithmic one — or as compact numbers such as `1.2k` and `3.4M`. `YReversed` and `Y2Reversed` put the smallest value at the top, so a faster pace sits higher. Reversal is one property on `Axis`, honoured by `Map` and `Invert`, so everything placed through them follows, and a trend line still says whether the data rises or falls. Every place that reads out a value — ticks, tooltips, accessible names, annotation labels, the data table and the status line — reads it in the axis's format, and CSV keeps raw numbers. Formats are refused on a time axis and on kinds with no axis to carry them, and reversal on the kinds drawn from a zero baseline. All of it round-trips through the HTTP API's JSON, enums as strings.
+
+A chart that sets none of this renders as before: the 73 hashed renderings match, and so do seven more, hashed before the change, that guard the log, time and secondary axes, minor gridlines, trend lines and a logarithmic violin. Four new ones cover a duration line, a power–duration curve, a reversed pace line and a compact column chart. One thing does read differently: the component's status line used to print a selected value as the raw number in the host's culture, and now reads it as the tooltip does, in the axis's format.
+
+Limits: a linear duration axis steps by a second at the finest and rounds what it shows to the second, so sub-second durations are not shown; compact labels carry one decimal, so close ticks can round unevenly; histograms take no format; and only Y axes reverse. The gallery's line chart adds two axis modes: a power–duration curve built with `Training.MeanMaximal` on a logarithmic duration axis, its critical-power fit drawn as a reference line, and a pace line on a reversed duration axis. Its logarithmic demonstration now writes thousands compactly.
+
+Building this found a hang older than it: with minor gridlines on an axis near 1e21, where a tick step is too small to move the value it is added to, the loop that places the minor lines never ended, and the HTTP API would accept such a request. The loop now counts its intervals as well, which changes nothing at ordinary magnitudes.
 
 ## 0.18.0 additions
 

@@ -92,6 +92,26 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify ($r.Content.Contains('Rate: 1, 4') -and $r.Content.Contains('rotate(90')) 'A secondary series is measured and named on the right'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"StackedColumn","series":[{"name":"A","points":[{"x":0,"y":1}]},{"name":"B","secondary":true,"points":[{"x":0,"y":2}]}]}' -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400) 'A secondary axis on a stacked chart is rejected'
+$duration='{"title":"Pace","kind":"Line","yFormat":"Duration","series":[{"name":"Pace","points":[{"x":0,"y":290},{"x":1,"y":305},{"x":2,"y":320}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $duration
+Verify ($r.Content.Contains('>4:50<') -and $r.Content.Contains('>5:20<') -and $r.Content.Contains('Pace: 1, 5:05')) 'A duration axis posted as JSON reads m:ss'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $duration
+Verify ($r.Content.Contains('"Pace",1,305,')) 'CSV keeps durations in seconds'
+$curve='{"title":"Power","kind":"Line","xAxis":"Log","xFormat":"Duration","series":[{"name":"Power","points":[{"x":1,"y":900},{"x":60,"y":420},{"x":1200,"y":290},{"x":3600,"y":260}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $curve
+Verify ($r.Content.Contains('>1s<') -and $r.Content.Contains('>1m<') -and $r.Content.Contains('>1h<') -and $r.Content.Contains('Power: 20m, 290')) 'A log duration axis reads 1s, 1m and 1h'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $duration.Replace('"yFormat"','"yReversed":true,"yFormat"') -SkipHttpErrorCheck
+$fast=[double][regex]::Match($r.Content,"y='([\d.]+)'[^>]*>4:50<").Groups[1].Value;$slow=[double][regex]::Match($r.Content,"y='([\d.]+)'[^>]*>5:20<").Groups[1].Value
+Verify ($r.StatusCode -eq 200 -and $fast -gt 0 -and $fast -lt $slow) 'A reversed axis renders with the faster pace on top'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Column","yFormat":"Compact","series":[{"name":"Views","points":[{"x":0,"y":1500,"label":"A"},{"x":1,"y":2400000,"label":"B"}]}]}'
+Verify ($r.Content.Contains('>2M<') -and $r.Content.Contains('Views: A, 1.5k')) 'Compact numbers read 1.5k and 2M'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Column","yReversed":true,"series":[{"name":"S","points":[{"x":0,"y":1}]}]}' -SkipHttpErrorCheck
+# A problem response is application/problem+json, which PowerShell hands back as bytes, so the text is read from RawContent.
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('zero baseline')) 'A reversed column chart is rejected for its zero baseline'
+foreach($bad in @('{"kind":"Line","xAxis":"Time","xFormat":"Duration","series":[{"name":"S","points":[{"x":1767225600000,"y":1}]}]}','{"kind":"Line","xAxis":"Time","xFormat":"Compact","series":[{"name":"S","points":[{"x":1767225600000,"y":1}]}]}','{"kind":"Line","yFormat":"Pace","series":[{"name":"S","points":[{"x":0,"y":1}]}]}')){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400) 'A format on a time axis, or an unknown format, is rejected'
+}
 $annotated='{"title":"Target","kind":"Line","annotations":[{"axis":"Y","from":25,"label":"Target"},{"axis":"X","from":1,"to":2,"label":"Window"}],"series":[{"name":"S","points":[{"x":0,"y":10},{"x":1,"y":30},{"x":2,"y":20},{"x":3,"y":40}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $annotated
 Verify ($r.Content.Contains('Target: 25') -and $r.Content.Contains('Window: 1 to 2')) 'Annotations in the request are drawn and named'

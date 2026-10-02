@@ -33,7 +33,7 @@
         @foreach(var series in Spec.Series)
         {
             @foreach(var point in series.Points.Take(500))
-            { <tr><td>@series.Name</td><td>@(point.Label ?? xAxis.Format(point.X))</td><td>@Value(point)</td></tr> }
+            { <tr><td>@series.Name</td><td>@(point.Label ?? xAxis.Format(point.X))</td><td>@Value(series,point)</td></tr> }
         }
         </tbody></table><p>Table shows up to 500 observations per series. CSV contains all original observations.</p></div>
     }
@@ -54,14 +54,20 @@
     private Axis xAxis;
     private double? viewMin, viewMax;
     private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band;
-    private string Value(ChartPoint point) => Spec.Kind switch
+    private string Value(ChartSeries series,ChartPoint point)
     {
-        ChartKind.Candlestick or ChartKind.Ohlc=>$"O {LinearScale.Label(point.Open ?? 0)} · H {LinearScale.Label(point.High ?? 0)} · L {LinearScale.Label(point.Low ?? 0)} · C {LinearScale.Label(point.Close ?? 0)}",
-        _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{LinearScale.Label(point.Y.Value)} ({LinearScale.Label(point.Low.Value)} to {LinearScale.Label(point.High.Value)})",
-        _=>point.Y.HasValue?LinearScale.Label(point.Y.Value):"Missing"
-    };
+        var y=Measure(series);
+        return Spec.Kind switch
+        {
+            ChartKind.Candlestick or ChartKind.Ohlc=>$"O {y.Format(point.Open ?? 0)} · H {y.Format(point.High ?? 0)} · L {y.Format(point.Low ?? 0)} · C {y.Format(point.Close ?? 0)}",
+            _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Y.Value)} ({y.Format(point.Low.Value)} to {y.Format(point.High.Value)})",
+            _=>point.Y.HasValue?y.Format(point.Y.Value):"Missing"
+        };
+    }
+    // How a value reads depends only on the axis kind and format, so the bounds here are nominal.
+    private Axis Measure(ChartSeries series) => series.Secondary ? new(Spec.Y2Axis,1,10){ValueFormat=Spec.Y2Format} : new(Spec.YAxis,1,10){ValueFormat=Spec.YFormat};
     private Axis FullRange => Axis.Create(Spec.XAxis,Spec.Series.SelectMany(s=>s.Points).Select(p=>p.X), min:Spec.XMin, max:Spec.XMax, zone:TimeAxis.Zone(Spec.TimeZone),
-        weekends:Spec.SkipWeekends, skips:Spec.TimeSkips.Count>0?Spec.TimeSkips:null);
+        weekends:Spec.SkipWeekends, skips:Spec.TimeSkips.Count>0?Spec.TimeSkips:null) with {ValueFormat=Spec.XFormat};
     // The view is tracked as a fraction of the full axis so log and time domains zoom in their own space.
     private (double Min,double Max) View { get { var full=FullRange;return (viewMin.HasValue?full.Map(viewMin.Value,0,1):0,viewMax.HasValue?full.Map(viewMax.Value,0,1):1); } }
     private void Zoom(double factor)
@@ -92,7 +98,7 @@
     {
         if(series<0||series>=visible.Length)return;
         var index=visible[series];if(point<0||point>=Spec.Series[index].Points.Count)return;
-        var p=Spec.Series[index].Points[point];status=$"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {p.Y}";
+        var p=Spec.Series[index].Points[point];status=$"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y) : "missing")}";
         await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
     }
     private async Task Download(string format)

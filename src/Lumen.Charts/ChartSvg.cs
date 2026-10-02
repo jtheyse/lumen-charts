@@ -105,7 +105,7 @@ public static class ChartSvg
         var maxSize = points.Length == 0 ? 0 : points.Max(point => point.Size);
         var cats = points.Select(p => p.X).Distinct().Order().ToArray();
         var xs = Axis.Create(s.XAxis, points.Select(p => p.X), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone),
-            weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null);
+            weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null) with { ValueFormat = s.XFormat };
         var primary = s.Series.Where(series => !series.Secondary).SelectMany(series => series.Points).ToArray();
         var values = primary.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
         if (s.Kind is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band)
@@ -117,12 +117,12 @@ public static class ChartSvg
                 values.Add(points.Where(p => p.X == x && p.Y < 0).Sum(p => p.Y!.Value));
             }
         var zero = s.IncludeZero || category || s.Kind == ChartKind.Area;
-        var ys = Axis.Create(s.YAxis, values, zero, s.YMin, s.YMax);
+        var ys = Axis.Create(s.YAxis, values, zero, s.YMin, s.YMax) with { ValueFormat = s.YFormat, Reversed = s.YReversed };
         var second = s.Series.Where(series => series.Secondary).SelectMany(series => series.Points).ToArray();
         var secondValues = second.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
         if (s.Kind == ChartKind.Band)
             foreach (var p in second.Where(p => p.Low.HasValue && p.High.HasValue)) { secondValues.Add(p.Low!.Value); secondValues.Add(p.High!.Value); }
-        var ys2 = secondary ? Axis.Create(s.Y2Axis, secondValues, zero, s.Y2Min, s.Y2Max) : ys;
+        var ys2 = secondary ? Axis.Create(s.Y2Axis, secondValues, zero, s.Y2Min, s.Y2Max) with { ValueFormat = s.Y2Format, Reversed = s.Y2Reversed } : ys;
         double X(double x) => category ? left + (Array.IndexOf(cats, x) + .5) / cats.Length * (right - left) : xs.Map(x, left, right);
         double Y(double y) => ys.Map(y, bottom, top);
         if (s.MinorGridlines)
@@ -248,7 +248,7 @@ public static class ChartSvg
                     Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(y))}' r='{N(radius)}' fill='{color}' fill-opacity='.7' stroke='{color}'/>");
                 }
             }
-            if (series.Trend) Trend(w, series, color, X, At, left, right);
+            if (series.Trend) Trend(w, series, color, X, At, left, right, scale.Reversed);
         }
         w.Add("</svg>");
     }
@@ -259,12 +259,14 @@ public static class ChartSvg
     /// instead of curving on a log axis or jumping where a trading axis closes. Least squares is
     /// unchanged by the scaling between data and pixels, so on plain axes this is the ordinary fit.
     /// </summary>
-    private static void Trend(SvgWriter w, ChartSeries series, string color, Func<double, double> X, Func<double, double> Y, double left, double right)
+    private static void Trend(SvgWriter w, ChartSeries series, string color, Func<double, double> X, Func<double, double> Y, double left, double right, bool reversed)
     {
         var fit = Statistics.Fit(series.Points.Where(p => p.Y.HasValue).Select(p => (X(p.X), Y(p.Y!.Value))));
         if (fit is null) return;
-        // Screen y grows downwards, so a falling line is a rising series.
-        var label = $"{series.Name} trend: {(fit.Slope <= 0 ? "rising" : "falling")}, R squared {fit.R2.ToString("0.00", CultureInfo.InvariantCulture)}";
+        // Screen y grows downwards, so a falling line is a rising series; on a reversed axis larger values sit
+        // lower, so there a falling line is a falling series.
+        var rising = reversed ? fit.Slope >= 0 : fit.Slope <= 0;
+        var label = $"{series.Name} trend: {(rising ? "rising" : "falling")}, R squared {fit.R2.ToString("0.00", CultureInfo.InvariantCulture)}";
         w.Add($"<path class='lumen-trend' d='M{N(left)},{N(fit.Predict(left))} L{N(right)},{N(fit.Predict(right))}' " +
             $"fill='none' stroke='{color}' stroke-width='2' stroke-dasharray='7 5' stroke-opacity='.85' role='img' aria-label='{SvgWriter.E(label)}'>" +
             $"{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}</path>");
@@ -289,9 +291,11 @@ public static class ChartSvg
         {
             double x = left + column * size, y = top + row * size;
             var weight = .22 + .68 * Math.Log(1 + count) / Math.Log(1 + busiest);
+            // A cell's lower edge is its smaller value unless the axis is reversed.
+            double near = ys.Invert(y + size, bottom, top), far = ys.Invert(y, bottom, top);
             var label = $"{series.Name}: {Count(count)} observation{(count == 1 ? "" : "s")}, " +
                         $"{xs.Format(xs.Invert(x, left, right))} to {xs.Format(xs.Invert(x + size, left, right))}, " +
-                        $"{ys.Format(ys.Invert(y + size, bottom, top))} to {ys.Format(ys.Invert(y, bottom, top))}";
+                        $"{ys.Format(Math.Min(near, far))} to {ys.Format(Math.Max(near, far))}";
             Aggregate(w, label, $"<rect x='{N(x)}' y='{N(y)}' width='{N(size)}' height='{N(size)}' fill='{color}' fill-opacity='{N(Math.Round(weight, 3))}'/>");
         }
     }
@@ -339,7 +343,8 @@ public static class ChartSvg
             var p = series.Points[pi];
             double open = p.Open!.Value, high = p.High!.Value, low = p.Low!.Value, close = p.Close!.Value;
             var color = close >= open ? w.Style.Rising : w.Style.Falling;
-            double body = Y(Math.Max(open, close)), baseline = Y(Math.Min(open, close));
+            // The body's top edge is whichever price sits higher on screen, which on a reversed axis is the lower one.
+            double body = Math.Min(Y(open), Y(close)), baseline = Math.Max(Y(open), Y(close));
             Datum(w, 0, pi, $"{p.Label ?? xs.Format(p.X)}: open {ys.Format(open)}, high {ys.Format(high)}, low {ys.Format(low)}, close {ys.Format(close)}",
                 $"<line x1='{N(columns[pi])}' y1='{N(Y(high))}' x2='{N(columns[pi])}' y2='{N(Y(low))}' stroke='{color}' stroke-width='1.5'/>" +
                 $"<rect x='{N(columns[pi] - width / 2)}' y='{N(body)}' width='{N(width)}' height='{N(Math.Max(baseline - body, 1))}' rx='1' fill='{color}'/>");
@@ -456,7 +461,7 @@ public static class ChartSvg
         // A supplied summary has no observations behind it, so its whiskers and outliers are what the axis must reach.
         var supplied = s.Series.Select(series => series.Summary).OfType<BoxSummary>()
             .SelectMany(summary => summary.Outliers.Append(summary.LowerWhisker).Append(summary.UpperWhisker));
-        var ys = Axis.Create(s.YAxis, observations.SelectMany(v => v).Concat(supplied), s.IncludeZero, s.YMin, s.YMax);
+        var ys = Axis.Create(s.YAxis, observations.SelectMany(v => v).Concat(supplied), s.IncludeZero, s.YMin, s.YMax) with { ValueFormat = s.YFormat, Reversed = s.YReversed };
         Frame(w, s, ys, left, right, top, bottom);
         var band = (right - left) / s.Series.Count;
         for (var si = 0; si < s.Series.Count; si++)
@@ -506,7 +511,7 @@ public static class ChartSvg
     {
         var observations = s.Series.Select(series => series.Points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray()).ToArray();
         double left = 76, right = s.Width - 30, top = 78, bottom = s.Height - 76;
-        var ys = Axis.Create(s.YAxis, observations.SelectMany(v => v), s.IncludeZero, s.YMin, s.YMax);
+        var ys = Axis.Create(s.YAxis, observations.SelectMany(v => v), s.IncludeZero, s.YMin, s.YMax) with { ValueFormat = s.YFormat, Reversed = s.YReversed };
         Frame(w, s, ys, left, right, top, bottom);
         var band = (right - left) / s.Series.Count;
         var logarithmic = s.YAxis == AxisKind.Log;

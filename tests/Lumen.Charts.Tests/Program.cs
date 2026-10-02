@@ -1697,6 +1697,245 @@ Test("A rolling window skips missing values and waits for its minimum",()=>{
     Reject(()=>Statistics.Rolling([1d,double.NaN],2,1));
     Reject(()=>Statistics.Rolling([1d,double.PositiveInfinity],2,1));
 });
+Axis Seconds(double min,double max)=>new(AxisKind.Linear,min,max){ValueFormat=ValueFormat.Duration};
+Axis LogSeconds(double min,double max)=>new(AxisKind.Log,min,max){ValueFormat=ValueFormat.Duration};
+Axis Compacted(double min=0,double max=1)=>new(AxisKind.Linear,min,max){ValueFormat=ValueFormat.Compact};
+string[] Labelled(IReadOnlyList<(double Value,string Label)> ticks)=>ticks.Select(t=>t.Label).ToArray();
+Test("Durations read m:ss below an hour and h:mm:ss from an hour up",()=>{
+    (double Value,string Label)[] cases=[(0,"0:00"),(5,"0:05"),(59.4,"0:59"),(59.5,"1:00"),(330,"5:30"),(3599,"59:59"),(3599.5,"1:00:00"),
+        (3600,"1:00:00"),(3725,"1:02:05"),(86400,"24:00:00"),(90061,"25:01:01"),(-330,"-5:30"),(-3725,"-1:02:05"),(-0.4,"0:00")];
+    foreach(var (value,label) in cases)Check(Seconds(0,1).Format(value)==label,$"{value} read {Seconds(0,1).Format(value)}, not {label}");
+});
+double[] DurationLadder=[1,2,5,10,15,30,60,120,300,600,900,1800,3600,7200,10800,21600,43200];
+Test("Linear duration ticks are every multiple of the smallest round step that fits the count",()=>{
+    var random=new Random(19);
+    for(var trial=0;trial<400;trial++)
+    {
+        var min=Math.Round((random.NextDouble()-.3)*Math.Pow(10,random.Next(1,7)));
+        var max=min+Math.Round(1+random.NextDouble()*Math.Pow(10,random.Next(1,7)));
+        var count=random.Next(2,9);
+        var ticks=Seconds(min,max).Ticks(count);
+        double Fitted(double step)=>Math.Floor(max/step)-Math.Ceiling(min/step)+1;
+        // The documented ladder and then every whole number of days, searched from the bottom.
+        var step=DurationLadder.Concat(Enumerable.Range(1,100_000).Select(days=>days*86400d)).First(s=>Fitted(s)<=count);
+        var expected=Enumerable.Range(0,(int)Fitted(step)).Select(i=>(Math.Ceiling(min/step)+i)*step).ToArray();
+        Check(ticks.Count<=count,$"[{min}, {max}] drew {ticks.Count} ticks for {count}");
+        Check(ticks.Select(t=>t.Value).SequenceEqual(expected),$"[{min}, {max}] at {count}: {string.Join(" ",ticks.Select(t=>t.Value))}, expected every {step} s");
+        Check(ticks.All(t=>t.Label==Seconds(0,1).Format(t.Value)),"a tick reads differently from a tooltip");
+    }
+    Check(Labelled(Seconds(280,330).Ticks()).SequenceEqual(["4:45","5:00","5:15","5:30"]));
+    Check(Labelled(Seconds(0,3000).Ticks()).SequenceEqual(["0:00","15:00","30:00","45:00"]));
+    Check(Labelled(Seconds(0,9000).Ticks()).SequenceEqual(["0:00","1:00:00","2:00:00"]));
+    Check(Labelled(Seconds(-300,300).Ticks()).SequenceEqual(["-4:00","-2:00","0:00","2:00","4:00"]));
+    Check(Labelled(Seconds(0,10*86400).Ticks()).SequenceEqual(["0:00","72:00:00","144:00:00","216:00:00"]),"ten days did not step by three");
+});
+Test("Linear duration minor lines divide each step into round durations",()=>{
+    Check(Seconds(280,330).MinorTicks().SequenceEqual([290d,295,305,310,320,325]),"15 seconds is not three fives");
+    Check(Seconds(0,3000).MinorTicks().SequenceEqual([300d,600,1200,1500,2100,2400]),"15 minutes is not three fives");
+    Check(Seconds(0,9000).MinorTicks().SequenceEqual([900d,1800,2700,4500,5400,6300,8100]),"an hour is not four quarters");
+    Check(Seconds(0,3*86400).MinorTicks().Count==9&&Seconds(0,3*86400).MinorTicks().All(v=>v%21600==0&&v%86400!=0),"a day is not four six-hour parts");
+});
+Test("Logarithmic duration ticks are round durations inside the range, from the nearest at each end",()=>{
+    double[] fixedLadder=[1,2,5,10,15,30,60,120,300,600,1200,1800,3600,7200,10800,14400,18000];
+    var random=new Random(7);
+    for(var trial=0;trial<400;trial++)
+    {
+        var min=Math.Pow(10,random.NextDouble()*4);var max=min*Math.Pow(10,.5+random.NextDouble()*2.5);
+        var count=random.Next(2,9);
+        var ticks=LogSeconds(min,max).Ticks(count).Select(t=>t.Value).ToArray();
+        var inside=fixedLadder.Concat(Enumerable.Range(6,Math.Max(0,(int)(max/3600)-5)).Select(hours=>hours*3600d)).Where(v=>v>=min&&v<=max).ToArray();
+        Check(ticks.Length<=count&&ticks.Length>=Math.Min(2,inside.Length),$"[{min}, {max}] drew {ticks.Length} ticks for {count}");
+        Check(ticks.All(inside.Contains),$"[{min}, {max}]: {string.Join(" ",ticks)} leaves the ladder or the range");
+        Check(ticks[0]==inside.Min()&&ticks[^1]==inside.Max(),$"[{min}, {max}]: {string.Join(" ",ticks)} does not reach the ends");
+        Check(ticks.Zip(ticks.Skip(1)).All(p=>p.First<p.Second),"ticks repeat or run backwards");
+    }
+    Check(Labelled(LogSeconds(1,3600).Ticks()).SequenceEqual(["1s","10s","1m","10m","1h"]));
+    Check(Labelled(LogSeconds(1,7200).Ticks()).SequenceEqual(["1s","10s","2m","10m","2h"]));
+    Check(Labelled(LogSeconds(1,1000).Ticks()).SequenceEqual(["1s","5s","30s","2m","10m"]),"the range's last round duration is not kept");
+    Check(Labelled(LogSeconds(7*3600,30*3600).Ticks()).SequenceEqual(["7h","10h","14h","21h","30h"]),"whole hours past five are not on the ladder");
+    (double Value,string Label)[] spans=[(1,"1s"),(1.5,"1.5s"),(30,"30s"),(60,"1m"),(90,"1m30s"),(1200,"20m"),(3600,"1h"),(3725,"1h2m5s"),(9000,"2h30m"),(86400,"24h")];
+    foreach(var (value,label) in spans)Check(LogSeconds(1,10).Format(value)==label,$"{value} read {LogSeconds(1,10).Format(value)}, not {label}");
+    // Mantissas of 20 minutes are no duration anyone reads, so the duration axis has no minor lines; a plain one does.
+    Check(LogSeconds(1,3600).MinorTicks().Count==0&&new Axis(AxisKind.Log,1,3600).MinorTicks().Count>0);
+});
+Test("Compact labels change unit at each magnitude boundary and keep the plain positions",()=>{
+    (double Value,string Label)[] cases=[(0,"0"),(12.5,"12.5"),(999,"999"),(1000,"1k"),(1049,"1k"),(1050,"1.1k"),(999_949,"999.9k"),(999_950,"1M"),
+        (999_999,"1M"),(1e6,"1M"),(3.45e6,"3.5M"),(1.5e9,"1.5B"),(2e12,"2T"),(-1234,"-1.2k"),(-1e6,"-1M")];
+    foreach(var (value,label) in cases)Check(Compacted().Format(value)==label,$"{value} read {Compacted().Format(value)}, not {label}");
+    var plain=new Axis(AxisKind.Linear,0,2.5e6);
+    Check(Compacted(0,2.5e6).Ticks().Select(t=>t.Value).SequenceEqual(plain.Ticks().Select(t=>t.Value))&&Labelled(Compacted(0,2.5e6).Ticks()).SequenceEqual(["0","1M","2M"]));
+    Check(Compacted(0,2.5e6).MinorTicks().SequenceEqual(plain.MinorTicks()));
+    var log=new Axis(AxisKind.Log,1,1e7);
+    Check(Labelled((log with{ValueFormat=ValueFormat.Compact}).Ticks()).SequenceEqual(["1","100","10k","1M"])&&(log with{ValueFormat=ValueFormat.Compact}).MinorTicks().SequenceEqual(log.MinorTicks()));
+    var doc=Svg(Spec(ChartKind.Column) with{YFormat=ValueFormat.Compact,Series=[new("Views",[new(0,1500,"A"),new(1,2_400_000,"B")])]});
+    Check(doc.Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")=="Views: A, 1.5k")&&doc.Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")=="Views: B, 2.4M"));
+    Check(doc.Descendants(ns+"text").Any(t=>t.Value=="2M"),"the axis does not read compactly");
+});
+Test("Durations and compact numbers read the same in every culture",()=>{
+    var previous=CultureInfo.CurrentCulture;
+    try {
+        foreach(var culture in (string[])["fr-FR","sv-SE"])
+        {
+            // Swedish writes its minus as U+2212 and both write a decimal comma.
+            CultureInfo.CurrentCulture=new(culture);
+            Check(Seconds(0,1).Format(-3725)=="-1:02:05"&&LogSeconds(1,10).Format(1.5)=="1.5s"&&LogSeconds(1,10).Format(9000)=="2h30m",culture);
+            Check(Compacted().Format(1250)=="1.3k"&&Compacted().Format(-3.45e6)=="-3.5M",culture);
+        }
+    } finally {CultureInfo.CurrentCulture=previous;}
+});
+Test("A reversed axis maps the minimum to the top and reads back exactly",()=>{
+    foreach(var kind in (AxisKind[])[AxisKind.Linear,AxisKind.Log])
+    {
+        var plain=new Axis(kind,10,1000);var reversed=plain with{Reversed=true};
+        Check(reversed.Map(10,344,78)==78&&reversed.Map(1000,344,78)==344,$"{kind}: the minimum is not at the top");
+        foreach(var value in (double[])[10,37.5,100,512,1000])
+        {
+            Check(Near(reversed.Map(value,344,78)+plain.Map(value,344,78),344+78),$"{kind}: {value} is not mirrored");
+            Check(Near(reversed.Invert(reversed.Map(value,344,78),344,78),value),$"{kind}: {value} does not read back");
+        }
+        Check(reversed.Ticks().SequenceEqual(plain.Ticks())&&reversed.MinorTicks().SequenceEqual(plain.MinorTicks()),$"{kind}: reversal moved the ticks");
+    }
+});
+// A plot spans 78 to 344 pixels, so on a reversed axis every Y position is 422 minus the plain one.
+double Attr(XElement e,string name)=>double.Parse(e.Attribute(name)!.Value,CultureInfo.InvariantCulture);
+Test("A reversed pace axis puts the fastest pace on top and mirrors every mark and annotation",()=>{
+    var pace=Spec() with{YFormat=ValueFormat.Duration,Annotations=[new(AnnotationAxis.Y,300){Label="Target"},new(AnnotationAxis.Y,290){To=310,Label="Zone"}],
+        Series=[new("Pace",[new(0,330),new(1,300),new(2,281),new(3,295)])]};
+    XDocument plain=Svg(pace),reversed=Svg(pace with{YReversed=true});
+    double TickY(XDocument doc,string label)=>Attr(doc.Descendants(ns+"text").First(t=>t.Value==label),"y");
+    Check(TickY(reversed,"4:50")<TickY(reversed,"5:20")&&TickY(plain,"4:50")>TickY(plain,"5:20"),"faster pace is not higher");
+    double[] Marks(XDocument doc)=>doc.Descendants(ns+"circle").Select(c=>Attr(c,"cy")).ToArray();
+    Check(Marks(plain).Length==4&&Marks(plain).Zip(Marks(reversed)).All(p=>Near(p.First+p.Second,422)),"marks are not mirrored");
+    XElement Reference(XDocument doc)=>doc.Descendants(ns+"line").First(l=>(string?)l.Attribute("stroke-dasharray")=="6 4");
+    Check(Near(Attr(Reference(plain),"y1")+Attr(Reference(reversed),"y1"),422),"the target line is not mirrored");
+    XElement Band(XDocument doc)=>doc.Descendants(ns+"rect").Single(r=>(string?)r.Attribute("fill-opacity")==".12");
+    Check(Near(Attr(Band(reversed),"y"),422-Attr(Band(plain),"y")-Attr(Band(plain),"height"))&&Near(Attr(Band(reversed),"height"),Attr(Band(plain),"height")),"the zone band is not mirrored");
+    var labels=reversed.Descendants().Select(e=>(string?)e.Attribute("aria-label")).OfType<string>().ToArray();
+    Check(labels.Contains("Target: 5:00")&&labels.Contains("Zone: 4:50 to 5:10")&&labels.Contains("Pace: 2, 4:41"),string.Join(" | ",labels));
+});
+Test("Trend lines on a reversed axis name the direction of the data, not of the line",()=>{
+    foreach(var reversed in (bool[])[false,true])
+    {
+        ChartSpec Trended(params double[] values)=>Spec(ChartKind.Scatter) with{YReversed=reversed,Series=[new("Pace",values.Select((y,i)=>new ChartPoint(i,y)).ToArray()){Trend=true}]};
+        XElement Line(ChartSpec spec)=>Svg(spec).Descendants(ns+"path").Single(p=>(string?)p.Attribute("class")=="lumen-trend");
+        Check(Line(Trended(300,310,320,330)).Attribute("aria-label")!.Value.Contains("trend: rising"),$"reversed {reversed}: a rising series is not called rising");
+        Check(Line(Trended(330,320,310,300)).Attribute("aria-label")!.Value.Contains("trend: falling"),$"reversed {reversed}: a falling series is not called falling");
+        // On screen a rising series climbs on a plain axis and descends on a reversed one.
+        var ends=System.Text.RegularExpressions.Regex.Matches(Line(Trended(300,310,320,330)).Attribute("d")!.Value,@",(-?[\d.]+)").Select(m=>double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture)).ToArray();
+        Check(reversed?ends[1]>ends[0]:ends[1]<ends[0],$"reversed {reversed}: the line runs the wrong way on screen");
+    }
+});
+Test("Candles, boxes and violins on a reversed axis keep their shapes, mirrored",()=>{
+    foreach(var (kind,opacity) in ((ChartKind,string?)[])[(ChartKind.Candlestick,null),(ChartKind.Box,".18"),(ChartKind.Violin,".85")])
+    {
+        XElement[] Bodies(XDocument doc)=>doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("class")=="lumen-datum").SelectMany(g=>g.Elements(ns+"rect"))
+            .Where(r=>(string?)r.Attribute("fill-opacity")==opacity).ToArray();
+        XDocument plain=Svg(Sample(kind)),reversed=Svg(Sample(kind) with{YReversed=true});
+        Check(Bodies(plain).Length>0&&Bodies(plain).Length==Bodies(reversed).Length,$"{kind}: bodies went missing");
+        foreach(var (before,after) in Bodies(plain).Zip(Bodies(reversed)))
+            Check(Near(Attr(after,"y"),422-Attr(before,"y")-Attr(before,"height"))&&Near(Attr(after,"height"),Attr(before,"height")),$"{kind}: a body is not mirrored");
+    }
+    // A density cell still reads its range from low to high when the low edge is at the top.
+    var cells=Svg(Spec(ChartKind.Scatter) with{YReversed=true,DensityCells=10,Series=[new("Cloud",Enumerable.Range(0,400).Select(i=>new ChartPoint(i%37,i%23)).ToArray())]})
+        .Descendants(ns+"g").Select(g=>(string?)g.Attribute("aria-label")).OfType<string>().Where(l=>l.StartsWith("Cloud:")).ToArray();
+    Check(cells.Length>0&&cells.All(label=>{var ends=label.Split(", ")[^1].Split(" to ").Select(v=>double.Parse(v,CultureInfo.InvariantCulture)).ToArray();return ends[0]<ends[1];}),
+        string.Join(" | ",cells.Take(3)));
+});
+Test("Formats and reversal are refused where they cannot apply",()=>{
+    string Refusal(ChartSpec spec){try{ChartSvg.Render(spec);}catch(ArgumentException error){return error.Message;}throw new Exception($"{spec.Kind} accepted a setting it cannot draw");}
+    foreach(var format in (ValueFormat[])[ValueFormat.Duration,ValueFormat.Compact])
+        Check(Refusal(TimeSpec(Utc(2026,1,1),3_600_000,5) with{XFormat=format}).Contains("time axis"),$"{format} on a time axis");
+    foreach(var kind in Enum.GetValues<ChartKind>())
+    {
+        var spec=Sample(kind);
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band)
+            ChartSvg.Render(spec with{XFormat=ValueFormat.Duration});
+        else Check(Refusal(spec with{XFormat=ValueFormat.Duration}).Contains("X format"),$"{kind}: X format");
+        if(kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Histogram)
+        {
+            Check(Refusal(spec with{YFormat=ValueFormat.Compact}).Contains("Y format"),$"{kind}: Y format");
+            Check(Refusal(spec with{Y2Format=ValueFormat.Duration}).Contains("Y format"),$"{kind}: Y2 format");
+        }
+        else ChartSvg.Render(spec with{YFormat=ValueFormat.Duration,Y2Format=ValueFormat.Compact});
+        if(kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Area or ChartKind.Histogram)
+        {
+            Check(Refusal(spec with{YReversed=true}).Contains("zero baseline"),$"{kind}: reversed Y");
+            Check(Refusal(spec with{Y2Reversed=true}).Contains("zero baseline"),$"{kind}: reversed Y2");
+        }
+        else if(kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar) Check(Refusal(spec with{YReversed=true}).Contains("no Y axis"),$"{kind}: reversed Y");
+        else ChartSvg.Render(spec with{YReversed=true,Y2Reversed=true});
+    }
+    Reject(()=>ChartSvg.Render(Spec() with{YFormat=(ValueFormat)9}));
+    Reject(()=>ChartSvg.Render(Spec() with{Y2Format=(ValueFormat)(-1)}));
+});
+string Operate(ChartSpec spec,Func<LumenChart,Task> act)
+{
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try {
+        LumenChart? chart=null;
+        RenderFragment content=b=>{b.OpenComponent<LumenChart>(0);b.AddAttribute(1,"Spec",spec);b.AddComponentReferenceCapture(2,c=>chart=(LumenChart)c);b.CloseComponent();};
+        return renderer.Dispatcher.InvokeAsync(async()=>{
+            var root=await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",ChartStyle.Light},{"ChildContent",content}}));
+            await act(chart!);
+            await root.QuiescenceTask;
+            return root.ToHtmlString();
+        }).GetAwaiter().GetResult();
+    } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
+}
+Test("Durations reach tooltips, the component's data table and status line; CSV keeps the seconds",()=>{
+    var run=Spec() with{XFormat=ValueFormat.Duration,YFormat=ValueFormat.Duration,YReversed=true,Y2Format=ValueFormat.Compact,
+        Series=[new("Pace",[new(0,301),new(600,295),new(1200,288.4)]),new("Climb",[new(0,1200),new(600,15_400),new(1200,15_900)]){Secondary=true}]};
+    var labels=Svg(run).Descendants().Select(e=>(string?)e.Attribute("aria-label")).OfType<string>().ToArray();
+    Check(labels.Contains("Pace: 10:00, 4:55")&&labels.Contains("Climb: 20:00, 15.9k"),string.Join(" | ",labels));
+    var csv=ChartExport.Csv(run);
+    Check(csv.Contains("\"Pace\",600,295,")&&csv.Contains("\"Pace\",1200,288.4,")&&csv.Contains("\"Climb\",600,15400,"),csv);
+    var html=Operate(run,async chart=>{
+        // The table opens on a click, which static rendering cannot send, so the test opens it directly.
+        typeof(LumenChart).GetField("showData",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.SetValue(chart,true);
+        await chart.SelectPoint(0,1);
+    });
+    Check(html.Contains("<tr><td>Pace</td><td>10:00</td><td>4:55</td></tr>")&&html.Contains("<tr><td>Climb</td><td>20:00</td><td>15.9k</td></tr>"),"the table reads raw numbers");
+    Check(html.Contains("Pace: 10:00 = 4:55"),"the status line reads raw numbers");
+});
+Test("Formats and reversal survive JSON as strings, and a request that names none keeps the defaults",()=>{
+    var options=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web){Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}};
+    var spec=Spec() with{XAxis=AxisKind.Log,XFormat=ValueFormat.Duration,YFormat=ValueFormat.Compact,Y2Format=ValueFormat.Duration,YReversed=true,Y2Reversed=true,
+        Series=[new("Power",[new(1,1200),new(60,420),new(1200,290)]),new("Pace",[new(1,300),new(60,290),new(1200,310)]){Secondary=true}]};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,options);
+    Check(json.Contains("\"xFormat\":\"Duration\"")&&json.Contains("\"yFormat\":\"Compact\"")&&json.Contains("\"y2Format\":\"Duration\"")&&json.Contains("\"yReversed\":true")&&json.Contains("\"y2Reversed\":true"),json);
+    Check(ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,options)!)==ChartSvg.Render(spec),"the settings changed in transit");
+    var written="{\"title\":\"Example\",\"kind\":\"Line\",\"yFormat\":\"Duration\",\"yReversed\":true,\"series\":[{\"name\":\"Pace\",\"points\":[{\"x\":0,\"y\":301},{\"x\":1,\"y\":295}]}]}";
+    var read=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,options)!;
+    Check(read.YFormat==ValueFormat.Duration&&read.YReversed&&ChartSvg.Render(read).Contains(">5:00<"),"hand-written JSON lost its format");
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",options)!;
+    Check(old.XFormat==ValueFormat.Number&&old.YFormat==ValueFormat.Number&&old.Y2Format==ValueFormat.Number&&!old.YReversed&&!old.Y2Reversed);
+});
+Test("An axis that asks for no format or reversal reads exactly as before",()=>{
+    var axis=new Axis(AxisKind.Linear,0,1);
+    Check(axis.ValueFormat==ValueFormat.Number&&!axis.Reversed&&new ChartSpec().XFormat==ValueFormat.Number&&!new ChartSpec().YReversed);
+    var random=new Random(3);
+    for(var i=0;i<2000;i++)
+    {
+        var value=(random.NextDouble()-.5)*Math.Pow(10,random.Next(-4,12));
+        Check(axis.Format(value)==LinearScale.Label(value)&&new Axis(AxisKind.Log,1,10).Format(value)==LinearScale.Label(value),$"{value}");
+    }
+    var range=new Axis(AxisKind.Linear,-37,1234);
+    Check(range.Ticks().SequenceEqual(new LinearScale(-37,1234).Ticks().Select(v=>(v,LinearScale.Label(v)))),"plain ticks moved");
+});
+Test("Axes at extreme magnitudes finish their ticks",()=>{
+    // Near 1e21 a step can be too small to move the value it is added to; minor lines once looped for ever there.
+    var work=Task.Run(()=>{
+        foreach(var format in Enum.GetValues<ValueFormat>())
+        {
+            var axis=new Axis(AxisKind.Linear,1e21,1e21+131072){ValueFormat=format};
+            Check(axis.Ticks().Count<=5);axis.MinorTicks();
+        }
+        LogSeconds(1e95,1e100).Ticks();
+        ChartSvg.Render(Spec() with{MinorGridlines=true,YFormat=ValueFormat.Duration,YMin=1e21,YMax=1e21+131072,Series=[new("S",[new(0,1e21+65536)])]});
+    });
+    Check(work.Wait(TimeSpan.FromSeconds(20)),"an axis near 1e21 did not finish");
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;
