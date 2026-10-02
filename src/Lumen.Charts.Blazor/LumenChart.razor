@@ -64,8 +64,13 @@
             _=>point.Y.HasValue?y.Format(point.Y.Value):"Missing"
         };
     }
-    // How a value reads depends only on the axis kind and format, so the bounds here are nominal.
-    private Axis Measure(ChartSeries series) => series.Secondary ? new(Spec.Y2Axis,1,10){ValueFormat=Spec.Y2Format} : new(Spec.YAxis,1,10){ValueFormat=Spec.YFormat};
+    // How a value reads depends only on the axis kind and format, so the bounds here are nominal. A series in a pane below
+    // the main plot reads through that pane's axes.
+    private Axis Measure(ChartSeries series)
+    {
+        var pane=series.Pane>0&&series.Pane<=Spec.Panes.Count?Spec.Panes[series.Pane-1]:null;
+        return series.Secondary ? new(pane?.Y2Axis ?? Spec.Y2Axis,1,10){ValueFormat=pane?.Y2Format ?? Spec.Y2Format} : new(pane?.YAxis ?? Spec.YAxis,1,10){ValueFormat=pane?.YFormat ?? Spec.YFormat};
+    }
     private Axis FullRange => Axis.Create(Spec.XAxis,Spec.Series.SelectMany(s=>s.Points).Select(p=>p.X), min:Spec.XMin, max:Spec.XMax, zone:TimeAxis.Zone(Spec.TimeZone),
         weekends:Spec.SkipWeekends, skips:Spec.TimeSkips.Count>0?Spec.TimeSkips:null) with {ValueFormat=Spec.XFormat};
     // The view is tracked as a fraction of the full axis so log and time domains zoom in their own space.
@@ -86,9 +91,23 @@
     }
     private void ResetView() { viewMin=null;viewMax=null;Render(); }
     protected override void OnParametersSet() { hidden.RemoveWhere(i=>i>=Spec.Series.Count);viewMin=null;viewMax=null;Render(); }
-    private ChartSpec VisibleSpec() => Spec with { Style=Style, XMin=CanZoom ? viewMin ?? Spec.XMin : Spec.XMin, XMax=CanZoom ? viewMax ?? Spec.XMax : Spec.XMax, Series=Spec.Series.Select((s,i)=>(s,i)).Where(p=>!hidden.Contains(p.i)).Select(p=>p.s with {Color=ChartSvg.SeriesColor(p.s,p.i,Style)}).ToArray() };
+    private ChartSpec VisibleSpec()
+    {
+        var spec=Spec with { Style=Style, XMin=CanZoom ? viewMin ?? Spec.XMin : Spec.XMin, XMax=CanZoom ? viewMax ?? Spec.XMax : Spec.XMax, Series=visible.Select(i=>Spec.Series[i] with {Color=ChartSvg.SeriesColor(Spec.Series[i],i,Style),Points=hidden.Contains(i)?[]:Spec.Series[i].Points}).ToArray() };
+        if(Spec.Panes.Count==0||Spec.Series.Any(s=>s.Pane<0||s.Pane>Spec.Panes.Count))return spec;
+        // A pane its hidden series leave empty closes and the panes under it move up, the first one left taking the main
+        // plot's place and settings. Hidden candles whose pane closes move to the main plot.
+        var used=visible.Where(i=>!hidden.Contains(i)).Select(i=>Spec.Series[i].Pane).Distinct().Order().DefaultIfEmpty().ToArray();
+        spec=spec with { Panes=used.Skip(1).Select(p=>Spec.Panes[p-1]).ToArray(), Series=spec.Series.Select(s=>s with {Pane=Math.Max(0,Array.IndexOf(used,s.Pane))}).ToArray() };
+        if(used[0]==0)return spec;
+        var main=Spec.Panes[used[0]-1];
+        return spec with { YLabel=main.Label, YAxis=main.YAxis, YMin=main.YMin, YMax=main.YMax, YFormat=main.YFormat, YReversed=main.YReversed, YZones=main.YZones,
+            Y2Label=main.Y2Label, Y2Axis=main.Y2Axis, Y2Min=main.Y2Min, Y2Max=main.Y2Max, Y2Format=main.Y2Format, Y2Reversed=main.Y2Reversed, Annotations=Spec.Annotations.Where(a=>a?.Axis!=AnnotationAxis.Y).ToArray() };
+    }
+    // Hidden candles stay without their points, because a candlestick or OHLC chart draws its other series beside them.
+    private bool Candles(int index) => Spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc && Spec.Series[index].Kind is null;
     // The component draws its own tooltips, so marks render without the native SVG title.
-    private void Render() { xAxis=FullRange;visible=Enumerable.Range(0,Spec.Series.Count).Where(i=>!hidden.Contains(i)).ToArray();svg=ChartSvg.Render(VisibleSpec(), includeLegend:false, includeTitles:false); }
+    private void Render() { xAxis=FullRange;visible=Enumerable.Range(0,Spec.Series.Count).Where(i=>!hidden.Contains(i)||Candles(i)).ToArray();svg=ChartSvg.Render(VisibleSpec(), includeLegend:false, includeTitles:false); }
     private void Toggle(int index) { if(!hidden.Add(index))hidden.Remove(index);Render(); }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

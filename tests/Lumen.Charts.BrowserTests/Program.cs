@@ -194,6 +194,42 @@ if (await page.Locator("[data-lumen-brand]").CountAsync() > 0)
 }
 else Console.WriteLine("SKIP LumenBrand check: this host renders no LumenBrand");
 
+// Panes belong to a chart a host chooses to offer, so the check finds the gallery's activity stream as a user does, by the
+// buttons named for the line chart and for the stream, and a host without them says SKIP. Its three panes are nested clips.
+var lineTab = page.GetByRole(AriaRole.Button, new() { Name = "Line", Exact = true });
+var stream = page.GetByRole(AriaRole.Button, new() { Name = "Activity stream", Exact = true });
+if (await lineTab.CountAsync() > 0)
+{
+    await lineTab.First.ClickAsync();
+    try { await stream.First.WaitForAsync(new() { Timeout = 5_000 }); } catch (TimeoutException) { }
+}
+if (await stream.CountAsync() > 0)
+{
+    await stream.First.ClickAsync();
+    await page.WaitForFunctionAsync("() => document.querySelector('.lumen-chart svg')?.querySelectorAll(':scope > svg').length === 3");
+
+    await Test("Zooming moves every pane together", async () =>
+    {
+        // The same moment in each series, one series to a pane, read from its marker.
+        const string moment = "() => [0, 1, 2].map(s => document.querySelector(`.lumen-chart [data-series='${s}'][data-point='120'] circle`)?.getAttribute('cx'))";
+        var before = await page.EvaluateAsync<string?[]>(moment);
+        Check(before[0] is not null && before.Distinct().Count() == 1, $"the panes place one moment at {string.Join(", ", before)}");
+        await chart.Locator(".lumen-tools button[aria-label='Zoom in']").ClickAsync();
+        await page.WaitForFunctionAsync("x => document.querySelector(`.lumen-chart [data-series='0'][data-point='120'] circle`)?.getAttribute('cx') !== x", before[0]);
+        var after = await page.EvaluateAsync<string?[]>(moment);
+        Check(after[0] is not null && after.Distinct().Count() == 1, $"after zooming the panes place it at {string.Join(", ", after)}");
+        await chart.Locator(".lumen-tools button[aria-label='Pan right']").ClickAsync();
+        await page.WaitForFunctionAsync("x => document.querySelector(`.lumen-chart [data-series='0'][data-point='120'] circle`)?.getAttribute('cx') !== x", after[0]);
+        var panned = await page.EvaluateAsync<string?[]>(moment);
+        Check(panned[0] is not null && panned.Distinct().Count() == 1, $"after panning the panes place it at {string.Join(", ", panned)}");
+        await Tool("Reset view").ClickAsync();
+        await page.WaitForFunctionAsync("x => document.querySelector(`.lumen-chart [data-series='0'][data-point='120'] circle`)?.getAttribute('cx') === x", before[0]);
+    });
+
+    await Test("axe-core reports no WCAG A or AA violation on a chart with panes", Sweep);
+}
+else Console.WriteLine("SKIP pane checks: this host offers no chart with panes");
+
 // A fresh load, so the sweep sees the page as a visitor first meets it rather than mid-interaction.
 await page.ReloadAsync(new() { WaitUntil = WaitUntilState.NetworkIdle });
 await page.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });

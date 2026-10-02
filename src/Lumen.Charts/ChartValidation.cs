@@ -34,9 +34,13 @@ public static partial class ChartValidation
         {
             if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Band))
                 throw new ArgumentException("A secondary axis applies to line, area, scatter, bubble, column and band charts; stacked, horizontal, candlestick, OHLC and radial charts cannot measure against two.");
-            if (spec.Series!.All(series => series.Secondary))
-                throw new ArgumentException("A secondary axis needs at least one series on the left to measure against.");
+            if (spec.Series!.Where(series => series is not null).GroupBy(series => series.Pane).Any(pane => pane.All(series => series.Secondary)))
+                throw new ArgumentException("A secondary axis needs at least one series on the left of its pane to measure against.");
         }
+        if (spec.Panes is null || spec.Panes.Count > 3) throw new ArgumentException("A chart has at most four panes: the main plot and three more in Panes.");
+        if ((spec.Panes.Count > 0 || spec.Series?.Any(series => series is not null && series.Pane != 0) == true)
+            && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Candlestick or ChartKind.Ohlc))
+            throw new ArgumentException("Panes share one continuous X axis, so they apply to line, area, scatter, bubble, band, candlestick and OHLC charts; column, bar and stacked column charts place their bars by category, and the other kinds derive their X or have none.");
         Text(spec.Y2Label);
         if (spec.IncludeZero && (spec.XAxis == AxisKind.Log || spec.YAxis == AxisKind.Log)) throw new ArgumentException("Log axes cannot include zero.");
         Text(spec.Title); Text(spec.Description); Text(spec.Source); Text(spec.XLabel); Text(spec.YLabel);
@@ -68,13 +72,12 @@ public static partial class ChartValidation
                 throw new ArgumentException("Zone bands apply wherever Y annotations do, on charts drawn on an X and Y axis; donut, radar, heatmap, histogram, box and violin charts refuse them.");
             Zones(spec.YZones, style);
         }
+        foreach (var pane in spec.Panes) Pane(pane, spec, style);
         if (spec.DensityCells is not null)
         {
             if (spec.Kind != ChartKind.Scatter) throw new ArgumentException("Density cells apply to scatter charts; the other kinds either draw one mark per category or already sample.");
             if (spec.DensityCells is < 8 or > 200) throw new ArgumentException("DensityCells must be between 8 and 200.");
         }
-        if (spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc && spec.Series.Count > 1)
-            throw new ArgumentException("Candlestick and OHLC charts accept one series.");
         if (spec.Kind == ChartKind.Histogram && spec.Series.Count > 4)
             throw new ArgumentException("Histograms accept at most four series; past four, the bars side by side in each bin are too narrow to read.");
         Bounds(spec.XMin, spec.XMax); Bounds(spec.YMin, spec.YMax);
@@ -107,10 +110,15 @@ public static partial class ChartValidation
                 throw new ArgumentException(series?.Summary is null ? "Series and points cannot be null." : "A series with a summary still needs a points list; pass an empty one.");
             if (series.Name is null) throw new ArgumentException("Series names cannot be null.");
             Text(series.Name); Color(series.Color);
+            if (series.Pane < 0 || series.Pane > spec.Panes.Count)
+                throw new ArgumentException("A series' pane is 0, the main plot, or one that Panes sets up: pane k is Panes[k - 1].");
+            // Each series is measured on the axes of its own pane.
+            var pane = ChartSvg.Pane(spec, series.Pane);
+            var measure = series.Secondary ? pane.Y2Axis : pane.YAxis;
             if (series.Kind is { } own)
             {
-                if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Column))
-                    throw new ArgumentException("A series' own kind applies to line, area, scatter, bubble, band and column charts; horizontal bar, stacked column, candlestick, OHLC, donut, heatmap, radar, histogram, box and violin charts draw every series one way.");
+                if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Column or ChartKind.Candlestick or ChartKind.Ohlc))
+                    throw new ArgumentException("A series' own kind applies to line, area, scatter, bubble, band, column, candlestick and OHLC charts; horizontal bar, stacked column, donut, heatmap, radar, histogram, box and violin charts draw every series one way.");
                 if (own is not (ChartKind.Line or ChartKind.Area or ChartKind.Column or ChartKind.Scatter or ChartKind.Band))
                     throw new ArgumentException("A series can be drawn as a line, area, column, scatter or band; bubbles share one size scale across a chart, and the other kinds lay out a whole chart rather than one series.");
             }
@@ -147,20 +155,25 @@ public static partial class ChartValidation
                 if (p.Color is not null && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Donut))
                     throw new ArgumentException("Point colours apply to series drawn as lines, areas, scatter points, bubbles, columns, bars and donut slices; on the other kinds colour already says something else: direction on candlesticks and OHLC bars, value on a heatmap, and the series or distribution a mark belongs to on stacked column, radar, band, histogram, box and violin charts.");
                 if (spec.XAxis == AxisKind.Log && p.X <= 0) throw new ArgumentException("Log X axes require positive X values.");
-                if ((series.Secondary ? spec.Y2Axis : spec.YAxis) == AxisKind.Log && p.Y.HasValue && p.Y.Value <= 0)
+                if (measure == AxisKind.Log && p.Y.HasValue && p.Y.Value <= 0)
                     throw new ArgumentException("Log Y axes require positive values; use a linear axis for zero or negative data.");
                 if (spec.XAxis == AxisKind.Time && !TimeAxis.InRange(p.X)) throw new ArgumentException("Time X values must be Unix milliseconds between year 1 and year 9999.");
                 if (spec.Kind is ChartKind.Donut or ChartKind.Radar && p.Y < 0)
                     throw new ArgumentException("Donut and radar charts require nonnegative values.");
-                if (spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc) Candle(p, spec.YAxis);
-                if (mark == ChartKind.Band) Interval(p, series.Secondary ? spec.Y2Axis : spec.YAxis);
+                if (mark is ChartKind.Candlestick or ChartKind.Ohlc) Candle(p, measure);
+                if (mark == ChartKind.Band) Interval(p, measure);
             }
-            if ((mark is ChartKind.Line or ChartKind.Area or ChartKind.Band || spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc) && series.Points.Zip(series.Points.Skip(1)).Any(p => p.First.X > p.Second.X))
+            if (mark is ChartKind.Line or ChartKind.Area or ChartKind.Band or ChartKind.Candlestick or ChartKind.Ohlc && series.Points.Zip(series.Points.Skip(1)).Any(p => p.First.X > p.Second.X))
                 throw new ArgumentException("Line, area, candlestick, OHLC and band points must be ordered by X.");
             // Two columns at one X would stand in one place; a category chart already refuses that for every series.
             if (mark == ChartKind.Column && spec.Kind != ChartKind.Column && series.Points.Select(p => p.X).Distinct().Count() != series.Points.Count)
                 throw new ArgumentException("Columns on a continuous axis need unique X values within each series.");
         }
+        if (spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc && spec.Series.Count > 0 && spec.Series.Count(series => series.Kind is null) != 1)
+            throw new ArgumentException("Candlestick and OHLC charts draw exactly one series as candles or bars, the one that names no kind; any others name their own kind, such as a line for a moving average or columns for volume.");
+        if (spec.Panes.Count > 0)
+            for (var pane = 0; pane <= spec.Panes.Count; pane++)
+                if (!spec.Series.Any(series => series.Pane == pane)) throw new ArgumentException($"Every pane needs a series, and pane {pane} has none.");
         if (spec.Kind == ChartKind.Donut && spec.Series.Count > 1) throw new ArgumentException("Donut charts accept one series.");
         if (spec.Kind is ChartKind.Bar or ChartKind.Column or ChartKind.StackedColumn or ChartKind.Heatmap or ChartKind.Radar)
         {
@@ -172,14 +185,40 @@ public static partial class ChartValidation
         if (spec.Kind == ChartKind.Donut && count > 100) throw new ArgumentException("Donut charts support at most 100 slices.");
         if (spec.Kind is ChartKind.Bar or ChartKind.Column or ChartKind.StackedColumn or ChartKind.Area or ChartKind.Histogram)
             if (spec.YMin > 0 || spec.YMax < 0 || spec.Y2Min > 0 || spec.Y2Max < 0) throw new ArgumentException("Magnitude charts require a zero baseline.");
-        // The rules above follow the chart's kind; a series drawn as columns or an area on another kind meets them on its own axis.
+        // The rules above follow the chart's kind; a series drawn as columns or an area on another kind, or in another pane,
+        // meets them on its own axis.
         foreach (var series in spec.Series.Where(series => ChartSvg.Mark(spec, series) is ChartKind.Column or ChartKind.Area))
         {
-            var (axis, reversed, min, max) = series.Secondary ? (spec.Y2Axis, spec.Y2Reversed, spec.Y2Min, spec.Y2Max) : (spec.YAxis, spec.YReversed, spec.YMin, spec.YMax);
+            var pane = ChartSvg.Pane(spec, series.Pane);
+            var (axis, reversed, min, max) = series.Secondary ? (pane.Y2Axis, pane.Y2Reversed, pane.Y2Min, pane.Y2Max) : (pane.YAxis, pane.YReversed, pane.YMin, pane.YMax);
             if (axis == AxisKind.Log) throw new ArgumentException("Column and area series draw from a zero baseline, which a logarithmic axis cannot show; measure them against a linear one.");
             if (reversed) throw new ArgumentException("Column and area series draw from a zero baseline, which a reversed axis would hang from the top.");
             if (min > 0 || max < 0) throw new ArgumentException("Column and area series draw from a zero baseline, so the bounds of their axis must include zero.");
         }
+    }
+
+    /// <summary>A pane's settings meet the rules the spec's own Y properties meet for the main plot, on the kinds that take panes.</summary>
+    private static void Pane(ChartPane? pane, ChartSpec spec, ChartStyle style)
+    {
+        if (pane is null) throw new ArgumentException("Panes cannot be null.");
+        if (!Finite(pane.Weight) || pane.Weight <= 0)
+            throw new ArgumentException("A pane's weight is its height beside the main plot's 1, so it must be positive and finite, magnitude <= 1e100.");
+        Text(pane.Label); Text(pane.Y2Label);
+        if (!Enum.IsDefined(pane.YAxis) || !Enum.IsDefined(pane.Y2Axis) || pane.YAxis == AxisKind.Time || pane.Y2Axis == AxisKind.Time)
+            throw new ArgumentException("A pane's axes are numeric or logarithmic; time axes are supported on X only.");
+        if (pane.YAxis == AxisKind.Log && spec.Kind == ChartKind.Area)
+            throw new ArgumentException("Log Y axes require line, scatter, bubble, candlestick, OHLC, band, box or violin charts; magnitude, count and radial charts need a zero baseline.");
+        if (pane.Y2Axis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band))
+            throw new ArgumentException("A logarithmic secondary axis requires line, scatter, bubble or band charts.");
+        if (!Enum.IsDefined(pane.YFormat) || !Enum.IsDefined(pane.Y2Format)) throw new ArgumentException("Unknown value format.");
+        if ((pane.YReversed || pane.Y2Reversed) && spec.Kind == ChartKind.Area)
+            throw new ArgumentException("A reversed Y axis applies to line, scatter, bubble, band, candlestick, OHLC, box and violin charts. Column, bar, stacked column, area and histogram charts draw from a zero baseline, which a reversed axis would hang from the top, and donut, heatmap and radar charts have no Y axis.");
+        if (spec.IncludeZero && pane.YAxis == AxisKind.Log) throw new ArgumentException("Log axes cannot include zero.");
+        Bounds(pane.YMin, pane.YMax); Bounds(pane.Y2Min, pane.Y2Max);
+        if (pane.YAxis == AxisKind.Log && (pane.YMin <= 0 || pane.YMax <= 0)) throw new ArgumentException("Log Y bounds must be positive.");
+        if (pane.Y2Axis == AxisKind.Log && (pane.Y2Min <= 0 || pane.Y2Max <= 0)) throw new ArgumentException("Log secondary bounds must be positive.");
+        if (spec.Kind == ChartKind.Area && (pane.YMin > 0 || pane.YMax < 0 || pane.Y2Min > 0 || pane.Y2Max < 0)) throw new ArgumentException("Magnitude charts require a zero baseline.");
+        if (pane.YZones is not null) Zones(pane.YZones, style);
     }
 
     private static void Candle(ChartPoint p, AxisKind axis)

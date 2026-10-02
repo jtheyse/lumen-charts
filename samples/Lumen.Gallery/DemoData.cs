@@ -1,6 +1,6 @@
 namespace Lumen.Gallery;
 
-public enum AxisDemo { Numeric, Time, Log, PowerCurve, Pace, Zones, Performance, Target }
+public enum AxisDemo { Numeric, Time, Log, PowerCurve, Pace, Zones, Performance, Target, Stream }
 public enum BrandDemo { Lumen, Harbour, PageCss }
 
 public static class DemoData
@@ -18,6 +18,7 @@ public static class DemoData
     public static bool ZoneCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Bar;
     public static bool PerformanceCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line;
     public static bool TargetCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Column;
+    public static bool StreamCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line;
     public static readonly string[] Months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     public static Lumen.Charts.ChartSpec Create(Lumen.Charts.ChartKind kind,Lumen.Charts.ChartTheme theme,int revision=0,AxisDemo axis=AxisDemo.Numeric)
     {
@@ -25,6 +26,7 @@ public static class DemoData
         Lumen.Charts.ChartSeries Make(string name,double baseline) => new(name,Enumerable.Range(0,12).Select(i=>new Lumen.Charts.ChartPoint(i,Math.Round(baseline+i*2+random.NextDouble()*18,1),Months[i],10+random.Next(80))).ToArray());
         var series=new[]{Make("Workspace",35),Make("Enterprise",20),Make("Community",10)};
         var xKind=Lumen.Charts.AxisKind.Linear; var weekends=false; IReadOnlyList<Lumen.Charts.TimeSkip> holidays=[];
+        IReadOnlyList<Lumen.Charts.ChartPane> panes=[]; var height=420;
         var title="A clearer view of growth"; var desc="Monthly activity across three product plans";var x="Month index";var y="Active accounts (thousands)";
         if(kind==Lumen.Charts.ChartKind.Donut)
         {
@@ -58,11 +60,16 @@ public static class DemoData
                 }
                 day=day.AddDays(1);
             }
-            series=[new("ACME",candles)];
+            // Volume runs higher on the days the price moves most, and the average is over the last five closes.
+            var volume=candles.Select(c=>new Lumen.Charts.ChartPoint(c.X,Math.Round((1_200_000+Math.Abs(c.Close!.Value-c.Open!.Value)/c.Open.Value*60_000_000+random.Next(0,300_000))/1000)*1000)).ToArray();
+            var average=Lumen.Charts.Statistics.Rolling(candles.Select(c=>c.Close).ToArray(),5);
+            series=[new("ACME",candles),new("Volume",volume){Kind=Lumen.Charts.ChartKind.Column,Pane=1},
+                new("Five-day average",candles.Select((c,i)=>new Lumen.Charts.ChartPoint(c.X,average[i] is {} window?Math.Round(window.Mean,2):null)).ToArray()){Kind=Lumen.Charts.ChartKind.Line}];
+            panes=[new(){Label="Volume (shares)",Weight=.4,YFormat=Lumen.Charts.ValueFormat.Compact}];height=520;
             title=kind==Lumen.Charts.ChartKind.Candlestick?"Follow the market's mood":"The same prices, bar by bar";
             desc=kind==Lumen.Charts.ChartKind.Candlestick
-                ? "Simulated daily prices · 30 trading days, with the weekends and Good Friday left out of the axis"
-                : "The same 30 trading days as the candlestick · the tick on the left is the open, the one on the right the close";
+                ? "Simulated daily prices with their five-day average, and the volume traded beneath · 30 trading days, with the weekends and Good Friday left out of the axis"
+                : "The same 30 trading days as the candlestick, with its average and volume · the tick on the left is the open, the one on the right the close";
             x="Trading day (UTC)";y="Price (ZAR)";
             xKind=Lumen.Charts.AxisKind.Time;weekends=true;holidays=[Lumen.Charts.TimeAxis.Day(shut)];
         }
@@ -103,7 +110,7 @@ public static class DemoData
             title="Explore the relationship";desc="Account engagement and retention · illustrative observations"+(kind==Lumen.Charts.ChartKind.Scatter?" with a least-squares trend per series":"");x="Engagement score";y="Retention score";
             series=series.Select(s=>s with {Points=s.Points.Select(p=>p with {X=p.X*8+random.Next(6)}).ToArray(),Trend=kind==Lumen.Charts.ChartKind.Scatter}).ToArray();
         }
-        var spec=new Lumen.Charts.ChartSpec{Kind=kind,Theme=theme,XAxis=xKind,SkipWeekends=weekends,TimeSkips=holidays,Title=title,Description=desc,Series=series,XLabel=x,YLabel=y,Source="Source: deterministic demonstration data · not business results",Height=420};
+        var spec=new Lumen.Charts.ChartSpec{Kind=kind,Theme=theme,XAxis=xKind,SkipWeekends=weekends,TimeSkips=holidays,Title=title,Description=desc,Series=series,XLabel=x,YLabel=y,Source="Source: deterministic demonstration data · not business results",Height=height,Panes=panes};
         if(axis==AxisDemo.Time&&TimeCapable(kind))
         {
             var start=new DateTimeOffset(2026,1,5,0,0,0,TimeSpan.Zero);
@@ -204,6 +211,26 @@ public static class DemoData
                 XLabel="Week beginning",YLabel="Training stress per week",Annotations=[],
                 Series=[new("Weekly load",weekly.Select((w,i)=>new Lumen.Charts.ChartPoint(i,w,Week(i))).ToArray()),
                     new("Target range",Enumerable.Range(0,12).Select(i=>Lumen.Charts.ChartPoint.Interval(i,Math.Round(Before(i)),Math.Round(Before(i)*.8),Math.Round(Before(i)*1.3),Week(i))).ToArray()){Kind=Lumen.Charts.ChartKind.Band}]};
+        }
+        if(axis==AxisDemo.Stream&&StreamCapable(kind))
+        {
+            // An hour's run every 10 seconds: a warm-up, five intervals of four minutes hard and three easy, and a cool-down, over
+            // rolling ground. Heart rate closes a fifth of the gap to the effort each sample, and pace half of it.
+            var heart=Lumen.Charts.ZoneScale.CogganHeartRate(170);var beats=new double[361];var paces=new double[361];var climb=new double[361];
+            double current=96,stride=390;
+            for(var i=0;i<361;i++)
+            {
+                var t=i*10;var hard=t>=600&&t<3000&&(t-600)%420<240;
+                current+=((t<600?100+t*.075:t<3000?hard?185:132:118)-current)*.2;beats[i]=Math.Round(current+random.Next(-2,3));
+                stride+=((t<600?390-t*.1:t<3000?hard?248:345:380)-stride)*.5;paces[i]=Math.Round(stride+random.Next(-4,5));
+                climb[i]=Math.Round(20+14*Math.Sin(t/700.0)+5*Math.Sin(t/190.0),1);
+            }
+            Lumen.Charts.ChartPoint[] Over(double[] values)=>values.Select((v,i)=>new Lumen.Charts.ChartPoint(i*10,v)).ToArray();
+            spec=spec with{XFormat=Lumen.Charts.ValueFormat.Duration,Height=640,Title="See the whole run at once",
+                Description="Heart rate, pace and climb through a simulated interval run · three panes share the elapsed time, so zooming moves them together",
+                XLabel="Elapsed time",YLabel="Heart rate (bpm)",YZones=heart,Annotations=[new(Lumen.Charts.AnnotationAxis.X,600){To=3000,Label="Intervals"}],
+                Panes=[new(){Label="Pace (min/km)",Weight=.6,YFormat=Lumen.Charts.ValueFormat.Duration,YReversed=true},new(){Label="Climb (m)",Weight=.4}],
+                Series=[new("Heart rate",Over(beats)){Zones=heart},new("Pace",Over(paces)){Pane=1},new("Climb",Over(climb)){Pane=2,Kind=Lumen.Charts.ChartKind.Area}]};
         }
         return spec;
     }

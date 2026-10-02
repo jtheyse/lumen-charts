@@ -35,6 +35,12 @@ public static class ChartSvg
     internal static ChartStyle Preset(ChartTheme theme) => theme == ChartTheme.Dark ? ChartStyle.Dark : ChartStyle.Light;
     /// <summary>The mark a series draws: its own kind, or the chart's.</summary>
     internal static ChartKind Mark(ChartSpec spec, ChartSeries series) => series.Kind ?? spec.Kind;
+    /// <summary>What pane <paramref name="index"/> draws with: the spec's own Y properties for the main plot, and
+    /// <c>Panes[index - 1]</c> below it.</summary>
+    internal static ChartPane Pane(ChartSpec spec, int index) => index == 0
+        ? new() { Label = spec.YLabel, Weight = 1, YAxis = spec.YAxis, YMin = spec.YMin, YMax = spec.YMax, YFormat = spec.YFormat, YReversed = spec.YReversed, YZones = spec.YZones,
+            Y2Label = spec.Y2Label, Y2Axis = spec.Y2Axis, Y2Min = spec.Y2Min, Y2Max = spec.Y2Max, Y2Format = spec.Y2Format, Y2Reversed = spec.Y2Reversed }
+        : spec.Panes[index - 1];
 
     /// <summary>Renders a chart. <paramref name="includeTitles"/> controls the native SVG tooltip on each mark.</summary>
     public static string Render(ChartSpec spec, bool includeLegend = true, bool includeTitles = true)
@@ -105,109 +111,77 @@ public static class ChartSvg
         var category = s.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn;
         var secondary = s.Series.Any(series => series.Secondary);
         var left = horizontal ? 160d : 76d; var right = s.Width - (secondary ? 76d : 30d);
-        var top = 78d; var bottom = s.Height - 76d;
         var points = s.Series.SelectMany(x => x.Points).ToArray();
         var bubbles = s.Series.Where(x => Mark(s, x) == ChartKind.Bubble).SelectMany(x => x.Points).ToArray();
         var maxSize = bubbles.Length == 0 ? 0 : bubbles.Max(point => point.Size);
         var cats = points.Select(p => p.X).Distinct().Order().ToArray();
         var xs = Axis.Create(s.XAxis, points.Select(p => p.X), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone),
             weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null) with { ValueFormat = s.XFormat };
-        var primary = s.Series.Where(series => !series.Secondary).SelectMany(series => series.Points).ToArray();
-        var values = primary.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
-        // Prices and band edges reach the axis of the series that carries them.
-        IEnumerable<ChartPoint> Bounded(bool right) => s.Series.Where(x => x.Secondary == right && (s.Kind is ChartKind.Candlestick or ChartKind.Ohlc || Mark(s, x) == ChartKind.Band))
-            .SelectMany(x => x.Points).Where(p => p.Low.HasValue && p.High.HasValue);
-        foreach (var p in Bounded(false)) { values.Add(p.Low!.Value); values.Add(p.High!.Value); }
-        if (s.Kind == ChartKind.StackedColumn)
-            foreach (var x in cats)
-            {
-                values.Add(points.Where(p => p.X == x && p.Y > 0).Sum(p => p.Y!.Value));
-                values.Add(points.Where(p => p.X == x && p.Y < 0).Sum(p => p.Y!.Value));
-            }
-        var zero = s.IncludeZero || category || s.Kind == ChartKind.Area;
-        // An axis that carries columns or an area measures them from zero, whatever kind the chart is.
-        bool Filled(bool right) => s.Series.Any(x => x.Secondary == right && Mark(s, x) is ChartKind.Column or ChartKind.Area);
-        var ys = Axis.Create(s.YAxis, values, zero || Filled(false), s.YMin, s.YMax) with { ValueFormat = s.YFormat, Reversed = s.YReversed };
-        var second = s.Series.Where(series => series.Secondary).SelectMany(series => series.Points).ToArray();
-        var secondValues = second.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
-        foreach (var p in Bounded(true)) { secondValues.Add(p.Low!.Value); secondValues.Add(p.High!.Value); }
-        var ys2 = secondary ? Axis.Create(s.Y2Axis, secondValues, zero || Filled(true), s.Y2Min, s.Y2Max) with { ValueFormat = s.Y2Format, Reversed = s.Y2Reversed } : ys;
+        var plots = Plots(s, cats, points);
         double X(double x) => category ? left + (Array.IndexOf(cats, x) + .5) / cats.Length * (right - left) : xs.Map(x, left, right);
-        double Y(double y) => ys.Map(y, bottom, top);
-        if (s.MinorGridlines)
+        for (var k = 0; k < plots.Length; k++)
         {
-            foreach (var minor in ys.MinorTicks())
+            var (pane, top, bottom, ys, ys2, paired) = plots[k];
+            double Y(double y) => ys.Map(y, bottom, top);
+            if (s.MinorGridlines)
             {
-                if (horizontal) { var x = ys.Map(minor, left, right); w.Line(x, top, x, bottom, "class='lumen-grid-minor'"); }
-                else { var y = Y(minor); w.Line(left, y, right, y, "class='lumen-grid-minor'"); }
-            }
-            if (!category && !horizontal)
-                foreach (var minor in xs.MinorTicks())
+                foreach (var minor in ys.MinorTicks())
                 {
-                    var x = X(minor);
-                    w.Line(x, top, x, bottom, "class='lumen-grid-minor'");
+                    if (horizontal) { var x = ys.Map(minor, left, right); w.Line(x, top, x, bottom, "class='lumen-grid-minor'"); }
+                    else { var y = Y(minor); w.Line(left, y, right, y, "class='lumen-grid-minor'"); }
                 }
-        }
-        foreach (var (tick, label) in ys.Ticks())
-        {
-            if (horizontal)
-            {
-                var x = ys.Map(tick, left, right); w.Line(x, top, x, bottom, "class='lumen-grid'");
-                w.Text(x, bottom + 20, label, "text-anchor='middle' class='lumen-muted'");
+                if (!category && !horizontal)
+                    foreach (var minor in xs.MinorTicks())
+                    {
+                        var x = X(minor);
+                        w.Line(x, top, x, bottom, "class='lumen-grid-minor'");
+                    }
             }
-            else
+            foreach (var (tick, label) in ys.Ticks())
             {
-                var y = Y(tick); w.Line(left, y, right, y, "class='lumen-grid'");
-                w.Text(left - 12, y + 4, label, "text-anchor='end' class='lumen-muted'");
+                if (horizontal)
+                {
+                    var x = ys.Map(tick, left, right); w.Line(x, top, x, bottom, "class='lumen-grid'");
+                    w.Text(x, bottom + 20, label, "text-anchor='middle' class='lumen-muted'");
+                }
+                else
+                {
+                    var y = Y(tick); w.Line(left, y, right, y, "class='lumen-grid'");
+                    w.Text(left - 12, y + 4, label, "text-anchor='end' class='lumen-muted'");
+                }
             }
-        }
-        // Ticks on the right, but no second set of gridlines: one grid is what a reader can follow.
-        if (secondary)
-            foreach (var (tick, label) in ys2.Ticks())
-                w.Text(right + 12, ys2.Map(tick, bottom, top) + 4, label, "text-anchor='start' class='lumen-muted'");
-        if (category)
-        {
-            var step = Math.Max(1, (int)Math.Ceiling(cats.Length / (horizontal ? (bottom - top) / 24 : (right - left) / 65)));
-            for (var i = 0; i < cats.Length; i += step)
+            // Ticks on the right, but no second set of gridlines: one grid is what a reader can follow.
+            if (paired)
+                foreach (var (tick, label) in ys2.Ticks())
+                    w.Text(right + 12, ys2.Map(tick, bottom, top) + 4, label, "text-anchor='start' class='lumen-muted'");
+            // The panes share the X axis, so it is labelled once, under the bottom one.
+            if (k == plots.Length - 1)
             {
-                var label = points.First(p => p.X == cats[i]).Label ?? LinearScale.Label(cats[i]);
-                if (horizontal) w.Text(left - 12, top + (i + .5) / cats.Length * (bottom - top) + 4, Short(label, 21), "text-anchor='end' class='lumen-muted'");
-                else w.Text(X(cats[i]), bottom + 21, Short(label, 12), "text-anchor='middle' class='lumen-muted'");
+                if (category)
+                {
+                    var step = Math.Max(1, (int)Math.Ceiling(cats.Length / (horizontal ? (bottom - top) / 24 : (right - left) / 65)));
+                    for (var i = 0; i < cats.Length; i += step)
+                    {
+                        var label = points.First(p => p.X == cats[i]).Label ?? LinearScale.Label(cats[i]);
+                        if (horizontal) w.Text(left - 12, top + (i + .5) / cats.Length * (bottom - top) + 4, Short(label, 21), "text-anchor='end' class='lumen-muted'");
+                        else w.Text(X(cats[i]), bottom + 21, Short(label, 12), "text-anchor='middle' class='lumen-muted'");
+                    }
+                }
+                else
+                {
+                    var labels = points.Where(p => p.Label is not null && p.X >= xs.Min && p.X <= xs.Max).DistinctBy(p => p.X).OrderBy(p => p.X).ToArray();
+                    if (labels.Length is > 0 and <= 24)
+                        for (var i = 0; i < labels.Length; i += Math.Max(1, (int)Math.Ceiling(labels.Length / 7d)))
+                            w.Text(X(labels[i].X), bottom + 21, Short(labels[i].Label!, 12), "text-anchor='middle' class='lumen-muted'");
+                    else foreach (var (tick, label) in xs.Ticks(s.XAxis == AxisKind.Time ? 6 : 5)) w.Text(X(tick), bottom + 21, label, "text-anchor='middle' class='lumen-muted'");
+                }
+                w.Text((left + right) / 2, bottom + 44, horizontal ? s.YLabel : s.XLabel, "text-anchor='middle' class='lumen-muted'");
             }
+            w.Text(20, (top + bottom) / 2, horizontal ? s.XLabel : pane.Label, $"text-anchor='middle' transform='rotate(-90 20 {N((top + bottom) / 2)})' class='lumen-muted'");
+            if (paired)
+                w.Text(s.Width - 16, (top + bottom) / 2, pane.Y2Label, $"text-anchor='middle' transform='rotate(90 {N(s.Width - 16)} {N((top + bottom) / 2)})' class='lumen-muted'");
         }
-        else
-        {
-            var labels = points.Where(p => p.Label is not null && p.X >= xs.Min && p.X <= xs.Max).DistinctBy(p => p.X).OrderBy(p => p.X).ToArray();
-            if (labels.Length is > 0 and <= 24)
-                for (var i = 0; i < labels.Length; i += Math.Max(1, (int)Math.Ceiling(labels.Length / 7d)))
-                    w.Text(X(labels[i].X), bottom + 21, Short(labels[i].Label!, 12), "text-anchor='middle' class='lumen-muted'");
-            else foreach (var (tick, label) in xs.Ticks(s.XAxis == AxisKind.Time ? 6 : 5)) w.Text(X(tick), bottom + 21, label, "text-anchor='middle' class='lumen-muted'");
-        }
-        w.Text((left + right) / 2, bottom + 44, horizontal ? s.YLabel : s.XLabel, "text-anchor='middle' class='lumen-muted'");
-        w.Text(20, (top + bottom) / 2, horizontal ? s.XLabel : s.YLabel, $"text-anchor='middle' transform='rotate(-90 20 {N((top + bottom) / 2)})' class='lumen-muted'");
-        if (secondary)
-            w.Text(s.Width - 16, (top + bottom) / 2, s.Y2Label, $"text-anchor='middle' transform='rotate(90 {N(s.Width - 16)} {N((top + bottom) / 2)})' class='lumen-muted'");
-        // Nested SVG provides a local clipping viewport without global clip-path IDs. It is inset by
-        // one marker radius so a mark on the first or last value is drawn whole and stays hoverable.
-        const double bleed = 6;
-        w.Add($"<svg x='{N(left-bleed)}' y='{N(top-bleed)}' width='{N(right-left+2*bleed)}' height='{N(bottom-top+2*bleed)}' viewBox='{N(left-bleed)} {N(top-bleed)} {N(right-left+2*bleed)} {N(bottom-top+2*bleed)}' overflow='hidden'>");
-        // Behind the data, and inside the clip, so a reference pans and zooms with what it refers to.
-        Func<double, double> value = horizontal ? v => ys.Map(v, left, right) : Y;
-        if (s.YZones is { } bands) ZoneBands(w, bands, value, ys, horizontal, left, right, top, bottom);
-        // A horizontal bar chart measures along X, so there a value reference stands upright, as the zone bands do.
-        foreach (var annotation in s.Annotations)
-            if (horizontal) Annotate(w, annotation with { Axis = AnnotationAxis.X }, value, value, ys, ys, left, right, top, bottom, inside: true);
-            else Annotate(w, annotation, X, Y, xs, ys, left, right, top, bottom);
         var positive = cats.ToDictionary(x => x, _ => 0d); var negative = cats.ToDictionary(x => x, _ => 0d);
-        // Column series share each slot side by side. On a continuous axis a slot takes its width from the closest two X
-        // values any column series has, as a candle does from its own, so no two slots overlap.
-        var columns = Enumerable.Range(0, s.Series.Count).Where(i => Mark(s, s.Series[i]) is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn).ToArray();
-        var slot = 0d;
-        if (!category && columns.Length > 0)
-        {
-            var at = columns.SelectMany(i => s.Series[i].Points).Select(p => p.X).Distinct().Select(X).Order().ToArray();
-            slot = Math.Clamp((at.Length > 1 ? Enumerable.Range(1, at.Length - 1).Min(i => at[i] - at[i - 1]) : 30) * .7, 1, 34);
-        }
         // A category chart places categories by index, so a projection starting between two is interpolated between them.
         double Projected(double from)
         {
@@ -218,86 +192,155 @@ public static class ChartSvg
             if (after == 0) return double.NegativeInfinity;
             return X(cats[after - 1]) + (from - cats[after - 1]) / (cats[after] - cats[after - 1]) * (X(cats[after]) - X(cats[after - 1]));
         }
-        // Bands first, then areas, columns, lines, and points last, so the broad marks stand behind the narrow ones. Series
-        // keep their order within each, so a chart of one kind draws in series order.
-        foreach (var si in Enumerable.Range(0, s.Series.Count).OrderBy(i => Layer(Mark(s, s.Series[i]))))
+        // Nested SVG provides a local clipping viewport without global clip-path IDs, one for each pane. It is inset by
+        // one marker radius so a mark on the first or last value is drawn whole and stays hoverable.
+        const double bleed = 6;
+        for (var k = 0; k < plots.Length; k++)
         {
-            var series = s.Series[si]; var color = SeriesColor(series, si, w.Style); var mark = Mark(s, series); var place = Array.IndexOf(columns, si);
-            // Each series is measured against its own axis from here on.
-            var scale = series.Secondary ? ys2 : ys;
-            double At(double y) => scale.Map(y, bottom, top);
-            // A point's own colour beats its zone's, which beats the series colour.
-            string Ink(ChartPoint p) => p.Color ?? (series.Zones is { } zones ? ZoneColor(w.Style, zones, zones.IndexOf(p.Y!.Value)) : color);
-            if (mark == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, At, xs, scale, cells, left, right, top, bottom);
-            else if (s.Kind == ChartKind.Candlestick) Candles(w, series, X, At, xs, scale);
-            else if (s.Kind == ChartKind.Ohlc) Ohlc(w, series, X, At, xs, scale);
-            else if (mark is ChartKind.Line or ChartKind.Area or ChartKind.Band)
+            var (pane, top, bottom, ys, ys2, _) = plots[k];
+            double Y(double y) => ys.Map(y, bottom, top);
+            w.Add($"<svg x='{N(left-bleed)}' y='{N(top-bleed)}' width='{N(right-left+2*bleed)}' height='{N(bottom-top+2*bleed)}' viewBox='{N(left-bleed)} {N(top-bleed)} {N(right-left+2*bleed)} {N(bottom-top+2*bleed)}' overflow='hidden'>");
+            // Behind the data, and inside the clip, so a reference pans and zooms with what it refers to.
+            Func<double, double> value = horizontal ? v => ys.Map(v, left, right) : Y;
+            if (pane.YZones is { } bands) ZoneBands(w, bands, value, ys, horizontal, left, right, top, bottom);
+            // A horizontal bar chart measures along X, so there a value reference stands upright, as the zone bands do. A Y
+            // reference belongs to the main plot; an X one runs through every pane and is named once, in the main plot.
+            foreach (var annotation in s.Annotations)
+                if (horizontal) Annotate(w, annotation with { Axis = AnnotationAxis.X }, value, value, ys, ys, left, right, top, bottom, inside: true);
+                else if (k == 0) Annotate(w, annotation, X, Y, xs, ys, left, right, top, bottom);
+                else if (annotation.Axis == AnnotationAxis.X) Annotate(w, annotation, X, Y, xs, ys, left, right, top, bottom, named: false);
+            // Column series share each slot side by side. On a continuous axis a slot takes its width from the closest two X
+            // values any column series in the pane has, as a candle does from its own, so no two slots overlap.
+            var columns = Enumerable.Range(0, s.Series.Count).Where(i => s.Series[i].Pane == k && Mark(s, s.Series[i]) is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn).ToArray();
+            var slot = 0d;
+            if (!category && columns.Length > 0)
             {
-                if (mark == ChartKind.Band) Bands(w, series, color, X, At, s.MaxRenderedPoints);
-                var projected = series.ProjectedFrom is { } from ? Projected(from) : double.PositiveInfinity;
-                // Sample each continuous run independently, preserving missing-observation gaps.
-                var start = 0;
-                while (start < series.Points.Count)
-                {
-                    if (!series.Points[start].Y.HasValue) { start++; continue; }
-                    var end = start; while (end < series.Points.Count && series.Points[end].Y.HasValue) end++;
-                    var run = series.Points.Skip(start).Take(end - start).ToArray();
-                    var indices = Sampling.MinMax(run, s.MaxRenderedPoints);
-                    var path = string.Join(" ", indices.Select((i, n) => $"{(n == 0 ? "M" : "L")}{N(X(run[i].X))},{N(At(run[i].Y!.Value))}"));
-                    if (mark == ChartKind.Area)
-                        w.Add($"<path d='{path} L{N(X(run[^1].X))},{N(At(0))} L{N(X(run[0].X))},{N(At(0))} Z' fill='{color}' fill-opacity='.12'/>");
-                    if (series.Zones is null && series.ProjectedFrom is null && indices.All(i => run[i].Color is null))
-                        w.Add($"<path d='{path}' fill='none' stroke='{color}' stroke-width='2.5' stroke-linejoin='round'/>");
-                    else Stroke(w, series.Zones, run, indices, color, X, At, projected);
-                    foreach (var i in indices)
-                    {
-                        var p = run[i];
-                        Datum(w, si, start + i, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(p.Y!.Value))}' r='{(indices.Count > 80 ? "2" : "4")}' fill='{Ink(p)}'/>");
-                    }
-                    start = end;
-                }
+                var at = columns.SelectMany(i => s.Series[i].Points).Select(p => p.X).Distinct().Select(X).Order().ToArray();
+                slot = Math.Clamp((at.Length > 1 ? Enumerable.Range(1, at.Length - 1).Min(i => at[i] - at[i - 1]) : 30) * .7, 1, 34);
             }
-            else for (var pi = 0; pi < series.Points.Count; pi++)
+            // Bands first, then areas, columns and candles, lines, and points last, so the broad marks stand behind the narrow
+            // ones. Series keep their order within each, so a chart of one kind draws in series order.
+            foreach (var si in Enumerable.Range(0, s.Series.Count).Where(i => s.Series[i].Pane == k).OrderBy(i => Layer(Mark(s, s.Series[i]))))
             {
-                var p = series.Points[pi]; if (!p.Y.HasValue) continue;
-                var y = p.Y.Value;
-                if (category && place >= 0)
+                var series = s.Series[si]; var color = SeriesColor(series, si, w.Style); var mark = Mark(s, series); var place = Array.IndexOf(columns, si);
+                // Each series is measured against its own axis from here on.
+                var scale = series.Secondary ? ys2 : ys;
+                double At(double y) => scale.Map(y, bottom, top);
+                // A point's own colour beats its zone's, which beats the series colour.
+                string Ink(ChartPoint p) => p.Color ?? (series.Zones is { } zones ? ZoneColor(w.Style, zones, zones.IndexOf(p.Y!.Value)) : color);
+                if (mark == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, At, xs, scale, cells, left, right, top, bottom);
+                else if (mark == ChartKind.Candlestick) Candles(w, si, series, X, At, xs, scale);
+                else if (mark == ChartKind.Ohlc) Ohlc(w, si, series, X, At, xs, scale);
+                else if (mark is ChartKind.Line or ChartKind.Area or ChartKind.Band)
                 {
-                    var ci = Array.IndexOf(cats, p.X);
-                    var band = (horizontal ? bottom - top : right - left) / cats.Length;
-                    var stacked = s.Kind == ChartKind.StackedColumn;
-                    var width = band * .72 / (stacked ? 1 : columns.Length);
-                    var basis = 0d;
-                    if (stacked) { var dict = y >= 0 ? positive : negative; basis = dict[p.X]; dict[p.X] += y; }
-                    double rx, ry, rw, rh;
-                    if (horizontal)
+                    if (mark == ChartKind.Band) Bands(w, series, color, X, At, s.MaxRenderedPoints);
+                    var projected = series.ProjectedFrom is { } from ? Projected(from) : double.PositiveInfinity;
+                    // Sample each continuous run independently, preserving missing-observation gaps.
+                    var start = 0;
+                    while (start < series.Points.Count)
                     {
-                        rx = ys.Map(Math.Min(0, y), left, right); ry = top + ci * band + band * .14 + place * width;
-                        rw = Math.Abs(ys.Map(y, left, right) - ys.Map(0, left, right)); rh = width;
+                        if (!series.Points[start].Y.HasValue) { start++; continue; }
+                        var end = start; while (end < series.Points.Count && series.Points[end].Y.HasValue) end++;
+                        var run = series.Points.Skip(start).Take(end - start).ToArray();
+                        var indices = Sampling.MinMax(run, s.MaxRenderedPoints);
+                        var path = string.Join(" ", indices.Select((i, n) => $"{(n == 0 ? "M" : "L")}{N(X(run[i].X))},{N(At(run[i].Y!.Value))}"));
+                        if (mark == ChartKind.Area)
+                            w.Add($"<path d='{path} L{N(X(run[^1].X))},{N(At(0))} L{N(X(run[0].X))},{N(At(0))} Z' fill='{color}' fill-opacity='.12'/>");
+                        if (series.Zones is null && series.ProjectedFrom is null && indices.All(i => run[i].Color is null))
+                            w.Add($"<path d='{path}' fill='none' stroke='{color}' stroke-width='2.5' stroke-linejoin='round'/>");
+                        else Stroke(w, series.Zones, run, indices, color, X, At, projected);
+                        foreach (var i in indices)
+                        {
+                            var p = run[i];
+                            Datum(w, si, start + i, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(p.Y!.Value))}' r='{(indices.Count > 80 ? "2" : "4")}' fill='{Ink(p)}'/>");
+                        }
+                        start = end;
+                    }
+                }
+                else for (var pi = 0; pi < series.Points.Count; pi++)
+                {
+                    var p = series.Points[pi]; if (!p.Y.HasValue) continue;
+                    var y = p.Y.Value;
+                    if (category && place >= 0)
+                    {
+                        var ci = Array.IndexOf(cats, p.X);
+                        var band = (horizontal ? bottom - top : right - left) / cats.Length;
+                        var stacked = s.Kind == ChartKind.StackedColumn;
+                        var width = band * .72 / (stacked ? 1 : columns.Length);
+                        var basis = 0d;
+                        if (stacked) { var dict = y >= 0 ? positive : negative; basis = dict[p.X]; dict[p.X] += y; }
+                        double rx, ry, rw, rh;
+                        if (horizontal)
+                        {
+                            rx = ys.Map(Math.Min(0, y), left, right); ry = top + ci * band + band * .14 + place * width;
+                            rw = Math.Abs(ys.Map(y, left, right) - ys.Map(0, left, right)); rh = width;
+                        }
+                        else
+                        {
+                            rx = left + ci * band + band * .14 + (stacked ? 0 : place * width); ry = Math.Min(At(basis), At(basis + y));
+                            rw = width; rh = Math.Abs(At(basis + y) - At(basis));
+                        }
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<rect x='{N(rx)}' y='{N(ry)}' width='{N(rw)}' height='{N(rh)}' rx='2' fill='{Ink(p)}'/>");
+                    }
+                    else if (place >= 0)
+                    {
+                        // Centred on its X within the slot, rising from zero on the series' own axis.
+                        var width = slot / columns.Length;
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<rect x='{N(X(p.X) - slot / 2 + place * width)}' y='{N(Math.Min(At(0), At(y)))}' width='{N(width)}' height='{N(Math.Abs(At(y) - At(0)))}' rx='2' fill='{Ink(p)}'/>");
                     }
                     else
                     {
-                        rx = left + ci * band + band * .14 + (stacked ? 0 : place * width); ry = Math.Min(At(basis), At(basis + y));
-                        rw = width; rh = Math.Abs(At(basis + y) - At(basis));
+                        var radius = mark == ChartKind.Bubble ? Math.Sqrt(p.Size / Math.Max(maxSize, double.Epsilon)) * 22 : 4;
+                        var ink = Ink(p);
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(y))}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'/>");
                     }
-                    Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<rect x='{N(rx)}' y='{N(ry)}' width='{N(rw)}' height='{N(rh)}' rx='2' fill='{Ink(p)}'/>");
                 }
-                else if (place >= 0)
-                {
-                    // Centred on its X within the slot, rising from zero on the series' own axis.
-                    var width = slot / columns.Length;
-                    Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<rect x='{N(X(p.X) - slot / 2 + place * width)}' y='{N(Math.Min(At(0), At(y)))}' width='{N(width)}' height='{N(Math.Abs(At(y) - At(0)))}' rx='2' fill='{Ink(p)}'/>");
-                }
-                else
-                {
-                    var radius = mark == ChartKind.Bubble ? Math.Sqrt(p.Size / Math.Max(maxSize, double.Epsilon)) * 22 : 4;
-                    var ink = Ink(p);
-                    Datum(w, si, pi, PointLabel(series,p,xs,scale), $"<circle cx='{N(X(p.X))}' cy='{N(At(y))}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'/>");
-                }
+                if (series.Trend) Trend(w, series, color, X, At, left, right, scale.Reversed);
             }
-            if (series.Trend) Trend(w, series, color, X, At, left, right, scale.Reversed);
+            w.Add("</svg>");
         }
-        w.Add("</svg>");
+    }
+
+    /// <summary>
+    /// The main plot and the panes under it, top to bottom, each with the Y axes its own series are measured against. The
+    /// height between the title and the X axis is shared out by weight, the main plot weighing 1, after a fixed gap
+    /// between each two.
+    /// </summary>
+    private static (ChartPane Pane, double Top, double Bottom, Axis Ys, Axis Ys2, bool Paired)[] Plots(ChartSpec s, double[] cats, ChartPoint[] points)
+    {
+        const double gap = 24;
+        double top = 78, bottom = s.Height - 76d;
+        var room = bottom - top - gap * s.Panes.Count;
+        var weight = 1 + s.Panes.Sum(p => p.Weight);
+        var zero = s.IncludeZero || s.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Area;
+        var plots = new (ChartPane, double, double, Axis, Axis, bool)[s.Panes.Count + 1];
+        for (var k = 0; k < plots.Length; k++)
+        {
+            var pane = Pane(s, k);
+            var mine = s.Series.Where(x => x.Pane == k).ToArray();
+            var values = mine.Where(x => !x.Secondary).SelectMany(x => x.Points).Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
+            // Prices and band edges reach the axis of the series that carries them.
+            IEnumerable<ChartPoint> Bounded(bool right) => mine.Where(x => x.Secondary == right && Mark(s, x) is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band)
+                .SelectMany(x => x.Points).Where(p => p.Low.HasValue && p.High.HasValue);
+            foreach (var p in Bounded(false)) { values.Add(p.Low!.Value); values.Add(p.High!.Value); }
+            if (s.Kind == ChartKind.StackedColumn)
+                foreach (var x in cats)
+                {
+                    values.Add(points.Where(p => p.X == x && p.Y > 0).Sum(p => p.Y!.Value));
+                    values.Add(points.Where(p => p.X == x && p.Y < 0).Sum(p => p.Y!.Value));
+                }
+            // An axis that carries columns or an area measures them from zero, whatever kind the chart is.
+            bool Filled(bool right) => mine.Any(x => x.Secondary == right && Mark(s, x) is ChartKind.Column or ChartKind.Area);
+            var ys = Axis.Create(pane.YAxis, values, zero || Filled(false), pane.YMin, pane.YMax) with { ValueFormat = pane.YFormat, Reversed = pane.YReversed };
+            var paired = mine.Any(x => x.Secondary);
+            var secondValues = mine.Where(x => x.Secondary).SelectMany(x => x.Points).Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
+            foreach (var p in Bounded(true)) { secondValues.Add(p.Low!.Value); secondValues.Add(p.High!.Value); }
+            var ys2 = paired ? Axis.Create(pane.Y2Axis, secondValues, zero || Filled(true), pane.Y2Min, pane.Y2Max) with { ValueFormat = pane.Y2Format, Reversed = pane.Y2Reversed } : ys;
+            var below = k == plots.Length - 1 ? bottom : top + room * (pane.Weight / weight);
+            plots[k] = (pane, top, below, ys, ys2, paired);
+            top = below + gap;
+        }
+        return plots;
     }
 
     /// <summary>
@@ -369,7 +412,7 @@ public static class ChartSvg
             w.Add($"<path d='{path}' fill='none' stroke='{ink}' stroke-width='2.5' stroke-linejoin='round'{(dashed ? " stroke-dasharray='6 4'" : "")}/>");
     }
 
-    private static int Layer(ChartKind mark) => mark switch { ChartKind.Band => 0, ChartKind.Area => 1, ChartKind.Column => 2, ChartKind.Line => 3, _ => 4 };
+    private static int Layer(ChartKind mark) => mark switch { ChartKind.Band => 0, ChartKind.Area => 1, ChartKind.Column or ChartKind.Candlestick or ChartKind.Ohlc => 2, ChartKind.Line => 3, _ => 4 };
 
     /// <summary>
     /// Each zone as a band on the value axis, drawn through the annotation path so it clips, pans and zooms as a Y
@@ -428,9 +471,10 @@ public static class ChartSvg
     /// <summary>Draws one reference. <paramref name="reading"/> replaces the values it would otherwise read out, and
     /// <paramref name="ink"/> its label's colour. <paramref name="inside"/> sets an upright reference's label on the
     /// side of it with more of the plot, from the part of it the plot shows, so a label near the end of the axis stays
-    /// in view; a reference wholly off the plot turns its label away, so the two clip together.</summary>
+    /// in view; a reference wholly off the plot turns its label away, so the two clip together. A reference that is not
+    /// <paramref name="named"/> draws its shape alone, as an X reference does in the panes below the one that names it.</summary>
     private static void Annotate(SvgWriter w, ChartAnnotation annotation, Func<double, double> X, Func<double, double> Y,
-        Axis xs, Axis ys, double left, double right, double top, double bottom, string? reading = null, string? ink = null, bool inside = false)
+        Axis xs, Axis ys, double left, double right, double top, double bottom, string? reading = null, string? ink = null, bool inside = false, bool named = true)
     {
         var horizontal = annotation.Axis == AnnotationAxis.Y;
         var axis = horizontal ? ys : xs;
@@ -465,11 +509,12 @@ public static class ChartSvg
             reading ??= axis.Format(annotation.From);
             (labelX, labelY, anchor) = horizontal ? (right - 6, at - 6, "end") : Upright(at, at);
         }
+        if (!named) { w.Add(shape); return; }
         var label = annotation.Label is null ? reading : $"{annotation.Label}: {reading}";
         Aggregate(w, label, shape + $"<text x='{N(labelX)}' y='{N(labelY)}' text-anchor='{anchor}' fill='{ink ?? colour}' font-size='11'>{SvgWriter.E(label)}</text>");
     }
 
-    private static void Candles(SvgWriter w, ChartSeries series, Func<double, double> X, Func<double, double> Y, Axis xs, Axis ys)
+    private static void Candles(SvgWriter w, int si, ChartSeries series, Func<double, double> X, Func<double, double> Y, Axis xs, Axis ys)
     {
         var columns = series.Points.Select(p => X(p.X)).ToArray();
         var gap = columns.Length > 1 ? Enumerable.Range(1, columns.Length - 1).Min(i => columns[i] - columns[i - 1]) : 30;
@@ -481,7 +526,7 @@ public static class ChartSvg
             var color = close >= open ? w.Style.Rising : w.Style.Falling;
             // The body's top edge is whichever price sits higher on screen, which on a reversed axis is the lower one.
             double body = Math.Min(Y(open), Y(close)), baseline = Math.Max(Y(open), Y(close));
-            Datum(w, 0, pi, $"{p.Label ?? xs.Format(p.X)}: open {ys.Format(open)}, high {ys.Format(high)}, low {ys.Format(low)}, close {ys.Format(close)}",
+            Datum(w, si, pi, $"{p.Label ?? xs.Format(p.X)}: open {ys.Format(open)}, high {ys.Format(high)}, low {ys.Format(low)}, close {ys.Format(close)}",
                 $"<line x1='{N(columns[pi])}' y1='{N(Y(high))}' x2='{N(columns[pi])}' y2='{N(Y(low))}' stroke='{color}' stroke-width='1.5'/>" +
                 $"<rect x='{N(columns[pi] - width / 2)}' y='{N(body)}' width='{N(width)}' height='{N(Math.Max(baseline - body, 1))}' rx='1' fill='{color}'/>");
         }
@@ -492,7 +537,7 @@ public static class ChartSvg
     /// close to the right. A tick is half the width a candle body takes, so a bar occupies the same column
     /// and the two drawings of the same prices can be compared side by side.
     /// </summary>
-    private static void Ohlc(SvgWriter w, ChartSeries series, Func<double, double> X, Func<double, double> Y, Axis xs, Axis ys)
+    private static void Ohlc(SvgWriter w, int si, ChartSeries series, Func<double, double> X, Func<double, double> Y, Axis xs, Axis ys)
     {
         var columns = series.Points.Select(p => X(p.X)).ToArray();
         var gap = columns.Length > 1 ? Enumerable.Range(1, columns.Length - 1).Min(i => columns[i] - columns[i - 1]) : 30;
@@ -502,7 +547,7 @@ public static class ChartSvg
             var p = series.Points[pi];
             double open = p.Open!.Value, high = p.High!.Value, low = p.Low!.Value, close = p.Close!.Value;
             var color = close >= open ? w.Style.Rising : w.Style.Falling;
-            Datum(w, 0, pi, $"{p.Label ?? xs.Format(p.X)}: open {ys.Format(open)}, high {ys.Format(high)}, low {ys.Format(low)}, close {ys.Format(close)}",
+            Datum(w, si, pi, $"{p.Label ?? xs.Format(p.X)}: open {ys.Format(open)}, high {ys.Format(high)}, low {ys.Format(low)}, close {ys.Format(close)}",
                 $"<line x1='{N(columns[pi])}' y1='{N(Y(high))}' x2='{N(columns[pi])}' y2='{N(Y(low))}' stroke='{color}' stroke-width='1.5'/>" +
                 $"<line x1='{N(columns[pi] - tick)}' y1='{N(Y(open))}' x2='{N(columns[pi])}' y2='{N(Y(open))}' stroke='{color}' stroke-width='1.5'/>" +
                 $"<line x1='{N(columns[pi])}' y1='{N(Y(close))}' x2='{N(columns[pi] + tick)}' y2='{N(Y(close))}' stroke='{color}' stroke-width='1.5'/>");

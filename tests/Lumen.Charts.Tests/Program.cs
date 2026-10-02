@@ -2510,6 +2510,290 @@ Test("Series kinds and projections survive JSON, and a request that names neithe
     var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",options)!;
     Check(old.Series[0].Kind is null&&old.Series[0].ProjectedFrom is null);
 });
+// 0.22.0: panes. Each pane clips its marks in a nested SVG six pixels wider than it all round; the height between y 78 and
+// Height - 76 is shared out by weight, the main plot weighing 1, after a gap of 24 pixels between each two panes.
+XElement[] PaneClips(XDocument doc)=>doc.Root!.Elements(ns+"svg").ToArray();
+(double Top,double Bottom) PaneSpan(XElement clip)=>(Attr(clip,"y")+6,Attr(clip,"y")+Attr(clip,"height")-6);
+ChartSpec Stacked()=>Spec() with{Height=600,YLabel="Top",Panes=[new(){Label="Middle",Weight=.5},new(){Label="Bottom",Weight=1.5}],Series=[
+    new("Top",[new(0,100),new(5,200),new(10,150)]),new("Middle",[new(0,1),new(5,5),new(10,3)]){Pane=1},new("Bottom",[new(0,-20),new(5,20),new(10,0)]){Pane=2}]};
+double[] CxOf(XDocument doc,int series)=>doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("data-series")==series.ToString(CultureInfo.InvariantCulture)&&g.Element(ns+"circle") is not null)
+    .Select(g=>Attr(g.Element(ns+"circle")!,"cx")).ToArray();
+Test("Panes share the plot by weight, the main one weighing 1, a fixed gap apart and without overlapping",()=>{
+    var clips=PaneClips(Svg(Stacked()));
+    var spans=clips.Select(PaneSpan).ToArray();
+    // 600 - 76 - 78 leaves 446 pixels; less two gaps of 24 that is 398, shared 1 : 0.5 : 1.5.
+    Check(spans.Length==3,$"{spans.Length} panes");
+    double[] heights=[398/3d,398/6d,398/2d];
+    for(var i=0;i<3;i++) Check(Close(spans[i].Bottom-spans[i].Top,heights[i]),$"pane {i} is {spans[i].Bottom-spans[i].Top} high");
+    Check(Close(spans[0].Top,78)&&Close(spans[2].Bottom,524)&&Close(spans[1].Top-spans[0].Bottom,24)&&Close(spans[2].Top-spans[1].Bottom,24),"the panes do not fill the plot a gap apart");
+    Check(clips.Zip(clips.Skip(1)).All(p=>Attr(p.First,"y")+Attr(p.First,"height")<Attr(p.Second,"y")),"two clips overlap");
+    // Weights are relative, so doubling every one, the main plot's included, would change nothing; doubling the panes' alone shrinks the main plot.
+    var heavier=PaneClips(Svg(Stacked() with{Panes=Stacked().Panes.Select(p=>p with{Weight=p.Weight*2}).ToArray()})).Select(PaneSpan).ToArray();
+    Check(Close(heavier[0].Bottom-heavier[0].Top,398/5d)&&Close(heavier[2].Bottom-heavier[2].Top,398*3/5d),"weights are not relative to the main plot's 1");
+    Check(new ChartPane().Weight==.5&&PaneClips(Svg(Spec())).Select(PaneSpan).SequenceEqual([(78d,344d)]),"the defaults moved");
+});
+Test("Every pane places X through one mapping, the main plot's, on a trading axis and at any zoom",()=>{
+    var friday=Utc(2026,3,6);
+    var days=Enumerable.Range(0,12).Select(i=>friday+i*86_400_000d).Where(x=>TimeAxis.Moment(x).DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday)).ToArray();
+    ChartSeries Over(string name,int pane,double scale)=>new(name,days.Select((x,i)=>new ChartPoint(x,(i+1)*scale)).ToArray()){Pane=pane};
+    var paned=Spec() with{XAxis=AxisKind.Time,SkipWeekends=true,Height=560,Panes=[new(){YReversed=true},new(){YAxis=AxisKind.Log}],Series=[Over("A",0,1),Over("B",1,100),Over("C",2,.01)]};
+    foreach(var (from,to) in new (double?,double?)[]{(null,null),(days[2],days[5])})
+    {
+        var doc=Svg(paned with{XMin=from,XMax=to});
+        var alone=CxOf(Svg(Spec() with{XAxis=AxisKind.Time,SkipWeekends=true,XMin=from,XMax=to,Series=[Over("A",0,1)]}),0);
+        Check(CxOf(doc,0).Length==days.Length&&CxOf(doc,1).SequenceEqual(CxOf(doc,0))&&CxOf(doc,2).SequenceEqual(CxOf(doc,0))&&CxOf(doc,0).SequenceEqual(alone),$"the panes place X differently from {from} to {to}");
+    }
+    Check(!CxOf(Svg(paned),2).SequenceEqual(CxOf(Svg(paned with{XMin=days[2],XMax=days[5]}),2)),"zooming moved nothing");
+});
+Test("The X axis is labelled and titled once, under the bottom pane",()=>{
+    var spec=Stacked() with{XLabel="Elapsed",XFormat=ValueFormat.Duration};
+    XElement[] Below(XDocument doc)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="middle"&&t.Attribute("transform") is null&&(string?)t.Attribute("class")=="lumen-muted").ToArray();
+    var doc=Svg(spec);
+    var bottom=PaneSpan(PaneClips(doc)[2]).Bottom;
+    var alone=Below(Svg(spec with{Panes=[],Series=[spec.Series[0]]})).Select(t=>t.Value).ToArray();
+    Check(alone.Length>2&&Below(doc).Select(t=>t.Value).SequenceEqual(alone),"the panes label X differently from one plot");
+    Check(Below(doc).All(t=>Close(Attr(t,"y"),bottom+(t.Value=="Elapsed"?44:21)))&&Below(doc).Count(t=>t.Value=="Elapsed")==1,"an X label is not under the bottom pane, or is drawn twice");
+});
+Test("Each pane's Y axes measure its own series and no other, and are titled beside it",()=>{
+    var spec=Stacked() with{Panes=[Stacked().Panes[0] with{Y2Label="Rate"},Stacked().Panes[1]],Series=[..Stacked().Series,new("Rate",[new(0,.2),new(10,.4)]){Pane=1,Secondary=true}]};
+    var doc=Svg(spec);
+    var spans=PaneClips(doc).Select(PaneSpan).ToArray();
+    string[] Within(string anchor,int pane)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")==anchor&&(string?)t.Attribute("class")=="lumen-muted"&&t.Attribute("transform") is null
+        &&Attr(t,"y")-4>=spans[pane].Top-1e-6&&Attr(t,"y")-4<=spans[pane].Bottom+1e-6).Select(t=>t.Value).ToArray();
+    // A series alone in one plot draws the ticks its pane should.
+    string[] Alone(ChartSeries series)=>Ticks(Svg(Spec() with{Series=[series with{Pane=0,Secondary=false}]}),"end");
+    for(var k=0;k<3;k++) Check(Within("end",k).SequenceEqual(Alone(spec.Series[k])),$"pane {k} reads {string.Join(",",Within("end",k))}");
+    Check(Within("start",1).SequenceEqual(Alone(spec.Series[3]))&&Within("start",0).Length==0&&Within("start",2).Length==0,"the right-hand ticks are not pane 1's alone");
+    // Titles stand at the middle of their own pane, the right-hand one beside the pane that has the axis.
+    string[] Rotated(string title)=>((string)doc.Descendants(ns+"text").Single(t=>t.Value==title&&t.Attribute("transform") is not null).Attribute("transform")!).TrimEnd(')').Split(' ');
+    for(var k=0;k<3;k++)
+    {
+        var turn=Rotated(new[]{"Top","Middle","Bottom"}[k]);
+        Check(turn[0]=="rotate(-90"&&turn[1]=="20"&&Close(double.Parse(turn[2],CultureInfo.InvariantCulture),(spans[k].Top+spans[k].Bottom)/2),$"pane {k}'s title is not beside it");
+    }
+    var right=Rotated("Rate");
+    Check(right[0]=="rotate(90"&&right[1]=="884"&&Close(double.Parse(right[2],CultureInfo.InvariantCulture),(spans[1].Top+spans[1].Bottom)/2),"the right-hand title is not beside its pane");
+});
+Test("Each pane clips its own marks",()=>{
+    var spec=Stacked() with{Panes=[Stacked().Panes[0] with{YMax=4},Stacked().Panes[1]]};
+    var clips=PaneClips(Svg(spec));
+    for(var k=0;k<3;k++)
+    {
+        var series=clips[k].Descendants(ns+"g").Select(g=>(string?)g.Attribute("data-series")).OfType<string>().Distinct().ToArray();
+        Check(series.SequenceEqual([k.ToString(CultureInfo.InvariantCulture)]),$"pane {k} holds series {string.Join(",",series)}");
+        var span=PaneSpan(clips[k]);
+        var box=((string)clips[k].Attribute("viewBox")!).Split(' ').Select(v=>double.Parse(v,CultureInfo.InvariantCulture)).ToArray();
+        Check(Attr(clips[k],"x")==70&&Attr(clips[k],"width")==806&&(string?)clips[k].Attribute("overflow")=="hidden"
+            &&box.SequenceEqual([70,Attr(clips[k],"y"),806,Attr(clips[k],"height")])&&Close(span.Bottom-span.Top,new[]{398/3d,398/6d,398/2d}[k]),$"pane {k} is clipped elsewhere");
+    }
+    // Pane 1 stops at 4, so its 5 is drawn above the pane, where only that pane's clip can hide it.
+    Check(clips[1].Descendants(ns+"circle").Min(c=>Attr(c,"cy"))<PaneSpan(clips[1]).Top-6,"the value past the pane's maximum is not beyond its clip");
+    // Columns in two panes each take the whole slot at their X, 34 pixels at most, rather than sharing it side by side.
+    var columns=Svg(Stacked() with{Series=[Stacked().Series[0] with{Kind=ChartKind.Column},Stacked().Series[1] with{Kind=ChartKind.Column},Stacked().Series[2]]});
+    foreach(var k in new[]{0,1})
+        Check(Rects(columns,k).Zip(new[]{0d,5,10}).All(p=>Close(Attr(p.First,"width"),34)&&Close(Attr(p.First,"x")+17,76+p.Second/10*794)),$"pane {k}'s columns share a slot with another pane's");
+});
+Test("An X annotation runs through every pane and is named once; Y annotations and the main zones stay in the main plot, and a pane's own zones shade it",()=>{
+    var spec=Stacked() with{YZones=new([new("Low",150),new("High",double.PositiveInfinity)]),Panes=[Stacked().Panes[0] with{YZones=new([new("Calm",2),new("Busy",double.PositiveInfinity)])},Stacked().Panes[1]],
+        Annotations=[new(AnnotationAxis.X,2){To=4,Label="Window"},new(AnnotationAxis.Y,120){Label="Target"},new(AnnotationAxis.X,7){Label="Event"}]};
+    var clips=PaneClips(Svg(spec));
+    string[] Named(XElement clip)=>clip.Elements(ns+"g").Where(g=>(string?)g.Attribute("role")=="img").Select(g=>(string)g.Attribute("aria-label")!).ToArray();
+    Check(Named(clips[0]).SequenceEqual(["Low: up to 150","High: above 150","Window: 2 to 4","Target: 120","Event: 7"]),string.Join(" | ",Named(clips[0])));
+    Check(Named(clips[1]).SequenceEqual(["Calm: up to 2","Busy: above 2"])&&Named(clips[2]).Length==0,string.Join(" | ",Named(clips[1]).Concat(Named(clips[2]))));
+    var muted=ChartStyle.Light.Muted;
+    for(var k=0;k<3;k++)
+    {
+        var span=PaneSpan(clips[k]);
+        var window=clips[k].Descendants(ns+"rect").Single(r=>(string?)r.Attribute("fill")==muted);
+        Check(Close(Attr(window,"x"),76+2/10d*794)&&Close(Attr(window,"width"),2/10d*794)&&Close(Attr(window,"y"),span.Top)&&Close(Attr(window,"height"),span.Bottom-span.Top),$"the window does not span pane {k}");
+        var lines=clips[k].Descendants(ns+"line").Where(l=>(string?)l.Attribute("stroke")==muted&&(string?)l.Attribute("stroke-width")=="1.5").ToArray();
+        // The event stands upright through every pane; the target lies across the main plot alone.
+        Check(lines.Count(l=>Close(Attr(l,"x1"),76+7/10d*794)&&Close(Attr(l,"x2"),76+7/10d*794)&&Close(Attr(l,"y1"),span.Top)&&Close(Attr(l,"y2"),span.Bottom))==1,$"the event does not stand through pane {k}");
+        Check(lines.Count(l=>Attr(l,"y1")==Attr(l,"y2"))==(k==0?1:0),$"pane {k} has the wrong Y references");
+        Check(clips[k].Descendants(ns+"text").Count()==Named(clips[k]).Length,$"pane {k} labels a reference it does not name");
+    }
+});
+Test("A candlestick chart takes a moving average from Statistics.Rolling over its candles and volume as columns in a pane beneath",()=>{
+    var monday=Utc(2026,3,2);
+    var sessions=Enumerable.Range(0,28).Select(i=>monday+i*86_400_000d).Where(x=>TimeAxis.Moment(x).DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday)).ToArray();
+    var candles=sessions.Select((x,i)=>ChartPoint.Candle(x,50+i,53+i,48+i,i%3==0?49+i:52+i)).ToArray();
+    var average=Statistics.Rolling(candles.Select(p=>p.Close).ToArray(),5);
+    // The average comes first, so the candles are not series 0, and take their own index.
+    var spec=new ChartSpec{Kind=ChartKind.Candlestick,XAxis=AxisKind.Time,SkipWeekends=true,Height=520,Panes=[new(){Label="Volume",YFormat=ValueFormat.Compact}],Series=[
+        new("Five-day average",candles.Select((p,i)=>new ChartPoint(p.X,average[i]?.Mean)).ToArray()){Kind=ChartKind.Line},
+        new("ACME",candles),
+        new("Volume",candles.Select((p,i)=>new ChartPoint(p.X,1_000_000+i*50_000)).ToArray()){Kind=ChartKind.Column,Pane=1}]};
+    var doc=Svg(spec);
+    var clips=PaneClips(doc);
+    // 520 - 154 leaves 366 pixels, less one gap 342, shared 1 : 0.5: the prices from 78 to 306 and the volume from 330 to 444.
+    Check(clips.Select(PaneSpan).Zip(new[]{(78d,306d),(330d,444d)}).All(p=>Close(p.First.Top,p.Second.Item1)&&Close(p.First.Bottom,p.Second.Item2)),"the panes are not where their weights put them");
+    // Prices and the average share the main plot's axis, from the lowest low, 48, to the highest high, 72.
+    double Price(double value)=>306-(value-48)/24*228;
+    var bars=clips[0].Elements(ns+"g").Where(g=>(string?)g.Attribute("data-series")=="1").ToArray();
+    Check(sessions.Length==20&&bars.Length==20&&bars.Select((g,i)=>Attr(g.Element(ns+"line")!,"y1")-Price(candles[i].High!.Value)).All(d=>Math.Abs(d)<1e-6),"the candles are not on the main axis, or lost their index");
+    var means=clips[0].Elements(ns+"g").Where(g=>(string?)g.Attribute("data-series")=="0").ToArray();
+    Check(means.Length==16&&means.Select((g,i)=>(Cy:Attr(g.Element(ns+"circle")!,"cy"),Mean:average[i+4]!.Mean)).All(m=>Math.Abs(m.Cy-Price(m.Mean))<1e-6),"the average is not measured with the candles");
+    Check(means.Zip(bars.Skip(4)).All(p=>Close(Attr(p.First.Element(ns+"circle")!,"cx"),Attr(p.Second.Element(ns+"line")!,"x1"))),"the average does not stand over its candles");
+    // Only the candles' and a band's lows and highs reach the axis; points beside them are measured by their values alone.
+    var spread=Svg(spec with{Series=[..spec.Series,new("Range",candles.Select(p=>ChartPoint.Interval(p.X,p.Close,0,500)).ToArray()){Kind=ChartKind.Scatter}]});
+    Check(PaneClips(spread)[0].Elements(ns+"g").Where(g=>(string?)g.Attribute("data-series")=="1").Select((g,i)=>Attr(g.Element(ns+"line")!,"y1")-Price(candles[i].High!.Value)).All(d=>Math.Abs(d)<1e-6),"a scatter series' bounds widened the price axis");
+    // The candles are drawn before the average, so it lies over them.
+    var order=clips[0].Elements().ToList();
+    Check(order.IndexOf(bars[^1])<order.FindIndex(e=>e.Name==ns+"path"&&(string?)e.Attribute("stroke-width")=="2.5"),"the average is drawn behind the candles");
+    // Volume rises from zero at the foot of its own pane, one scale for every session, and reads in its pane's format.
+    var volume=Rects(doc,2);
+    Check(volume.Length==20&&volume.All(r=>Close(Attr(r,"y")+Attr(r,"height"),444))&&volume.Select((r,i)=>Attr(r,"height")/(1_000_000+i*50_000)).All(h=>Math.Abs(h-114/1_950_000d)<1e-9),"the volume is not drawn from zero on its own axis");
+    Check(clips[1].Descendants(ns+"rect").Count()==20&&Labels(doc).Contains("Volume: 2 Mar 2026, 1M")&&Labels(doc).Contains($"Five-day average: 6 Mar 2026, {LinearScale.Label(average[4]!.Mean)}"),"the volume is misplaced or misnamed");
+    // Exactly one series is the candles; the others draw as lines, areas, columns, points or bands.
+    string Refusal(ChartSpec chart){try{ChartSvg.Render(chart);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
+    Check(Refusal(spec with{Series=[..spec.Series,new("Second",candles)]}).Contains("exactly one series as candles"));
+    Check(Refusal(spec with{Series=[spec.Series[0],spec.Series[2]]}).Contains("exactly one series as candles"));
+    foreach(var mark in (ChartKind[])[ChartKind.Bubble,ChartKind.Candlestick,ChartKind.Ohlc,ChartKind.Bar])
+        Check(Refusal(spec with{Series=[spec.Series[0] with{Kind=mark},spec.Series[1]]}).Contains("can be drawn as"),$"{mark}");
+    Check(Refusal(spec with{Series=[spec.Series[0] with{Secondary=true},spec.Series[1]]}).Contains("secondary axis applies"));
+    foreach(var mark in (ChartKind[])[ChartKind.Area,ChartKind.Scatter,ChartKind.Band,ChartKind.Column])
+        ChartSvg.Render(spec with{Kind=ChartKind.Ohlc,Series=[spec.Series[1],new("Companion",candles.Select(p=>ChartPoint.Interval(p.X,p.Close,p.Low!.Value,p.High!.Value)).ToArray()){Kind=mark,Pane=1}]});
+    // A logarithmic or reversed price axis leaves the volume pane's own axis free to draw from zero, but refuses columns of its own.
+    ChartSvg.Render(spec with{YAxis=AxisKind.Log,YReversed=true});
+    Check(Refusal(spec with{YAxis=AxisKind.Log,Series=[..spec.Series.Take(2),spec.Series[2] with{Pane=0}],Panes=[]}).Contains("logarithmic"));
+    Check(Refusal(spec with{Panes=[spec.Panes[0] with{YAxis=AxisKind.Log}]}).Contains("logarithmic"));
+    // Everything per series follows the mark: the average takes a trend, a projection and point colours, which the candles refuse.
+    Check(ChartSvg.Render(spec with{Series=[spec.Series[0] with{Trend=true,ProjectedFrom=sessions[15]},..spec.Series.Skip(1)]}).Contains("stroke-dasharray='6 4'"));
+    Check(Refusal(spec with{Series=[spec.Series[0],spec.Series[1] with{Points=[candles[0] with{Color="#123456"}]},spec.Series[2]]}).Contains("Point colours"));
+    // Hidden from the component, the candles stay without their points and the average and volume are drawn alone.
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    var hidden="";
+    Operate(spec,chart=>{typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[1]);hidden=(string)typeof(LumenChart).GetField("svg",flags)!.GetValue(chart)!;return Task.CompletedTask;});
+    var shown=XDocument.Parse(hidden);
+    Check(PaneClips(shown).Length==2&&!hidden.Contains(": open ")&&Labels(shown).Count(l=>l.StartsWith("Five-day average"))==16&&Labels(shown).Count(l=>l.StartsWith("Volume"))==20,"hiding the candles lost their companions");
+});
+Test("A series below the main plot is coloured, dashed, fitted and named on its own pane's axes",()=>{
+    var spec=Spec() with{Height=560,YMin=0,YMax=1000,XFormat=ValueFormat.Duration,Panes=[new(){YFormat=ValueFormat.Duration,YReversed=true,YMin=240,YMax=360}],Series=[
+        new("Power",[new(0,200),new(600,300),new(1200,250)]),
+        new("Pace",[new(0,330),new(600,300),new(1200,270)]){Pane=1,Trend=true,Zones=new([new("Fast",280),new("Steady",320),new("Easy",double.PositiveInfinity)])},
+        new("Plan",[new(0,320),new(1200,260)]){Pane=1,ProjectedFrom=600}]};
+    var doc=Svg(spec);
+    // 560 - 154 leaves 406, less one gap 382, shared 1 : 0.5; pane 1 runs from 356.67 to 484 with 240 at its top.
+    var span=PaneSpan(PaneClips(doc)[1]);
+    Check(Close(span.Top,78+382/1.5+24)&&Close(span.Bottom,484));
+    double Px(double x)=>76+x/1200*794; double Py(double v)=>span.Top+(v-240)/120*(span.Bottom-span.Top);
+    var pace=Dashes(doc).Where(p=>!p.Dashed).Where(p=>p.Ink!=ChartStyle.Light.Series[0]&&p.Ink!=ChartStyle.Light.Series[2]).ToArray();
+    Check(pace.Select(p=>p.Ink).SequenceEqual([Ramp[2],Ramp[1],Ramp[0]]),string.Join(",",pace.Select(p=>p.Ink)));
+    Matches(pace[0].Points,(Px(0),Py(330)),(Px(200),Py(320)));
+    Matches(pace[1].Points,(Px(200),Py(320)),(Px(600),Py(300)),(Px(1000),Py(280)));
+    Matches(pace[2].Points,(Px(1000),Py(280)),(Px(1200),Py(270)));
+    var plan=Dashes(doc).Where(p=>p.Ink==ChartStyle.Light.Series[2]).ToArray();
+    Check(plan.Select(p=>p.Dashed).SequenceEqual([false,true]));
+    Matches(plan[0].Points,(Px(0),Py(320)),(Px(600),Py(290)));Matches(plan[1].Points,(Px(600),Py(290)),(Px(1200),Py(260)));
+    // The pace falls in a straight line, so its trend runs through every point on the pane's reversed axis, and reads falling.
+    var trend=doc.Descendants(ns+"path").Single(p=>(string?)p.Attribute("class")=="lumen-trend");
+    var ends=trend.Attribute("d")!.Value.Split(' ').Select(c=>c[1..].Split(',').Select(v=>double.Parse(v,CultureInfo.InvariantCulture)).ToArray()).ToArray();
+    Check(Close(ends[0][1],Py(330))&&Close(ends[1][1],Py(270))&&trend.Attribute("aria-label")!.Value=="Pace trend: falling, R squared 1.00","the trend is not fitted on the pane's axis");
+    Check(Labels(doc).Contains("Pace: 10:00, 5:00, Steady")&&Labels(doc).Contains("Plan: 20:00, 4:20, projected")&&Labels(doc).Contains("Power: 10:00, 300"),string.Join(" | ",Labels(doc)));
+});
+Test("Panes are refused where they cannot be drawn, each with its reason",()=>{
+    string Refusal(ChartSpec spec){try{ChartSvg.Render(spec);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
+    // Only the kinds that lay X out continuously take panes, whether named by a pane or by a series.
+    foreach(var kind in Enum.GetValues<ChartKind>())
+    {
+        var below=Sample(kind) with{Panes=[new()],Series=[..Sample(kind).Series,Sample(kind).Series[0] with{Name="Below",Pane=1,Kind=kind is ChartKind.Candlestick or ChartKind.Ohlc?ChartKind.Line:null}]};
+        var pointed=Sample(kind) with{Series=[Sample(kind).Series[0] with{Pane=1}]};
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Candlestick or ChartKind.Ohlc)
+        {
+            ChartSvg.Render(below);
+            Check(Refusal(pointed).Contains("pane is 0"),$"{kind}: {Refusal(pointed)}");
+        }
+        else Check(Refusal(below).Contains("Panes share")&&Refusal(pointed).Contains("Panes share")&&Refusal(Sample(kind) with{Panes=[new()]}).Contains("Panes share"),$"{kind}: {Refusal(below)}");
+    }
+    var spec=Stacked();
+    Check(Refusal(spec with{Series=[..spec.Series,new("Lost",[new(0,1)]){Pane=3}]}).Contains("pane is 0"));
+    Check(Refusal(spec with{Series=[..spec.Series,new("Lost",[new(0,1)]){Pane=-1}]}).Contains("pane is 0"));
+    Check(Refusal(spec with{Series=[spec.Series[0],spec.Series[2]]}).Contains("pane 1 has none"));
+    Check(Refusal(spec with{Series=spec.Series.Skip(1).ToArray()}).Contains("pane 0 has none"));
+    Check(Refusal(spec with{Panes=[new(),new(),new(),new()]}).Contains("at most four panes")&&Refusal(spec with{Panes=null!}).Contains("at most four panes"));
+    ChartSvg.Render(spec with{Panes=[..spec.Panes,new()],Series=[..spec.Series,new("Fourth",[new(0,1)]){Pane=3}]});
+    foreach(var weight in new[]{0,-1,double.NaN,double.PositiveInfinity,1e101})
+        Check(Refusal(spec with{Panes=[spec.Panes[0] with{Weight=weight},spec.Panes[1]]}).Contains("weight"),$"{weight}");
+    Check(Refusal(spec with{Panes=[spec.Panes[0],null!]}).Contains("cannot be null"));
+    // A pane's settings meet the rules the main plot's do.
+    ChartPane Middle(Func<ChartPane,ChartPane> change)=>change(spec.Panes[0]);
+    Check(Refusal(spec with{Panes=[Middle(p=>p with{YAxis=AxisKind.Time}),spec.Panes[1]]}).Contains("time axes"));
+    Check(Refusal(spec with{Panes=[Middle(p=>p with{Y2Axis=(AxisKind)7}),spec.Panes[1]]}).Contains("time axes"));
+    Check(Refusal(spec with{Panes=[Middle(p=>p with{YFormat=(ValueFormat)7}),spec.Panes[1]]}).Contains("Unknown value format"));
+    Check(Refusal(spec with{Panes=[Middle(p=>p with{YMin=5,YMax=5}),spec.Panes[1]]}).Contains("Axis bounds"));
+    Check(Refusal(spec with{Panes=[Middle(p=>p with{YAxis=AxisKind.Log,YMin=-1}),spec.Panes[1]]}).Contains("Log Y bounds"));
+    Check(Refusal(spec with{Panes=[Middle(p=>p with{Y2Axis=AxisKind.Log,Y2Max=0}),spec.Panes[1]]}).Contains("Log secondary bounds"));
+    Check(Refusal(spec with{IncludeZero=true,Panes=[Middle(p=>p with{YAxis=AxisKind.Log}),spec.Panes[1]]}).Contains("cannot include zero"));
+    Check(Refusal(spec with{Panes=[Middle(p=>p with{YZones=new(Enumerable.Range(0,8).Select(i=>new Zone($"Z{i}",i==7?double.PositiveInfinity:i)).ToArray())}),spec.Panes[1]]}).Contains("zone ramp"));
+    Check(Refusal(spec with{Panes=[Middle(p=>p with{Label=new string('x',2001)}),spec.Panes[1]]}).Contains("2000 characters"));
+    Check(Refusal(spec with{Kind=ChartKind.Area,Panes=[Middle(p=>p with{YAxis=AxisKind.Log}),spec.Panes[1]]}).Contains("Log Y axes require"));
+    Check(Refusal(spec with{Kind=ChartKind.Area,Panes=[Middle(p=>p with{YReversed=true}),spec.Panes[1]]}).Contains("reversed Y axis"));
+    Check(Refusal(spec with{Kind=ChartKind.Area,Panes=[Middle(p=>p with{YMin=1}),spec.Panes[1]]}).Contains("zero baseline"));
+    Check(Refusal(Sample(ChartKind.Candlestick) with{Panes=[new(){Y2Axis=AxisKind.Log}],Series=[..Sample(ChartKind.Candlestick).Series,new("Below",[new(0,1)]){Pane=1,Kind=ChartKind.Line}]}).Contains("logarithmic secondary axis"));
+    // Each series meets its own pane's axes: a pane of secondary series alone has nothing on its left, and a log pane refuses zero.
+    Check(Refusal(spec with{Series=[spec.Series[0],spec.Series[1] with{Secondary=true},spec.Series[2]]}).Contains("on the left of its pane"));
+    // A null series beside a secondary one is refused, where counting the left-hand series once dereferenced it.
+    Check(Refusal(Spec() with{Series=[new("S",[new(0,1)]){Secondary=true},null!]}).Contains("on the left"));
+    Check(Refusal(spec with{Panes=[Middle(p=>p with{YAxis=AxisKind.Log}),spec.Panes[1]],Series=[spec.Series[0],spec.Series[1] with{Points=[new(0,0)]},spec.Series[2]]}).Contains("positive values"));
+    ChartSvg.Render(spec with{YAxis=AxisKind.Log,Series=[spec.Series[0],spec.Series[1],spec.Series[2] with{Kind=ChartKind.Area}]});
+    Check(Refusal(spec with{Panes=[spec.Panes[0],spec.Panes[1] with{YAxis=AxisKind.Log}],Series=[spec.Series[0],spec.Series[1],spec.Series[2] with{Points=[new(0,1),new(1,2)],Kind=ChartKind.Column}]}).Contains("logarithmic"));
+    Check(Refusal(spec with{Panes=[spec.Panes[0],spec.Panes[1] with{YReversed=true}],Series=[spec.Series[0],spec.Series[1],spec.Series[2] with{Kind=ChartKind.Area}]}).Contains("reversed"));
+    Check(Refusal(spec with{Panes=[spec.Panes[0],spec.Panes[1] with{YMin=-30,YMax=-1}],Series=[spec.Series[0],spec.Series[1],spec.Series[2] with{Kind=ChartKind.Column,Points=[new(0,-20),new(5,-5)]}]}).Contains("zero baseline"));
+    Check(Refusal(spec with{Panes=[spec.Panes[0],spec.Panes[1] with{Y2Axis=AxisKind.Log}],Series=[..spec.Series,new("Edge",[ChartPoint.Interval(0,1,-1,2)]){Pane=2,Secondary=true,Kind=ChartKind.Band}]}).Contains("positive band bounds"));
+});
+Test("A chart that sets no panes draws in one plot, as before",()=>{
+    Check(new ChartSpec().Panes.Count==0&&new ChartSeries("S",[]).Pane==0);
+    foreach(var kind in Enum.GetValues<ChartKind>())
+    {
+        var sample=Sample(kind);
+        var doc=Svg(sample);
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Band or ChartKind.Ohlc)
+            Check(PaneClips(doc).Select(PaneSpan).SequenceEqual([(78d,344d)])&&doc.Descendants(ns+"g").Where(g=>g.Attribute("data-series") is not null).All(g=>(string?)g.Attribute("data-series")=="0"),$"{kind} is not one plot");
+        else Check(PaneClips(doc).Length==0,$"{kind} drew a plot");
+    }
+});
+Test("Panes survive JSON, and a request that names none keeps one plot",()=>{
+    var options=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web){Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}};
+    var spec=Stacked() with{Panes=[Stacked().Panes[0] with{YFormat=ValueFormat.Compact,YReversed=true,YMin=0,YMax=6,Y2Label="Rate",Y2Axis=AxisKind.Log,Y2Format=ValueFormat.Duration,YZones=Effort()},Stacked().Panes[1]],
+        Series=[..Stacked().Series,new("Rate",[new(0,60),new(10,3600)]){Pane=1,Secondary=true}]};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,options);
+    Check(json.Contains("\"panes\":[{\"label\":\"Middle\",\"weight\":0.5,\"yAxis\":\"Linear\"")&&json.Contains("\"y2Axis\":\"Log\"")&&json.Contains("\"pane\":2"),json);
+    Check(ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,options)!)==ChartSvg.Render(spec),"the panes changed in transit");
+    var written="{\"kind\":\"Candlestick\",\"panes\":[{\"label\":\"Volume\",\"yFormat\":\"Compact\"}],\"series\":[{\"name\":\"ACME\",\"points\":[{\"x\":0,\"open\":10,\"high\":12,\"low\":9,\"close\":11},{\"x\":1,\"open\":11,\"high\":13,\"low\":10,\"close\":10.4}]},"+
+        "{\"name\":\"Volume\",\"kind\":\"Column\",\"pane\":1,\"points\":[{\"x\":0,\"y\":1500000},{\"x\":1,\"y\":2100000}]}]}";
+    var read=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,options)!;
+    var svg=Svg(read);
+    Check(read.Panes[0].Weight==.5&&read.Series[1].Pane==1&&PaneClips(svg).Length==2&&Labels(svg).Contains("Volume: 1, 2.1M")&&Labels(svg).Contains("0: open 10, high 12, low 9, close 11"),"hand-written JSON lost its pane");
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",options)!;
+    Check(old.Panes.Count==0&&old.Series[0].Pane==0);
+});
+Test("The component reads a pane's series in its own formats, closes a pane its hidden series leave empty, and zooms every pane together",()=>{
+    var spec=Stacked() with{XFormat=ValueFormat.Duration,Panes=[Stacked().Panes[0] with{YFormat=ValueFormat.Duration},Stacked().Panes[1] with{YFormat=ValueFormat.Compact}],
+        Series=[Stacked().Series[0],Stacked().Series[1] with{Points=[new(0,61),new(5,125),new(10,3600)]},Stacked().Series[2] with{Points=[new(0,1500),new(5,-2500),new(10,0)]}]};
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    string Drawn(LumenChart chart)=>(string)typeof(LumenChart).GetField("svg",flags)!.GetValue(chart)!;
+    void Call(LumenChart chart,string method,params object[] arguments)=>typeof(LumenChart).GetMethod(method,flags)!.Invoke(chart,arguments);
+    string before="",zoomed="",closed="",promoted="";
+    var html=Operate(spec,async chart=>{
+        typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);
+        await chart.SelectPoint(1,2);
+        before=Drawn(chart);
+        Call(chart,"Zoom",.5);zoomed=Drawn(chart);Call(chart,"ResetView");
+        Call(chart,"Toggle",1);closed=Drawn(chart);
+        Call(chart,"Toggle",0);promoted=Drawn(chart);
+    });
+    Check(html.Contains("<tr><td>Middle</td><td>0:05</td><td>2:05</td></tr>")&&html.Contains("<tr><td>Bottom</td><td>0:05</td><td>-2.5k</td></tr>")&&html.Contains("<tr><td>Top</td><td>0:05</td><td>200</td></tr>"),"the table does not read each pane in its own format");
+    Check(html.Contains("Middle: 0:10 = 1:00:00"),"the status line does not read the pane's format");
+    // Zooming moves the three panes as one: the same X stands at one place in each, and it moved.
+    var (a,b)=(XDocument.Parse(before),XDocument.Parse(zoomed));
+    Check(Enumerable.Range(1,2).All(k=>CxOf(b,k).SequenceEqual(CxOf(b,0)))&&!CxOf(b,0).SequenceEqual(CxOf(a,0))&&Close(CxOf(b,0)[1],473),"the panes did not zoom together");
+    // Hiding the middle pane's only series closes it, and the bottom pane moves up with its own settings.
+    var shut=XDocument.Parse(closed);
+    Check(PaneClips(shut).Length==2&&Labels(shut).Contains("Bottom: 0:05, -2.5k")&&PaneClips(shut)[1].Descendants(ns+"g").Any(g=>(string?)g.Attribute("data-series")=="1"),"the emptied pane did not close");
+    // Hiding the main plot's series too lets the bottom pane take its place, with its settings and without the main plot's references.
+    var main=XDocument.Parse(promoted);
+    Check(PaneClips(main).Select(PaneSpan).SequenceEqual([(78d,524d)])&&Labels(main).SequenceEqual(["Bottom: 0:00, 1.5k","Bottom: 0:05, -2.5k","Bottom: 0:10, 0"])&&Ticks(main,"end").Contains("-2k"),"the bottom pane did not take the main plot's place");
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

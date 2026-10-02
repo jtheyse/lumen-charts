@@ -6,7 +6,8 @@ public enum ChartTheme { Light, Dark }
 /// <summary>Null Y is a missing observation, never an implicit zero. Size encodes bubble area.</summary>
 public sealed record ChartPoint(double X, double? Y, string? Label = null, double Size = 1)
 {
-    /// <summary>Prices. All four are required by the candlestick and OHLC kinds and ignored by every other one.</summary>
+    /// <summary>Prices. All four are required of the series a candlestick or OHLC chart draws as candles or bars, and
+    /// ignored everywhere else.</summary>
     public double? Open { get; init; }
     public double? High { get; init; }
     public double? Low { get; init; }
@@ -28,7 +29,7 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
 public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, string? Color = null)
 {
     /// <summary>Measure this series against the right-hand axis instead of the left, for a series in
-    /// different units. At least one series must stay on the left.</summary>
+    /// different units. At least one series in each pane must stay on the left.</summary>
     public bool Secondary { get; init; }
     /// <summary>Draws a least-squares line through this series. Fitted in the space each axis draws in,
     /// so it stays straight on screen; a series with no spread in X draws none.</summary>
@@ -44,12 +45,17 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     public ZoneScale? Zones { get; init; }
     /// <summary>Draws this series as a line, area, column, scatter or band instead of the chart's kind, so fitness lines
     /// can stand over daily stress columns. The chart's kind still lays out X: line, area, scatter, bubble and band charts
-    /// place every series along a continuous axis, and column charts by category. Null draws the chart's kind.</summary>
+    /// place every series along a continuous axis, and column charts by category. A candlestick or OHLC chart draws the one
+    /// series that names no kind as candles or bars, and takes others beside it, such as a moving average or volume. Null
+    /// draws the chart's kind.</summary>
     public ChartKind? Kind { get; init; }
     /// <summary>Dashes a line or area stroke from this X onward, such as planned workouts projected forward. The stroke is
     /// split exactly where it reaches the X, and each mark from there on is named projected; markers and fill are drawn
     /// as before.</summary>
     public double? ProjectedFrom { get; init; }
+    /// <summary>The pane this series is drawn in, counted from the top. Pane 0 is the main plot, set up by the spec's own
+    /// Y properties; pane k above 0 is set up by <see cref="ChartSpec.Panes"/>[k - 1]. Every pane shares the X axis.</summary>
+    public int Pane { get; init; }
 
     public static ChartSeries From<T>(string name, IEnumerable<T> items,
         Func<T, double> x, Func<T, double?> y, Func<T, string?>? label = null) =>
@@ -88,7 +94,7 @@ public sealed record ChartSpec
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];
     public string XLabel { get; init; } = "";
     public string YLabel { get; init; } = "";
-    /// <summary>Names the right-hand axis, which appears when a series is marked secondary.</summary>
+    /// <summary>Names the main plot's right-hand axis, which appears when one of its series is marked secondary.</summary>
     public string Y2Label { get; init; } = "";
     public int Width { get; init; } = 900;
     public int Height { get; init; } = 420;
@@ -107,12 +113,44 @@ public sealed record ChartSpec
     public int? DensityCells { get; init; }
     /// <summary>Lighter lines between the labelled ticks. Off by default; a time axis never takes them.</summary>
     public bool MinorGridlines { get; init; }
-    /// <summary>Reference lines and bands drawn behind the data.</summary>
+    /// <summary>Reference lines and bands drawn behind the data: a Y reference on the main plot, an X one through every pane.</summary>
     public IReadOnlyList<ChartAnnotation> Annotations { get; init; } = [];
-    /// <summary>Shades each zone as a band on the primary value axis, behind the data and any annotations, named
+    /// <summary>Shades each zone as a band on the main plot's primary value axis, behind the data and any annotations, named
     /// with its range. The open bottom zone and the unbounded top one stop at the plot edge, and the bands never
     /// widen the axis. Applies wherever Y annotations do.</summary>
     public ZoneScale? YZones { get; init; }
+    /// <summary>Plots stacked under the main one, sharing its X axis, each with Y axes of its own, such as volume under
+    /// prices. The main plot is pane 0 and takes this spec's Y properties; <c>Panes[k - 1]</c> sets up pane k, which holds
+    /// the series whose <see cref="ChartSeries.Pane"/> is k. Line, area, scatter, bubble, band, candlestick and OHLC charts
+    /// take them, at most three. Empty draws one plot.</summary>
+    public IReadOnlyList<ChartPane> Panes { get; init; } = [];
+}
+
+/// <summary>
+/// A plot stacked under the main one: pane k of a chart is <see cref="ChartSpec.Panes"/>[k - 1]. It shares the chart's X
+/// axis and has Y axes of its own, and each property means for it what the spec's property of the same name means for
+/// the main plot. Annotations stay on the main plot, except that an X annotation runs through every pane.
+/// </summary>
+public sealed record ChartPane
+{
+    /// <summary>Names the pane's left-hand axis, as <see cref="ChartSpec.YLabel"/> names the main plot's.</summary>
+    public string Label { get; init; } = "";
+    /// <summary>The pane's height beside the main plot's, which weighs 1.</summary>
+    public double Weight { get; init; } = .5;
+    public AxisKind YAxis { get; init; } = AxisKind.Linear;
+    public double? YMin { get; init; }
+    public double? YMax { get; init; }
+    public ValueFormat YFormat { get; init; }
+    public bool YReversed { get; init; }
+    /// <summary>Shades each zone as a band behind this pane's data.</summary>
+    public ZoneScale? YZones { get; init; }
+    /// <summary>Names the pane's right-hand axis, which appears when one of its series is secondary.</summary>
+    public string Y2Label { get; init; } = "";
+    public AxisKind Y2Axis { get; init; } = AxisKind.Linear;
+    public double? Y2Min { get; init; }
+    public double? Y2Max { get; init; }
+    public ValueFormat Y2Format { get; init; }
+    public bool Y2Reversed { get; init; }
 }
 
 /// <summary>
