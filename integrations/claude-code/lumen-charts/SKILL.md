@@ -1,6 +1,6 @@
 ---
 name: lumen-charts
-description: Add charts, graphs and dashboards to a C#, .NET, ASP.NET Core or Blazor project with Lumen.Charts — line, area, scatter, bubble, column, bar, stacked, donut, heatmap, radar, candlestick, OHLC, band, histogram, box, violin and network graphs, rendered as accessible SVG on the server or as an interactive Blazor component, with SVG, PNG and CSV export. It also draws sports and training charts — fitness, fatigue and form (CTL/ATL/TSB), heart-rate and power zones, power–duration curves, pace on reversed axes, activity streams in panes, time in zone — and computes the numbers behind them (normalized power, TSS, critical power). Use this skill whenever a .NET or Blazor project needs any chart or graph, a chart rendered to SVG on the server, a charting HTTP endpoint, or fitness, training or wearable data visualised, even if the user never names Lumen. Covers installing the packages, which come from GitHub releases rather than nuget.org.
+description: Add charts, graphs and dashboards to a C#, .NET, ASP.NET Core or Blazor project with Lumen.Charts — line, area, scatter, bubble, column, bar, stacked, donut, heatmap, radar, candlestick, OHLC, band, histogram, box, violin, score gauges, activity rings and network graphs, rendered as accessible SVG on the server or as an interactive Blazor component, with SVG, PNG and CSV export. It also draws sports and training charts — fitness, fatigue and form (CTL/ATL/TSB), heart-rate and power zones, power–duration curves, pace on reversed axes, activity streams in panes, time in zone, recovery and readiness gauges, activity rings — and computes the numbers behind them (normalized power, TSS, critical power). Use this skill whenever a .NET or Blazor project needs any chart or graph, a chart rendered to SVG on the server, a charting HTTP endpoint, or fitness, training or wearable data visualised, even if the user never names Lumen. Covers installing the packages, which come from GitHub releases rather than nuget.org.
 ---
 
 # Lumen.Charts
@@ -24,7 +24,7 @@ bash <skill-dir>/scripts/install.sh            # Git Bash, macOS, Linux
 pwsh <skill-dir>/scripts/install.ps1           # Windows PowerShell 7
 ```
 
-Both take an optional version tag (`v0.25.0`) to pin one. If the project already has a `nuget.config`, the scripts leave it alone and print the source line to add instead. Then:
+Both take an optional version tag (`v0.26.0`) to pin one. If the project already has a `nuget.config`, the scripts leave it alone and print the source line to add instead. Then:
 
 ```bash
 dotnet add package Lumen.Charts.Blazor        # or Lumen.Charts / Lumen.Charts.AspNetCore
@@ -62,9 +62,10 @@ Charts are drawn at `ChartSpec.Width` (900 by default) and scale down to their c
 
 Everything is one immutable `ChartSpec` record; change one with `with { … }`. The full member list is in `references/api.md` — read it before using anything not shown here. From 0.25.0 the packages also carry XML documentation beside each DLL, so IntelliSense shows what a member does, and you can read it in the NuGet cache (`~/.nuget/packages/lumen.charts/<version>/lib/net8.0/Lumen.Charts.xml`, and likewise for `lumen.charts.blazor` and `lumen.charts.aspnetcore`).
 
-- `Kind` picks the chart: `Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Ohlc, Band, Histogram, Box, Violin`.
+- `Kind` picks the chart: `Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Ohlc, Band, Histogram, Box, Violin, Gauge, Ring`.
 - `Series` is a list of `ChartSeries(name, points, color?)`; a point is `ChartPoint(x, y, label?, size)`. A null `y` is a missing observation, drawn as a gap, never as zero. `ChartSeries.From(name, items, x, y, label)` maps your own objects.
 - Category charts (column, bar, stacked, donut, radar, heatmap) place points by order and show their `Label`; continuous charts (line, area, scatter, bubble, band, candlestick, OHLC) place them by `X`.
+- **Gauges and rings** (0.26.0 and later) draw one point per series round an arc, with no X axis. `ChartKind.Gauge`: one series of one point, `Y` the score and its `Label` the caption; the scale is `YMin`–`YMax` (0–100 unless set), `GaugeSweep` 180–360 degrees (270 by default), `YLabel` the unit (`"%"`), `YZones` tint the track and colour the score, a Y annotation is a target tick. `ChartKind.Ring`: one to six series, outermost first, one nonnegative point each, `ChartSeries.Goal` the target (100 unless set) and the point's `Label` the unit; past its goal a ring runs on over itself. Recipes in `references/sports.md`.
 - **Time on X:** `XAxis = AxisKind.Time` and X in **Unix milliseconds** — `TimeAxis.Value(DateTimeOffset)` converts. `TimeZone = "Africa/Johannesburg"` reads the calendar locally; `SkipWeekends`/`TimeSkips` close trading gaps.
 - **Durations and pace:** `XFormat`/`YFormat = ValueFormat.Duration` reads values as **seconds** (`5:30`, `1:02:05`; on a log axis `1s`, `5m`, `1h`). Pace is seconds per unit, so 300 reads `5:00`; `YReversed = true` puts the faster pace on top. `ValueFormat.Compact` writes `1.2k`.
 - **Log axes:** `XAxis`/`YAxis = AxisKind.Log`, positive values only.
@@ -78,7 +79,7 @@ Everything is one immutable `ChartSpec` record; change one with `with { … }`. 
 
 ## 4. Sports and training charts
 
-For fitness, training, wearable or health data, read `references/sports.md`. It has tested recipes for the performance management chart (CTL/ATL/TSB from `Training.Load`), a multi-pane activity stream with heart-rate zones and reversed pace, the power–duration curve with a critical-power fit, time in zone, weekly load against a target band, an HRV baseline band, grade-coloured elevation and a personal-best step line — and the conventions the numbers follow (seconds, Unix milliseconds, zone bounds).
+For fitness, training, wearable or health data, read `references/sports.md`. It has tested recipes for the performance management chart (CTL/ATL/TSB from `Training.Load`), a recovery or readiness gauge, activity rings, a multi-pane activity stream with heart-rate zones and reversed pace, the power–duration curve with a critical-power fit, time in zone, weekly load against a target band, an HRV baseline band, grade-coloured elevation and a personal-best step line — and the conventions the numbers follow (seconds, Unix milliseconds, zone bounds).
 
 ## 5. When a chart is refused
 
@@ -91,6 +92,7 @@ For fitness, training, wearable or health data, read `references/sports.md`. It 
 - Candlestick and OHLC take exactly one price series (`ChartPoint.Candle`); other series beside it must set their own `Kind`.
 - Panes need a continuous chart (line, area, scatter, bubble, band, candlestick, OHLC), at most four, and every `Pane` index needs its `ChartPane`.
 - A zone scale's last `Upper` must be `double.PositiveInfinity`; in JSON write `"Infinity"`.
+- A gauge takes one series with one point and a scale with `YMin` below `YMax`; a ring chart one to six series of one nonnegative point each, each `Goal` positive. Both refuse time, log and reversed axes, panes, secondary series, trends and series kinds, and rings refuse zones and annotations.
 - Limits: 100,000 points per chart, 32 series.
 
 ## 6. Check the result
@@ -105,4 +107,4 @@ For Blazor, run the app and open the page; hover a point to see its tooltip. If 
 
 ## Limits worth knowing
 
-No server-side PNG (PNG export rasterizes in the browser), no PDF, no 3D, no map tiles (routes are out of scope), no streaming transport, no shared crosshair across panes. Vendor scores (WHOOP recovery, Garmin readiness and similar) are not computed — their formulas are unpublished — but they can be drawn like any other series.
+No server-side PNG (PNG export rasterizes in the browser), no PDF, no 3D, no map tiles (routes are out of scope), no streaming transport, no shared crosshair across panes. Vendor scores (WHOOP recovery, Garmin readiness and similar) are not computed — their formulas are unpublished — but a score the data provides draws on a `Gauge`, or as any other series.

@@ -432,6 +432,40 @@ if (await midnight.CountAsync() > 0)
 }
 else Console.WriteLine("SKIP Midnight axe sweep: this host offers no Midnight brand");
 
+// Gauges and rings belong to the chart kinds a host offers, so the suite finds them by the buttons that name them, and a host
+// without them says SKIP. Each score and each ring is one mark: it takes focus with its focus ring, shows its tooltip, and
+// Enter selects it, which the gallery reports under the chart.
+var gaugeTab = page.GetByRole(AriaRole.Button, new() { Name = "Gauge", Exact = true });
+var ringsTab = page.GetByRole(AriaRole.Button, new() { Name = "Rings", Exact = true });
+if (await gaugeTab.CountAsync() > 0 && await ringsTab.CountAsync() > 0)
+{
+    await Test("A gauge and a ring take focus, show their tooltip and raise selection, with no zoom to offer", async () =>
+    {
+        foreach (var (tab, group, series, selected) in new[] { (gaugeTab, "lumen-gauge", 0, "Selected series 1, observation 1"), (ringsTab, "lumen-rings", 1, "Selected series 2, observation 1") })
+        {
+            await tab.First.ClickAsync();
+            // The chart before it has marks of the same series and point, so the check waits for the radial drawing itself.
+            var mark = chart.Locator($"g.{group} .lumen-datum[data-series='{series}'][data-point='0']");
+            await mark.WaitForAsync();
+            Check(await chart.Locator(".lumen-tools button[aria-label='Zoom in']").CountAsync() == 0, "a radial chart offers zoom");
+            var label = await mark.GetAttributeAsync("aria-label");
+            await mark.FocusAsync();
+            await tooltip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            Check(await tooltip.TextContentAsync() == label, $"the tooltip reads \"{await tooltip.TextContentAsync()}\", the mark \"{label}\"");
+            var ring = await mark.EvaluateAsync<string>("g => getComputedStyle(g.querySelector(':scope > path[fill=none]')).strokeWidth");
+            Check(ring == "3px", $"the focused mark's outline is {ring} wide");
+            await page.Keyboard.PressAsync("Enter");
+            await page.WaitForFunctionAsync("text => document.querySelector('.under-chart')?.textContent.includes(text)", selected);
+            // The status line reads the mark as its legend does: the name the tooltip starts with, and the value.
+            await page.WaitForFunctionAsync("() => document.querySelector('.lumen-status')?.textContent.trim().length > 0");
+            var reported = (await status.TextContentAsync())!.Trim();
+            Check(label!.StartsWith(reported), $"the status line reads \"{reported}\" for \"{label}\"");
+            await page.Keyboard.PressAsync("Escape");
+        }
+    });
+}
+else Console.WriteLine("SKIP gauge and ring check: this host offers no gauge or rings");
+
 // The Sports & performance page belongs to the gallery, so the suite finds it as a visitor does, by the link that names it, and a
 // host without one says SKIP. It opens in a page of its own, so it starts in the light theme and the Lumen brand.
 var sportsLink = page.GetByRole(AriaRole.Link, new() { Name = "Sports & performance" });
@@ -445,15 +479,15 @@ if (await sportsLink.CountAsync() > 0)
     var charts = sports.Locator(".lumen-chart");
     // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
-        return svgs.length === 10 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+        return svgs.length === 12 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
-    await Test("The Sports & performance page renders its ten training charts, each live and drawn at the width it is shown", async () =>
+    await Test("The Sports & performance page renders its twelve training charts, each live and drawn at the width it is shown", async () =>
     {
-        Check(await charts.CountAsync() == 10, $"the page shows {await charts.CountAsync()} charts");
-        for (var i = 0; i < 10; i++)
+        Check(await charts.CountAsync() == 12, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 12; i++)
             Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
-        // Each chart's script adds its tooltip, so ten of them prove every chart is interactive.
-        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 10");
+        // Each chart's script adds its tooltip, so twelve of them prove every chart is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 12");
         await sports.WaitForFunctionAsync(drawnToFit);
     });
 

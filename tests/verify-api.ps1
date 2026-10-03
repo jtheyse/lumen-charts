@@ -7,9 +7,9 @@ foreach($path in @('/health','/_framework/blazor.web.js','/_content/Lumen.Charts
  Verify ($r.StatusCode -eq 200) "Asset/health $path"
 }
 $r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 10 -and $r.Content.Contains('not real training data')) 'The Sports & performance page answers 200 and prerenders its ten simulated charts, each set to fit its card'
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 12 -and $r.Content.Contains('not real training data')) 'The Sports & performance page answers 200 and prerenders its twelve simulated charts, each set to fit its card'
 $types=Invoke-RestMethod "$BaseUrl/api/charts/types"
-Verify ($types.Count -eq 16) 'Sixteen chart types'
+Verify ($types.Count -eq 18 -and $types -contains 'Gauge' -and $types -contains 'Ring') 'Eighteen chart types, gauge and ring among them'
 foreach($kind in @('Line','Area','Scatter','Bubble','Column','Bar','StackedColumn','Donut','Heatmap','Radar')){
  $spec=@{title='API test';kind=$kind;series=@(@{name='Sample';points=@(@{x=0;y=2;label='A'},@{x=1;y=4;label='B'},@{x=2;y=3;label='C'})})}
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body ($spec|ConvertTo-Json -Depth 10) -SkipHttpErrorCheck
@@ -26,7 +26,9 @@ $families=@(
  @{name='Band';marker="fill-opacity='.16'";body='{"title":"Forecast","kind":"Band","series":[{"name":"Demand","points":[{"x":0,"y":10,"low":8,"high":12},{"x":1,"y":12,"low":9,"high":15}]}]}'},
  @{name='Histogram';marker='equal-width bins';body='{"title":"Latency","kind":"Histogram","bins":5,"series":[{"name":"Requests","points":[{"x":0,"y":1},{"x":1,"y":2},{"x":2,"y":2},{"x":3,"y":3},{"x":4,"y":5},{"x":5,"y":8}]}]}'},
  @{name='Box';marker='median';body='{"title":"Spread","kind":"Box","series":[{"name":"Europe","points":[{"x":0,"y":1},{"x":1,"y":2},{"x":2,"y":3},{"x":3,"y":4},{"x":4,"y":40}]}]}'},
- @{name='Violin';marker='observations, median';body='{"title":"Shape","kind":"Violin","series":[{"name":"Europe","points":[{"x":0,"y":1},{"x":1,"y":2},{"x":2,"y":2},{"x":3,"y":3},{"x":4,"y":5},{"x":5,"y":8},{"x":6,"y":13},{"x":7,"y":21}]}]}'})
+ @{name='Violin';marker='observations, median';body='{"title":"Shape","kind":"Violin","series":[{"name":"Europe","points":[{"x":0,"y":1},{"x":1,"y":2},{"x":2,"y":2},{"x":3,"y":3},{"x":4,"y":5},{"x":5,"y":8},{"x":6,"y":13},{"x":7,"y":21}]}]}'},
+ @{name='Gauge';marker="class='lumen-gauge-value'";body='{"title":"Recovery","kind":"Gauge","yLabel":"%","gaugeSweep":270,"yZones":{"zones":[{"name":"Low","upper":33,"color":"#DD4B45"},{"name":"Moderate","upper":66,"color":"#A88200"},{"name":"Good","upper":"Infinity","color":"#2E9B58"}]},"annotations":[{"axis":"Y","from":60,"label":"Average"}],"series":[{"name":"Recovery","points":[{"x":0,"y":72,"label":"Recovery"}]}]}'},
+ @{name='Ring';marker="class='lumen-ring-progress'";body='{"title":"Activity","kind":"Ring","series":[{"name":"Move","goal":600,"points":[{"x":0,"y":540,"label":"kcal"}]},{"name":"Exercise","goal":30,"points":[{"x":0,"y":47,"label":"min"}]},{"name":"Stand","goal":12,"points":[{"x":0,"y":9,"label":"h"}]}]}'})
 foreach($family in $families){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $family.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') "$($family.name) SVG response"
@@ -34,6 +36,22 @@ foreach($family in $families){
 }
 $r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $families[0].body
 Verify ($r.Content.StartsWith('Series,X,Y,Label,Size,Open,High,Low,Close')) 'Candlestick CSV exports prices'
+# A gauge's score and a ring's progress are named with their zone, unit and goal, a gauge's target is a tick across its arc, and a
+# ring past its goal runs on over itself, its leading end shadowed.
+$gauge=$families|Where-Object{$_.name -eq 'Gauge'};$ring=$families|Where-Object{$_.name -eq 'Ring'}
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $gauge.body
+Verify ($r.Content.Contains("aria-label='Recovery: 72 %, Good'") -and $r.Content.Contains("aria-label='Good: above 66'") -and $r.Content.Contains("class='lumen-gauge-target'") -and $r.Content.Contains('>Average: 60<')) 'A gauge posted as JSON names its score and zone and marks its target'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $ring.body
+Verify ($r.Content.Contains("aria-label='Move: 540 of 600 kcal, 90 %'") -and $r.Content.Contains("aria-label='Exercise: 47 of 30 min, 157 %'") -and ([regex]::Matches($r.Content,"class='lumen-ring-shadow'")).Count -eq 3 -and $r.Content.Contains('>Stand: 9 of 12 h<')) 'Rings posted as JSON name each value and goal, and only the ring past its goal casts a shadow'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $ring.body
+Verify ($r.Content.StartsWith('Series,X,Y,Label,Size,Goal') -and $r.Content.Contains('"Move",0,540,"kcal",1,600')) 'Ring CSV carries each ring''s goal'
+foreach($bad in @(@{body=$gauge.body.Replace('{"x":0,"y":72,"label":"Recovery"}','{"x":0,"y":72},{"x":1,"y":40}');reason='exactly one point';name='A gauge of two points'},
+  @{body=$gauge.body.Replace('"gaugeSweep":270','"gaugeSweep":120');reason='between 180';name='A gauge sweep of 120 degrees'},
+  @{body=$ring.body.Replace('"goal":600','"goal":0');reason='positive';name='A ring goal of zero'},
+  @{body=$ring.body.Replace('"kind":"Ring",','"kind":"Ring","yZones":{"zones":[{"name":"All","upper":"Infinity"}]},');reason='no zones';name='Zones on rings'})){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
+}
 $summary='{"title":"Warehouse","kind":"Box","series":[{"name":"Asia","points":[],"summary":{"q1":205,"median":228,"q3":252,"lowerWhisker":160,"upperWhisker":318,"outliers":[352,371]}}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $summary -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'A precomputed box summary posted as JSON renders'

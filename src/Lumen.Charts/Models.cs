@@ -2,7 +2,8 @@ namespace Lumen.Charts;
 
 /// <summary>The kind of chart, which decides how X is laid out and how a series that names no kind of its own is drawn.
 /// Line, area, scatter, bubble, band, candlestick and OHLC charts place points along a continuous X axis by their X;
-/// column, bar, stacked column, donut, heatmap and radar charts place them by category and show their labels.</summary>
+/// column, bar, stacked column, donut, heatmap and radar charts place them by category and show their labels; gauge and
+/// ring charts draw one value a series round an arc and have no X axis.</summary>
 public enum ChartKind
 {
     /// <summary>Each series as a line through its points in X order.</summary>
@@ -41,7 +42,17 @@ public enum ChartKind
     Violin,
     /// <summary>One price series as open-high-low-close bars, coloured by direction, beside any series that name a kind of
     /// their own.</summary>
-    Ohlc
+    Ohlc,
+    /// <summary>One score on an open arc, as recovery and readiness scores are drawn: one series of one point, whose Y is the
+    /// score and whose label is the caption written under it. The scale runs from <see cref="ChartSpec.YMin"/> to
+    /// <see cref="ChartSpec.YMax"/>, 0 to 100 unless set, round <see cref="ChartSpec.GaugeSweep"/> degrees centred at the top.
+    /// <see cref="ChartSpec.YZones"/> tint the track and colour the score by its zone, and a Y annotation marks a target as a
+    /// tick across the arc.</summary>
+    Gauge,
+    /// <summary>Concentric progress rings, as activity rings are drawn: one series per ring, outermost first, at most six, each
+    /// of one nonnegative point measured against the series' <see cref="ChartSeries.Goal"/>. A ring past its goal keeps going
+    /// round over itself, up to three times.</summary>
+    Ring
 }
 /// <summary>The preset a chart draws with when it sets no <see cref="ChartSpec.Style"/>.</summary>
 public enum ChartTheme
@@ -182,7 +193,8 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     public AreaFill Fill { get; init; }
     /// <summary>Colours a line or area stroke and its markers continuously by value, each stop landing at its value's height
     /// on the series' own axis, logarithmic or reversed included. Stops rise strictly, at least two of them; a series takes
-    /// this or <see cref="Zones"/>, not both. Labels are unchanged, because they already read the value.</summary>
+    /// this or <see cref="Zones"/>, not both. Labels are unchanged, because they already read the value. On a gauge it colours
+    /// the arc along its length instead, each stop at its value's angle; a gauge takes this or <see cref="ChartSpec.YZones"/>.</summary>
     public IReadOnlyList<ColorStop>? Gradient { get; init; }
     /// <summary>The markers on a line, area or scatter series.</summary>
     public MarkerStyle Markers { get; init; }
@@ -192,6 +204,9 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// <summary>Writes each column's or bar's value just past its far end, in its axis's format. A label that would not fit
     /// within its column's width, or within the plot beside a bar, is left out.</summary>
     public bool ValueLabels { get; init; }
+    /// <summary>Ring charts only: the target this ring's value is measured against, so its progress is Y ÷ Goal. Positive;
+    /// null means 100. The point's label, if any, is the unit both are written in, such as <c>kcal</c>.</summary>
+    public double? Goal { get; init; }
 
     /// <summary>A series from your own objects, in the order given: <paramref name="x"/> and <paramref name="y"/> read each
     /// item's position and value, and <paramref name="label"/>, if given, its label.</summary>
@@ -253,7 +268,7 @@ public sealed record ChartSpec
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];
     /// <summary>Names the X axis.</summary>
     public string XLabel { get; init; } = "";
-    /// <summary>Names the main plot's left-hand axis.</summary>
+    /// <summary>Names the main plot's left-hand axis. On a gauge it is the unit written after the score, such as <c>%</c>.</summary>
     public string YLabel { get; init; } = "";
     /// <summary>Names the main plot's right-hand axis, which appears when one of its series is marked secondary.</summary>
     public string Y2Label { get; init; } = "";
@@ -299,6 +314,9 @@ public sealed record ChartSpec
     /// the series whose <see cref="ChartSeries.Pane"/> is k. Line, area, scatter, bubble, band, candlestick and OHLC charts
     /// take them, at most three. Empty draws one plot.</summary>
     public IReadOnlyList<ChartPane> Panes { get; init; } = [];
+    /// <summary>Gauge charts only: how far round the arc runs, in degrees, from 180, a semicircle, to 360, a full circle. The arc
+    /// is centred at the top, so the default 270 leaves its opening at the bottom.</summary>
+    public double GaugeSweep { get; init; } = 270;
 }
 
 /// <summary>

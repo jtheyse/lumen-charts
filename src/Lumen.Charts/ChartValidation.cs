@@ -33,17 +33,19 @@ public static partial class ChartValidation
         if ((spec.YFormat != ValueFormat.Number || spec.Y2Format != ValueFormat.Number) && spec.Kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Histogram)
             throw new ArgumentException("A Y format applies to the values a Y axis measures; donut, heatmap and radar charts have no Y axis, and a histogram's counts observations.");
         if ((spec.YReversed || spec.Y2Reversed) && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Box or ChartKind.Violin))
-            throw new ArgumentException("A reversed Y axis applies to line, scatter, bubble, band, candlestick, OHLC, box and violin charts. Column, bar, stacked column, area and histogram charts draw from a zero baseline, which a reversed axis would hang from the top, and donut, heatmap and radar charts have no Y axis.");
+            throw new ArgumentException(spec.Kind is ChartKind.Gauge or ChartKind.Ring
+                ? "A gauge or ring has no Y axis to reverse: its scale runs clockwise round its arc."
+                : "A reversed Y axis applies to line, scatter, bubble, band, candlestick, OHLC, box and violin charts. Column, bar, stacked column, area and histogram charts draw from a zero baseline, which a reversed axis would hang from the top, and donut, heatmap and radar charts have no Y axis.");
         var secondary = spec.Series?.Any(series => series?.Secondary == true) == true;
         if (!Enum.IsDefined(spec.YAxisSide) || !Enum.IsDefined(spec.YTickLabels)) throw new ArgumentException("Unknown Y axis side or tick labelling.");
         if (spec.YAxisSide == AxisSide.Right)
         {
-            if (spec.Kind is ChartKind.Bar or ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar)
-                throw new ArgumentException("The Y axis moves to the right on charts that draw it up the side; a horizontal bar chart draws its value axis along the bottom, and donut, heatmap and radar charts have none.");
+            if (spec.Kind is ChartKind.Bar or ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Gauge or ChartKind.Ring)
+                throw new ArgumentException("The Y axis moves to the right on charts that draw it up the side; a horizontal bar chart draws its value axis along the bottom, and donut, heatmap, radar, gauge and ring charts have none.");
             if (secondary) throw new ArgumentException("A secondary series measures against the right-hand edge, so a chart with one keeps its Y axis on the left.");
         }
-        if (spec.YTickLabels != TickLabels.All && spec.Kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar)
-            throw new ArgumentException("Tick labels apply to a Y axis, which donut, heatmap and radar charts do not have.");
+        if (spec.YTickLabels != TickLabels.All && spec.Kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Gauge or ChartKind.Ring)
+            throw new ArgumentException("Tick labels apply to a Y axis, which donut, heatmap, radar, gauge and ring charts do not have.");
         if (secondary)
         {
             if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Band))
@@ -61,16 +63,34 @@ public static partial class ChartValidation
         if (spec.Series is null || spec.Series.Count > 32) throw new ArgumentException("Provide at most 32 series.");
         if (spec.MaxRenderedPoints is < 16 or > 5000) throw new ArgumentException("MaxRenderedPoints must be between 16 and 5000.");
         if (spec.Bins is < 1 or > Statistics.MaxBins) throw new ArgumentException($"Bins must be between 1 and {Statistics.MaxBins}.");
+        if (spec.Kind == ChartKind.Gauge)
+        {
+            if (!(spec.GaugeSweep is >= 180 and <= 360))
+                throw new ArgumentException("A gauge's sweep is between 180 degrees, a semicircle, and 360, a full circle.");
+            if (!((spec.YMin ?? 0) < (spec.YMax ?? 100)))
+                throw new ArgumentException("A gauge's scale runs from YMin to YMax, 0 to 100 unless set, so YMin must be below YMax.");
+        }
+        else if (spec.GaugeSweep != 270)
+            throw new ArgumentException("GaugeSweep sets how far round a gauge's arc runs, so it applies to gauge charts only.");
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
         foreach (var annotation in spec.Annotations)
         {
             if (annotation is null) throw new ArgumentException("Annotations cannot be null.");
-            if (!Annotated(spec.Kind))
-                throw new ArgumentException("Annotations apply to charts drawn on an X and Y axis; donut, radar, heatmap, histogram, box and violin charts do not take them yet.");
+            if (spec.Kind == ChartKind.Ring)
+                throw new ArgumentException("Ring charts take no annotations: each ring's goal is its target.");
+            if (!Annotated(spec.Kind) && spec.Kind != ChartKind.Gauge)
+                throw new ArgumentException("Annotations apply to charts drawn on an X and Y axis, and to a gauge's arc; donut, radar, heatmap, histogram, box and violin charts do not take them yet.");
             if (!Enum.IsDefined(annotation.Axis)) throw new ArgumentException("Unknown annotation axis.");
             if (!Finite(annotation.From) || (annotation.To.HasValue && !Finite(annotation.To.Value)))
                 throw new ArgumentException("Annotation values must be finite, magnitude <= 1e100.");
             if (annotation.To <= annotation.From) throw new ArgumentException("A band annotation needs To above From.");
+            if (spec.Kind == ChartKind.Gauge)
+            {
+                if (annotation.Axis == AnnotationAxis.X) throw new ArgumentException("A gauge has no X axis: it takes Y annotations, drawn as ticks across its arc.");
+                if (annotation.To is not null) throw new ArgumentException("A gauge marks a Y annotation as a tick across its arc, so it takes lines, not bands; YZones shade its ranges.");
+                if (annotation.From < (spec.YMin ?? 0) || annotation.From > (spec.YMax ?? 100))
+                    throw new ArgumentException("A gauge's annotation must lie on its scale, from YMin to YMax, 0 to 100 unless set.");
+            }
             if (annotation.Axis == AnnotationAxis.X && spec.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn)
                 throw new ArgumentException("X annotations need a numeric axis; category charts place their bars by index.");
             var axis = annotation.Axis == AnnotationAxis.X ? spec.XAxis : spec.YAxis;
@@ -82,8 +102,10 @@ public static partial class ChartValidation
         var style = ChartSvg.ResolveStyle(spec);
         if (spec.YZones is not null)
         {
-            if (!Annotated(spec.Kind))
-                throw new ArgumentException("Zone bands apply wherever Y annotations do, on charts drawn on an X and Y axis; donut, radar, heatmap, histogram, box and violin charts refuse them.");
+            if (spec.Kind == ChartKind.Ring)
+                throw new ArgumentException("Ring charts take no zones: each ring is drawn in its series' colour.");
+            if (!Annotated(spec.Kind) && spec.Kind != ChartKind.Gauge)
+                throw new ArgumentException("Zone bands apply wherever Y annotations do, on charts drawn on an X and Y axis and on a gauge's track; donut, radar, heatmap, histogram, box and violin charts refuse them.");
             Zones(spec.YZones, style);
         }
         foreach (var pane in spec.Panes) Pane(pane, spec, style);
@@ -183,7 +205,13 @@ public static partial class ChartValidation
             // Two columns at one X would stand in one place; a category chart already refuses that for every series.
             if (mark == ChartKind.Column && spec.Kind != ChartKind.Column && series.Points.Select(p => p.X).Distinct().Count() != series.Points.Count)
                 throw new ArgumentException("Columns on a continuous axis need unique X values within each series.");
+            if (series.Goal is { } goal)
+            {
+                if (spec.Kind != ChartKind.Ring) throw new ArgumentException("A goal is what a ring's progress is measured against, so it applies to ring charts only.");
+                if (!Finite(goal) || goal <= 0) throw new ArgumentException("A ring's goal must be positive and finite, magnitude <= 1e100.");
+            }
         }
+        Radial(spec);
         if (spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc && spec.Series.Count > 0 && spec.Series.Count(series => series.Kind is null) != 1)
             throw new ArgumentException("Candlestick and OHLC charts draw exactly one series as candles or bars, the one that names no kind; any others name their own kind, such as a line for a moving average or columns for volume.");
         if (spec.Panes.Count > 0)
@@ -209,6 +237,30 @@ public static partial class ChartValidation
             if (axis == AxisKind.Log) throw new ArgumentException("Column and area series draw from a zero baseline, which a logarithmic axis cannot show; measure them against a linear one.");
             if (reversed) throw new ArgumentException("Column and area series draw from a zero baseline, which a reversed axis would hang from the top.");
             if (min > 0 || max < 0) throw new ArgumentException("Column and area series draw from a zero baseline, so the bounds of their axis must include zero.");
+        }
+    }
+
+    /// <summary>A gauge draws one score and a ring chart one value a ring, so each series carries exactly one point. A chart
+    /// with no series is left to draw its empty state, as every kind does, and as the component's legend leaves it when every
+    /// series is hidden.</summary>
+    private static void Radial(ChartSpec spec)
+    {
+        if (spec.Kind == ChartKind.Gauge && spec.Series.Count > 0)
+        {
+            if (spec.Series.Count > 1) throw new ArgumentException("A gauge shows one score, so it takes one series; draw several scores as several gauges.");
+            var series = spec.Series[0];
+            if (series.Points.Count != 1 || series.Points[0].Y is null)
+                throw new ArgumentException("A gauge's series has exactly one point, whose Y is the score, and the score cannot be missing.");
+            if (series.Gradient is not null && spec.YZones is not null)
+                throw new ArgumentException("A gauge takes its colour from YZones or from a gradient, not both.");
+        }
+        if (spec.Kind != ChartKind.Ring) return;
+        if (spec.Series.Count > 6) throw new ArgumentException("Ring charts take one to six rings, one series each; past six the rings are too thin to read.");
+        foreach (var series in spec.Series)
+        {
+            if (series.Points.Count != 1 || series.Points[0].Y is not { } value)
+                throw new ArgumentException("Each ring's series has exactly one point, whose Y is its value, and the value cannot be missing.");
+            if (value < 0) throw new ArgumentException("A ring's value cannot be negative: its progress is the value over its goal.");
         }
     }
 
@@ -260,8 +312,8 @@ public static partial class ChartValidation
         if (series.ValueLabels && mark is not (ChartKind.Column or ChartKind.Bar))
             throw new ArgumentException("Value labels apply to series drawn as columns or bars.");
         if (series.Gradient is not { } stops) return;
-        if (mark is not (ChartKind.Line or ChartKind.Area))
-            throw new ArgumentException("A gradient colours a stroke and its markers, so it applies to series drawn as lines or areas.");
+        if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Gauge))
+            throw new ArgumentException("A gradient colours a stroke and its markers, so it applies to series drawn as lines or areas, and to a gauge's arc.");
         if (series.Zones is not null)
             throw new ArgumentException("Zones colour a stroke in steps and a gradient colours it continuously, so a series takes one or the other.");
         if (stops.Count is < 2 or > 32) throw new ArgumentException("A gradient needs between 2 and 32 colour stops.");

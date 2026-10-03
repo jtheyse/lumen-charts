@@ -8,7 +8,7 @@
             var index=i;
             <button type="button" aria-pressed="@(!hidden.Contains(i) ? "true" : "false")" @onclick="()=>Toggle(index)">
                 @* A refined key is the chart's own legend key, shaped like the series' mark. *@
-                @if(Style.Finish==ChartFinish.Classic){<span style="background:@ChartSvg.SeriesColor(Spec.Series[i],i,Style)"></span>}else{@((MarkupString)ChartSvg.LegendKey(Spec with{Style=Style},i))}@Spec.Series[i].Name
+                @if(Style.Finish==ChartFinish.Classic){<span style="background:@ChartSvg.SeriesColor(Spec.Series[i],i,Style)"></span>}else{@((MarkupString)ChartSvg.LegendKey(Spec with{Style=Style},i))}@ChartSvg.LegendLabel(Spec,i)
             </button>
         }
     </div>
@@ -80,6 +80,7 @@
         return (series.Kind ?? Spec.Kind) switch
         {
             ChartKind.Candlestick or ChartKind.Ohlc=>$"O {y.Format(point.Open ?? 0)} · H {y.Format(point.High ?? 0)} · L {y.Format(point.Low ?? 0)} · C {y.Format(point.Close ?? 0)}",
+            ChartKind.Ring when point.Y.HasValue=>$"{y.Format(point.Y.Value)} of {y.Format(series.Goal ?? 100)}",
             _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Y.Value)} ({y.Format(point.Low.Value)} to {y.Format(point.High.Value)})",
             _=>point.Y.HasValue?y.Format(point.Y.Value):"Missing"
         };
@@ -154,7 +155,9 @@
     {
         if(series<0||series>=visible.Length)return;
         var index=visible[series];if(point<0||point>=Spec.Series[index].Points.Count)return;
-        var p=Spec.Series[index].Points[point];status=$"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y) : "missing")}";
+        var p=Spec.Series[index].Points[point];
+        // A gauge's or a ring's one point reads as its legend does, with its unit and a ring's goal.
+        status=Spec.Kind is ChartKind.Gauge or ChartKind.Ring ? ChartSvg.LegendLabel(Spec,index) : $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y) : "missing")}";
         await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
     }
     private async Task Download(string format)

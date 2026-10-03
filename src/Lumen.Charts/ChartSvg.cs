@@ -81,7 +81,7 @@ public static class ChartSvg
     // every record, so leaving out the nulls loses nothing, and it halves the text a long series makes.
     private static readonly JsonSerializerOptions Hashing = new()
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
     /// <summary>A classic style is serialized for hashing as 0.23.0 serialized it, without its finish.</summary>
     private static void Unfinished(JsonTypeInfo info)
@@ -89,6 +89,14 @@ public static class ChartSvg
         if (info.Type != typeof(ChartStyle)) return;
         foreach (var property in info.Properties)
             if (property.Name == nameof(ChartStyle.Finish)) property.ShouldSerialize = (_, finish) => finish is not ChartFinish.Classic;
+    }
+    /// <summary>A spec that leaves a gauge's sweep at its default is serialized for hashing as 0.25.0, which had no sweep,
+    /// serialized it, so every chart drawn before gauges keeps its IDs.</summary>
+    private static void Unswept(JsonTypeInfo info)
+    {
+        if (info.Type != typeof(ChartSpec)) return;
+        foreach (var property in info.Properties)
+            if (property.Name == nameof(ChartSpec.GaugeSweep)) property.ShouldSerialize = (_, sweep) => sweep is not 270d;
     }
     private static byte[] Hashed<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, Hashing);
     /// <summary>
@@ -112,13 +120,18 @@ public static class ChartSvg
         ChartValidation.Validate(spec);
         var style = ResolveStyle(spec);
         var w = new SvgWriter { Titles = includeTitles, Style = style, MinorGrid = spec.MinorGridlines && style.Gridlines != GridLine.Hidden, Spec = spec };
-        var legendColumns = Math.Max(1, (spec.Width - 48) / 180);
+        // A ring's key carries its value and goal as well as its name, so its columns are wider.
+        var ring = spec.Kind == ChartKind.Ring;
+        var legendColumns = Math.Max(1, (spec.Width - 48) / (ring ? 220 : 180));
         // A histogram of one distribution needs no key; of several, its colours are the only way to tell them apart.
-        var legendRows = includeLegend && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Box and not ChartKind.Violin
+        // A gauge's one score is written in its centre, so it needs no key either.
+        var legendRows = includeLegend && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Box and not ChartKind.Violin and not ChartKind.Gauge
             && (spec.Kind != ChartKind.Histogram || spec.Series.Count > 1) ? (int)Math.Ceiling(spec.Series.Count / (double)legendColumns) : 0;
         Begin(w, spec.Width, spec.Height + legendRows * 22, spec.Title, spec.Description);
         if (!HasData(spec))
             w.Text(spec.Width / 2, spec.Height / 2, "No data to display", "text-anchor='middle'");
+        else if (spec.Kind == ChartKind.Gauge) Gauge(w, spec);
+        else if (spec.Kind == ChartKind.Ring) Rings(w, spec);
         else if (spec.Kind == ChartKind.Donut) Donut(w, spec);
         else if (spec.Kind == ChartKind.Radar) Radar(w, spec);
         else if (spec.Kind == ChartKind.Heatmap) Heatmap(w, spec);
@@ -138,11 +151,11 @@ public static class ChartSvg
                 if (w.Refined)
                 {
                     w.Add(Key(spec, i, w.Style, x, y - 8));
-                    w.Text(x + 20, y, Short(spec.Series[i].Name, 24), "font-size='11'");
+                    w.Text(x + 20, y, Short(LegendLabel(spec, i), ring ? 30 : 24), "font-size='11'");
                     continue;
                 }
                 w.Add($"<rect x='{N(x)}' y='{N(y - 8)}' width='9' height='9' rx='2' fill='{SeriesColor(spec.Series[i], i, w.Style)}'/>");
-                w.Text(x + 16, y, Short(spec.Series[i].Name, 24), "font-size='11'");
+                w.Text(x + 16, y, Short(LegendLabel(spec, i), ring ? 30 : 24), "font-size='11'");
             }
         w.Add("</svg>");
         return w.ToString();
@@ -163,11 +176,33 @@ public static class ChartSvg
     }
 
     /// <summary>
+    /// What the legend writes for series <paramref name="index"/>: its name, and on a ring or a gauge its value too, so that a
+    /// ring reads <c>Move: 540 of 600 kcal</c>, its point's label being the unit, and a gauge <c>Recovery: 72 %</c>, its
+    /// <see cref="ChartSpec.YLabel"/> being the unit. Values are written in <see cref="ChartSpec.YFormat"/>. The chart's own
+    /// legend and the component's write the same.
+    /// </summary>
+    public static string LegendLabel(ChartSpec spec, int index)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        var series = spec.Series[index];
+        if (spec.Kind is not (ChartKind.Ring or ChartKind.Gauge) || series.Points.Count != 1 || series.Points[0].Y is not { } value) return series.Name;
+        var scale = Radial(spec);
+        return spec.Kind == ChartKind.Ring
+            ? $"{series.Name}: {scale.Format(value)} of {scale.Format(series.Goal ?? 100)}{Unit(series.Points[0].Label)}"
+            : $"{series.Name}: {scale.Format(value)}{Unit(spec.YLabel)}";
+    }
+    /// <summary>The scale a gauge or a ring writes its values on: a gauge's runs from YMin to YMax, 0 to 100 unless set.</summary>
+    private static Axis Radial(ChartSpec s) => new(AxisKind.Linear, s.YMin ?? 0, s.YMax ?? 100) { ValueFormat = s.YFormat };
+    /// <summary>A unit written after a value, with a space; none when it is blank.</summary>
+    private static string Unit(string? unit) => string.IsNullOrWhiteSpace(unit) ? "" : " " + unit.Trim();
+
+    /// <summary>
     /// A refined legend key in the 14 × 9 box whose top left is (<paramref name="x"/>, <paramref name="y"/>), shaped like the
     /// series' mark: a short line for a line, dashed when the whole series is projected; a dot for scatter points and bubbles;
     /// and a square for columns, bars, areas and the rest. A key whose series draws in colours other than its own is split
     /// into them, left to right: up to four of the point colours when every drawn point has one, as time-in-zone bars do, a
-    /// donut's slice colours, a heatmap row's low and high colours, and the rising and falling colours of candles and OHLC bars.
+    /// donut's slice colours, a gauge's zone or gradient colours, a heatmap row's low and high colours, and the rising and
+    /// falling colours of candles and OHLC bars.
     /// </summary>
     internal static string Key(ChartSpec spec, int index, ChartStyle style, double x, double y)
     {
@@ -177,6 +212,8 @@ public static class ChartSvg
         IReadOnlyList<string> inks = mark is ChartKind.Candlestick or ChartKind.Ohlc ? [style.Rising, style.Falling]
             : spec.Kind == ChartKind.Heatmap ? [style.HeatmapLow, style.HeatmapHigh]
             : spec.Kind == ChartKind.Donut ? series.Points.Select((p, i) => (p, i)).Where(t => t.p.Y > 0).Select(t => t.p.Color ?? style.SeriesColor(t.i)).Distinct().Take(4).ToArray()
+            : spec.Kind == ChartKind.Gauge && spec.YZones is { } zones ? zones.Zones.Select((zone, i) => zone.Color ?? style.Zones[i]).Distinct().Take(4).ToArray()
+            : spec.Kind == ChartKind.Gauge && series.Gradient is { } stops ? stops.Select(stop => stop.Color).Distinct().Take(4).ToArray()
             : drawn.Length > 0 && drawn.All(p => p.Color is not null) ? drawn.Select(p => p.Color!).Distinct().Take(4).ToArray()
             : [SeriesColor(series, index, style)];
         if (inks.Count == 0) inks = [SeriesColor(series, index, style)];
@@ -833,19 +870,21 @@ public static class ChartSvg
             double? lower = i > 0 ? scale.Zones[i - 1].Upper : null, upper = i < scale.Zones.Count - 1 ? scale.Zones[i].Upper : null;
             double from = Math.Max(lower ?? ys.Min, ys.Min), to = Math.Min(upper ?? ys.Max, ys.Max);
             if (to <= from) continue;
-            var reading = (lower, upper) switch
-            {
-                (null, null) => "every value",
-                (null, { } u) => $"up to {ys.Format(u)}",
-                ({ } l, null) => $"above {ys.Format(l)}",
-                ({ } l, { } u) => $"{ys.Format(l)} to {ys.Format(u)}"
-            };
             // A horizontal bar chart measures along X, so there the bands stand upright.
             bands.Add(Measure(w, new(horizontal ? AnnotationAxis.X : AnnotationAxis.Y, from) { To = to, Label = scale.Zones[i].Name, Color = ZoneColor(w.Style, scale, i) },
-                at, at, ys, ys, left, right, top, bottom, reading, w.Style.Text));
+                at, at, ys, ys, left, right, top, bottom, Range(lower, upper, ys), w.Style.Text));
         }
         return bands;
     }
+
+    /// <summary>What a zone holds, read on <paramref name="axis"/>: up to its own bound, above the one before it, or between the two.</summary>
+    private static string Range(double? lower, double? upper, Axis axis) => (lower, upper) switch
+    {
+        (null, null) => "every value",
+        (null, { } u) => $"up to {axis.Format(u)}",
+        ({ } l, null) => $"above {axis.Format(l)}",
+        ({ } l, { } u) => $"{axis.Format(l)} to {axis.Format(u)}"
+    };
 
     /// <summary>One shaded cell per occupied region. Cells are square in pixels, and a cell's opacity
     /// follows the logarithm of its count so a dense core does not flatten everything around it.</summary>
@@ -1241,6 +1280,227 @@ public static class ChartSvg
                 $"<line x1='{N(center - width / 2)}' y1='{N(median)}' x2='{N(center + width / 2)}' y2='{N(median)}' stroke='{color}' stroke-width='2.5'{w.Fixed}/>");
             w.Text(center, bottom + 21, Short($"{s.Series[si].Name} (n={Count(observations[si].Length)})", 22), "text-anchor='middle' class='lumen-muted'");
         }
+    }
+
+    /// <summary>
+    /// One score on an open arc, drawn in a group whose origin is the arc's centre. The arc runs <see cref="ChartSpec.GaugeSweep"/>
+    /// degrees clockwise and is centred at twelve o'clock, so the scale's minimum stands at minus half the sweep, its maximum at
+    /// plus half, and a value's angle is linear between them; a score off the scale stands at the end it passed, and its name
+    /// says so. The track is the grid colour, tinted by any zones; the score's arc takes its zone's colour, a gradient along
+    /// its length, or its series colour, and ends in a knob. The arc is as large as fits between the title and the source line
+    /// with its end labels under it, its thickness .16 of its radius.
+    /// </summary>
+    private static void Gauge(SvgWriter w, ChartSpec s)
+    {
+        var series = s.Series[0]; var point = series.Points[0]; var value = point.Y!.Value;
+        var scale = Radial(s);
+        double min = scale.Min, max = scale.Max, sweep = s.GaugeSweep, start = -sweep / 2;
+        double Angle(double v) => start + sweep * (Math.Clamp(v, min, max) - min) / (max - min);
+        const double ratio = .16;
+        // A target's label over the upper half of the arc stands above it, so the arc starts lower to leave it room.
+        var top = s.Annotations.Any(annotation => Math.Abs(Angle(annotation.From)) < 70) ? 78d : 64d;
+        var bottom = s.Height - 30d;
+        // How far below the centre the arc's ends reach, in radii; under them go the end labels.
+        var drop = Math.Max(0, -Math.Cos(sweep / 2 * Math.PI / 180));
+        var radius = Math.Min((s.Width - 48d) / (2 + ratio), (bottom - top - 18) / (1 + ratio + drop));
+        var thick = radius * ratio;
+        double outer = radius + thick / 2, inner = radius - thick / 2;
+        double cx = s.Width / 2d, cy = top + outer + (bottom - top - (outer + drop * radius + thick / 2 + 18)) / 2;
+        w.Add($"<g class='lumen-gauge' transform='translate({R(cx)} {R(cy)})'>");
+        w.Add($"<path class='lumen-gauge-track' d='{Band(inner, outer, start, -start)}' fill='{w.Style.Grid}'/>");
+        // Each zone tints the stretch of track it covers, clipped to the scale, and is named with its own range.
+        var zones = s.YZones;
+        if (zones is not null)
+            for (var i = 0; i < zones.Zones.Count; i++)
+            {
+                double? lower = i > 0 ? zones.Zones[i - 1].Upper : null, upper = i < zones.Zones.Count - 1 ? zones.Zones[i].Upper : null;
+                double from = Math.Max(lower ?? min, min), to = Math.Min(upper ?? max, max);
+                if (to <= from) continue;
+                Aggregate(w, $"{zones.Zones[i].Name}: {Range(lower, upper, scale)}",
+                    $"<path class='lumen-gauge-zone' d='{Band(inner, outer, Angle(from), Angle(to), from == min, to == max)}' fill='{ZoneColor(w.Style, zones, i)}' fill-opacity='.3'/>");
+            }
+        var end = Angle(value);
+        var zone = zones is null ? null : zones.Zones[zones.IndexOf(value)].Name;
+        var shape = new StringBuilder();
+        if (series.Gradient is { } stops && end > start)
+        {
+            // A gradient is laid along the arc in pieces of two degrees at most, each in the colour of the value at its middle and
+            // reaching a little into the next, so that no seam shows between them.
+            var pieces = (int)Math.Ceiling((end - start) / 2);
+            var step = (end - start) / pieces;
+            for (var k = 0; k < pieces; k++)
+            {
+                double from = start + k * step, to = k == pieces - 1 ? end : from + step + Math.Min(.4, step / 2);
+                var middle = min + (from + step / 2 - start) / sweep * (max - min);
+                shape.Append($"<path class='lumen-gauge-value' d='{Band(inner, outer, from, to, k == 0, k == pieces - 1)}' fill='{Blend(stops, middle)}' stroke='none'/>");
+            }
+        }
+        else
+        {
+            var ink = series.Gradient is { } gradient ? Blend(gradient, min) : zones is not null ? ZoneColor(w.Style, zones, zones.IndexOf(value)) : SeriesColor(series, 0, w.Style);
+            shape.Append($"<path class='lumen-gauge-value' d='{Band(inner, outer, start, end)}' fill='{ink}' stroke='none'/>");
+        }
+        var (kx, ky) = Polar(radius, end);
+        // A knob in the background colour marks the score; the arc's outline draws nothing until the score is focused, when it
+        // takes the focus ring.
+        shape.Append($"<circle class='lumen-gauge-knob' cx='{N(kx)}' cy='{N(ky)}' r='{R(thick * .3)}' fill='{w.Style.Background}' stroke='none'/><path d='{Band(inner, outer, start, end)}' fill='none'/>");
+        var named = $"{point.Label ?? series.Name}: {scale.Format(value)}{Unit(s.YLabel)}"
+            + (value > max ? $", above the scale, drawn at {scale.Format(max)}" : value < min ? $", below the scale, drawn at {scale.Format(min)}" : "")
+            + (zone is null ? "" : $", {zone}");
+        Datum(w, 0, 0, named, shape.ToString());
+        // The score in the centre, in the scale's format, its unit at half its size; the caption and the zone under it. The
+        // block is centred on the arc's centre unless the ends do not reach far enough below it, as on a semicircle, where it
+        // rises to stand on the line between them. Every text set here is kept as a box, so that targets' labels keep clear.
+        var taken = new List<(double X1, double Y1, double X2, double Y2)>();
+        var number = scale.Format(value); var unit = Unit(s.YLabel).TrimStart();
+        var ems = Wide(number) / 11 + (unit.Length > 0 ? .1 + Wide(unit) / 11 * .5 : 0);
+        var size = Math.Round(Math.Clamp(Math.Min(radius * .42, inner * 1.5 / ems), 12, 72), 1);
+        var block = size * .72 + (point.Label is null ? 0 : 20) + (zone is null ? 0 : 17);
+        var baseline = -Math.Max(0, block / 2 - drop * radius * .8) - block / 2 + size * .72;
+        w.Add($"<text x='0' y='{R(baseline)}' text-anchor='middle' font-size='{N(size)}' font-weight='600'>{SvgWriter.E(number)}" +
+            (unit.Length > 0 ? $"<tspan font-size='{N(Math.Round(size * .5, 1))}' dx='{N(Math.Round(size * .02, 1))}'>{SvgWriter.E(unit)}</tspan>" : "") + "</text>");
+        var across = Math.Max(ems * size, Math.Max(Wide(point.Label ?? "") * 13 / 11, Wide(zone ?? "") * 12 / 10));
+        taken.Add((-across / 2, baseline - size * .72, across / 2, baseline - size * .72 + block + 3));
+        var line = baseline;
+        if (point.Label is not null) w.Text(0, Math.Round(line += 20, 4), point.Label, "text-anchor='middle' class='lumen-muted' font-size='13'");
+        if (zone is not null) w.Text(0, Math.Round(line + (point.Label is null ? 20 : 17), 4), zone, "text-anchor='middle' font-size='12' font-weight='600'");
+        // The scale's ends under the arc's ends, set either side of them where the two ends nearly meet, as on a full circle.
+        var (sx, sy) = Polar(radius, start); var (ex, ey) = Polar(radius, -start);
+        var close = ex - sx < 70;
+        void End(double x, double y, string text, string anchor)
+        {
+            w.Text(x, y, text, $"text-anchor='{anchor}' class='lumen-muted' font-size='11'");
+            var left = x - (anchor == "end" ? Wide(text) : anchor == "middle" ? Wide(text) / 2 : 0);
+            taken.Add((left, y - 9, left + Wide(text), y + 3));
+        }
+        End(close ? sx - 4 : sx, Math.Round(sy + thick / 2 + 14, 4), scale.Format(min), close ? "end" : "middle");
+        End(close ? ex + 4 : ex, Math.Round(ey + thick / 2 + 14, 4), scale.Format(max), close ? "start" : "middle");
+        // A target is a tick across the arc over the score, haloed so it shows on any colour. Its label goes outside the arc,
+        // within the drawing and clear of the description; or else inside it, as near the arc as it fits whole; and in either
+        // place clear of every text already set. A label with no such place is left out, as a reference label is, and the
+        // tick keeps its name for the tooltip and assistive technology.
+        bool Free((double X1, double Y1, double X2, double Y2) box) => taken.All(t => box.X2 + 2 < t.X1 || box.X1 - 2 > t.X2 || box.Y2 + 2 < t.Y1 || box.Y1 - 2 > t.Y2);
+        foreach (var annotation in s.Annotations)
+        {
+            var angle = Angle(annotation.From);
+            var colour = annotation.Color ?? w.Style.Muted;
+            var name = annotation.Label is null ? scale.Format(annotation.From) : $"{annotation.Label}: {scale.Format(annotation.From)}";
+            var (x1, y1) = Polar(inner - 5, angle); var (x2, y2) = Polar(outer + 5, angle);
+            string Tick(string ink, string width) => $"<line class='lumen-gauge-target' x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{ink}' stroke-width='{width}' stroke-linecap='round'{w.Fixed}/>";
+            Aggregate(w, name, Tick(w.Style.Background, "5") + Tick(colour, "2"));
+            var wide = Wide(name);
+            // Near the top or the bottom of the arc a label is centred on its tick; elsewhere it runs away from the tick, outward
+            // outside the arc and toward the middle inside it.
+            (double X, double Y, string Anchor, (double X1, double Y1, double X2, double Y2) Box) Place(double distance, bool outside)
+            {
+                var (x, y) = Polar(distance, angle);
+                var level = Math.Abs(x) < wide / 2;
+                var anchor = level ? "middle" : x > 0 == outside ? "start" : "end";
+                var baseline = level ? y + (y < 0 == outside ? -3 : 12) : y + 4;
+                var left = x - (anchor == "start" ? 0 : anchor == "end" ? wide : wide / 2);
+                return (x, baseline, anchor, (left, baseline - 9, left + wide, baseline + 3));
+            }
+            var label = Place(outer + 9, true);
+            var placed = cx + label.Box.X1 >= 8 && cx + label.Box.X2 <= s.Width - 8 && cy + label.Box.Y1 >= 56 && Free(label.Box);
+            for (var distance = inner - 9; !placed && distance > inner / 3; distance -= 4)
+            {
+                label = Place(distance, false);
+                var (lx1, ly1, lx2, ly2) = label.Box;
+                placed = new[] { (lx1, ly1), (lx2, ly1), (lx1, ly2), (lx2, ly2) }.All(c => double.Hypot(c.Item1, c.Item2) < inner - 3) && Free(label.Box);
+            }
+            if (!placed) continue;
+            taken.Add(label.Box);
+            w.Add($"<text x='{R(label.X)}' y='{R(label.Y)}' text-anchor='{label.Anchor}' fill='{colour}' font-size='11' stroke='{w.Style.Background}' stroke-width='3' stroke-linejoin='round' paint-order='stroke' pointer-events='none' aria-hidden='true'>{SvgWriter.E(name)}</text>");
+        }
+        w.Add("</g>");
+    }
+
+    /// <summary>
+    /// Concentric progress rings in a group whose origin is their centre, the first series outermost. A ring's progress is its
+    /// value over its goal, and runs clockwise from twelve o'clock, 360 degrees to the goal, over a track of its own colour at
+    /// a fifth of its strength. The rings fill a circle as wide as the smaller of the room across and down; each is .84 of the
+    /// pitch between two, the pitch a fifth of the radius and a little more, or less for more than three rings, so the gaps
+    /// stay even and the middle open. Past its goal a ring lies whole, and its leading end is drawn again over the lap beneath,
+    /// with a soft shadow just ahead of it, so the overlap reads. It stops at three laps and its name says so.
+    /// </summary>
+    private static void Rings(SvgWriter w, ChartSpec s)
+    {
+        const double top = 64;
+        var bottom = s.Height - 30d;
+        var outer = Math.Min(s.Width - 48d, bottom - top) / 2;
+        var pitch = Math.Min(outer * .22, outer * .72 / s.Series.Count);
+        var thick = pitch * .84;
+        var scale = Radial(s);
+        w.Add($"<g class='lumen-rings' transform='translate({R(s.Width / 2d)} {R((top + bottom) / 2)})'>");
+        for (var i = 0; i < s.Series.Count; i++)
+        {
+            var series = s.Series[i]; var point = series.Points[0]; var value = point.Y!.Value; var goal = series.Goal ?? 100;
+            var color = SeriesColor(series, i, w.Style);
+            var centre = outer - thick / 2 - i * pitch;
+            double ro = centre + thick / 2, ri = centre - thick / 2;
+            var progress = value / goal;
+            var end = 360 * Math.Min(progress, 3);
+            var shape = new StringBuilder($"<path class='lumen-ring-track' d='{Annulus(ri, ro)}' fill='{color}' fill-opacity='.2' stroke='none'/>");
+            if (end > 360)
+            {
+                shape.Append($"<path class='lumen-ring-progress' d='{Annulus(ri, ro)}' fill='{color}' stroke='none'/>");
+                // Three discs the width of the ring, a little further ahead of the leading end each, darken the lap beneath into a
+                // soft edge.
+                foreach (var (ahead, opacity) in new[] { (.42, ".06"), (.28, ".1"), (.14, ".14") })
+                {
+                    var (x, y) = Polar(centre, end + ahead * thick / centre * 180 / Math.PI);
+                    shape.Append($"<circle class='lumen-ring-shadow' cx='{N(x)}' cy='{N(y)}' r='{R(thick / 2)}' fill='#000000' fill-opacity='{opacity}' stroke='none'/>");
+                }
+                shape.Append($"<path class='lumen-ring-lead' d='{Band(ri, ro, end - 90, end, false, true)}' fill='{color}' stroke='none'/>");
+            }
+            else if (end > 0) shape.Append($"<path class='lumen-ring-progress' d='{Band(ri, ro, 0, end)}' fill='{color}' stroke='none'/>");
+            // The ring's outline draws nothing until it is focused, when it takes the focus ring.
+            shape.Append($"<path d='{Annulus(ri, ro)}' fill='none'/>");
+            var percent = Math.Round(progress * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture);
+            Datum(w, i, 0, $"{series.Name}: {scale.Format(value)} of {scale.Format(goal)}{Unit(point.Label)}, {percent} %{(progress > 3 ? ", drawn at 300 %" : "")}", shape.ToString());
+        }
+        w.Add("</g>");
+    }
+
+    /// <summary>A point <paramref name="radius"/> from a radial chart's centre at <paramref name="degrees"/> clockwise from twelve
+    /// o'clock, rounded to four places so that no coordinate reads -0.</summary>
+    private static (double X, double Y) Polar(double radius, double degrees)
+    {
+        var angle = degrees * Math.PI / 180;
+        return (Math.Round(radius * Math.Sin(angle), 4) + 0d, Math.Round(-radius * Math.Cos(angle), 4) + 0d);
+    }
+    private static string At(double radius, double degrees) { var (x, y) = Polar(radius, degrees); return $"{N(x)},{N(y)}"; }
+    /// <summary>A length rounded to four places, so that no coordinate reads -0.</summary>
+    private static string R(double n) => N(Math.Round(n, 4) + 0d);
+    /// <summary>Arcs round a circle of <paramref name="radius"/> from one angle to another, continuing a path from the first,
+    /// clockwise when the second is the larger, in pieces of a quarter turn at most so that no arc's flags are in doubt.</summary>
+    private static string Sweep(double radius, double from, double to)
+    {
+        if (to == from) return "";
+        var pieces = (int)Math.Ceiling(Math.Abs(to - from) / 90 - 1e-9);
+        var arcs = new StringBuilder();
+        for (var k = 1; k <= pieces; k++)
+            arcs.Append($" A{R(radius)},{R(radius)} 0 0 {(to > from ? 1 : 0)} {At(radius, from + (to - from) * k / pieces)}");
+        return arcs.ToString();
+    }
+    /// <summary>A closed band between two radii from one angle clockwise to another, each end square or, where asked, rounded
+    /// into a semicircle beyond it, as a round line cap is.</summary>
+    private static string Band(double inner, double outer, double from, double to, bool roundFrom = true, bool roundTo = true)
+    {
+        var half = R((outer - inner) / 2);
+        return $"M{At(outer, from)}{Sweep(outer, from, to)}{(roundTo ? $" A{half},{half} 0 0 1 " : " L")}{At(inner, to)}{Sweep(inner, to, from)}" +
+            $"{(roundFrom ? $" A{half},{half} 0 0 1 {At(outer, from)}" : "")} Z";
+    }
+    /// <summary>A whole ring between two radii: the outer circle clockwise and the inner one back, so the middle stays empty.</summary>
+    private static string Annulus(double inner, double outer) => $"M{At(outer, 0)}{Sweep(outer, 0, 360)} Z M{At(inner, 0)}{Sweep(inner, 360, 0)} Z";
+    /// <summary>The colour a gradient takes at <paramref name="value"/>: its first stop's below the first, its last's above the
+    /// last, and between two stops a blend of theirs.</summary>
+    private static string Blend(IReadOnlyList<ColorStop> stops, double value)
+    {
+        if (value <= stops[0].Value) return stops[0].Color;
+        for (var i = 1; i < stops.Count; i++)
+            if (value <= stops[i].Value) return Mix(stops[i - 1].Color, stops[i].Color, (value - stops[i - 1].Value) / (stops[i].Value - stops[i - 1].Value));
+        return stops[^1].Color;
     }
 
     private static void Donut(SvgWriter w, ChartSpec s)

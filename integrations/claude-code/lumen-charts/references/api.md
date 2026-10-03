@@ -27,7 +27,7 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 | `Theme` | `ChartTheme`, `Light` | `Light` or `Dark`, used when no `Style` is set. |
 | `Style` | `ChartStyle?` | Colours, font and finish; wins over `Theme` and a cascaded style. |
 | `Series` | `IReadOnlyList<ChartSeries>` | The data. At most 32 series, 100,000 points. |
-| `XLabel`, `YLabel`, `Y2Label` | string | Axis titles. `Y2Label` names the right axis. |
+| `XLabel`, `YLabel`, `Y2Label` | string | Axis titles. `Y2Label` names the right axis. On a gauge `YLabel` is the unit written after the score (`"%"`). |
 | `Width`, `Height` | int, 900 × 420 | The SVG's viewBox, 320–4096 by 240–2160; the component scales it to its container, or with `FitWidth` draws it at the container's width. |
 | `XAxis`, `YAxis`, `Y2Axis` | `AxisKind`, `Linear` | `Linear`, `Log`, or (X only) `Time` in Unix milliseconds. |
 | `XFormat`, `YFormat`, `Y2Format` | `ValueFormat`, `Number` | `Duration` reads seconds; `Compact` writes 1.2k. Not on a time axis. |
@@ -45,6 +45,7 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 | `Bins` | int? | Histogram bin count; null chooses from the data. |
 | `DensityCells` | int? | Scatter only: aggregate into shaded cells (8–200 across). |
 | `MaxRenderedPoints` | int, 1200 | Line and area sampling budget per continuous run (min/max sampling keeps extremes). |
+| `GaugeSweep` | double, 270 | Gauge only (0.26.0): how far round the arc runs, 180 (semicircle) to 360 (full circle), centred at the top. Any other kind refuses a value but 270. |
 
 ## ChartSeries
 
@@ -62,10 +63,11 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 | `StrokeWidth` | 0.5–12 px for line, area and band strokes. |
 | `Curve` | `LineCurve.Linear`, `Smooth` (monotone, never overshoots), `Step`. |
 | `Fill` | `AreaFill.Flat` or `Fade` (vertical gradient) on areas and columns. |
-| `Gradient` | `IReadOnlyList<ColorStop>` — colour a stroke continuously by value; not with `Zones`. |
+| `Gradient` | `IReadOnlyList<ColorStop>` — colour a stroke continuously by value; not with `Zones`. On a gauge it colours the arc along its length; not with `YZones`. |
 | `Markers` | `MarkerStyle.Auto` (hover/focus in the refined finish), `None`, `Hollow`, `Filled`. |
 | `HighlightLast` | Ring the latest point of a line or area. |
 | `ValueLabels` | Print each column's or bar's value past its end when it fits. |
+| `Goal` | Ring charts only (0.26.0): the ring's target, `double?`, positive, 100 when null; progress is `Y / Goal`. The point's `Label` is the unit (`"kcal"`). |
 
 `ChartSeries.From<T>(name, items, x: item => …, y: item => …, label: item => …)` maps your own objects.
 
@@ -85,7 +87,7 @@ Init properties: `Label` (left axis title), `Weight` (height beside the main plo
 
 ## Enums
 
-`ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc }` · `ChartTheme { Light, Dark }` · `AxisKind { Linear, Log, Time }` · `ValueFormat { Number, Duration, Compact }` · `LineCurve { Linear, Smooth, Step }` · `AreaFill { Flat, Fade }` · `MarkerStyle { Auto, None, Hollow, Filled }` · `AxisSide { Left, Right }` · `TickLabels { All, Ends }` · `GridLine { Solid, Dotted, Dashed, Hidden }` · `ChartFinish { Refined, Classic }` · `AnnotationAxis { X, Y }` · `GraphLayout { Circular, Layered }`.
+`ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc, Gauge, Ring }` · `ChartTheme { Light, Dark }` · `AxisKind { Linear, Log, Time }` · `ValueFormat { Number, Duration, Compact }` · `LineCurve { Linear, Smooth, Step }` · `AreaFill { Flat, Fade }` · `MarkerStyle { Auto, None, Hollow, Filled }` · `AxisSide { Left, Right }` · `TickLabels { All, Ends }` · `GridLine { Solid, Dotted, Dashed, Hidden }` · `ChartFinish { Refined, Classic }` · `AnnotationAxis { X, Y }` · `GraphLayout { Circular, Layered }`.
 
 ## ChartStyle
 
@@ -103,8 +105,8 @@ public static readonly ChartStyle Brand = new() {
 ## Rendering and export
 
 - `ChartSvg.Render(spec, includeLegend = true, includeTitles = true)` → SVG string. Throws `ArgumentException` for an invalid spec.
-- `ChartSvg.ResolveStyle(spec)`, `ChartSvg.SeriesColor(series, index, style)`.
-- `ChartExport.Csv(spec)` → CSV of the original observations (time charts add an ISO `XTime` column).
+- `ChartSvg.ResolveStyle(spec)`, `ChartSvg.SeriesColor(series, index, style)`, `ChartSvg.LegendKey(spec, index)` (a series' legend key as a small SVG) and `ChartSvg.LegendLabel(spec, index)` (what the legend writes: the name, and on a ring `Move: 540 of 600 kcal`, on a gauge `Recovery: 72 %`).
+- `ChartExport.Csv(spec)` → CSV of the original observations (time charts add an ISO `XTime` column, ring charts a `Goal` column).
 - `ChartValidation.Validate(spec)` validates without rendering.
 
 ## Axes and time

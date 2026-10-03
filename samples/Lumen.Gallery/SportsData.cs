@@ -41,6 +41,9 @@ public static class SportsData
     public const double PaceBefore = 266, PaceAfter = 250;
     /// <summary>The pace the 10 km race is planned at, seconds per kilometre.</summary>
     public const double GoalPace = 245;
+    /// <summary>The athlete's body mass in kilograms, which a run's active calories are reckoned from at one kilocalorie per
+    /// kilogram per kilometre.</summary>
+    public const double BodyMass = 68;
     // Short enough to stay inside a chart drawn at a phone's width.
     public const string Source = "Source: simulated athlete · not real training data";
     public static DateOnly Today => Start.AddDays(Weeks * 7 - 1);
@@ -279,6 +282,38 @@ public static class SportsData
             .Select(zone => season.Sessions.Where(s => (s.Day.DayNumber - Start.DayNumber) / 7 == week).Sum(s => s.TimeInZone[zone])).ToArray())
         .ToArray();
 
+    /// <summary>
+    /// An illustrative readiness score for each day of the season, from 0 to 100, and no vendor's, whose formulas are
+    /// unpublished: 60, plus 10 for each standard deviation the night before's HRV sits above the mean of the 28 nights before
+    /// it — the baseline the HRV chart draws — plus half the day's form, rounded and held between 0 and 100.
+    /// </summary>
+    public static IReadOnlyList<double> Readiness(Season season)
+    {
+        var rolling = Statistics.Rolling(season.Hrv.Select(v => (double?)v).ToArray(), BaselineNights);
+        return Enumerable.Range(0, Weeks * 7).Select(day =>
+        {
+            var night = day + BaselineNights;
+            var window = rolling[night - 1]!;
+            return Math.Clamp(Math.Round(60 + 10 * (season.Hrv[night] - window.Mean) / window.Deviation + .5 * season.Load[day].Form), 0, 100);
+        }).ToArray();
+    }
+
+    /// <summary>Readiness in three tiers, as WHOOP colours recovery: low to 33, moderate to 66 and good above, in the red, gold
+    /// and green of <paramref name="zones"/>, a brand's zone ramp.</summary>
+    public static ZoneScale ReadinessZones(IReadOnlyList<string> zones) =>
+        new([new("Low", 33, zones[5]), new("Moderate", 66, zones[3]), new("Good", double.PositiveInfinity, zones[2])]);
+
+    /// <summary>The day's training as three rings: active calories from its runs at <see cref="BodyMass"/>, against 1000; its
+    /// minutes, against 45; and its training stress, against yesterday's fitness, which is the athlete's average day.</summary>
+    public static IReadOnlyList<(string Name, double Value, string Unit, double Goal)> Activity(Season season, DateOnly day)
+    {
+        var sessions = season.Sessions.Where(s => s.Day == day).ToArray();
+        var fitness = season.Load.Single(d => d.Day == day.AddDays(-1)).Fitness;
+        return [("Move", Math.Round(sessions.Where(s => s.Sport == Sport.Run).Sum(s => s.Metres) / 1000 * BodyMass), "kcal", 1000),
+            ("Exercise", Math.Round(sessions.Sum(s => s.Seconds) / 60), "min", 45),
+            ("Stress", season.Load.Single(d => d.Day == day).Stress, "TSS", Math.Round(fitness))];
+    }
+
     /// <summary>The headline numbers above the dashboard, each a value and what it is.</summary>
     public static IReadOnlyList<(string Value, string Label)> Facts()
     {
@@ -319,6 +354,25 @@ public static class SportsData
         var track = run.Track!;
         ChartSpec Chart(int width, int height) => new() { Theme = theme, Width = width, Height = height, Source = Source };
         string WeekOf(int week) => Day(Start.AddDays(7 * week));
+
+        // This morning's readiness on a gauge tinted by its tiers, with the average of the 28 days before as a tick, and the day's
+        // training as rings, each in a zone colour of the brand: move red, exercise green and stress blue.
+        var scores = Readiness(season);
+        var tiers = ReadinessZones(zones);
+        var readiness = Chart(half, 360) with
+        {
+            Kind = ChartKind.Gauge,
+            Title = $"Readiness {Text(scores[^1])}, {tiers.Zones[tiers.IndexOf(scores[^1])].Name.ToLowerInvariant()}", Description = "Last night's HRV against its baseline, and today's form",
+            YZones = tiers, Annotations = [new(AnnotationAxis.Y, Math.Round(scores.SkipLast(1).TakeLast(BaselineNights).Average())) { Label = "28-day average" }],
+            Series = [new("Readiness", [new(0, scores[^1], "Readiness")])]
+        };
+        var activity = Activity(season, Today);
+        var rings = Chart(half, 360) with
+        {
+            Kind = ChartKind.Ring,
+            Title = $"{activity.Count(a => a.Value >= a.Goal)} of {activity.Count} rings closed", Description = $"{run.Name} · the day's training against its goals",
+            Series = activity.Select((a, i) => new ChartSeries(a.Name, [new(0, a.Value, a.Unit)], zones[new[] { 5, 2, 1 }[i]]) { Goal = a.Goal }).ToArray()
+        };
 
         // Performance management, the planned weeks shaded and dashed from the first planned day, and the daily stress in the
         // ramp's neutral grey so that the lines read over it.
@@ -482,6 +536,8 @@ public static class SportsData
         };
 
         return [
+            new("today", "readiness", "Readiness", "An illustrative score, no vendor's: 60, plus 10 for each standard deviation last night's HRV sits above its 28-night baseline, plus half of today's form, on a `Gauge` whose `YZones` tint the track; the tick is the 28-day average.", false, readiness),
+            new("today", "activity", "Today's activity", "The run's active calories at 1 kcal per kg per km, its minutes and its training stress, each a `Ring` series against its `Goal` — stress against fitness, the athlete's average day. Past 100 % a ring runs on over itself.", false, rings),
             new("load", "performance", "Performance management", "Daily stress as columns, fitness and fatigue as lines and form as an area on the right axis, all from `Training.Load`; `ProjectedFrom` dashes the planned weeks and `HighlightLast` rings race-day fitness.", true, performance),
             new("load", "weekly-load", "Weekly load against a target", "Each week's stress in capsule columns over a `Band` series from 80 to 130 % of the four weeks before, whose centre line is their average.", false, weeklyLoad),
             new("load", "weekly-zones", "Weekly zone distribution", "Every session's `Training.TimeInZone` added up by week and stacked in the zone colours.", false, distribution),

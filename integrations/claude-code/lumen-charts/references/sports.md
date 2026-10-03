@@ -1,6 +1,6 @@
 # Sports and training charts
 
-Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.25.0.
+Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.26.0.
 
 ## Conventions the numbers follow
 
@@ -9,7 +9,7 @@ Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, 
 - **Pace** is seconds per km (or mile): 300 = `5:00 /km`. Set `YReversed = true` so faster is higher, as every running app does. Put the unit in the axis title.
 - **Power** is watts; **heart rate** bpm; samples must be uniformly spaced (pass `sampleSeconds` when not 1 s). Fill or cut gaps before computing.
 - **Zones:** `Zone.Upper` is inclusive, the last zone's is `double.PositiveInfinity`. `ZoneScale.CogganPower(ftp)` and `ZoneScale.CogganHeartRate(thresholdHr)` follow Allen & Coggan. A value in a published gap (55 % vs 56 %) belongs to the higher zone.
-- **Not computed** (no published formula): hrTSS, rTSS, TRIMP, grade-adjusted pace, W′ balance, and vendor scores such as recovery, readiness, strain or Body Battery. Draw them as ordinary series if the data provides them.
+- **Not computed** (no published formula): hrTSS, rTSS, TRIMP, grade-adjusted pace, W′ balance, and vendor scores such as recovery, readiness, strain or Body Battery. When the data provides one, draw it on a gauge (below) or as an ordinary series.
 
 Shared helper used below:
 
@@ -166,6 +166,40 @@ var best = new ChartSpec {
     }).ToArray()) { Curve = LineCurve.Step }]
 };
 ```
+
+## Recovery or readiness gauge
+
+One score on an open arc, tinted by tiers — WHOOP's red, yellow and green recovery, Oura's and Garmin's readiness bands — with its recent average as a target tick.
+
+```csharp
+// score: today's 0–100 score from the device; average: the last seven days'
+var tiers = new ZoneScale([new("Low", 33, "#DD4B45"), new("Moderate", 66, "#A88200"), new("Good", double.PositiveInfinity, "#2E9B58")]);
+var recovery = new ChartSpec {
+    Title = "Recovery", Description = "This morning's recovery against its seven-day average",
+    Kind = ChartKind.Gauge, YLabel = "%", YZones = tiers,                 // scale 0–100 unless YMin/YMax say otherwise
+    Annotations = [new ChartAnnotation(AnnotationAxis.Y, Math.Round(average)) { Label = "7-day average" }],
+    Series = [new("Recovery", [new ChartPoint(0, score, "Recovery")])]    // one point; its label is the caption
+};
+```
+
+The score is drawn in its tier's colour and named with it (`Recovery: 72 %, Good`); a score off the scale stands at its end and says so. `GaugeSweep = 180` draws a semicircle, `360` a full circle. For WHOOP strain set `YMax = 21` and colour the arc with `Gradient = [new ColorStop(0, "#3F87D9"), new ColorStop(21, "#DD4B45")]` on the series instead of `YZones`; for sleep against a goal, `YFormat = ValueFormat.Duration` with seconds (`YMax = 36000` reads `10:00:00`). The tier colours above are entries of `ChartStyle.Light.Zones`, which clear 3:1 on every preset; on `ChartStyle.Midnight` take `ChartStyle.Midnight.Zones[5]`, `[3]` and `[2]` for brighter ones.
+
+## Activity rings
+
+Apple's concentric rings: each a value against its goal, outermost first, running on over itself past the goal.
+
+```csharp
+// moveKcal, exerciseMinutes and standHours for the day
+var activity = new ChartSpec {
+    Title = "Activity", Description = "Today's move, exercise and stand against their goals",
+    Kind = ChartKind.Ring, Width = 400, Height = 360,
+    Series = [new("Move", [new ChartPoint(0, moveKcal, "kcal")], "#DD4B45") { Goal = 600 },      // the label is the unit
+              new("Exercise", [new ChartPoint(0, exerciseMinutes, "min")], "#2E9B58") { Goal = 30 },
+              new("Stand", [new ChartPoint(0, standHours, "h")], "#3F87D9") { Goal = 12 }]
+};
+```
+
+One to six rings, one nonnegative point each; `Goal` defaults to 100, so percentages need none. The legend reads `Move: 540 of 600 kcal` and each ring's name adds its progress, `90 %`; past 300 % a ring is drawn at 300 % and says so. A ring in seconds takes `YFormat = ValueFormat.Duration`, which applies to every ring of the chart. CSV adds a `Goal` column.
 
 ## Look
 

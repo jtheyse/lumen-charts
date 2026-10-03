@@ -106,6 +106,20 @@ public static class DemoData
             // Asia arrives already summarised, so a violin, which needs the observations, leaves it out.
             if(kind==Lumen.Charts.ChartKind.Box) series=[..series,new("Asia",[]){Summary=new(205,228,252,160,318,[352,371])}];
         }
+        // The radial kinds take the zone ramp's red, gold, green and blue, which clear 3:1 on every preset's background.
+        var palette=Lumen.Charts.ChartStyle.Light.Zones;
+        if(kind==Lumen.Charts.ChartKind.Gauge)
+        {
+            series=[new("Recovery",[new(0,Math.Round(58+random.NextDouble()*30),"Recovery")])];
+            title="How recovered is the body today?";desc="A recovery score in WHOOP-like tiers · red to 33 %, yellow to 66 %, green above · the tick is the seven-day average";x="";y="%";
+        }
+        if(kind==Lumen.Charts.ChartKind.Ring)
+        {
+            series=[new("Move",[new(0,Math.Round(420+random.NextDouble()*160),"kcal")],palette[5]){Goal=600},
+                new("Exercise",[new(0,Math.Round(36+random.NextDouble()*20),"min")],palette[2]){Goal=30},
+                new("Stand",[new(0,7+random.Next(4),"h")],palette[1]){Goal=12}];
+            title="Close your rings";desc="Today's move, exercise and stand against their goals · exercise is past its goal, so its ring runs on over itself";x="";y="";
+        }
         if(kind==Lumen.Charts.ChartKind.Bar) {title="Compare plans without the clutter";x="Month";}
         if(kind==Lumen.Charts.ChartKind.Scatter || kind==Lumen.Charts.ChartKind.Bubble)
         {
@@ -113,6 +127,9 @@ public static class DemoData
             series=series.Select(s=>s with {Points=s.Points.Select(p=>p with {X=p.X*8+random.Next(6)}).ToArray(),Trend=kind==Lumen.Charts.ChartKind.Scatter}).ToArray();
         }
         var spec=new Lumen.Charts.ChartSpec{Kind=kind,Theme=theme,XAxis=xKind,SkipWeekends=weekends,TimeSkips=holidays,Title=title,Description=desc,Series=series,XLabel=x,YLabel=y,Source="Source: deterministic demonstration data · not business results",Height=height,Panes=panes};
+        if(kind==Lumen.Charts.ChartKind.Gauge)
+            spec=spec with{YZones=new([new("Low",33,palette[5]),new("Moderate",66,palette[3]),new("Good",double.PositiveInfinity,palette[2])]),
+                Annotations=[new(Lumen.Charts.AnnotationAxis.Y,Math.Round(52+random.NextDouble()*16)){Label="7-day average"}]};
         if(axis==AxisDemo.Time&&TimeCapable(kind))
         {
             var start=new DateTimeOffset(2026,1,5,0,0,0,TimeSpan.Zero);

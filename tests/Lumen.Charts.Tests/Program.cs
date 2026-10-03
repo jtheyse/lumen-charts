@@ -25,6 +25,8 @@ ChartSpec Sample(ChartKind kind)=>kind switch{
     ChartKind.Candlestick or ChartKind.Ohlc=>Spec(kind) with{Series=[new("Price",[ChartPoint.Candle(0,10,12,9,11),ChartPoint.Candle(1,11,13,10,10.5),ChartPoint.Candle(2,10.5,11,8,9)])]},
     ChartKind.Band=>Spec(kind) with{Series=[new("Forecast",[ChartPoint.Interval(0,2,1,3),ChartPoint.Interval(1,5,4,6),ChartPoint.Interval(2,3,2,4)])]},
     ChartKind.Histogram or ChartKind.Box or ChartKind.Violin=>Spec(kind) with{Series=[new("Sample",Enumerable.Range(0,40).Select(i=>new ChartPoint(i,i%7+1)).ToArray())]},
+    ChartKind.Gauge=>Spec(kind) with{Series=[new("Recovery",[new(0,72,"Recovery")])]},
+    ChartKind.Ring=>Spec(kind) with{Series=[new("Move",[new(0,540,"kcal")]){Goal=600},new("Exercise",[new(0,47,"min")]){Goal=30},new("Stand",[new(0,9,"h")]){Goal=12}]},
     _=>Spec(kind)};
 foreach(var kind in Enum.GetValues<ChartKind>())
 {
@@ -1867,7 +1869,7 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
             Check(Refusal(spec with{YReversed=true}).Contains("zero baseline"),$"{kind}: reversed Y");
             Check(Refusal(spec with{Y2Reversed=true}).Contains("zero baseline"),$"{kind}: reversed Y2");
         }
-        else if(kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar) Check(Refusal(spec with{YReversed=true}).Contains("no Y axis"),$"{kind}: reversed Y");
+        else if(kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Gauge or ChartKind.Ring) Check(Refusal(spec with{YReversed=true}).Contains("no Y axis"),$"{kind}: reversed Y");
         else ChartSvg.Render(spec with{YReversed=true,Y2Reversed=true});
     }
     Reject(()=>ChartSvg.Render(Spec() with{YFormat=(ValueFormat)9}));
@@ -3670,8 +3672,8 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: ten charts, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
-    Check(sports.Count==10&&sports.Select(card=>card.Id).Distinct().Count()==10,"the page should have ten charts");
+Test("Sports page: twelve charts, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+    Check(sports.Count==12&&sports.Select(card=>card.Id).Distinct().Count()==12,"the page should have twelve charts");
     foreach(var (theme,style,zones) in new[]{(ChartTheme.Light,(ChartStyle?)null,ChartStyle.Light.Zones),(ChartTheme.Dark,null,ChartStyle.Light.Zones),(ChartTheme.Dark,ChartStyle.Midnight,ChartStyle.Midnight.Zones)})
         foreach(var markers in new[]{true,false})
             foreach(var card in SportsData.Cards(theme,zones,markers))
@@ -3682,6 +3684,36 @@ Test("Sports page: ten charts, each rendering in light, dark and Midnight at a d
                     Check(XDocument.Parse(ChartSvg.Render(card.Spec with{Width=width,Style=style})).Descendants().Any(e=>e.Attribute("data-point") is not null),$"{card.Id} drew no marks {width} wide");
             }
     Check(Sports("stream").Annotations.Count==3&&SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones,markers:false).Single(card=>card.Id=="stream").Spec.Annotations.Count==0,"the stream's markers do not follow the page");
+});
+Test("Sports page: this morning's readiness reads the HRV and form the other charts draw, and the day's rings are the last run",()=>{
+    Check(sports.Take(2).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("today","readiness",ChartKind.Gauge),("today","activity",ChartKind.Ring)]),"the Today row is not first");
+    var gauge=Sports("readiness");var score=gauge.Series.Single().Points.Single().Y!.Value;
+    // Last night is the HRV chart's last night, measured against the band that chart draws round it, and today's form is the
+    // performance chart's. The band is rounded to a tenth, so the score is checked to within a point.
+    var band=Sports("hrv").Series[0].Points[^1];var deviation=(band.High!.Value-band.Low!.Value)/2;
+    var today=SportsData.When(SportsData.Today);
+    var form=Sports("performance").Series.Single(s=>s.Name=="Form").Points.Single(p=>p.X==today).Y!.Value;
+    Check(Math.Abs(score-Math.Clamp(Math.Round(60+10*(athlete.Hrv[^1]-band.Y!.Value)/deviation+.5*form),0,100))<=1,$"readiness {score} does not follow last night's HRV and today's form");
+    var scores=SportsData.Readiness(athlete);
+    Check(scores.Count==SportsData.Weeks*7&&scores[^1]==score&&gauge.Annotations.Single().From==Math.Round(scores.SkipLast(1).TakeLast(SportsData.BaselineNights).Average()),"the tick is not the 28 days before");
+    Check(gauge.YZones!.Zones.Select(z=>z.Upper).SequenceEqual([33,66,double.PositiveInfinity])&&gauge.Title==$"Readiness {score}, {gauge.YZones.Zones[gauge.YZones.IndexOf(score)].Name.ToLowerInvariant()}","the tiers or the title disagree with the score");
+    // The rings are the last run: its active calories, its minutes and the stress the performance chart scores for today,
+    // against yesterday's fitness.
+    var rings=Sports("activity").Series;
+    var daily=Sports("performance").Series.Single(s=>s.Name=="Daily stress").Points.Single(p=>p.X==today).Y;
+    Check(rings.Select(s=>(s.Name,s.Points.Single().Label)).SequenceEqual([("Move","kcal"),("Exercise","min"),("Stress","TSS")]),"the rings are not move, exercise and stress");
+    Check(rings[0].Points[0].Y==Math.Round(latest.Metres/1000*SportsData.BodyMass)&&rings[1].Points[0].Y==Math.Round(latest.Seconds/60)&&Sports("stream").Series[0].Points.Count*SportsData.RunSample==latest.Seconds,"move or exercise is not the run");
+    Check(rings[2].Points[0].Y==daily&&daily==latest.Stress&&rings[2].Goal==Math.Round(athlete.Load.Single(d=>d.Day==SportsData.Today.AddDays(-1)).Fitness),"stress is not today's against yesterday's fitness");
+    Check(Sports("activity").Title==$"{rings.Count(r=>r.Points[0].Y>=r.Goal)} of 3 rings closed"&&rings.Any(r=>r.Points[0].Y>r.Goal),"the title miscounts, or no ring runs past its goal");
+});
+Test("Sports page: the Today row's zone and ring colours clear 3:1 on every brand's background, and its score's text 4.5:1",()=>{
+    foreach(var (style,zones) in new[]{(ChartStyle.Light,ChartStyle.Light.Zones),(ChartStyle.Dark,ChartStyle.Light.Zones),(Brand(),Brand().Zones),(ChartStyle.Midnight,ChartStyle.Midnight.Zones)})
+        foreach(var card in SportsData.Cards(ChartTheme.Light,zones).Where(card=>card.Section=="today"))
+        {
+            var inks=card.Spec.Series.Select(s=>s.Color).Concat(card.Spec.YZones?.Zones.Select(z=>z.Color)??[]).OfType<string>().ToArray();
+            Check(inks.Length>=3&&inks.All(ink=>Contrast(ink,style.Background)>=3),$"{card.Id} on {style.Background}: {string.Join(", ",inks.Where(ink=>Contrast(ink,style.Background)<3))}");
+            Check(Contrast(style.Text,style.Background)>=4.5&&Svg(card.Spec with{Style=style}).Descendants().Any(e=>e.Attribute("data-point") is not null));
+        }
 });
 Test("Sports page: the stream's run is a day of the performance chart, at the stress it scored, and every day is its sessions",()=>{
     var daily=Sports("performance").Series.Single(s=>s.Name=="Daily stress").Points;
@@ -3860,6 +3892,277 @@ Test("The packages carry their XML documentation beside each assembly, and it co
     var missing=properties.Where(id=>!documented.Contains(id))
         .Concat(methods.Where(id=>!documented.Any(d=>d==id||d.StartsWith(id+"(")||d.StartsWith(id+"``")))).Distinct().ToArray();
     Check(missing.Length==0,"undocumented: "+string.Join(", ",missing));
+});
+// 0.26.0: gauges and rings. Angles are measured as the renderer measures them, in degrees clockwise from twelve o'clock about
+// the origin of the group the arcs are drawn in, which the group's transform puts at their centre.
+double AngleAt(double x,double y)=>Math.Atan2(x,-y)*180/Math.PI;
+bool About(double a,double b,double within=.01)=>Math.Abs(a-b)<within;
+// Two angles that name one direction, whichever turn they are written in.
+bool Same(double a,double b)=>About(((a-b)%360+540)%360-180,0);
+ZoneScale Tiers()=>new([new("Low",33,"#DD4B45"),new("Moderate",66,"#A88200"),new("Good",double.PositiveInfinity,"#2E9B58")]);
+ChartSpec Gauge(double value,double sweep=270)=>new(){Kind=ChartKind.Gauge,Title="Recovery",GaugeSweep=sweep,Series=[new("Recovery",[new(0,value,"Recovery")])]};
+ChartSpec Rings(params (string Name,double Value,double? Goal)[] rings)=>new(){Kind=ChartKind.Ring,Title="Activity",
+    Series=rings.Select(r=>new ChartSeries(r.Name,[new(0,r.Value,"kcal")]){Goal=r.Goal}).ToArray()};
+XElement[] Classed(XDocument doc,string name)=>doc.Descendants().Where(e=>(string?)e.Attribute("class")==name).ToArray();
+// The radius of a band's or a ring's outer edge, which its first arc follows, and the angles of the points a path visits on a circle.
+double OuterOf(XElement path)=>Commands(path.Attribute("d")!.Value).First(c=>c.Op=='A').Args[0];
+double[] AnglesOn(XElement path,double radius)=>Commands(path.Attribute("d")!.Value).Where(c=>c.Op is 'M' or 'A' or 'L')
+    .Select(c=>(X:c.Args[^2],Y:c.Args[^1])).Where(p=>About(double.Hypot(p.X,p.Y),radius)).Select(p=>AngleAt(p.X,p.Y)).ToArray();
+// How far clockwise a path runs round the circle of a radius, arc by arc.
+double SweepOn(XElement path,double radius)
+{
+    double x=0,y=0,total=0;
+    foreach(var (op,a) in Commands(path.Attribute("d")!.Value))
+    {
+        if(op=='A'&&About(a[0],radius)&&a[4]==1){var turn=(AngleAt(a[5],a[6])-AngleAt(x,y)+720)%360;total+=turn==0?360:turn;}
+        if(op is 'M' or 'L' or 'A'){x=a[^2];y=a[^1];}
+    }
+    return total;
+}
+double KnobAngle(ChartSpec spec){var knob=Classed(Svg(spec),"lumen-gauge-knob").Single();return AngleAt(Attr(knob,"cx"),Attr(knob,"cy"));}
+XElement ScoreOf(XDocument doc)=>doc.Descendants(ns+"g").Single(g=>g.Attribute("data-point") is not null);
+Test("Gauge: the score stands at its angle on the arc, at the start, the middle and the end, and off the scale at the end it passed",()=>{
+    (double Value,double Sweep,double Angle)[] cases=[(0,270,-135),(50,270,0),(100,270,135),(25,270,-67.5),(150,270,135),(-20,270,-135),
+        (0,180,-90),(25,180,-45),(100,180,90),(25,360,-90),(50,360,0),(75,360,90),(72,300,-150+300*.72)];
+    foreach(var (value,sweep,angle) in cases)
+    {
+        Check(About(KnobAngle(Gauge(value,sweep)),angle),$"{value} on a {sweep}-degree arc stands at {KnobAngle(Gauge(value,sweep)):0.###}, not {angle}");
+        // The score's band runs along the outer edge from the start of the arc to the score, and no further.
+        var doc=Svg(Gauge(value,sweep));var track=Classed(doc,"lumen-gauge-track").Single();var band=Classed(doc,"lumen-gauge-value").Single();
+        var outer=OuterOf(track);var on=AnglesOn(band,outer);
+        Check(Same(on[0],-sweep/2)&&About(SweepOn(band,outer),angle+sweep/2)&&About(SweepOn(track,outer),sweep),$"{value} on {sweep}: the band runs {SweepOn(band,outer)} degrees from {on[0]}");
+        Check(band.Parent!.Attribute("data-point")?.Value=="0"&&band.Parent.Attribute("data-series")?.Value=="0"&&(string?)band.Parent.Attribute("role")=="button","the score is not a selectable mark");
+    }
+    // The scale is YMin to YMax: 14.2 on WHOOP's strain scale of 0 to 21.
+    Check(About(KnobAngle(Gauge(14.2) with{YMin=0,YMax=21}),-135+270*14.2/21)&&About(KnobAngle(Gauge(-10) with{YMin=-50,YMax=50}),-27),"the scale's bounds are not where the arc's ends are");
+});
+Test("Gauge: zones tint their own stretch of track, clipped to the scale, and the score takes its zone's colour",()=>{
+    var doc=Svg(Gauge(72) with{YZones=Tiers()});
+    var outer=OuterOf(Classed(doc,"lumen-gauge-track").Single());
+    var zones=Classed(doc,"lumen-gauge-zone");
+    double At(double v)=>-135+270*v/100;
+    (double From,double To,string Ink,string Name)[] expected=[(At(0),At(33),"#DD4B45","Low: up to 33"),(At(33),At(66),"#A88200","Moderate: 33 to 66"),(At(66),At(100),"#2E9B58","Good: above 66")];
+    Check(zones.Length==3,$"{zones.Length} zones");
+    for(var i=0;i<3;i++)
+    {
+        var on=AnglesOn(zones[i],outer);
+        Check(About(on.Min(),expected[i].From)&&About(on.Max(),expected[i].To)&&(string?)zones[i].Attribute("fill")==expected[i].Ink&&(string?)zones[i].Attribute("fill-opacity")==".3",$"zone {i} runs {on.Min():0.##} to {on.Max():0.##}");
+        Check((string?)zones[i].Parent!.Attribute("aria-label")==expected[i].Name&&(string?)zones[i].Parent!.Attribute("role")=="img"&&zones[i].Parent!.Attribute("data-point") is null,$"zone {i} is named {zones[i].Parent!.Attribute("aria-label")}");
+    }
+    Check((string?)Classed(doc,"lumen-gauge-value").Single().Attribute("fill")=="#2E9B58","a good score is not green");
+    Check((string?)Classed(Svg(Gauge(20) with{YZones=Tiers()}),"lumen-gauge-value").Single().Attribute("fill")=="#DD4B45","a low score is not red");
+    // A zone that ends below the scale is left out, and one that starts below it is clipped to the arc's start.
+    var clipped=Classed(Svg(Gauge(72) with{YZones=Tiers(),YMin=40}),"lumen-gauge-zone");
+    Check(clipped.Length==2&&About(AnglesOn(clipped[0],outer).Min(),-135)&&About(AnglesOn(clipped[0],outer).Max(),-135+270*26/60.0),"a zone below the scale was drawn or not clipped");
+    // Without zones the score takes its series colour, and a zone without a colour the style's ramp at its place.
+    Check((string?)Classed(Svg(Gauge(72)),"lumen-gauge-value").Single().Attribute("fill")==ChartStyle.Light.Series[0]);
+    var ramped=Svg(Gauge(72) with{YZones=new([new("Low",33),new("Moderate",66),new("Good",double.PositiveInfinity)]),Style=ChartStyle.Midnight});
+    Check(Classed(ramped,"lumen-gauge-zone").Select(z=>(string?)z.Attribute("fill")).SequenceEqual(ChartStyle.Midnight.Zones.Take(3))&&(string?)Classed(ramped,"lumen-gauge-value").Single().Attribute("fill")==ChartStyle.Midnight.Zones[2]);
+    // The key of a zoned gauge is its zones' colours.
+    Check(XDocument.Parse(ChartSvg.LegendKey(Gauge(72) with{YZones=Tiers()},0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual(["#DD4B45","#A88200","#2E9B58"]),"the key is not the zones");
+});
+Test("Gauge: a target is a tick across the arc at its angle, named and labelled",()=>{
+    var doc=Svg(Gauge(72) with{Annotations=[new(AnnotationAxis.Y,60){Label="Average"}]});
+    var outer=OuterOf(Classed(doc,"lumen-gauge-track").Single());
+    var ticks=Classed(doc,"lumen-gauge-target");
+    Check(ticks.Length==2,"the tick and its halo");
+    foreach(var tick in ticks)
+    {
+        double x1=Attr(tick,"x1"),y1=Attr(tick,"y1"),x2=Attr(tick,"x2"),y2=Attr(tick,"y2");
+        Check(About(AngleAt(x1,y1),-135+270*.6)&&About(AngleAt(x2,y2),-135+270*.6)&&double.Hypot(x1,y1)<outer-5&&double.Hypot(x2,y2)>outer+4,"the tick is not across the arc at 60");
+    }
+    Check((string?)ticks[0].Parent!.Attribute("aria-label")=="Average: 60"&&doc.Descendants(ns+"text").Any(t=>t.Value=="Average: 60"),"the target is not named and labelled");
+    // A target drawn without a label reads its value, and a label with no room clear of the score is left out but keeps its name.
+    Check(Classed(Svg(Gauge(72) with{Annotations=[new(AnnotationAxis.Y,10)]}),"lumen-gauge-target")[0].Parent!.Attribute("aria-label")!.Value=="10");
+    var narrow=Svg(Gauge(30) with{Width=337,Height=360,Annotations=[new(AnnotationAxis.Y,85){Label="Seven-day average"}]});
+    Check(!narrow.Descendants(ns+"text").Any(t=>t.Value.StartsWith("Seven"))&&Classed(narrow,"lumen-gauge-target")[0].Parent!.Attribute("aria-label")!.Value=="Seven-day average: 85","a label without room was drawn over the score or lost its name");
+});
+Test("Gauge: a gradient colours the arc along its length, each stop at its value's angle",()=>{
+    var stops=new ColorStop[]{new(0,"#3F87D9"),new(50,"#A88200"),new(100,"#DD4B45")};
+    var doc=Svg(Gauge(80) with{Series=[new("Strain",[new(0,80)]){Gradient=stops}]});
+    var outer=OuterOf(Classed(doc,"lumen-gauge-track").Single());
+    var pieces=Classed(doc,"lumen-gauge-value");
+    Check(pieces.Length>50&&About(AnglesOn(pieces[0],outer)[0],-135)&&About(AnglesOn(pieces[^1],outer)[^1],-135+270*.8),"the pieces do not run from the start to the score");
+    // Each piece starts where the last one did plus its step, so they leave no gap, and takes the gradient's colour at its middle.
+    var step=270*.8/pieces.Length;
+    for(var k=0;k<pieces.Length;k++)
+    {
+        var from=AnglesOn(pieces[k],outer)[0];
+        Check(About(from,-135+k*step),$"piece {k} starts at {from}");
+        var middle=(k*step+step/2)/270*100;
+        var expected=middle<=50?Blend("#3F87D9","#A88200",middle/50):Blend("#A88200","#DD4B45",(middle-50)/50);
+        var fill=pieces[k].Attribute("fill")!.Value;
+        Check(new[]{1,3,5}.All(o=>Math.Abs(C(fill,o)-C(expected,o))<=1),$"piece {k} is {fill}, not {expected}");
+    }
+    static int C(string hex,int offset)=>int.Parse(hex.AsSpan(offset,2),NumberStyles.HexNumber,CultureInfo.InvariantCulture);
+    static string Blend(string a,string b,double t){int B(int o)=>(int)(C(a,o)+(C(b,o)-C(a,o))*t);return $"#{B(1):X2}{B(3):X2}{B(5):X2}";}
+});
+Test("Ring: progress runs clockwise from twelve o'clock, past 100 % over itself with a shadow ahead of its leading end, and stops at 300 %",()=>{
+    (double Percent,double End)[] cases=[(0,0),(50,180),(100,360),(125,450),(150,540),(250,900),(400,1080)];
+    foreach(var (percent,end) in cases)
+    {
+        var doc=Svg(Rings(("Move",percent*6,600)));
+        var ring=doc.Descendants(ns+"g").Single(g=>(string?)g.Attribute("data-series")=="0");
+        var track=ring.Elements().Single(e=>(string?)e.Attribute("class")=="lumen-ring-track");
+        var outer=OuterOf(track);
+        var progress=ring.Elements().Where(e=>(string?)e.Attribute("class")=="lumen-ring-progress").ToArray();
+        var lead=ring.Elements().Where(e=>(string?)e.Attribute("class")=="lumen-ring-lead").ToArray();
+        var shadows=ring.Elements().Where(e=>(string?)e.Attribute("class")=="lumen-ring-shadow").ToArray();
+        Check(ring.Attribute("aria-label")!.Value==$"Move: {(percent*6).ToString(CultureInfo.InvariantCulture)} of 600 kcal, {percent} %{(percent>300?", drawn at 300 %":"")}",ring.Attribute("aria-label")!.Value);
+        if(percent==0){Check(progress.Length==0&&lead.Length==0&&shadows.Length==0,"an empty ring drew progress");continue;}
+        if(end<=360)
+        {
+            var on=AnglesOn(progress.Single(),outer);
+            Check(About(on[0],0)&&About(SweepOn(progress.Single(),outer),end)&&lead.Length==0&&shadows.Length==0,$"{percent} %: the arc runs {SweepOn(progress.Single(),outer)} degrees");
+            continue;
+        }
+        // Past the goal the ring lies whole, its leading end is drawn again over the lap beneath, and the shadow lies ahead of it.
+        Check(About(SweepOn(progress.Single(),outer),360)&&Commands(progress.Single().Attribute("d")!.Value).Count(c=>c.Op=='M')==2,$"{percent} %: the lap beneath is not whole");
+        var leading=AnglesOn(lead.Single(),outer);
+        Check(About((leading[^1]+360)%360,end%360)&&About(SweepOn(lead.Single(),outer),90),$"{percent} %: the leading end stands at {leading[^1]}, not {end%360}");
+        var thick=outer-Commands(track.Attribute("d")!.Value).Where(c=>c.Op=='A').Select(c=>c.Args[0]).Min();
+        Check(shadows.Length==3&&shadows.All(s=>About(Attr(s,"r"),thick/2,.001)&&About(double.Hypot(Attr(s,"cx"),Attr(s,"cy")),outer-thick/2)),"the shadow is not the ring's width, on its centre line");
+        Check(shadows.All(s=>{var ahead=(AngleAt(Attr(s,"cx"),Attr(s,"cy"))-end%360+720)%360;return ahead>0&&ahead<10;}),"the shadow is not just ahead of the leading end");
+        var order=ring.Elements().ToList();
+        Check(order.IndexOf(progress.Single())<order.IndexOf(shadows[0])&&order.IndexOf(shadows[^1])<order.IndexOf(lead.Single()),"the leading end is not drawn over its shadow");
+    }
+});
+Test("Ring: rings are evenly spaced from the outside in, each .84 of the pitch, sized from the smaller of the width and height",()=>{
+    foreach(var (count,width,height) in new[]{(1,900,420),(3,900,420),(3,337,600),(6,540,360)})
+    {
+        var spec=Rings(Enumerable.Range(0,count).Select(i=>($"R{i}",40d+i*20,(double?)100)).ToArray()) with{Width=width,Height=height};
+        var doc=Svg(spec);
+        var outerEdge=Math.Min(width-48,height-94)/2d;
+        var pitch=Math.Min(outerEdge*.22,outerEdge*.72/count);
+        var tracks=Classed(doc,"lumen-ring-track");
+        Check(tracks.Length==count,$"{tracks.Length} rings");
+        for(var i=0;i<count;i++)
+        {
+            var radii=Commands(tracks[i].Attribute("d")!.Value).Where(c=>c.Op=='A').Select(c=>c.Args[0]).Distinct().ToArray();
+            Check(radii.Length==2&&About(radii.Max(),outerEdge-i*pitch,.001)&&About(radii.Max()-radii.Min(),pitch*.84,.001),$"{count} rings at {width} by {height}: ring {i} spans {radii.Min()} to {radii.Max()}");
+        }
+        var group=doc.Descendants(ns+"g").Single(g=>(string?)g.Attribute("class")=="lumen-rings");
+        Check((string?)group.Attribute("transform")==$"translate({(width/2d).ToString(CultureInfo.InvariantCulture)} {((64+height-30)/2d).ToString(CultureInfo.InvariantCulture)})","the rings are not centred");
+    }
+});
+Test("Gauge and ring: names, labels and legends read the value in the axis's format, with its unit, zone and goal",()=>{
+    var gauge=Gauge(72) with{YLabel="%",YZones=Tiers()};
+    var doc=Svg(gauge);
+    Check(ScoreOf(doc).Attribute("aria-label")!.Value=="Recovery: 72 %, Good",ScoreOf(doc).Attribute("aria-label")!.Value);
+    var texts=doc.Descendants(ns+"text").Select(t=>t.Value).ToArray();
+    Check(texts.Contains("72%")&&texts.Contains("Recovery")&&texts.Contains("Good")&&texts.Contains("0")&&texts.Contains("100"),string.Join(" | ",texts));
+    // A gauge's score is written in its centre, so it draws no legend; a ring chart's legend names each ring with its value and goal.
+    Check(!texts.Any(t=>t.StartsWith("Recovery:")),"a gauge drew a legend");
+    Check(ScoreOf(Svg(Gauge(104) with{YLabel="%",YZones=Tiers()})).Attribute("aria-label")!.Value=="Recovery: 104 %, above the scale, drawn at 100, Good");
+    Check(ScoreOf(Svg(Gauge(-3))).Attribute("aria-label")!.Value=="Recovery: -3, below the scale, drawn at 0");
+    var slept=Svg(Gauge(25740) with{YFormat=ValueFormat.Duration,YMax=36000,Series=[new("Sleep",[new(0,25740,"Asleep")])]});
+    Check(ScoreOf(slept).Attribute("aria-label")!.Value=="Asleep: 7:09:00"&&slept.Descendants(ns+"text").Any(t=>t.Value=="10:00:00")&&slept.Descendants(ns+"text").Any(t=>t.Value=="0:00"),"a duration gauge does not read h:mm:ss");
+    Check(ScoreOf(Svg(Gauge(1500) with{YFormat=ValueFormat.Compact,YMax=2000,Series=[new("Steps",[new(0,1500)])]})).Attribute("aria-label")!.Value=="Steps: 1.5k");
+    var rings=Rings(("Move",540,600),("Exercise",47,30),("Stand",9,null));
+    var drawn=Svg(rings);
+    var marks=drawn.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).ToArray();
+    Check(marks.Select(g=>g.Attribute("aria-label")!.Value).SequenceEqual(["Move: 540 of 600 kcal, 90 %","Exercise: 47 of 30 kcal, 157 %","Stand: 9 of 100 kcal, 9 %"]),string.Join(" | ",marks.Select(g=>g.Attribute("aria-label")!.Value)));
+    Check(marks.Select(g=>(g.Attribute("data-series")!.Value,g.Attribute("data-point")!.Value,g.Attribute("role")!.Value,g.Attribute("tabindex")!.Value)).SequenceEqual([("0","0","button","0"),("1","0","button","0"),("2","0","button","0")]));
+    Check(drawn.Descendants(ns+"text").Select(t=>t.Value).Intersect(["Move: 540 of 600 kcal","Exercise: 47 of 30 kcal","Stand: 9 of 100 kcal"]).Count()==3,"the legend does not name each ring's value and goal");
+    Check(ChartSvg.LegendLabel(rings,0)=="Move: 540 of 600 kcal"&&ChartSvg.LegendLabel(gauge,0)=="Recovery: 72 %"&&ChartSvg.LegendLabel(Spec(),0)=="Series","LegendLabel");
+    // A ring without a unit, in durations.
+    Check(ScoreOf(Svg(new ChartSpec{Kind=ChartKind.Ring,YFormat=ValueFormat.Duration,Series=[new("Exercise",[new(0,2040)]){Goal=1800}]})).Attribute("aria-label")!.Value=="Exercise: 34:00 of 30:00, 113 %");
+});
+Test("Gauge and ring: every colour follows the style, marks clear 3:1 and the score 4.5:1 against the background, in every preset",()=>{
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight,ChartStyle.Light with{Finish=ChartFinish.Classic}})
+    {
+        var gauge=Svg(Gauge(72) with{Style=style,YZones=new([new("Low",33),new("Moderate",66),new("Good",double.PositiveInfinity)])});
+        var score=gauge.Descendants(ns+"text").Single(t=>(string?)t.Attribute("font-weight")=="600"&&t.Value.StartsWith("72"));
+        // The score inherits the text colour and the caption is muted: both are text colours of the style.
+        Check(score.Attribute("fill") is null&&Contrast(style.Text,style.Background)>=4.5&&Contrast(style.Muted,style.Background)>=4.5);
+        Check((string?)Classed(gauge,"lumen-gauge-track").Single().Attribute("fill")==style.Grid&&(string?)Classed(gauge,"lumen-gauge-knob").Single().Attribute("fill")==style.Background);
+        foreach(var ink in Classed(gauge,"lumen-gauge-zone").Concat(Classed(gauge,"lumen-gauge-value")).Select(e=>e.Attribute("fill")!.Value))
+            Check(style.Zones.Contains(ink)&&Contrast(ink,style.Background)>=3,$"{ink} on {style.Background}");
+        var rings=Svg(Rings(("A",1,10),("B",2,10),("C",3,10),("D",4,10),("E",5,10),("F",6,10)) with{Style=style});
+        foreach(var ink in Classed(rings,"lumen-ring-progress").Select(e=>e.Attribute("fill")!.Value))
+            Check(style.Series.Contains(ink)&&Contrast(ink,style.Background)>=3,$"{ink} on {style.Background}");
+        Check(gauge.Root!.Attribute("style")!.Value.Contains($"background:{style.Background}"));
+    }
+});
+Test("Gauge and ring: what has no meaning on them is refused, each with its reason",()=>{
+    string Refusal(ChartSpec spec){try{ChartSvg.Render(spec);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
+    var gauge=Gauge(72);var ring=Rings(("Move",540,600));
+    foreach(var (spec,reason) in new (ChartSpec,string)[]{
+        (gauge with{Series=[gauge.Series[0],gauge.Series[0]]},"one series"),
+        (gauge with{Series=[new("S",[])]},"exactly one point"),(gauge with{Series=[new("S",[new(0,1),new(1,2)])]},"exactly one point"),(gauge with{Series=[new("S",[new(0,null)])]},"cannot be missing"),
+        (gauge with{GaugeSweep=170},"between 180"),(gauge with{GaugeSweep=361},"between 180"),(gauge with{GaugeSweep=double.NaN},"between 180"),
+        (gauge with{YMin=150},"YMin must be below YMax"),(gauge with{YMin=10,YMax=10},"YMin must be below YMax"),
+        (gauge with{Annotations=[new(AnnotationAxis.X,3)]},"no X axis"),(gauge with{Annotations=[new(AnnotationAxis.Y,30){To=40}]},"not bands"),(gauge with{Annotations=[new(AnnotationAxis.Y,120)]},"on its scale"),
+        (gauge with{YZones=Tiers(),Series=[new("S",[new(0,50)]){Gradient=[new(0,"#3F87D9"),new(100,"#DD4B45")]}]},"not both"),
+        (gauge with{Series=[gauge.Series[0] with{Goal=80}]},"ring charts only"),(gauge with{Series=[gauge.Series[0] with{Zones=Tiers()}]},"Series zones"),
+        (gauge with{XAxis=AxisKind.Time},"Time and log X"),(gauge with{XAxis=AxisKind.Log},"Time and log X"),(gauge with{YAxis=AxisKind.Log},"Log Y"),(gauge with{YReversed=true},"no Y axis"),
+        (gauge with{Panes=[new()]},"Panes share"),(gauge with{Series=[gauge.Series[0] with{Secondary=true}]},"secondary axis"),(gauge with{Series=[gauge.Series[0] with{Trend=true}]},"trend line"),
+        (gauge with{Series=[gauge.Series[0] with{Kind=ChartKind.Line}]},"own kind"),(gauge with{DensityCells=20},"Density cells"),(gauge with{YAxisSide=AxisSide.Right},"gauge and ring"),(gauge with{YTickLabels=TickLabels.Ends},"gauge and ring"),
+        (ring with{Series=Enumerable.Range(0,7).Select(i=>ring.Series[0] with{Name=$"R{i}"}).ToArray()},"one to six"),
+        (ring with{Series=[new("S",[])]},"exactly one point"),(ring with{Series=[new("S",[new(0,null)])]},"cannot be missing"),(ring with{Series=[new("S",[new(0,-1)])]},"cannot be negative"),
+        (ring with{Series=[ring.Series[0] with{Goal=0}]},"positive and finite"),(ring with{Series=[ring.Series[0] with{Goal=-5}]},"positive and finite"),(ring with{Series=[ring.Series[0] with{Goal=double.NaN}]},"positive and finite"),
+        (ring with{YZones=Tiers()},"no zones"),(ring with{Annotations=[new(AnnotationAxis.Y,50)]},"no annotations"),(ring with{Annotations=[new(AnnotationAxis.X,0)]},"no annotations"),
+        (ring with{Series=[ring.Series[0] with{Gradient=[new(0,"#3F87D9"),new(100,"#DD4B45")]}]},"gauge's arc"),(ring with{GaugeSweep=180},"gauge charts only"),
+        (ring with{XAxis=AxisKind.Time},"Time and log X"),(ring with{YAxis=AxisKind.Log},"Log Y"),(ring with{YReversed=true},"no Y axis"),(ring with{Panes=[new()]},"Panes share"),
+        (ring with{Series=[ring.Series[0] with{Secondary=true},ring.Series[0]]},"secondary axis"),(ring with{Series=[ring.Series[0] with{Trend=true}]},"trend line"),(ring with{Series=[ring.Series[0] with{Kind=ChartKind.Column}]},"own kind"),
+        (ring with{DensityCells=20},"Density cells"),(ring with{YAxisSide=AxisSide.Right},"gauge and ring"),
+        (Spec() with{GaugeSweep=200},"gauge charts only"),(Spec() with{Series=[Spec().Series[0] with{Goal=10}]},"ring charts only"),(Spec(ChartKind.Donut) with{Series=[Spec().Series[0] with{Goal=10}]},"ring charts only")})
+        Check(Refusal(spec).Contains(reason),$"{spec.Kind}: \"{Refusal(spec)}\" does not say \"{reason}\"");
+    // Within the rules, the ends of each range are accepted, and a chart with no series draws its empty state.
+    foreach(var spec in new[]{gauge with{GaugeSweep=180},gauge with{GaugeSweep=360},gauge with{Annotations=[new(AnnotationAxis.Y,0),new(AnnotationAxis.Y,100)]},ring with{Series=[ring.Series[0] with{Points=[new(0,0)]}]},
+        ring with{Series=Enumerable.Range(0,6).Select(i=>ring.Series[0] with{Name=$"R{i}"}).ToArray()},gauge with{Series=[new("S",[new(0,50)]){Gradient=[new(0,"#3F87D9"),new(100,"#DD4B45")]}]}})
+        ChartSvg.Render(spec);
+    Check(ChartSvg.Render(gauge with{Series=[]}).Contains("No data to display")&&ChartSvg.Render(ring with{Series=[]}).Contains("No data to display"));
+});
+Test("Gauge and ring: specs survive JSON, a request that names no sweep draws 270 degrees, and CSV carries each ring's goal",()=>{
+    var options=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web){Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}};
+    var gauge=Gauge(72) with{GaugeSweep=180,YLabel="%",YZones=Tiers(),Annotations=[new(AnnotationAxis.Y,60){Label="Average"}]};
+    var ring=Rings(("Move",540,600),("Exercise",47,30));
+    foreach(var spec in new[]{gauge,ring,gauge with{YZones=null,YMax=21,Annotations=[],Series=[new("Strain",[new(0,14)]){Gradient=[new(0,"#3F87D9"),new(21,"#DD4B45")]}]}})
+    {
+        var json=System.Text.Json.JsonSerializer.Serialize(spec,options);
+        Check(ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,options)!)==ChartSvg.Render(spec),$"{spec.Kind} changed in transit");
+    }
+    var written=System.Text.Json.JsonSerializer.Serialize(gauge,options)+System.Text.Json.JsonSerializer.Serialize(ring,options);
+    Check(written.Contains("\"kind\":\"Gauge\"")&&written.Contains("\"gaugeSweep\":180")&&written.Contains("\"kind\":\"Ring\"")&&written.Contains("\"goal\":600"),written);
+    var request=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Gauge\",\"series\":[{\"name\":\"Recovery\",\"points\":[{\"x\":0,\"y\":72}]}]}",options)!;
+    Check(request.GaugeSweep==270&&ChartSvg.Render(request)==ChartSvg.Render(Gauge(72) with{Title="Untitled chart",Series=[new("Recovery",[new(0,72)])]}),"a request without a sweep is not 270 degrees");
+    var rings=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Ring\",\"series\":[{\"name\":\"Move\",\"goal\":600,\"points\":[{\"x\":0,\"y\":540,\"label\":\"kcal\"}]},{\"name\":\"Stand\",\"points\":[{\"x\":0,\"y\":9}]}]}",options)!;
+    Check(rings.Series[0].Goal==600&&rings.Series[1].Goal is null&&ChartSvg.Render(rings).Contains("aria-label='Move: 540 of 600 kcal, 90 %'")&&ChartSvg.Render(rings).Contains("aria-label='Stand: 9 of 100, 9 %'"));
+    var csv=ChartExport.Csv(Rings(("Move",540,600),("Stand",9,null)));
+    Check(csv.StartsWith("Series,X,Y,Label,Size,Goal\r\n")&&csv.Contains("\"Move\",0,540,\"kcal\",1,600")&&csv.Contains("\"Stand\",0,9,\"kcal\",1,100"),csv);
+    Check(ChartExport.Csv(Gauge(72)).StartsWith("Series,X,Y,Label,Size\r\n")&&ChartExport.Csv(Gauge(72)).Contains("\"Recovery\",0,72,\"Recovery\",1"),"a gauge's CSV changed shape");
+    Check(!ChartExport.Csv(Spec()).Contains("Goal"),"another kind's CSV carries a goal");
+});
+Test("A gauge's sweep left at its default is left out of the hash that names gradients, so every other chart keeps its IDs",()=>{
+    // 0.25.0 had no sweep: its hash of a spec is the JSON written today less the sweep, which is the last property written.
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
+    string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
+    Check(json.EndsWith(",\"GaugeSweep\":270}"),json[^60..]);
+    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(",\"GaugeSweep\":270}","}"))))[..12].ToLowerInvariant();
+    Check(Prefix(ChartSvg.Render(faded))==before,$"{Prefix(ChartSvg.Render(faded))} is not 0.25.0's {before}");
+    // Gauges and rings define no IDs: a gradient gauge draws its arc in pieces.
+    var strain=Gauge(14) with{YMax=21,Series=[new("Strain",[new(0,14)]){Gradient=[new(0,"#3F87D9"),new(21,"#DD4B45")]}]};
+    Check(!ChartSvg.Render(strain).Contains(" id=")&&!ChartSvg.Render(Rings(("Move",900,600))).Contains(" id="),"a radial chart defines an ID");
+});
+Test("Gauge and ring: the component draws them without zoom, its legend and status read their values, and its table each ring's goal",()=>{
+    foreach(var spec in new[]{Gauge(72) with{YLabel="%"},Rings(("Move",540,600),("Exercise",47,30))})
+    {
+        var html=RenderInside(null,spec);
+        Check(!html.Contains("aria-label=\"Zoom in\"")&&!html.Contains("Reset view")&&html.Contains("Export CSV"),$"{spec.Kind} offers zoom");
+        Check(html.Contains(ChartSvg.LegendLabel(spec,0)+"\n")||html.Contains(ChartSvg.LegendLabel(spec,0)+"\r\n")||html.Contains(ChartSvg.LegendLabel(spec,0)+"</button>"),$"{spec.Kind}'s legend does not read its value");
+    }
+    var rings=Rings(("Move",540,600),("Exercise",47,30));
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    var shown=Operate(rings,async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(1,0);});
+    Check(shown.Contains("<tr><td>Move</td><td>kcal</td><td>540 of 600</td></tr>")&&shown.Contains("Exercise: 47 of 30 kcal</span>"),"the table or the status line does not read the ring");
+    // Hiding every ring leaves the chart's empty state rather than a refused spec.
+    var hidden="";
+    Operate(rings,chart=>{var toggle=typeof(LumenChart).GetMethod("Toggle",flags)!;toggle.Invoke(chart,[0]);toggle.Invoke(chart,[1]);hidden=(string)typeof(LumenChart).GetField("svg",flags)!.GetValue(chart)!;return Task.CompletedTask;});
+    Check(hidden.Contains("No data to display"),"hiding every ring broke the chart");
+    var gauge=Operate(Gauge(72) with{YLabel="%"},async chart=>await chart.SelectPoint(0,0));
+    Check(gauge.Contains("Recovery: 72 %</span>"),"the status line does not read the gauge");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

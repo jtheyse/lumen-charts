@@ -49,6 +49,8 @@ Property names are camelCase; enums are strings; time values are Unix millisecon
 {"title":"Market","kind":"Candlestick","xAxis":"Time","skipWeekends":true,"panes":[{"label":"Volume","weight":0.4,"yFormat":"Compact"}],"series":[{"name":"ACME","points":[{"x":1772409600000,"open":10,"high":12,"low":9,"close":11}]},{"name":"Volume","kind":"Column","pane":1,"points":[{"x":1772409600000,"y":1500000}]}]}
 {"title":"Latency","kind":"Box","series":[{"name":"Asia","points":[],"summary":{"q1":205,"median":228,"q3":252,"lowerWhisker":160,"upperWhisker":318,"outliers":[352,371]}}]}
 {"title":"Classic look","kind":"Line","style":{"finish":"Classic"},"series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":3}]}]}
+{"title":"Recovery","kind":"Gauge","gaugeSweep":270,"yLabel":"%","yZones":{"zones":[{"name":"Low","upper":33,"color":"#DD4B45"},{"name":"Moderate","upper":66,"color":"#A88200"},{"name":"Good","upper":"Infinity","color":"#2E9B58"}]},"series":[{"name":"Recovery","points":[{"x":0,"y":72,"label":"Recovery"}]}]}
+{"title":"Activity","kind":"Ring","series":[{"name":"Move","goal":600,"points":[{"x":0,"y":540,"label":"kcal"}]},{"name":"Exercise","goal":30,"points":[{"x":0,"y":47,"label":"min"}]}]}
 ```
 
 A series with a `summary` still sends `"points": []`. A field left out of a hand-written object reads as its default (zero for numbers), so send every number you mean.
