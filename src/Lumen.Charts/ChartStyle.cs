@@ -63,7 +63,8 @@ public sealed record ChartStyle
     public string Rising { get; init; } = "#169B8D";
     /// <summary>Candles and OHLC bars that close below their open.</summary>
     public string Falling { get; init; } = "#D36B84";
-    /// <summary>Heatmap cells are interpolated from this colour at the lowest value…</summary>
+    /// <summary>Heatmap cells are interpolated from this colour at the lowest value… A calendar starts from its empty day's
+    /// track instead, a third of the way from <see cref="Grid"/> towards <see cref="HeatmapHigh"/>, so it does not use this.</summary>
     public string HeatmapLow { get; init; } = "#E4EDFC";
     /// <summary>…to this one at the highest.</summary>
     public string HeatmapHigh { get; init; } = "#4069D0";

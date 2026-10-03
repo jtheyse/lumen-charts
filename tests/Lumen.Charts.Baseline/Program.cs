@@ -443,6 +443,25 @@ var monday = TimeAxis.Value(new DateTimeOffset(2026, 8, 3, 0, 0, 0, TimeSpan.Zer
     ("blocks/workout-midnight", Workout(ChartStyle.Midnight)),
 ];
 foreach (var (name, spec) in blocked) lines.Add($"{name} {Hash(Render(spec))}");
+// 0.30.0: graphs top to bottom, and graphs fitted to a width. The graph above in both layouts and themes set top to bottom, which
+// a circular graph ignores; then it and the gallery's pipeline, whose labels decide where it turns, fitted to a phone and to a
+// wide screen, and the pipeline on a phone in Midnight.
+foreach (var layout in Enum.GetValues<GraphLayout>())
+    foreach (var theme in Enum.GetValues<ChartTheme>())
+        lines.Add($"graph/{layout}/{theme}/TopToBottom {Hash(Graph(graph with { Layout = layout, Theme = theme, Direction = GraphDirection.TopToBottom }))}");
+var pipeline = new GraphSpec
+{
+    Title = "From source to insight",
+    Nodes = [new("sources", "Sources"), new("ingest", "Ingestion"), new("validate", "Validation"), new("transform", "Transform"), new("charts", "Charts"), new("api", "Chart API"), new("reports", "Reports")],
+    Edges = [new("sources", "ingest"), new("ingest", "validate"), new("validate", "transform"), new("transform", "charts"), new("transform", "api"), new("charts", "reports"), new("api", "reports"), new("ingest", "reports", "audit trail")]
+};
+foreach (var layout in Enum.GetValues<GraphLayout>())
+    foreach (var width in new[] { 360, 1200 })
+    {
+        lines.Add($"fit/{layout}/{width} {Hash(Graph(GraphEngine.Fit(graph with { Layout = layout }, width)))}");
+        lines.Add($"fit/pipeline-{layout}/{width} {Hash(Graph(GraphEngine.Fit(pipeline with { Layout = layout }, width)))}");
+    }
+lines.Add($"fit/pipeline-midnight-360 {Hash(Graph(GraphEngine.Fit(pipeline with { Style = ChartStyle.Midnight }, 360)))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

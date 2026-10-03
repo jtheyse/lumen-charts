@@ -72,9 +72,10 @@ public enum ChartKind
     /// total is zero or missing is a day without activity, drawn as an empty cell in the grid colour and not focusable. The days
     /// are laid out by <see cref="ChartSpec.CalendarLayout"/> from the first day of the data to the last, weeks starting on
     /// <see cref="ChartSpec.WeekStart"/>, and drawn as <see cref="ChartSpec.CalendarCell"/>. Each day takes the colour of its
-    /// value's zone in <see cref="ChartSpec.YZones"/>, or else a colour on the style's ramp from
-    /// <see cref="ChartStyle.HeatmapLow"/> to <see cref="ChartStyle.HeatmapHigh"/> across the days' values, and the key under the
-    /// grid shows the zones or the ramp. An X annotation outlines its day's cell.</summary>
+    /// value's zone in <see cref="ChartSpec.YZones"/>, or else a colour on a ramp across the days' values that starts a third of the
+    /// way from an empty cell's <see cref="ChartStyle.Grid"/> colour to the style's <see cref="ChartStyle.HeatmapHigh"/> and ends
+    /// at it, as a contribution grid steps up from its empty cell, so the quietest day stands apart from a rest day on any style;
+    /// the key under the grid shows the zones or the ramp. An X annotation outlines its day's cell.</summary>
     Calendar,
     /// <summary>Variable-width blocks, as Strava draws laps and TrainingPeaks and Zwift draw a structured workout: each point a
     /// block from its X to its <see cref="ChartPoint.XEnd"/>, made with <see cref="ChartPoint.Block"/>, standing on the bottom edge
@@ -481,9 +482,18 @@ public enum GraphLayout
 {
     /// <summary>Evenly round a circle, in the order given. Takes cycles of any length.</summary>
     Circular,
-    /// <summary>In levels from left to right by longest path, each level ordered to cut edge crossings. Refuses cycles longer
-    /// than a self-loop.</summary>
+    /// <summary>In levels by longest path, from left to right or from top to bottom as <see cref="GraphSpec.Direction"/> says,
+    /// each level ordered to cut edge crossings. Refuses cycles longer than a self-loop.</summary>
     Layered
+}
+/// <summary>Which way the levels of a layered graph run.</summary>
+public enum GraphDirection
+{
+    /// <summary>Levels in columns from left to right, each level's nodes spread down the height. The default.</summary>
+    LeftToRight,
+    /// <summary>Levels in rows from top to bottom, each level's nodes spread across the width, so that a graph with many levels
+    /// fits a narrow box such as a phone's. Its edges point down, and each leaves its node from under the node's label.</summary>
+    TopToBottom
 }
 /// <summary>A network graph: nodes, the directed edges between them and how to lay them out, drawn by
 /// <see cref="GraphEngine.Render"/>. At most 250 nodes and 2,000 edges.</summary>
@@ -497,6 +507,10 @@ public sealed record GraphSpec
     public IReadOnlyList<GraphEdge> Edges { get; init; } = [];
     /// <summary>How the nodes are placed: layered by default.</summary>
     public GraphLayout Layout { get; init; } = GraphLayout.Layered;
+    /// <summary>Which way a layered graph's levels run: from left to right by default, or from top to bottom. A circular graph
+    /// ignores it. <see cref="GraphEngine.Fit"/> turns a graph top to bottom when its levels cannot stand side by side in the
+    /// width it is shown at.</summary>
+    public GraphDirection Direction { get; init; }
     /// <summary>The preset the graph draws with when it sets no <see cref="Style"/>.</summary>
     public ChartTheme Theme { get; init; }
     /// <summary>A host application's colours and typeface. When set it replaces <see cref="Theme"/>.</summary>

@@ -4,6 +4,10 @@ namespace Lumen.Charts;
 public static class GraphEngine
 {
     private const double Radius = 23, Trim = 25;
+    // A node's label hangs under it, its baseline 42 below the centre, so top to bottom an edge that runs below a node meets it
+    // 50 below the centre, at the foot of the label, rather than through the words. A row then holds a node, its label and an
+    // edge long enough to carry its own label and arrowhead clear of both.
+    private const double Foot = 50, Row = 110;
 
     /// <summary>Node coordinates. Layered graphs order each level to reduce edge crossings.</summary>
     public static IReadOnlyList<NodePosition> Layout(GraphSpec graph)
@@ -51,23 +55,32 @@ public static class GraphEngine
         var layout = Layout(graph).ToDictionary(p => p.Id, p => positions is not null && positions.TryGetValue(p.Id, out var moved) ? moved : new GraphPoint(p.X, p.Y), StringComparer.Ordinal);
         var routes = Routes(graph);
         var w = new SvgWriter { Style = graph.Style ?? ChartSvg.Preset(graph.Theme) };
+        var down = Down(graph);
         var crossings = graph.Layout == GraphLayout.Circular ? "" : $" · {Crossings(graph)} edge crossings";
         ChartSvg.Begin(w, graph.Width, graph.Height, graph.Title,
-            $"{graph.Nodes.Count} nodes · {graph.Edges.Count} directed connections · {graph.Layout} layout{crossings}");
+            $"{graph.Nodes.Count} nodes · {graph.Edges.Count} directed connections · {graph.Layout} layout{(down ? " top to bottom" : "")}{crossings}", wrap: true);
+        // An edge leaves and reaches a node trimmed clear of its circle; top to bottom, one that runs on below the node meets it at
+        // the foot of its label instead, so that it never runs through the words.
+        GraphPoint End(GraphPoint node, GraphPoint towards) => down && towards.Y > node.Y + Foot ? new(node.X, node.Y + Foot) : Shift(node, towards, Trim);
         for (var i = 0; i < graph.Edges.Count; i++)
         {
             var edge = graph.Edges[i];
             var a = layout[edge.Source];
             if (edge.Source == edge.Target)
             {
-                w.Add($"<path d='M{N(a.X - 12)},{N(a.Y - 17)} C{N(a.X - 65)},{N(a.Y - 75)} {N(a.X + 65)},{N(a.Y - 75)} {N(a.X + 12)},{N(a.Y - 17)}' fill='none' stroke='{w.Style.Edge}'{w.Fixed}><title>{SvgWriter.E(edge.Label ?? "Self-loop")}</title></path>");
+                // A loop stands on top of its node; top to bottom, where edges arrive from above, it stands at the node's right.
+                var loop = down
+                    ? $"M{N(a.X + 17)},{N(a.Y - 12)} C{N(a.X + 75)},{N(a.Y - 65)} {N(a.X + 75)},{N(a.Y + 65)} {N(a.X + 17)},{N(a.Y + 12)}"
+                    : $"M{N(a.X - 12)},{N(a.Y - 17)} C{N(a.X - 65)},{N(a.Y - 75)} {N(a.X + 65)},{N(a.Y - 75)} {N(a.X + 12)},{N(a.Y - 17)}";
+                w.Add($"<path d='{loop}' fill='none' stroke='{w.Style.Edge}'{w.Fixed}><title>{SvgWriter.E(edge.Label ?? "Self-loop")}</title></path>");
                 continue;
             }
             // Dragged endpoints replace the layout's own; the bends between them stay where the layout put them.
             var points = routes[i].Points.ToArray();
             points[0] = a; points[^1] = layout[edge.Target];
-            var start = Shift(points[0], points[1], Trim);
-            var end = Shift(points[^1], points[^2], Trim);
+            var start = End(points[0], points[1]);
+            // A straight edge that leaves from under a label arrives aimed from there.
+            var end = End(points[^1], down && points.Length == 2 ? start : points[^2]);
             points[0] = start; points[^1] = end;
             w.Add($"<path d='{Path(points)}' fill='none' stroke='{w.Style.Edge}' stroke-width='1.5'{w.Fixed}/>");
             var direction = Unit(points[^2], end);
@@ -76,7 +89,16 @@ public static class GraphEngine
             {
                 var middle = points[points.Length / 2];
                 var previous = points[points.Length / 2 - 1];
-                w.Text((middle.X + previous.X) / 2, (middle.Y + previous.Y) / 2 - 9, ChartSvg.Short(edge.Label, 20), "text-anchor='middle' class='lumen-muted' font-size='10'");
+                var text = ChartSvg.Short(edge.Label, 20);
+                if (down)
+                {
+                    // Top to bottom an edge runs down, so its label stands beside it, at the middle of its middle stretch, on its
+                    // right unless that would take it past the drawing's edge.
+                    double x = (middle.X + previous.X) / 2, y = (middle.Y + previous.Y) / 2;
+                    var right = x + 6 + ChartSvg.Wide(text) * 10 / 11 <= graph.Width - 4;
+                    w.Text(right ? x + 6 : x - 6, y + 3.5, text, $"text-anchor='{(right ? "start" : "end")}' class='lumen-muted' font-size='10'");
+                }
+                else w.Text((middle.X + previous.X) / 2, (middle.Y + previous.Y) / 2 - 9, text, "text-anchor='middle' class='lumen-muted' font-size='10'");
             }
         }
         for (var i = 0; i < graph.Nodes.Count; i++)
@@ -89,6 +111,71 @@ public static class GraphEngine
         w.Add("</svg>");
         return w.ToString();
     }
+
+    /// <summary>
+    /// The graph as it should be drawn in a box <paramref name="width"/> pixels wide, clamped to 320 to 4,096, so that it fills
+    /// the box with its text at its own size: the graph itself when it already fits at its own width and direction, and otherwise
+    /// a copy at that width. Neighbouring nodes need room for the widest node label as drawn, cut to 22 characters, and 16 pixels
+    /// more, or for a node's diameter and 24 pixels more, whichever is the larger. A layered graph whose levels cannot stand that
+    /// far apart side by side turns <see cref="GraphDirection.TopToBottom"/>, as one already set so stays, and grows as tall as
+    /// its rows need, up to 2,160 pixels; when its fullest level, counting the bends of longer edges that pass through it, cannot
+    /// stand that far apart across the width either, it takes the narrowest width that holds it instead, wider than the box,
+    /// which a fitted LumenGraph scrolls. A
+    /// circular graph keeps its circle's arithmetic and grows taller, up to 2,160 pixels, until neighbouring nodes stand that far
+    /// apart. Nodes at one height, which no height can part, need room for their two labels and their circles side by side at
+    /// least, and a width too narrow for that becomes the narrowest that has it. A graph is never drawn shorter than its own
+    /// <see cref="GraphSpec.Height"/>.
+    /// </summary>
+    public static GraphSpec Fit(GraphSpec graph, int width)
+    {
+        Validate(graph);
+        width = Math.Clamp(width, 320, 4096);
+        if (graph.Nodes.Count == 0) return Sized(graph, width, graph.Height, graph.Direction);
+        // A label is drawn 12 pixels high, cut to 22 characters.
+        static double Label(GraphNode node) => ChartSvg.Wide(ChartSvg.Short(node.Label, 22)) * 12 / 11;
+        var room = Math.Max(graph.Nodes.Max(Label) + 16, 2 * Radius + 24);
+        if (graph.Layout == GraphLayout.Circular)
+        {
+            var n = graph.Nodes.Count;
+            var labels = graph.Nodes.Select(Label).ToArray();
+            // A node and its mirror image across the circle stand at one height whatever the height, so only the width parts them,
+            // by twice the circle's half-width times this sine.
+            for (var i = 1; i < n - i; i++)
+            {
+                var apart = 2 * Math.Abs(Math.Sin(2 * Math.PI * i / n));
+                var need = Math.Max((labels[i] + labels[n - i]) / 2, 2 * Radius);
+                width = Math.Max(width, (int)Math.Min(4096, Math.Ceiling(200 + 2 * need / apart)));
+            }
+            // Neighbours round the circle stand further apart as it grows taller, unless they stand at one height.
+            var across = width / 2d - 100;
+            var radius = graph.Height / 2d - 100;
+            for (var i = 0; i < n && n > 1; i++)
+            {
+                double a = 2 * Math.PI * i / n - Math.PI / 2, b = 2 * Math.PI * ((i + 1) % n) / n - Math.PI / 2;
+                var dx = across * Math.Abs(Math.Cos(b) - Math.Cos(a));
+                var rise = Math.Abs(Math.Sin(b) - Math.Sin(a));
+                if (rise > 1e-9 && dx < room) radius = Math.Max(radius, Math.Sqrt(room * room - dx * dx) / rise);
+            }
+            return Sized(graph, width, (int)Math.Clamp(Math.Ceiling(2 * (radius + 100)), graph.Height, 2160), graph.Direction);
+        }
+        var levels = Levels(graph);
+        var depth = levels.Values.Max();
+        if (graph.Direction == GraphDirection.LeftToRight && (depth == 0 || (width - 180d) / depth >= room))
+            return Sized(graph, width, graph.Height, GraphDirection.LeftToRight);
+        // Top to bottom, a level's nodes and the bends of the longer edges passing through it share the width.
+        var slots = new int[depth + 1];
+        foreach (var level in levels.Values) slots[level]++;
+        foreach (var edge in graph.Edges)
+            for (var level = levels[edge.Source] + 1; level < levels[edge.Target]; level++) slots[level]++;
+        var narrowest = (int)Math.Min(4096, Math.Ceiling(48 + slots.Max() * room));
+        return Sized(graph, Math.Max(width, narrowest), (int)Math.Clamp(Math.Ceiling(180 + depth * Row), graph.Height, 2160), GraphDirection.TopToBottom);
+    }
+
+    // The graph itself when nothing changes, so a graph that fits is drawn exactly as it was.
+    private static GraphSpec Sized(GraphSpec graph, int width, int height, GraphDirection direction) =>
+        width == graph.Width && height == graph.Height && direction == graph.Direction ? graph : graph with { Width = width, Height = height, Direction = direction };
+
+    private static bool Down(GraphSpec graph) => graph.Layout == GraphLayout.Layered && graph.Direction == GraphDirection.TopToBottom;
 
     private static string N(double value) => SvgWriter.N(value);
 
@@ -164,12 +251,21 @@ public static class GraphEngine
         for (var level = 0; level < layers.Count; level++) { layers[level].Clear(); layers[level].AddRange(best[level]); }
         Renumber(layers);
 
+        var down = Down(graph);
         foreach (var layer in layers)
             foreach (var slot in layer)
-            {
-                slot.X = depth == 0 ? graph.Width / 2d : 90 + (graph.Width - 180d) * slot.Level / depth;
-                slot.Y = 90 + (graph.Height - 130d) * (slot.Order + .5) / layer.Count;
-            }
+                if (down)
+                {
+                    // Top to bottom mirrors left to right: the levels run between the same 90-pixel ends, and each level's slots
+                    // share the width in equal bands, as they share the height across, inside the 24-pixel margins the title keeps.
+                    slot.X = 24 + (graph.Width - 48d) * (slot.Order + .5) / layer.Count;
+                    slot.Y = depth == 0 ? graph.Height / 2d : 90 + (graph.Height - 180d) * slot.Level / depth;
+                }
+                else
+                {
+                    slot.X = depth == 0 ? graph.Width / 2d : 90 + (graph.Width - 180d) * slot.Level / depth;
+                    slot.Y = 90 + (graph.Height - 130d) * (slot.Order + .5) / layer.Count;
+                }
         return new(
             graph.Nodes.Select(n => new NodePosition(n.Id, slots[n.Id].X, slots[n.Id].Y)).ToArray(),
             chains.Select((chain, i) => new EdgeRoute(i, chain.Select(s => new GraphPoint(s.X, s.Y)).ToArray())).ToArray(),
@@ -238,7 +334,7 @@ public static class GraphEngine
     private static void Validate(GraphSpec g)
     {
         ArgumentNullException.ThrowIfNull(g); ChartValidation.Dimensions(g.Width, g.Height); ChartValidation.Text(g.Title);
-        if (!Enum.IsDefined(g.Layout) || !Enum.IsDefined(g.Theme)) throw new ArgumentException("Unknown layout or theme.");
+        if (!Enum.IsDefined(g.Layout) || !Enum.IsDefined(g.Direction) || !Enum.IsDefined(g.Theme)) throw new ArgumentException("Unknown layout, direction or theme.");
         ChartValidation.Style(g.Style);
         if (g.Nodes is null || g.Edges is null || g.Nodes.Count > 250 || g.Edges.Count > 2000) throw new ArgumentException("Graphs support at most 250 nodes and 2000 edges.");
         var ids = new HashSet<string>(StringComparer.Ordinal);

@@ -100,8 +100,9 @@ export function attachGraph(root, dotnet) {
     handlers.set(root, { bindings });
 }
 
-/// Reports the width of a chart's box in whole pixels, at once and again whenever the box settles at a new width, so that
-/// the chart can be drawn at the width it is shown and its text keeps its own size. A hidden box measures nothing.
+/// Reports the width of a chart's or a graph's box in whole pixels to the component's Fit method, at once and again whenever
+/// the box settles at a new width, so that it can be drawn at the width it is shown and its text keeps its own size. A hidden
+/// box measures nothing.
 export function fit(root, dotnet) {
     unfit(root);
     let timer = 0, last = 0;

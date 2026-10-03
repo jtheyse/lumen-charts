@@ -1,7 +1,8 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
-<div class="lumen-chart" @ref="root">
-    <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable graph">@((MarkupString)svg)</div>
+<div class="@(FitWidth ? "lumen-chart lumen-fit" : "lumen-chart")" @ref="root">
+    @* A fitted drawing wider than its box, at 320 pixels or at its fullest level's width, keeps its size there and scrolls. *@
+    <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable graph" style="@(FitWidth && fitted is not null && drawn is not null ? $"--lumen-drawn:{drawn.Width}px" : null)">@((MarkupString)svg)</div>
     <div class="lumen-tools">
         <button type="button" @onclick="ResetLayout" disabled="@(moved.Count==0)">Reset layout</button>
         <span class="lumen-status" role="status">@status</span>
@@ -17,32 +18,81 @@
     /// <summary>Raised with a node's <see cref="GraphNode.Id"/> when it is clicked, or chosen with Enter or Space. Needs an
     /// interactive render mode.</summary>
     [Parameter] public EventCallback<string> NodeSelected { get; set; }
+    /// <summary>
+    /// Draws the graph at the width its container gives it instead of at <see cref="GraphSpec.Width"/>, laid out as
+    /// <see cref="GraphEngine.Fit"/> lays it out for that width, so that its text stays at its own size on a phone or in a narrow
+    /// card rather than being scaled down, and lifts the stylesheet's 640-pixel minimum for this graph alone. A layered graph whose
+    /// levels cannot stand side by side at that width turns top to bottom and grows taller. The width is measured in the browser
+    /// once the component is interactive, and again whenever the container settles at a new width. Until then, and in static
+    /// rendering, the graph is drawn at <see cref="GraphSpec.Width"/> and scaled to fit. It is never drawn narrower than 320
+    /// pixels, or than its fullest level or its circle's side-by-side labels need; a drawing wider than its box keeps its size
+    /// and scrolls. Dragged nodes keep their place in proportion to the drawing when its size changes, and return to the layout
+    /// when it turns.
+    /// </summary>
+    [Parameter] public bool FitWidth { get; set; }
     /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style on the spec itself wins.</summary>
     [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }
+    // Dragged nodes, each held as a fraction of the drawing's width and height, so that a node keeps its place in proportion
+    // when the drawing is redrawn at another size.
     private readonly Dictionary<string,GraphPoint> moved=new(StringComparer.Ordinal);
     private string svg="",status="",signature="";
     private ElementReference root;
     private IJSObjectReference? module;
     private DotNetObjectReference<LumenGraph>? reference;
+    // The graph as last drawn; the width the container last reported while FitWidth is on, and whether the script is measuring
+    // it. A graph accepts widths from 320 to 4096 pixels.
+    private GraphSpec? drawn;
+    private int? fitted;
+    private bool fitting;
+    private const int Narrowest=320, Widest=4096;
     // Dragged positions survive a re-render of the same graph and are dropped when the nodes change.
     protected override void OnParametersSet()
     {
-        var current=string.Join("\u0001",Spec.Nodes.Select(n=>n.Id))+"|"+Spec.Layout;
+        var current=string.Join("\u0001",Spec.Nodes.Select(n=>n.Id))+"|"+Spec.Layout+"|"+Spec.Direction;
         if(current!=signature) { signature=current;moved.Clear();status=""; }
         Render();
     }
-    private void Render()=>svg=GraphEngine.Render(Spec.Style is null && CascadingStyle is not null ? Spec with { Style=CascadingStyle } : Spec,moved);
+    private void Render()
+    {
+        var spec=Spec.Style is null && CascadingStyle is not null ? Spec with { Style=CascadingStyle } : Spec;
+        var next=FitWidth && fitted is { } width ? GraphEngine.Fit(spec,width) : spec;
+        // Dragged positions describe the layout they were dragged in, so they go when a layered graph turns to fit.
+        if(drawn is not null && next.Layout==GraphLayout.Layered && next.Direction!=drawn.Direction && moved.Count>0)
+        {
+            moved.Clear();
+            status=next.Direction==GraphDirection.TopToBottom ? "Turned top to bottom to fit; moved nodes returned" : "Turned left to right to fit; moved nodes returned";
+        }
+        drawn=next;
+        svg=GraphEngine.Render(next,moved.ToDictionary(p=>p.Key,p=>Place(p.Value,next),StringComparer.Ordinal));
+    }
+    // A fraction of the drawing as a centre in its coordinates, kept clear of its edges.
+    private static GraphPoint Place(GraphPoint fraction,GraphSpec graph)=>new(Math.Clamp(fraction.X*graph.Width,40,graph.Width-40),Math.Clamp(fraction.Y*graph.Height,40,graph.Height-52));
     private void ResetLayout() { moved.Clear();status="Layout reset";Render(); }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if(firstRender) { module=await JS.InvokeAsync<IJSObjectReference>("import","./_content/Lumen.Charts.Blazor/lumen.js");reference=DotNetObjectReference.Create(this);await module.InvokeVoidAsync("attachGraph",root,reference); }
+        // The script measures the graph's box only while the graph is asked to fit it.
+        if(module is not null&&FitWidth!=fitting)
+        {
+            fitting=FitWidth;
+            if(!fitting)fitted=null;
+            await module.InvokeVoidAsync(fitting?"fit":"unfit",root,reference);
+        }
     }
+    /// <summary>Called by the component's script, while <see cref="FitWidth"/> is on, with the width in whole pixels that the
+    /// graph's container gives it. The graph is redrawn as <see cref="GraphEngine.Fit"/> lays it out for that width.</summary>
+    [JSInvokable] public Task Fit(int width) => InvokeAsync(()=>
+    {
+        var next=Math.Clamp(width,Narrowest,Widest);
+        if(!FitWidth||next==fitted)return;
+        fitted=next;Render();StateHasChanged();
+    });
     /// <summary>Called by the component's script when a node is dragged or nudged with an arrow key, with its new centre in
-    /// the drawing's coordinates. The centre is kept clear of the drawing's edges.</summary>
+    /// the coordinates of the drawing as it is drawn. The centre is kept clear of the drawing's edges.</summary>
     [JSInvokable] public async Task MoveNode(string id,double x,double y)
     {
-        var node=Spec.Nodes.FirstOrDefault(n=>n.Id==id);if(node is null)return;
-        moved[id]=new(Math.Clamp(x,40,Spec.Width-40),Math.Clamp(y,40,Spec.Height-52));
+        var node=Spec.Nodes.FirstOrDefault(n=>n.Id==id);if(node is null||drawn is null)return;
+        moved[id]=new(Math.Clamp(x,40,drawn.Width-40)/drawn.Width,Math.Clamp(y,40,drawn.Height-52)/drawn.Height);
         status=$"Moved {node.Label}";Render();await InvokeAsync(StateHasChanged);
     }
     /// <summary>Called by the component's script when a node is selected. It reports the node in the status line and raises
@@ -52,7 +102,7 @@
         var node=Spec.Nodes.FirstOrDefault(n=>n.Id==id);if(node is null)return;
         status=$"Selected {node.Label}";await NodeSelected.InvokeAsync(id);await InvokeAsync(StateHasChanged);
     }
-    /// <summary>Removes the graph's event handlers from the page.</summary>
+    /// <summary>Removes the graph's event handlers from the page and stops measuring its box.</summary>
     public async ValueTask DisposeAsync()
     {
         try { if(module is not null) { await module.InvokeVoidAsync("detach",root);await module.DisposeAsync(); } }

@@ -4,9 +4,9 @@ The state of Lumen.Charts and how work on it is done, for whoever picks it up ne
 
 ## Where things stand
 
-- **Released:** v0.29.0, *laps and workout blocks* (`ChartKind.Blocks`, `ChartPoint.Block`). GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
-- **In progress:** nothing. 0.29.0 finished the eight-step sports build order in `docs/FITNESS.md`; the next work comes from *What is left* below. Still start with `git status`: uncommitted changes to `src/`, `samples/`, `tests/`, the docs or the skill are a delegated agent's unreleased work.
-- **Counts at v0.29.0:** 421 unit assertions, 170 HTTP checks, 40 browser checks on the gallery (20 on the WebAssembly host), 256 hashed renderings. Release build at 0 warnings.
+- **Released:** v0.30.0, *calendars that read on every style, graphs that fit a phone*: a calendar without `YZones` ramps from a third of the way between its empty day's `Grid` colour and `HeatmapHigh` up to `HeatmapHigh`; `GraphSpec.Direction` (`GraphDirection.TopToBottom`), `GraphEngine.Fit(graph, width)` and `LumenGraph.FitWidth`, which the home page's network graph sets. GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
+- **In progress:** nothing. The next work comes from *What is left* below. Still start with `git status`: uncommitted changes to `src/`, `samples/`, `tests/`, the docs or the skill are a delegated agent's unreleased work.
+- **Counts at v0.30.0:** 431 unit assertions, 174 HTTP checks, 44 browser checks on the gallery (20 on the WebAssembly host), 269 hashed renderings. Release build at 0 warnings.
 - **NuGet:** not published. The owner chose "skip nuget for now"; packages ship as GitHub release assets, and the Claude Code skill's install scripts download them into a local feed.
 
 ## The map
@@ -21,7 +21,7 @@ The state of Lumen.Charts and how work on it is done, for whoever picks it up ne
 | `tests/Lumen.Charts.Tests` | Executable assertion suite (`Test`/`Check`/`Reject`), `dotnet run`. |
 | `tests/verify-api.ps1` | HTTP checks against a running gallery on port 5188. |
 | `tests/Lumen.Charts.BrowserTests` | Playwright suite (gallery on 5188, WebAssembly host on 5199), with axe sweeps in light, dark and Midnight. |
-| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.29.0 reference hashes. See its README. |
+| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.30.0 reference hashes (269 rows). See its README. |
 | `integrations/claude-code/lumen-charts` | The Claude Code skill: `SKILL.md`, `references/` (API, sports recipes, HTTP), `scripts/install.sh` and `install.ps1`. |
 | `docs/FITNESS.md` | The sports-charts research and the eight-step build order this work has followed. |
 | `docs/RESEARCH.md` | The original roadmap. `docs/VERIFICATION.md` the verification record. `docs/PERFORMANCE.md` measured cost. |
@@ -59,6 +59,8 @@ If an agent stops on an API rate limit, resume it with `SendMessage` (it keeps i
 - Playwright MCP writes screenshots and logs only inside the repo (`.playwright-mcp`); copy them out and delete the folder.
 - Windows refuses deep worktree paths: use short ones such as `D:/CHATGPT/wt…`, and remove with `Remove-Item -LiteralPath '\\?\<path>' -Recurse -Force`.
 - The skill's frontmatter description has a hard 1024-character limit and is YAML: no unquoted `: `.
+- `tests/Lumen.Charts.BrowserTests` and `samples/Lumen.Wasm` are outside the solution: building `Lumen.Charts.slnx` does not rebuild them, and `dotnet run --no-build` then runs a stale binary. Build both explicitly before running them.
+- A fitted drawing's `viewBox` is not what the reader sees: compare it with the SVG's rendered width (`getBoundingClientRect().width`) and the box's `scrollWidth`, which caught a graph scaled down where it should scroll. Resizing the Playwright MCP page to 375 keeps a desktop scrollbar (a 360-pixel page, a 322-pixel card); for a phone, open a context with `isMobile` and `hasTouch` through `browser_run_code_unsafe`.
 
 ## Decisions worth knowing before changing them
 
@@ -71,8 +73,9 @@ If an agent stops on an API rate limit, resume it with `SendMessage` (it keeps i
 ## What is left
 
 - Blocks (0.29.0) leave out sloped ramps (a ramp is drawn at its average), stacked blocks and text on a block; reference lines sit behind blocks, as behind columns, so a lap chart's average line is hidden behind faster laps while its label stays on top.
-- Calendar colour ramp reads poorly on dark styles (Midnight's `HeatmapLow` is darker than an empty day's track); zones are fine.
-- `LumenGraph` does not support `FitWidth` (dragged node positions are held in drawing coordinates).
+- Circular graph layout (before 0.30.0 and still): edges aim at node centres, so an edge reaching a node from below runs through its label (Reports, Validation and Chart API on the home graph), and at the home graph's 460-pixel height the "audit trail" edge label sits on the "Sources" node label. On a phone its bottom pair, Charts and Transform, stands close: `Fit` gives side-by-side labels room to touch, no more.
+- `GraphEngine.Fit` ignores edge labels. When a layered graph fits neither direction it turns top to bottom at its narrowest width, even where left to right would need less; it never grows a left-to-right graph's height for a full level.
+- No gallery page shows a calendar without `YZones` (the 0.30.0 ramp); its tiers are what the explorer and the Sports & performance page draw.
 - Screen-reader conformance (NVDA, JAWS, VoiceOver) — needs a person with the hardware; never run.
 - From the original roadmap: irregular tick placement; graph work (orthogonal routing, force layout, overlap removal, edge bundling); regression families beyond the linear trend (a drawn moving average, polynomial, exponential).
 - NuGet publication, when the owner wants it (Trusted Publishing was explored and set aside).

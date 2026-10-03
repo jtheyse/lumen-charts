@@ -3862,8 +3862,9 @@ Test("FitWidth marks its own chart, and the stylesheet lifts the 640-pixel minim
     Check(fitted.Contains("viewBox='0 0 1100 640'")&&fitted.Replace(" lumen-fit","")==Prerender(ChartElement(Sports("stream"))),"the prerendered fitted chart differs by more than its class");
     var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
     Check(css.Contains(".lumen-viewport>svg{min-width:640px}"),"the minimum is gone for every chart");
-    // The only rule naming the class reaches the drawing of the chart that carries it, and nothing else.
-    Check(css.Split(".lumen-fit").Length==2&&css.Contains(".lumen-fit>.lumen-viewport>svg{min-width:0}"),"the fitted chart's rule is missing or reaches further");
+    // The only rule naming the class reaches the drawing of the chart that carries it, and nothing else. A chart sets no minimum
+    // there; a fitted graph drawn wider than its box sets its drawn width, so that it scrolls rather than shrinks.
+    Check(css.Split(".lumen-fit").Length==2&&css.Contains(".lumen-fit>.lumen-viewport>svg{min-width:var(--lumen-drawn,0)}"),"the fitted chart's rule is missing or reaches further");
 });
 Test("A fitted chart redraws at the width its box reports, keeps its zoom and hidden series, and exports at that width",()=>{
     var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
@@ -4656,11 +4657,12 @@ Test("Calendar: each day with activity is one focusable mark naming its date, it
     Check(Svg(spec with{YFormat=ValueFormat.Duration,YZones=null}).Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")=="Tue 15 Sep 2026, Ride, Run: 0:54"),"a duration format does not reach a day's name");
     Check(ChartSvg.LegendLabel(spec,0)=="Stress"&&doc.Root!.Attribute("aria-label")!.Value=="Untitled chart","the legend or the accessible name changed");
 });
-Test("Calendar: without zones a day takes the heatmap ramp across the active days, exact at its ends and middle, with the heatmap's hairline, and the key reads the ends",()=>{
+Test("Calendar: without zones a day takes a ramp across the active days from a third of the way between an empty day and the heatmap's high end up to that end, exact at its ends and middle, with the heatmap's hairline, and the key reads the ends",()=>{
     var from=new DateOnly(2026,9,14);
     var spec=Days(from,4,i=>new double?[]{10,30,50,0}[i]);
     var doc=Svg(spec);
-    Check(Enumerable.Range(0,3).Select(i=>(string?)DayShape(doc,from.AddDays(i)).Attribute("fill")).SequenceEqual(["#E4EDFC","#92ABE6","#4069D0"]),"the ramp's ends and middle moved");
+    // A third of the way from the light grid colour #E8EDF5 to #4069D0 is #B0C1E8, truncated per channel as the heatmap's ramp is.
+    Check(Enumerable.Range(0,3).Select(i=>(string?)DayShape(doc,from.AddDays(i)).Attribute("fill")).SequenceEqual(["#B0C1E8","#7895DC","#4069D0"]),"the ramp's ends and middle moved");
     // The hairline is the shape's own stroke, so a second shape that draws nothing carries the focus ring.
     foreach(var i in Enumerable.Range(0,3))
     {
@@ -4668,10 +4670,10 @@ Test("Calendar: without zones a day takes the heatmap ramp across the active day
         Check(parts.Length==2&&(string?)parts[0].Attribute("stroke")=="var(--lumen-muted)"&&(string?)parts[0].Attribute("stroke-opacity")==".4"&&(string?)parts[1].Attribute("fill")=="none"&&parts[1].Attribute("stroke") is null,"a ramp day has no hairline or no focus shape");
     }
     var swatches=doc.Root!.Elements(ns+"rect").Where(r=>r.Attribute("class") is null&&Attr(r,"width")==10).Select(r=>(string?)r.Attribute("fill")).ToArray();
-    Check(swatches.SequenceEqual(["#E4EDFC","#BBCCF1","#92ABE6","#698ADB","#4069D0"]),string.Join(",",swatches));
+    Check(swatches.SequenceEqual(["#B0C1E8","#94ABE2","#7895DC","#5C7FD6","#4069D0"]),string.Join(",",swatches));
     Check(KeyText(doc).SequenceEqual(["10","50"]),string.Join(",",KeyText(doc)));
-    // The ramp is the style's: Midnight's low end, and a brand's high end.
-    Check((string?)DayShape(Svg(spec with{Style=ChartStyle.Midnight}),from).Attribute("fill")==ChartStyle.Midnight.HeatmapLow&&(string?)DayShape(Svg(spec with{Style=Brand()}),from.AddDays(2)).Attribute("fill")==Brand().HeatmapHigh,"the ramp is not the style's");
+    // The ramp is the style's: Midnight's low end, from its own grid colour towards its own high end, and a brand's high end.
+    Check((string?)DayShape(Svg(spec with{Style=ChartStyle.Midnight}),from).Attribute("fill")=="#3C5C85"&&(string?)DayShape(Svg(spec with{Style=Brand()}),from.AddDays(2)).Attribute("fill")==Brand().HeatmapHigh,"the ramp is not the style's");
     // A day with no activity anywhere leaves the key without a ramp.
     Check(KeyText(Svg(Days(from,3,_=>0))).Length==0&&DayTracks(Svg(Days(from,3,_=>0))).Length==3);
 });
@@ -4793,7 +4795,7 @@ Test("Calendar: the component offers no zoom, keys the zones or the ramp, and re
     var html=RenderInside(null,spec);
     Check(!html.Contains("aria-label=\"Zoom in\"")&&!html.Contains("Reset view")&&html.Contains("Export CSV")&&html.Contains(ChartSvg.LegendKey(spec,0))&&html.Contains("Tue 15 Sep 2026: 54, Easy"),"the component offers zoom, or lost the key or the day");
     Check(XDocument.Parse(ChartSvg.LegendKey(spec,0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual(ChartStyle.Light.Zones.Take(4)),"the key is not the zones");
-    Check(XDocument.Parse(ChartSvg.LegendKey(spec with{YZones=null},0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual([ChartStyle.Light.HeatmapLow,ChartStyle.Light.HeatmapHigh]),"the key is not the ramp");
+    Check(XDocument.Parse(ChartSvg.LegendKey(spec with{YZones=null},0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual(["#B0C1E8",ChartStyle.Light.HeatmapHigh]),"the key is not the ramp");
     var shown=Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,0);});
     Check(shown.Contains("Stress: Tue 15 Sep 2026 = 54</span>")&&shown.Contains("<tr><td>Stress</td>"),"the status line does not read the day's total");
     // Hiding the series leaves the chart's empty state rather than a refused spec.
@@ -5126,6 +5128,211 @@ Test("Sports page: the next session is the first planned day's workout, in Cogga
         var fills=Svg(spec with{Style=style}).Descendants(ns+"path").Where(p=>(string?)p.Attribute("class")=="lumen-block").Select(p=>(string)p.Attribute("fill")!).ToArray();
         Check(fills.Length==10&&fills.Distinct().SequenceEqual([style.Zones[2],style.Zones[4],style.Zones[1]])&&fills.All(f=>Contrast(f,style.Background)>=3),$"{style.Background}: {string.Join(", ",fills.Distinct())}");
     }
+});
+// 0.30.0: a calendar's ramp steps up from its empty day, and graphs turn top to bottom to fit a narrow box. Colours are mixed per
+// channel and truncated, as the heatmap's ramp always has been, so these mix the same way on their own.
+string Blend(string from,string to,double t){int Channel(string hex,int at)=>Convert.ToInt32(hex.Substring(at,2),16);return "#"+string.Concat(new[]{1,3,5}.Select(at=>((int)(Channel(from,at)+(Channel(to,at)-Channel(from,at))*t)).ToString("X2")));}
+Test("Calendar ramp: on every preset, a brand and the classic finish, the quietest day is a third of the way from an empty day to the heatmap's high end and the busiest that end, in squares, dots and bubbles, the key's swatches and legend key match, and the quietest day stands between a rest day and the busiest",()=>{
+    var from=new DateOnly(2026,9,14);
+    var spec=Days(from,4,i=>new double?[]{10,0,30,50}[i]);
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight,Brand(),ChartStyle.Light with{Finish=ChartFinish.Classic},ChartStyle.Dark with{Finish=ChartFinish.Classic}})
+    {
+        var low=Blend(style.Grid,style.HeatmapHigh,1/3d);
+        foreach(var cell in Enum.GetValues<CalendarCell>())
+        {
+            var doc=Svg(spec with{Style=style,CalendarCell=cell});
+            var (quiet,busy)=((string?)DayShape(doc,from).Attribute("fill"),(string?)DayShape(doc,from.AddDays(3)).Attribute("fill"));
+            Check(quiet==low&&busy==style.HeatmapHigh&&(string?)DayShape(doc,from.AddDays(2)).Attribute("fill")==Blend(low,style.HeatmapHigh,.5),$"{style.Background} {cell}: the ramp runs from {quiet} to {busy}");
+            // The rest day's track is the grid colour, and the quietest day lies between it and the busiest, never past it.
+            var track=(string?)DayTracks(doc).Single(t=>t.Parent==doc.Root).Attribute("fill");
+            Check(track==style.Grid&&quiet!=track&&(Luminance(quiet!)-Luminance(track!))*(Luminance(busy!)-Luminance(quiet!))>0&&Contrast(quiet!,track!)>1.2,$"{style.Background} {cell}: the quietest day {quiet} against the track {track}, {Contrast(quiet!,track!):0.00}:1");
+            var swatches=doc.Root!.Elements().Where(e=>e.Attribute("class") is null&&(e.Name==ns+"rect"&&Attr(e,"width")==10||e.Name==ns+"circle"&&Attr(e,"r")==5)).Select(e=>(string?)e.Attribute("fill")).ToArray();
+            Check(swatches.SequenceEqual(Enumerable.Range(0,5).Select(k=>Blend(low,style.HeatmapHigh,k/4d))),$"{style.Background} {cell}: the key is {string.Join(",",swatches)}");
+        }
+        // The component's legend keys the ramp by its ends in the refined finish; the classic one keys every series by a square.
+        Check(style.Finish==ChartFinish.Classic||XDocument.Parse(ChartSvg.LegendKey(spec with{Style=style},0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual([low,style.HeatmapHigh]),$"{style.Background}: the legend key is not the ramp");
+    }
+    // Tiers are untouched: a zoned calendar never takes the ramp.
+    Check(!Svg(spec with{YZones=Effort()}).ToString().Contains("#B0C1E8"),"a zoned calendar took the ramp");
+});
+Test("Heatmaps keep their ramp from HeatmapLow to HeatmapHigh on every preset, cells and legend key alike",()=>{
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight,Brand()})
+    {
+        var doc=Svg(Spec(ChartKind.Heatmap) with{Style=style,Series=[new("Row",[new(0,0,"A"),new(1,5,"B"),new(2,10,"C")])]});
+        var fills=doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).Select(g=>(string?)g.Element(ns+"rect")!.Attribute("fill")).ToArray();
+        Check(fills.SequenceEqual([style.HeatmapLow,Blend(style.HeatmapLow,style.HeatmapHigh,.5),style.HeatmapHigh]),$"{style.Background}: {string.Join(",",fills)}");
+        Check(XDocument.Parse(ChartSvg.LegendKey(Spec(ChartKind.Heatmap) with{Style=style},0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual([style.HeatmapLow,style.HeatmapHigh]),$"{style.Background}: the heatmap's key moved");
+    }
+});
+// A node's label is drawn 12 pixels high, as wide as the library's generous estimate: .62 of an em for most letters, .9 for m and
+// w, .3 for a space. The gallery's pipeline is the graph the home page shows, built once so that a spec fitted from it compares
+// equal to it changed by hand.
+var pipelines=Enum.GetValues<GraphLayout>().ToDictionary(layout=>layout,layout=>DemoData.Graph(layout,ChartTheme.Light));
+GraphSpec Pipeline(GraphLayout layout=GraphLayout.Layered)=>pipelines[layout];
+string Shape(GraphSpec graph)=>$"{graph.Width} by {graph.Height} {graph.Layout} {graph.Direction}";
+Dictionary<string,NodePosition> Placed(GraphSpec spec)=>GraphEngine.Layout(spec).ToDictionary(p=>p.Id);
+Test("Top to bottom: a layered graph's levels stand in rows between the 90-pixel ends, each level's slots spread across the width in equal bands, and a circular graph ignores it",()=>{
+    var chain=Placed(Graph() with{Direction=GraphDirection.TopToBottom});
+    Check(chain.Values.All(p=>p.X==450)&&chain["a"].Y==90&&chain["b"].Y==230&&chain["c"].Y==370,string.Join(" | ",chain.Values));
+    // Spanning's middle level holds b and the bend of a to c, each in half of the width inside the 24-pixel margins.
+    var spec=Spanning() with{Direction=GraphDirection.TopToBottom};
+    var placed=Placed(spec);var bend=GraphEngine.Routes(spec)[2].Points[1];
+    Check(placed["a"]==new NodePosition("a",450,90)&&placed["c"]==new NodePosition("c",450,370)&&placed["b"].Y==230&&bend.Y==230&&new[]{placed["b"].X,bend.X}.Order().SequenceEqual([237d,663]),$"{string.Join(" | ",placed.Values)}, bend {bend}");
+    // The same ordering as left to right: Crossing's second level is reordered so d stands opposite a, now across rather than down.
+    var crossing=Placed(Crossing() with{Direction=GraphDirection.TopToBottom});
+    Check(GraphEngine.Crossings(Crossing() with{Direction=GraphDirection.TopToBottom})==0&&crossing["d"].X<crossing["c"].X&&crossing["a"].X<crossing["b"].X&&crossing["a"].Y==crossing["b"].Y&&crossing["d"].Y>crossing["a"].Y,"the levels are not ordered across");
+    // One level alone stands at the middle of the height.
+    Check(Placed(new GraphSpec{Nodes=[new("a","A"),new("b","B")],Direction=GraphDirection.TopToBottom}).Values.All(p=>p.Y==230),"a single level is not at the middle");
+    var circle=Pipeline(GraphLayout.Circular);
+    Check(GraphEngine.Render(circle with{Direction=GraphDirection.TopToBottom})==GraphEngine.Render(circle)&&GraphEngine.Layout(circle with{Direction=GraphDirection.TopToBottom}).SequenceEqual(GraphEngine.Layout(circle)),"a circular graph turned");
+    Check(XDocument.Parse(GraphEngine.Render(spec)).Descendants(ns+"desc").Single().Value=="3 nodes · 3 directed connections · Layered layout top to bottom · 0 edge crossings","the description does not say which way it runs");
+    Reject(()=>GraphEngine.Layout(spec with{Direction=(GraphDirection)2}));
+    // The direction survives JSON by name, and a request that names none runs left to right.
+    var options=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web){Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,options);
+    Check(json.Contains("\"direction\":\"TopToBottom\"")&&GraphEngine.Render(System.Text.Json.JsonSerializer.Deserialize<GraphSpec>(json,options)!)==GraphEngine.Render(spec),json);
+    Check(System.Text.Json.JsonSerializer.Deserialize<GraphSpec>("{\"nodes\":[{\"id\":\"a\",\"label\":\"A\"}]}",options)!.Direction==GraphDirection.LeftToRight,"a request without a direction does not run left to right");
+});
+Test("Top to bottom: edges leave from under their source's label and point down, long ones bend through each row they pass, labels stand beside their edge and a self-loop at its node's right",()=>{
+    var spec=new GraphSpec{Direction=GraphDirection.TopToBottom,Nodes=[new("a","A"),new("b","B"),new("c","C")],Edges=[new("a","b"),new("b","c"),new("a","c","long"),new("c","c")]};
+    var placed=Placed(spec);var doc=XDocument.Parse(GraphEngine.Render(spec));
+    var paths=doc.Root!.Elements(ns+"path").ToArray();
+    // Each edge is its line and its arrowhead; the loop has no head.
+    var lines=paths.Where(p=>(string?)p.Attribute("stroke-width")=="1.5").Select(p=>(string)p.Attribute("d")!).ToArray();
+    var heads=paths.Where(p=>p.Attribute("stroke") is null).Select(p=>((string)p.Attribute("d")!).Split(' ').Select(s=>s.TrimStart('M','L').Split(',')).Where(s=>s.Length==2).Select(s=>(X:double.Parse(s[0],CultureInfo.InvariantCulture),Y:double.Parse(s[1],CultureInfo.InvariantCulture))).ToArray()).ToArray();
+    Check(lines.Length==3&&heads.Length==3,$"{lines.Length} lines and {heads.Length} heads");
+    Check(lines[0].StartsWith($"M{placed["a"].X.ToString(CultureInfo.InvariantCulture)},{(placed["a"].Y+50).ToString(CultureInfo.InvariantCulture)} ")&&lines[1].StartsWith($"M{placed["b"].X.ToString(CultureInfo.InvariantCulture)},{(placed["b"].Y+50).ToString(CultureInfo.InvariantCulture)} "),"an edge does not leave from under its source's label: "+string.Join(" | ",lines));
+    Check(heads.All(h=>h[0].Y>(h[1].Y+h[2].Y)/2),"an arrowhead does not point down");
+    // a to c bends once, on b's row and beside b, and arrives at the upper side of c.
+    var route=GraphEngine.Routes(spec)[2].Points;
+    Check(route.Count==3&&route[1].Y==placed["b"].Y&&Math.Abs(route[1].X-placed["b"].X)>20&&heads[2][0].Y<placed["c"].Y-10,"the long edge does not bend through b's row");
+    var label=doc.Root!.Elements(ns+"text").Single(t=>t.Value=="long");
+    Check((string?)label.Attribute("text-anchor")=="start"&&Close(Attr(label,"x"),(route[0].X+route[1].X)/2+6)&&Close(Attr(label,"y"),(route[0].Y+50+route[1].Y)/2+3.5),"the edge's label is not beside its middle stretch");
+    var loop=(string)paths.Single(p=>p.Element(ns+"title") is not null).Attribute("d")!;
+    Check(loop.StartsWith($"M{(placed["c"].X+17).ToString(CultureInfo.InvariantCulture)},{(placed["c"].Y-12).ToString(CultureInfo.InvariantCulture)} C"),"the loop is not at the node's right: "+loop);
+    // A label that would run past the drawing's right edge, 111 pixels of 10-pixel text from 207 in 320, stands on the edge's left.
+    var right=new GraphSpec{Direction=GraphDirection.TopToBottom,Width=320,Nodes=[new("a","A"),new("b","B"),new("c","C"),new("d","D")],Edges=[new("a","b"),new("a","c"),new("a","d","a label that is long")]};
+    var left=XDocument.Parse(GraphEngine.Render(right)).Root!.Elements(ns+"text").Single(t=>t.Value=="a label that is long");
+    Check((string?)left.Attribute("text-anchor")=="end"&&Attr(left,"x")<200&&Attr(left,"x")-111>0,$"the label stands at {Attr(left,"x")}, anchored {left.Attribute("text-anchor")}");
+    // An edge that reaches its node from below, once the source is dragged under it, arrives at the foot of the node's label.
+    var pair=new GraphSpec{Direction=GraphDirection.TopToBottom,Nodes=[new("a","A"),new("b","B")],Edges=[new("a","b")]};
+    var under=(string)XDocument.Parse(GraphEngine.Render(pair,new Dictionary<string,GraphPoint>{["a"]=new(450,600)})).Root!.Elements(ns+"path").First().Attribute("d")!;
+    Check(under=="M450,575 L450,420","an edge from below does not reach the foot of the label: "+under);
+});
+Test("Fit: a graph that fits at its own width and direction comes back unchanged, and one shown wider keeps its layout and height",()=>{
+    foreach(var spec in new[]{Pipeline(),Pipeline(GraphLayout.Circular),Spanning(),Graph(),new GraphSpec(),Spanning() with{Direction=GraphDirection.TopToBottom,Height=500}})
+        Check(ReferenceEquals(GraphEngine.Fit(spec,spec.Width),spec),$"{spec.Title} {spec.Layout} {spec.Direction} moved at its own width");
+    Check(GraphEngine.Fit(Pipeline(),1200)==Pipeline() with{Width=1200}&&GraphEngine.Fit(Pipeline(GraphLayout.Circular),1200)==Pipeline(GraphLayout.Circular) with{Width=1200},"a wider box changed more than the width");
+    Check(GraphEngine.Fit(Spanning() with{Direction=GraphDirection.TopToBottom},1200).Direction==GraphDirection.TopToBottom,"a graph set top to bottom turned back");
+    Check(Shape(GraphEngine.Fit(new GraphSpec(),375))=="375 by 460 Layered LeftToRight","an empty graph did not take the width");
+});
+Test("Fit: the home page's pipeline turns top to bottom where its six levels cannot stand its widest label, Validation's 74.4 pixels, and 16 more apart, on a phone among them, and its rows hold its labels apart",()=>{
+    // 74.4 + 16 is 90.4, which five gaps between levels reach at 180 + 452 pixels.
+    Check(GraphEngine.Fit(Pipeline(),633)==Pipeline() with{Width=633},"it turned with room to stand side by side");
+    foreach(var width in new[]{631,375,360,337,322,320})
+    {
+        var fitted=GraphEngine.Fit(Pipeline(),width);
+        Check(fitted==Pipeline() with{Width=width,Height=730,Direction=GraphDirection.TopToBottom},$"at {width}: {Shape(fitted)}");
+        // Every node's label, as wide as estimated and 12 high under its node, stays clear of every other label and node.
+        var placed=Placed(fitted);var widths=fitted.Nodes.ToDictionary(n=>n.Id,n=>n.Label.Sum(c=>c is ' ' ? .3 : c is 'm' or 'M' or 'w' or 'W' ? .9 : .62)*12);
+        foreach(var a in fitted.Nodes)
+            foreach(var b in fitted.Nodes.Where(b=>b!=a))
+            {
+                var (p,q)=(placed[a.Id],placed[b.Id]);
+                Check(Math.Abs(p.X-q.X)>=(widths[a.Id]+widths[b.Id])/2||Math.Abs(p.Y-q.Y)>=24,$"at {width}: {a.Label} and {b.Label} overlap");
+                Check(Math.Abs(p.X-q.X)>=widths[a.Id]/2+23||p.Y+42+3<q.Y-23||p.Y+30>q.Y+23,$"at {width}: {a.Label}'s label touches {b.Label}");
+            }
+        Check(fitted.Nodes.Where(n=>placed[n.Id].Y==placed["charts"].Y).Count()==2&&placed["api"].X-placed["charts"].X>=90.4,$"at {width}: Charts and Chart API stand {placed["api"].X-placed["charts"].X} apart");
+    }
+    Check(GraphEngine.Fit(Pipeline() with{Height=900},360).Height==900,"the rows shrank the graph below its own height");
+});
+Test("Fit: a level too full for the width even top to bottom takes the narrowest width that holds it, the bends of longer edges counted, within 320 to 4,096",()=>{
+    // a fans out to b and three x's and on down a chain to f; a straight to f bends through every level between. Single letters
+    // need a node's 46 pixels and 24 more, so five slots need 48 + 350 pixels.
+    var fan=new GraphSpec{Nodes=[new("a","A"),new("b","B"),new("x1","X"),new("x2","X"),new("x3","X"),new("c","C"),new("d","D"),new("e","E"),new("f","F")],
+        Edges=[new("a","b"),new("a","x1"),new("a","x2"),new("a","x3"),new("b","c"),new("c","d"),new("d","e"),new("e","f"),new("a","f")]};
+    var fitted=GraphEngine.Fit(fan,360);
+    Check(Shape(fitted)=="398 by 730 Layered TopToBottom",Shape(fitted));
+    var placed=Placed(fitted);
+    Check(new[]{"b","x1","x2","x3"}.Select(id=>placed[id].X).Order().Zip(new[]{"b","x1","x2","x3"}.Select(id=>placed[id].X).Order().Skip(1)).All(p=>p.Second-p.First>=70),"the fullest level's nodes stand closer than 70");
+    Check(GraphEngine.Fit(fan with{Edges=fan.Edges.Take(8).ToArray()},360).Width==360,"without the bends four slots did not fit 360");
+    // The width is clamped, and a level of sixty takes no more than 4,096.
+    Check(GraphEngine.Fit(Pipeline(),100).Width==320&&GraphEngine.Fit(Pipeline(),100000)==Pipeline() with{Width=4096},"the width is not clamped");
+    var wide=new GraphSpec{Direction=GraphDirection.TopToBottom,Nodes=[new("a","A"),..Enumerable.Range(0,60).Select(i=>new GraphNode($"n{i}","N"))],Edges=Enumerable.Range(0,60).Select(i=>new GraphEdge("a",$"n{i}")).ToArray()};
+    Check(GraphEngine.Fit(wide,320).Width==4096,"a level of sixty is not capped at 4,096");
+    // Thirty levels need 180 + 29 × 110 pixels, more than the 2,160 a graph may be.
+    var chain=new GraphSpec{Nodes=Enumerable.Range(0,30).Select(i=>new GraphNode($"n{i}",$"N{i}")).ToArray(),Edges=Enumerable.Range(1,29).Select(i=>new GraphEdge($"n{i-1}",$"n{i}")).ToArray()};
+    Check(GraphEngine.Fit(chain,360).Height==2160,"thirty rows are not capped at 2,160");
+    Reject(()=>GraphEngine.Fit(Spanning() with{Edges=[new("a","b"),new("b","a")]},360));
+});
+Test("Fit: a circular graph keeps its circle and grows just tall enough for neighbours to stand 90.4 apart, and nodes side by side at one height take the narrowest width that holds their labels",()=>{
+    double Wide(string label)=>label.Sum(c=>c is ' ' ? .3 : c is 'm' or 'M' or 'w' or 'W' ? .9 : .62)*12;
+    double Apart(NodePosition p,NodePosition q)=>Math.Sqrt((p.X-q.X)*(p.X-q.X)+(p.Y-q.Y)*(p.Y-q.Y));
+    var round=Pipeline(GraphLayout.Circular);
+    var fitted=GraphEngine.Fit(round,337);
+    Check(fitted.Width==337&&fitted.Height>460&&fitted.Height<2160&&fitted.Layout==GraphLayout.Circular&&fitted.Direction==round.Direction,$"{fitted.Width} by {fitted.Height}");
+    bool Apart90(GraphSpec spec){var p=GraphEngine.Layout(spec);return Enumerable.Range(0,p.Count).Where(i=>Math.Abs(p[i].Y-p[(i+1)%p.Count].Y)>1e-6).All(i=>Apart(p[i],p[(i+1)%p.Count])>=90.4-1e-9);}
+    Check(Apart90(fitted)&&!Apart90(fitted with{Height=fitted.Height-1}),"the circle is not just tall enough");
+    // Transform and Charts stand side by side at the bottom, so at 322 the width must grow until half of each label, 57.48, fits.
+    var narrow=GraphEngine.Fit(round,322);
+    double Bottom(GraphSpec spec){var p=Placed(spec);return Math.Abs(p["transform"].X-p["charts"].X);}
+    Check(narrow.Width==333&&Bottom(narrow)>=(Wide("Transform")+Wide("Charts"))/2&&Bottom(narrow with{Width=332})<(Wide("Transform")+Wide("Charts"))/2&&Apart90(narrow),$"{narrow.Width} by {narrow.Height}, {Bottom(narrow)} apart");
+    // Forty nodes cannot stand that far apart on a phone, so the circle stops at 2,160.
+    Check(GraphEngine.Fit(new GraphSpec{Layout=GraphLayout.Circular,Nodes=Enumerable.Range(0,40).Select(i=>new GraphNode($"n{i}","N")).ToArray()},360).Height==2160,"forty nodes did not stop at 2,160");
+});
+string OperateGraph(GraphSpec spec,Func<LumenGraph,Task> act,bool fit=false)
+{
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try {
+        LumenGraph? graph=null;
+        RenderFragment content=b=>{b.OpenComponent<LumenGraph>(0);b.AddAttribute(1,"Spec",spec);if(fit)b.AddAttribute(2,"FitWidth",true);b.AddComponentReferenceCapture(3,c=>graph=(LumenGraph)c);b.CloseComponent();};
+        return renderer.Dispatcher.InvokeAsync(async()=>{
+            var root=await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",null},{"ChildContent",content}}));
+            await act(graph!);
+            await root.QuiescenceTask;
+            return root.ToHtmlString();
+        }).GetAwaiter().GetResult();
+    } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
+}
+Test("LumenGraph without FitWidth renders as before, and with it is marked for the stylesheet and drawn at its spec's width until measured",()=>{
+    RenderFragment Element(GraphSpec spec,bool? fit)=>b=>{b.OpenComponent<LumenGraph>(0);b.AddAttribute(1,"Spec",spec);if(fit is {} f)b.AddAttribute(2,"FitWidth",f);b.CloseComponent();};
+    var plain=Prerender(Element(Pipeline(),null));
+    Check(plain.Contains("<div class=\"lumen-chart\">")&&!plain.Contains("lumen-fit")&&plain.Contains(GraphEngine.Render(Pipeline())),"the graph without FitWidth is not drawn as before");
+    Check(Prerender(Element(Pipeline(),false))==plain,"FitWidth=\"false\" renders differently from leaving it out");
+    var fitted=Prerender(Element(Pipeline(),true));
+    Check(fitted.Contains("class=\"lumen-chart lumen-fit\"")&&fitted.Contains("viewBox='0 0 900 460'")&&fitted.Replace(" lumen-fit","")==plain,"the prerendered fitted graph differs by more than its class");
+    Check(File.ReadAllText(Path.ChangeExtension(typeof(GraphEngine).Assembly.Location,".xml")).Contains("M:Lumen.Charts.GraphEngine.Fit(Lumen.Charts.GraphSpec,System.Int32)"),"Fit is undocumented");
+});
+Test("A fitted graph redraws at the width its box reports, holds dragged nodes in proportion, drops them with a word when it turns, and clamps a move to the drawing",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    string Drawn(LumenGraph graph)=>(string)typeof(LumenGraph).GetField("svg",flags)!.GetValue(graph)!;
+    string Status(LumenGraph graph)=>(string)typeof(LumenGraph).GetField("status",flags)!.GetValue(graph)!;
+    string Box(string svg)=>XDocument.Parse(svg).Root!.Attribute("viewBox")!.Value;
+    string At(string svg,string id)=>XDocument.Parse(svg).Descendants(ns+"g").Single(g=>(string?)g.Attribute("data-node")==id).Attribute("data-position")!.Value;
+    var log=new List<string>();
+    var html=OperateGraph(Pipeline(),async graph=>{
+        log.Add(Box(Drawn(graph)));
+        await graph.Fit(1200);log.Add(Box(Drawn(graph)));
+        await graph.MoveNode("validate",300,200);log.Add(At(Drawn(graph),"validate"));
+        // Wider, the node keeps its place in proportion: a quarter of the width across and the same height down.
+        await graph.Fit(1600);log.Add(Box(Drawn(graph))+" "+At(Drawn(graph),"validate")+" "+Status(graph));
+        // On a phone the graph turns, and the node goes back to the layout, which the status line says.
+        await graph.Fit(360);log.Add(Box(Drawn(graph))+" "+Status(graph)+" "+(At(Drawn(graph),"validate")==At(GraphEngine.Render(GraphEngine.Fit(Pipeline(),360)),"validate")));
+        // A move is kept inside the drawing as it is drawn, 360 by 730, not the spec's 900 by 460.
+        await graph.MoveNode("validate",5000,5000);log.Add(At(Drawn(graph),"validate"));
+        await graph.Fit(1200);log.Add(Status(graph)+" "+(At(Drawn(graph),"validate")==At(GraphEngine.Render(Pipeline() with{Width=1200}),"validate")));
+        await graph.MoveNode("reports",900,300);await graph.Fit(980);log.Add(At(Drawn(graph),"reports"));
+        typeof(LumenGraph).GetMethod("ResetLayout",flags)!.Invoke(graph,[]);log.Add(Status(graph)+" "+(Drawn(graph)==GraphEngine.Render(Pipeline() with{Width=980})));
+        await graph.SelectNode("api");log.Add(Status(graph));
+    },fit:true);
+    Check(log.SequenceEqual(["0 0 900 460","0 0 1200 460","300,200","0 0 1600 460 400,200 Moved Validation","0 0 360 730 Turned top to bottom to fit; moved nodes returned True","320,678",
+        "Turned left to right to fit; moved nodes returned True","735,300","Layout reset True","Selected Chart API"]),string.Join(" | ",log));
+    Check(html.Contains("class=\"lumen-chart lumen-fit\"")&&html.Contains("viewBox='0 0 980 460'"),"the page does not show the fitted graph");
+    // A graph not asked to fit ignores a width, and keeps a move inside its spec's own drawing, as before.
+    var ignored=new List<string>();
+    OperateGraph(Pipeline(),async graph=>{await graph.Fit(375);ignored.Add(Box(Drawn(graph)));await graph.MoveNode("validate",5000,5000);ignored.Add(At(Drawn(graph),"validate"));});
+    Check(ignored.SequenceEqual(["0 0 900 460","860,408"]),string.Join(" | ",ignored));
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

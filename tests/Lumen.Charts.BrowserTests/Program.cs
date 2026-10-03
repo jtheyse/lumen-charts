@@ -302,6 +302,100 @@ if (await graph.CountAsync() > 0 && await graph.Locator("[data-node]").CountAsyn
     });
 }
 
+// A graph set to FitWidth is drawn at the width of its box, holds a dragged node in proportion when the box changes, and lets it
+// go when a narrow box turns the graph top to bottom. A host whose graph does not fit its box says SKIP.
+var fittedGraph = page.Locator(".lumen-chart.lumen-fit:has([data-node])").First;
+if (await fittedGraph.CountAsync() > 0)
+{
+    var box = await fittedGraph.ElementHandleAsync();
+    const string graphDrawn = "c => [...c.querySelector(':scope > .lumen-viewport > svg').getAttribute('viewBox').split(' ').slice(2).map(Number), Math.max(320, c.querySelector(':scope > .lumen-viewport').clientWidth)]";
+    async Task<double[]> Drawing() => await fittedGraph.EvaluateAsync<double[]>(graphDrawn);
+    async Task SettleGraph() => await page.WaitForFunctionAsync($"c => {{ const d = ({graphDrawn})(c); return d[0] === d[2]; }}", box);
+    async Task<double[]> Position(string id) => (await fittedGraph.Locator($"[data-node='{id}']").GetAttributeAsync("data-position"))!.Split(',').Select(v => double.Parse(v, CultureInfo.InvariantCulture)).ToArray();
+
+    await Test("A dragged graph node keeps its place in proportion when the graph's box narrows", async () =>
+    {
+        await SettleGraph();
+        var node = fittedGraph.Locator("[data-node]").Nth(2);
+        var id = (await node.GetAttributeAsync("data-node"))!;
+        await node.ScrollIntoViewIfNeededAsync();
+        var circle = await node.Locator("circle").BoundingBoxAsync();
+        await page.Mouse.MoveAsync(circle!.X + circle.Width / 2, circle.Y + circle.Height / 2);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(circle.X + circle.Width / 2 + 45, circle.Y + circle.Height / 2 + 30, new() { Steps = 10 });
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("c => c.querySelector('.lumen-status')?.textContent.startsWith('Moved')", box);
+        var (wide, before) = (await Drawing(), await Position(id));
+        // Narrowed to 900 pixels the graph still stands left to right, so only its width changes.
+        await fittedGraph.EvaluateAsync("c => c.parentElement.style.maxWidth = '900px'");
+        await page.WaitForFunctionAsync($"c => ({graphDrawn})(c)[0] < {wide[0]}", box);
+        await SettleGraph();
+        var (narrow, after) = (await Drawing(), await Position(id));
+        Check(narrow[1] == wide[1], $"the graph's height changed from {wide[1]} to {narrow[1]}");
+        Check(Math.Abs(after[0] - before[0] * narrow[0] / wide[0]) < .01 && Math.Abs(after[1] - before[1]) < .01,
+            $"the node moved from {before[0]},{before[1]} in {wide[0]} to {after[0]},{after[1]} in {narrow[0]}");
+    });
+
+    await Test("A graph whose box turns it top to bottom lets its dragged nodes go and says so", async () =>
+    {
+        await fittedGraph.EvaluateAsync("c => c.parentElement.style.maxWidth = '420px'");
+        await page.WaitForFunctionAsync($"c => {{ const d = ({graphDrawn})(c); return d[0] === d[2] && d[1] > d[0]; }}", box);
+        await page.WaitForFunctionAsync("c => c.querySelector('.lumen-status')?.textContent.includes('top to bottom')", box);
+        Check(await fittedGraph.Locator(".lumen-tools button", new() { HasTextString = "Reset layout" }).IsDisabledAsync(), "the dragged node was kept");
+        Check((await fittedGraph.Locator("svg desc").First.TextContentAsync())!.Contains("top to bottom"), "the drawing does not say it runs top to bottom");
+        await fittedGraph.EvaluateAsync("c => c.parentElement.style.maxWidth = ''");
+        await page.WaitForFunctionAsync($"c => {{ const d = ({graphDrawn})(c); return d[0] === d[2] && d[1] < d[0]; }}", box);
+    });
+
+    // A box narrower than the narrowest a graph is drawn, 320 pixels, shows the drawing at its own size and scrolls, rather than
+    // scaling it down and its text with it.
+    await Test("A fitted graph wider than its box scrolls in the box at its own size", async () =>
+    {
+        await fittedGraph.EvaluateAsync("c => c.parentElement.style.maxWidth = '280px'");
+        await page.WaitForFunctionAsync("c => c.querySelector(':scope > .lumen-viewport').clientWidth < 300", box);
+        await page.WaitForFunctionAsync($"c => {{ const d = ({graphDrawn})(c); return d[0] === d[2]; }}", box);
+        var shown = await fittedGraph.EvaluateAsync<double[]>(@"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector('svg');
+            return [Number(s.getAttribute('viewBox').split(' ')[2]), s.getBoundingClientRect().width, v.scrollWidth - v.clientWidth]; }");
+        Check(Math.Abs(shown[1] - shown[0]) < 1, $"the {shown[0]}-pixel drawing is shown {shown[1]} pixels wide");
+        Check(shown[2] > 0, "the box does not scroll");
+        await fittedGraph.EvaluateAsync("c => c.parentElement.style.maxWidth = ''");
+        await page.WaitForFunctionAsync($"c => {{ const d = ({graphDrawn})(c); return d[0] === d[2] && d[1] < d[0]; }}", box);
+    });
+
+    // On a phone, with its overlay scrollbars, touch and a device scale of 2, the page and its graph fit the screen in each layout the
+    // page offers, and no two of the graph's labels overlap.
+    await Test("On a 375-pixel phone the home page does not scroll sideways with its graph in either layout, and the graph's labels do not overlap", async () =>
+    {
+        await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+        var tab = await phone.NewPageAsync();
+        tab.SetDefaultTimeout(15_000);
+        await tab.GotoAsync(address, new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+        await tab.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });
+        var shown = tab.Locator(".lumen-chart.lumen-fit:has([data-node])").First;
+        var layouts = tab.Locator("#network .segmented button");
+        var names = await layouts.CountAsync() > 0 ? (await layouts.AllTextContentsAsync()).ToArray() : new[] { "" };
+        foreach (var name in names)
+        {
+            if (name.Length > 0)
+            {
+                await tab.Locator("#network .segmented button", new() { HasTextString = name }).ClickAsync();
+                await tab.WaitForFunctionAsync("n => document.querySelector('#network .segmented .selected')?.textContent === n", name);
+            }
+            await tab.WaitForFunctionAsync($"c => {{ const d = ({graphDrawn})(c); return d[0] === d[2]; }}", await shown.ElementHandleAsync());
+            await tab.WaitForTimeoutAsync(400);
+            var measured = await shown.EvaluateAsync<double[]>(@"c => { const v = c.querySelector(':scope > .lumen-viewport');
+                const boxes = [...c.querySelectorAll('[data-node]')].map(g => g.querySelectorAll('text')[1]).concat([...v.querySelectorAll('svg > text[font-size=""10""]')]).map(t => t.getBoundingClientRect());
+                let overlaps = 0;
+                for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) { const a = boxes[i], b = boxes[j]; if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) overlaps++; }
+                return [document.documentElement.scrollWidth, v.scrollWidth - v.clientWidth, overlaps, boxes.length]; }");
+            Check(measured[0] <= 375, $"{name}: the page is {measured[0]} pixels wide");
+            Check(measured[1] <= 0, $"{name}: the graph scrolls sideways by {measured[1]} pixels");
+            Check(measured[2] == 0, $"{name}: {measured[2]} pairs of the graph's {measured[3]} labels overlap");
+        }
+    });
+}
+else Console.WriteLine("SKIP fitted graph checks: this host's graph does not set FitWidth");
+
 // Only a host that wraps its charts in LumenBrand can prove the page's own colours reach the chart.
 if (await page.Locator("[data-lumen-brand]").CountAsync() > 0)
 {

@@ -10,6 +10,7 @@ $r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 19 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'") -and $r.Content.Contains('id="laps"') -and $r.Content.Contains('id="next-session"') -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 14) 'The Sports & performance page answers 200 and prerenders its nineteen simulated charts, each set to fit its card, last night''s sleep stages, the training calendar, the run''s four laps and the next session''s ten steps among them'
 $r=Invoke-WebRequest "$BaseUrl/" -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('class="lumen-chart lumen-fit"') -and $r.Content.Contains('<b>22</b><span>Chart types</span>') -and $r.Content.Contains('>Calendar</button>') -and $r.Content.Contains('>Blocks</button>')) 'The home page answers 200, its chart explorer set to fit its card, with twenty-two chart types and a calendar and blocks among them'
+Verify (([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 2 -and $r.Content.Contains("data-node='sources'") -and $r.Content.Contains("viewBox='0 0 900 460'")) 'The home page prerenders its network graph set to fit its card too, drawn at its own width until the browser measures the card'
 $types=Invoke-RestMethod "$BaseUrl/api/charts/types"
 Verify ($types.Count -eq 22 -and $types -contains 'Gauge' -and $types -contains 'Ring' -and $types -contains 'Timeline' -and $types -contains 'Range' -and $types -contains 'Calendar' -and $types -contains 'Blocks') 'Twenty-two chart types, gauge, ring, timeline, range, calendar and blocks among them'
 foreach($kind in @('Line','Area','Scatter','Bubble','Column','Bar','StackedColumn','Donut','Heatmap','Radar')){
@@ -288,6 +289,13 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType a
 Verify ($r.Content.Contains('data-position=') -and $r.Content.Contains('edge crossings')) 'Graph SVG exposes node handles and its crossing count'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/routes" -Method Post -ContentType application/json -Body '{"nodes":[{"id":"a","label":"A"},{"id":"b","label":"B"}],"edges":[{"source":"a","target":"b"},{"source":"b","target":"a"}]}' -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400) 'Cyclic route request rejected'
+$down=$spanning.Replace('"layout":"Layered"','"layout":"Layered","direction":"TopToBottom"')
+$positions=Invoke-RestMethod "$BaseUrl/api/charts/graph/layout" -Method Post -ContentType application/json -Body $down
+Verify ($positions.Count -eq 3 -and $positions[0].y -lt $positions[1].y -and $positions[1].y -lt $positions[2].y -and $positions[0].x -eq $positions[2].x) 'A layered graph set top to bottom lays its levels out in rows down the drawing'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType application/json -Body $down
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('Layered layout top to bottom')) 'A graph set top to bottom says so in its description'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/graph/layout" -Method Post -ContentType application/json -Body $spanning.Replace('"layout":"Layered"','"layout":"Layered","direction":"Sideways"') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'An unknown graph direction is rejected'
 foreach($bad in @('{"kind":"Donut","series":[{"name":"Bad","points":[{"x":0,"y":-1}]}]}','{"width":99999}','{"series":null}','{"kind":"Bogus"}','{not json')){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400) 'Invalid request rejected'

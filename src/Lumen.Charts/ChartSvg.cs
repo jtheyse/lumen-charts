@@ -236,7 +236,7 @@ public static class ChartSvg
         var drawn = series.Points.Where(p => p.Y.HasValue || mark == ChartKind.Range && p.Low.HasValue).ToArray();
         IReadOnlyList<string> inks = mark is ChartKind.Candlestick or ChartKind.Ohlc ? [style.Rising, style.Falling]
             : spec.Kind == ChartKind.Heatmap ? [style.HeatmapLow, style.HeatmapHigh]
-            : spec.Kind == ChartKind.Calendar ? spec.YZones is { } tiers ? tiers.Zones.Select((zone, i) => zone.Color ?? style.Zones[i]).Distinct().Take(4).ToArray() : [style.HeatmapLow, style.HeatmapHigh]
+            : spec.Kind == ChartKind.Calendar ? spec.YZones is { } tiers ? tiers.Zones.Select((zone, i) => zone.Color ?? style.Zones[i]).Distinct().Take(4).ToArray() : [CalendarLow(style), style.HeatmapHigh]
             : spec.Kind == ChartKind.Donut ? series.Points.Select((p, i) => (p, i)).Where(t => t.p.Y > 0).Select(t => t.p.Color ?? style.SeriesColor(t.i)).Distinct().Take(4).ToArray()
             : spec.Kind == ChartKind.Gauge && spec.YZones is { } zones ? zones.Zones.Select((zone, i) => zone.Color ?? style.Zones[i]).Distinct().Take(4).ToArray()
             : spec.Kind == ChartKind.Gauge && series.Gradient is { } stops ? stops.Select(stop => stop.Color).Distinct().Take(4).ToArray()
@@ -265,7 +265,9 @@ public static class ChartSvg
             : $"<rect x='{N(x + 2.5)}' y='{N(y)}' width='9' height='9' rx='2' fill='{inks[0]}'/>";
     }
 
-    internal static void Begin(SvgWriter w, int width, int height, string title, string description)
+    /// <summary>Opens the drawing with its title and description. With <paramref name="wrap"/>, a description of clauses parted by
+    /// <c> · </c> that is too wide for the drawing, as a graph's own may be on a phone, goes on over a second line.</summary>
+    internal static void Begin(SvgWriter w, int width, int height, string title, string description, bool wrap = false)
     {
         var style = w.Style;
         w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{style.Grid};--lumen-muted:{style.Muted};width:100%;height:auto;display:block;background:{style.Background};color:{style.Text};font-family:{style.FontFamily};font-size:12px' fill='currentColor'>");
@@ -276,7 +278,16 @@ public static class ChartSvg
             +(w.Refined?".lumen-svg .lumen-marker{opacity:0}.lumen-svg .lumen-datum:hover .lumen-marker,.lumen-svg .lumen-datum:focus .lumen-marker{opacity:1}":"")+".lumen-svg .lumen-node{cursor:grab;outline:none}.lumen-svg .lumen-node:focus circle{stroke-width:4}.lumen-svg .lumen-node:active{cursor:grabbing}</style>");
         w.MarkDefinitions();
         w.Text(24, 28, title, "font-size='17' font-weight='600'");
-        w.Text(24, 49, description, "class='lumen-muted' font-size='11'");
+        var clauses = description.Split(" · ");
+        if (wrap && clauses.Length > 1 && Wide(description) > width - 48)
+        {
+            // As many clauses as fit go on the first line, at least one, and the rest on the second.
+            var count = clauses.Length - 1;
+            while (count > 1 && Wide(string.Join(" · ", clauses[..count])) > width - 48) count--;
+            w.Text(24, 49, string.Join(" · ", clauses[..count]), "class='lumen-muted' font-size='11'");
+            w.Text(24, 62, string.Join(" · ", clauses[count..]), "class='lumen-muted' font-size='11'");
+        }
+        else w.Text(24, 49, description, "class='lumen-muted' font-size='11'");
     }
 
     /// <summary>A focusable, labelled data mark. <paramref name="attributes"/> are presentation attributes on the group, which
@@ -699,7 +710,7 @@ public static class ChartSvg
     private static double Broad(string text) => Wide(text) * 12 / 11;
     /// <summary>A generous width for 11 px text, so a label judged to fit does: digits and most letters at .62 em, wider
     /// than in the common sans and serif faces, punctuation narrower and the widest letters wider.</summary>
-    private static double Wide(string text) =>
+    internal static double Wide(string text) =>
         text.Sum(c => c is '.' or ',' or ':' or ' ' ? .3 : c is '-' ? .36 : c is 'm' or 'M' or 'w' or 'W' ? .9 : .62) * 11;
 
     private enum End { Top, Bottom, Right, Left }
@@ -1395,8 +1406,9 @@ public static class ChartSvg
     /// A calendar of the days from the first to the last, in a grid of weeks or of months. Each day is a cell on a pitch that fills
     /// the width, or the height when that is the tighter: a fifth of the pitch, up to 6 pixels, is the gap between cells, across
     /// and down alike, and the grid is centred in the room it leaves. A day with activity is a focusable mark in its zone's colour,
-    /// or on the ramp from the style's heatmap low to its high across the active days' totals, where it takes the heatmap's
-    /// hairline so that the palest stays apart from an empty day; a day without activity is an empty cell in the grid colour.
+    /// or on a ramp across the active days' totals that starts a third of the way from an empty day's grid colour to the style's
+    /// heatmap high and ends at that high, where it takes the heatmap's hairline as well; a day without activity is an empty cell
+    /// in the grid colour.
     /// An X annotation outlines its day in the gap round it. The key under the grid names the zones or reads the ramp's ends,
     /// and names each outlined day.
     /// </summary>
@@ -1422,8 +1434,11 @@ public static class ChartSvg
         var zones = s.YZones;
         var ramp = LinearScale.Create(active.Values.Select(d => d.Total));
         var largest = active.Count == 0 ? 1 : active.Values.Max(d => d.Total);
+        // The ramp steps up from an empty day, as a contribution grid does, so its quietest day stands apart from a rest day on light
+        // and dark styles alike. The heatmap's low end would not: it is a light style's track colour and a dark style's brightest.
+        var palest = CalendarLow(w.Style);
         string Ink(double value) => zones is not null ? ZoneColor(w.Style, zones, zones.IndexOf(value))
-            : Mix(w.Style.HeatmapLow, w.Style.HeatmapHigh, Math.Clamp(ramp.Map(value, 0, 1), 0, 1));
+            : Mix(palest, w.Style.HeatmapHigh, Math.Clamp(ramp.Map(value, 0, 1), 0, 1));
         string Date(DateOnly day) => day.ToString("ddd d MMM yyyy", CultureInfo.InvariantCulture);
         var round = s.CalendarCell != CalendarCell.Square;
         var outlined = s.Annotations.Select(annotation => (Annotation: annotation, Day: CalendarDay(annotation.From, zone)))
@@ -1445,7 +1460,7 @@ public static class ChartSvg
         {
             string low = values.Format(ramp.Min), high = values.Format(ramp.Max);
             key.Add((Wide(low) + 66 + Wide(high), (x, y) => Words(x, y, low)
-                + string.Concat(Enumerable.Range(0, 5).Select(k => Swatch(x + Wide(low) + 4 + k * 12, y, $"fill='{Mix(w.Style.HeatmapLow, w.Style.HeatmapHigh, k / 4d)}'")))
+                + string.Concat(Enumerable.Range(0, 5).Select(k => Swatch(x + Wide(low) + 4 + k * 12, y, $"fill='{Mix(palest, w.Style.HeatmapHigh, k / 4d)}'")))
                 + Words(x + Wide(low) + 66, y, high)));
         }
         foreach (var (annotation, day) in outlined)
@@ -2064,6 +2079,8 @@ public static class ChartSvg
         int Blend(int offset) => (int)(Channel(low, offset) + (Channel(high, offset) - Channel(low, offset)) * t);
         return $"#{Blend(1):X2}{Blend(3):X2}{Blend(5):X2}";
     }
+    /// <summary>Where a calendar's ramp starts: a third of the way from an empty day's grid colour to the heatmap's high end.</summary>
+    internal static string CalendarLow(ChartStyle style) => Mix(style.Grid, style.HeatmapHigh, 1 / 3d);
     internal static string Short(string text,int max) => text.Length <= max ? text : text[..(max-1)] + "…";
 }
 
