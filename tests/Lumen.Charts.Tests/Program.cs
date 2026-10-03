@@ -3285,7 +3285,8 @@ Test("Each finishing touch refuses the marks and values it cannot apply to",()=>
     Reject(()=>ChartSvg.Render(Spec() with{YTickLabels=(TickLabels)2}));
 });
 // 0.24.0: the refined finish is the default and the classic one is the exact way back. The rows below are renderings of the
-// release baseline, hashed from 0.23.0's own output, so the classic finish must reproduce every byte of them.
+// release baseline, hashed from 0.23.0's own output, so the classic finish must reproduce every byte of them; the two graph rows
+// hold 0.31.0's layout, which moved graphs in both finishes.
 string Hash16(string svg)=>Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(svg)))[..16];
 ChartPoint[] Twelve()=>Enumerable.Range(0,12).Select(i=>new ChartPoint(i,10+i*3+(i%3)*4,$"P{i}")).ToArray();
 ChartSpec Baseline(ChartKind kind,ChartTheme theme)=>kind switch{
@@ -3297,7 +3298,7 @@ ChartSpec Baseline(ChartKind kind,ChartTheme theme)=>kind switch{
     ChartKind.Radar=>new(){Kind=kind,Theme=theme,Series=[new("R",[new(0,4,"A"),new(1,3,"B"),new(2,5,"C"),new(3,2,"D")]),new("Q",[new(0,2,"A"),new(1,4,"B"),new(2,3,"C"),new(3,4,"D")])]},
     ChartKind.Heatmap=>new(){Kind=kind,Theme=theme,Series=Enumerable.Range(0,3).Select(r=>new ChartSeries($"Row {r}",Enumerable.Range(0,6).Select(c=>new ChartPoint(c,(r*7+c*5)%17,$"C{c}")).ToArray())).ToArray()},
     _=>new(){Kind=kind,Theme=theme,Title="Baseline",Description="Default output",Series=[new("A",Twelve()),new("B",Twelve().Select(p=>p with{Y=p.Y+5}).ToArray())]}};
-Test("The classic finish draws 0.23.0's charts byte for byte, gradients and their IDs included, and the refined one does not",()=>{
+Test("The classic finish draws 0.23.0's charts byte for byte, gradients and their IDs included, and graphs as 0.31.0 lays them out, and the refined one does not",()=>{
     // The reference hashes were recorded on Windows. Another platform's maths library can differ in the last bits of a
     // sine or a logarithm, which moves the eighth decimal of a donut's arc, so byte equality only means something where
     // the hashes came from. Elsewhere the classic finish is held by the structural checks that follow.
@@ -3336,8 +3337,10 @@ Test("The classic finish draws 0.23.0's charts byte for byte, gradients and thei
         ("Ohlc/Dark/True","9EC042FF686CC18D",c=>Chart(Baseline(ChartKind.Ohlc,ChartTheme.Dark),c)),
         ("annotated","B8D59813CF5546F6",c=>Chart(line with{Annotations=[new(AnnotationAxis.Y,25){Label="Target"},new(AnnotationAxis.X,3){To=6,Label="Window"}]},c)),
         ("branded","EA336EC369F8AAB7",c=>Chart(Baseline(ChartKind.Area,ChartTheme.Light) with{Style=ChartStyle.Light with{Background="#F6F3EE",Series=["#1D4E89","#B03A2E"],FontFamily="Georgia,serif"}},c)),
-        ("graph/Circular/Light","1DF550CDF523B601",c=>Network(graph with{Layout=GraphLayout.Circular,Theme=ChartTheme.Light},c)),
-        ("graph/Layered/Dark","6E16348F752690A3",c=>Network(graph with{Layout=GraphLayout.Layered,Theme=ChartTheme.Dark},c)),
+        // 0.31.0 moved graphs by design, in both finishes: a circle stands in from the sides by half its widest label, and an edge's
+        // label stands at the first free place along the drawn edge. These two rows hold 0.31.0's classic drawings.
+        ("graph/Circular/Light","7C46B8ECD7E02490",c=>Network(graph with{Layout=GraphLayout.Circular,Theme=ChartTheme.Light},c)),
+        ("graph/Layered/Dark","D1C37290EC07B085",c=>Network(graph with{Layout=GraphLayout.Layered,Theme=ChartTheme.Dark},c)),
         ("guard/y-annotations-Bar","B3B36E22BBCD4641",c=>Chart(Baseline(ChartKind.Bar,ChartTheme.Dark) with{Annotations=References(25,30,40)},c)),
         ("zones/time-in-zone","77633DA66248659B",c=>Chart(Baseline(ChartKind.Bar,ChartTheme.Light) with{YFormat=ValueFormat.Duration,
             Series=[new("Time in zone",heart.Zones.Select((z,i)=>new ChartPoint(i,seconds[i],z.Name){Color=ChartStyle.Light.Zones[i]}).ToArray())]},c)),
@@ -5171,6 +5174,67 @@ var pipelines=Enum.GetValues<GraphLayout>().ToDictionary(layout=>layout,layout=>
 GraphSpec Pipeline(GraphLayout layout=GraphLayout.Layered)=>pipelines[layout];
 string Shape(GraphSpec graph)=>$"{graph.Width} by {graph.Height} {graph.Layout} {graph.Direction}";
 Dictionary<string,NodePosition> Placed(GraphSpec spec)=>GraphEngine.Layout(spec).ToDictionary(p=>p.Id);
+// A crowded pipeline: ten long labels, two cut at 22 characters, and fourteen edges, half of them labelled. It is acyclic, so it lays
+// out in both layouts.
+var crowded=new GraphSpec{Title="A crowded pipeline",
+    Nodes=[new("orders","Customer orders feed"),new("crm","CRM contacts export"),new("web","Web analytics events"),new("lake","Raw data lake (landing zone)"),new("clean","Cleansing and dedupe"),
+        new("join","Identity resolution"),new("model","Revenue attribution model"),new("warehouse","Analytics warehouse"),new("dash","Executive dashboards"),new("alerts","Anomaly alerts")],
+    Edges=[new("orders","lake","nightly"),new("crm","lake","hourly"),new("web","lake","stream"),new("lake","clean"),new("clean","join"),new("crm","join","match keys"),new("join","model"),
+        new("clean","warehouse","audited rows"),new("model","warehouse"),new("warehouse","dash"),new("warehouse","alerts","thresholds"),new("model","alerts"),new("web","dash","live"),new("orders","model")]};
+// The generous width the engine estimates for text: .62 of an em for most characters, .9 for m and w, .3 for a space and punctuation.
+double Estimate(string text,double size)=>text.Sum(c=>c is '.' or ',' or ':' or ' ' ? .3 : c is '-' ? .36 : c is 'm' or 'M' or 'w' or 'W' ? .9 : .62)*size;
+// A drawn edge as a line of points, its quadratic pieces cut fine, and the point a fraction of its length along it.
+(double X,double Y)[] EdgeLine(string d)
+{
+    var tokens=d.Replace("M"," M ").Replace("L"," L ").Replace("Q"," Q ").Split(' ',StringSplitOptions.RemoveEmptyEntries);
+    (double X,double Y) Point(string token){var p=token.Split(',');return (double.Parse(p[0],CultureInfo.InvariantCulture),double.Parse(p[1],CultureInfo.InvariantCulture));}
+    var line=new List<(double X,double Y)>();
+    for(var i=0;i<tokens.Length;i++)
+        if(tokens[i] is "M" or "L")line.Add(Point(tokens[++i]));
+        else if(tokens[i]=="Q")
+        {
+            var (s,c,e)=(line[^1],Point(tokens[++i]),Point(tokens[++i]));
+            for(var k=1;k<=64;k++){double t=k/64d,u=1-t;line.Add((u*u*s.X+2*u*t*c.X+t*t*e.X,u*u*s.Y+2*u*t*c.Y+t*t*e.Y));}
+        }
+    return line.ToArray();
+}
+(double X,double Y) Partway((double X,double Y)[] line,double fraction)
+{
+    double Length(int i)=>Math.Sqrt((line[i].X-line[i-1].X)*(line[i].X-line[i-1].X)+(line[i].Y-line[i-1].Y)*(line[i].Y-line[i-1].Y));
+    var left=fraction*Enumerable.Range(1,line.Length-1).Sum(Length);
+    for(var i=1;i<line.Length;i++){if(left<=Length(i))return (line[i-1].X+(line[i].X-line[i-1].X)*left/Length(i),line[i-1].Y+(line[i].Y-line[i-1].Y)*left/Length(i));left-=Length(i);}
+    return line[^1];
+}
+// A graph as drawn and measured: each node's centre and label box, each edge with its drawn line, and each edge label's box. A label's
+// box is the engine's: its estimated width by a line, 1.2 em, centred .35 em above its baseline.
+Drawing Measure(GraphSpec spec,IReadOnlyDictionary<string,GraphPoint>? moved=null)
+{
+    var root=XDocument.Parse(GraphEngine.Render(spec,moved)).Root!;
+    Bounds Words(XElement text,double size)
+    {
+        var (x,y,wide)=(Attr(text,"x"),Attr(text,"y"),Estimate(text.Value,size));
+        var left=(string?)text.Attribute("text-anchor") switch{"start"=>x,"end"=>x-wide,_=>x-wide/2};
+        return new(left,y-.35*size-.6*size,left+wide,y-.35*size+.6*size);
+    }
+    var nodes=root.Elements(ns+"g").Where(g=>g.Attribute("data-node") is not null).ToDictionary(g=>(string)g.Attribute("data-node")!,
+        g=>(X:Attr(g.Element(ns+"circle")!,"cx"),Y:Attr(g.Element(ns+"circle")!,"cy"),Label:Words(g.Elements(ns+"text").ElementAt(1),12)));
+    var lines=root.Elements(ns+"path").Where(p=>(string?)p.Attribute("stroke-width")=="1.5").Select(p=>EdgeLine((string)p.Attribute("d")!)).ToArray();
+    return new(nodes,spec.Edges.Where(e=>e.Source!=e.Target).Zip(lines,(e,l)=>(e,l)).ToArray(),
+        root.Elements(ns+"text").Where(t=>(string?)t.Attribute("font-size")=="10").Select(t=>(t.Value,Words(t,10))).ToArray());
+}
+// A node's label as drawn, cut to 22 characters.
+string Cut(string label)=>label.Length<=22?label:label[..21]+"…";
+// Every pair of a graph's nodes that stand at one height: how far apart their centres stand, and how far their labels' boxes.
+(string Pair,double Apart,double Gap)[] Level(GraphSpec spec)
+{
+    var p=GraphEngine.Layout(spec);
+    double Label(int i)=>Estimate(Cut(spec.Nodes[i].Label),12);
+    return [..from i in Enumerable.Range(0,p.Count) from j in Enumerable.Range(i+1,p.Count-i-1) where Math.Abs(p[i].Y-p[j].Y)<1e-6
+        select ($"{spec.Nodes[i].Label} and {spec.Nodes[j].Label}",Math.Abs(p[i].X-p[j].X),Math.Abs(p[i].X-p[j].X)-(Label(i)+Label(j))/2)];
+}
+// The home page's graph, or the crowded one, fitted to a wide screen's box, a laptop's and a phone's in each layout and direction.
+GraphSpec[] Widths(GraphSpec graph)=>[..from layout in Enum.GetValues<GraphLayout>() from direction in Enum.GetValues<GraphDirection>() from width in new[]{1280,900,375}
+    select GraphEngine.Fit(graph with{Layout=layout,Direction=direction},width)];
 Test("Top to bottom: a layered graph's levels stand in rows between the 90-pixel ends, each level's slots spread across the width in equal bands, and a circular graph ignores it",()=>{
     var chain=Placed(Graph() with{Direction=GraphDirection.TopToBottom});
     Check(chain.Values.All(p=>p.X==450)&&chain["a"].Y==90&&chain["b"].Y==230&&chain["c"].Y==370,string.Join(" | ",chain.Values));
@@ -5206,8 +5270,11 @@ Test("Top to bottom: edges leave from under their source's label and point down,
     // a to c bends once, on b's row and beside b, and arrives at the upper side of c.
     var route=GraphEngine.Routes(spec)[2].Points;
     Check(route.Count==3&&route[1].Y==placed["b"].Y&&Math.Abs(route[1].X-placed["b"].X)>20&&heads[2][0].Y<placed["c"].Y-10,"the long edge does not bend through b's row");
+    // Its label stands 6 pixels to the right of the middle of the drawn edge, where it is free (0.31.0; before, at the middle of its
+    // first stretch).
     var label=doc.Root!.Elements(ns+"text").Single(t=>t.Value=="long");
-    Check((string?)label.Attribute("text-anchor")=="start"&&Close(Attr(label,"x"),(route[0].X+route[1].X)/2+6)&&Close(Attr(label,"y"),(route[0].Y+50+route[1].Y)/2+3.5),"the edge's label is not beside its middle stretch");
+    var half=Partway(EdgeLine(lines[2]),.5);
+    Check((string?)label.Attribute("text-anchor")=="start"&&Math.Abs(Attr(label,"x")-half.X-6)<.5&&Math.Abs(Attr(label,"y")-half.Y-3.5)<.5,$"the edge's label stands at {Attr(label,"x")},{Attr(label,"y")}, not beside the middle of its edge, {half}");
     var loop=(string)paths.Single(p=>p.Element(ns+"title") is not null).Attribute("d")!;
     Check(loop.StartsWith($"M{(placed["c"].X+17).ToString(CultureInfo.InvariantCulture)},{(placed["c"].Y-12).ToString(CultureInfo.InvariantCulture)} C"),"the loop is not at the node's right: "+loop);
     // A label that would run past the drawing's right edge, 111 pixels of 10-pixel text from 207 in 320, stands on the edge's left.
@@ -5269,16 +5336,139 @@ Test("Fit: a circular graph keeps its circle and grows just tall enough for neig
     double Wide(string label)=>label.Sum(c=>c is ' ' ? .3 : c is 'm' or 'M' or 'w' or 'W' ? .9 : .62)*12;
     double Apart(NodePosition p,NodePosition q)=>Math.Sqrt((p.X-q.X)*(p.X-q.X)+(p.Y-q.Y)*(p.Y-q.Y));
     var round=Pipeline(GraphLayout.Circular);
+    // Since 0.31.0 the circle stands in from the sides by half its widest label and 24 pixels, 61.2 for Validation's 74.4, not a
+    // fixed 100: on a 337-pixel phone it reaches 107.3 either side of the middle, which already stands neighbours 90.4 apart in the
+    // graph's own 460 pixels. Drawn 300 high, it grows just tall enough.
     var fitted=GraphEngine.Fit(round,337);
-    Check(fitted.Width==337&&fitted.Height>460&&fitted.Height<2160&&fitted.Layout==GraphLayout.Circular&&fitted.Direction==round.Direction,$"{fitted.Width} by {fitted.Height}");
     bool Apart90(GraphSpec spec){var p=GraphEngine.Layout(spec);return Enumerable.Range(0,p.Count).Where(i=>Math.Abs(p[i].Y-p[(i+1)%p.Count].Y)>1e-6).All(i=>Apart(p[i],p[(i+1)%p.Count])>=90.4-1e-9);}
-    Check(Apart90(fitted)&&!Apart90(fitted with{Height=fitted.Height-1}),"the circle is not just tall enough");
-    // Transform and Charts stand side by side at the bottom, so at 322 the width must grow until half of each label, 57.48, fits.
+    Check(fitted==round with{Width=337}&&Apart90(fitted),Shape(fitted));
+    var low=GraphEngine.Fit(round with{Height=300},337);
+    Check(low.Width==337&&low.Height>300&&low.Height<460&&low.Layout==GraphLayout.Circular&&low.Direction==round.Direction,Shape(low));
+    Check(Apart90(low)&&!Apart90(low with{Height=low.Height-1}),"the circle is not just tall enough");
+    // Transform and Charts stand side by side at the bottom: even at 322 their labels stand more than 16 apart, so the width stays.
     var narrow=GraphEngine.Fit(round,322);
     double Bottom(GraphSpec spec){var p=Placed(spec);return Math.Abs(p["transform"].X-p["charts"].X);}
-    Check(narrow.Width==333&&Bottom(narrow)>=(Wide("Transform")+Wide("Charts"))/2&&Bottom(narrow with{Width=332})<(Wide("Transform")+Wide("Charts"))/2&&Apart90(narrow),$"{narrow.Width} by {narrow.Height}, {Bottom(narrow)} apart");
+    Check(narrow==round with{Width=322}&&Bottom(narrow)-(Wide("Transform")+Wide("Charts"))/2>=16&&Apart90(narrow),$"{Shape(narrow)}, {Bottom(narrow)} apart");
+    // The crowded graph's pairs at one height need more than a phone, and take the narrowest width that stands their labels 16 apart.
+    var crowd=crowded with{Layout=GraphLayout.Circular};
+    var wide=GraphEngine.Fit(crowd,375);
+    Check(wide.Width>375&&Level(wide).All(p=>p.Gap>=16-1e-9&&p.Apart>=70-1e-9)&&!Level(wide with{Width=wide.Width-1}).All(p=>p.Gap>=16-1e-9),Shape(wide));
     // Forty nodes cannot stand that far apart on a phone, so the circle stops at 2,160.
     Check(GraphEngine.Fit(new GraphSpec{Layout=GraphLayout.Circular,Nodes=Enumerable.Range(0,40).Select(i=>new GraphNode($"n{i}","N")).ToArray()},360).Height==2160,"forty nodes did not stop at 2,160");
+});
+Test("An edge keeps out of its own nodes' labels in every layout, meeting a node at the foot of its label where its run towards its next point would cross it, and on the home page's graph no edge runs through any label",()=>{
+    foreach(var (spec,home) in Widths(Pipeline()).Select(s=>(s,true)).Concat(Widths(crowded).Append(crowded).Append(crowded with{Layout=GraphLayout.Circular}).Select(s=>(s,false))))
+    {
+        var drawn=Measure(spec);
+        foreach(var (edge,line) in drawn.Edges)
+        {
+            var name=$"{spec.Title} {Shape(spec)}: {edge.Source} to {edge.Target}";
+            foreach(var (id,node) in drawn.Nodes.Where(n=>home||n.Key==edge.Source||n.Key==edge.Target))
+                Check(!node.Label.Crossed(line),$"{name} runs through {id}'s label");
+            // Each end stands 25 pixels from its node's centre, clear of the circle, or at the foot of the node's label, 50 below it.
+            foreach(var (id,end) in new[]{(edge.Source,line[0]),(edge.Target,line[^1])})
+            {
+                var node=drawn.Nodes[id];
+                Check(Math.Abs(Math.Sqrt((end.X-node.X)*(end.X-node.X)+(end.Y-node.Y)*(end.Y-node.Y))-25)<1e-6||Math.Abs(end.X-node.X)<1e-6&&Math.Abs(end.Y-node.Y-50)<1e-6,$"{name} meets {id} at {end}");
+            }
+        }
+    }
+    // On the home page's circle Ingestion's edge to Validation, below it, leaves from the foot of its label, and Charts and Chart API
+    // reach Reports from below at the foot of its label; on a phone Validation's edge down to Transform leaves from its foot too.
+    // At 1,280 pixels the circle is wide enough that the edges into Reports pass beside its label.
+    string[] Feet(GraphSpec spec){var drawn=Measure(spec);bool Foot(string id,(double X,double Y) end)=>Math.Abs(end.X-drawn.Nodes[id].X)<1e-6&&Math.Abs(end.Y-drawn.Nodes[id].Y-50)<1e-6;
+        return [..drawn.Edges.Where(e=>Foot(e.Edge.Source,e.Line[0])).Select(e=>$"from {e.Edge.Source}"),..drawn.Edges.Where(e=>Foot(e.Edge.Target,e.Line[^1])).Select(e=>$"{e.Edge.Source} into {e.Edge.Target}")];}
+    var round=Pipeline(GraphLayout.Circular);
+    Check(Feet(round).SequenceEqual(["from ingest","charts into reports","api into reports"]),string.Join(", ",Feet(round)));
+    Check(Feet(GraphEngine.Fit(round,375)).SequenceEqual(["from ingest","from validate","charts into reports","api into reports"]),string.Join(", ",Feet(GraphEngine.Fit(round,375))));
+    Check(Feet(GraphEngine.Fit(round,1280)).SequenceEqual(["from ingest"]),string.Join(", ",Feet(GraphEngine.Fit(round,1280))));
+    // Left to right the home page's graph needs no foot, and top to bottom every edge leaves from one, as it always has.
+    Check(Feet(Pipeline()).Length==0&&Feet(GraphEngine.Fit(Pipeline(),375)).Length==8&&Feet(GraphEngine.Fit(Pipeline(),375)).All(f=>f.StartsWith("from ")),string.Join(", ",Feet(GraphEngine.Fit(Pipeline(),375))));
+    // A dragged node keeps the rule: an edge's source pulled under its target reaches the target at the foot of its label, and leaves
+    // the source aimed at that foot.
+    var pair=new GraphSpec{Layout=GraphLayout.Circular,Nodes=[new("a","Alpha"),new("b","Beta")],Edges=[new("a","b")]};
+    var b=Placed(pair)["b"];
+    var dragged=Measure(pair,new Dictionary<string,GraphPoint>{["a"]=new(b.X+5,b.Y+200)});
+    var (leaving,reaching)=(dragged.Edges[0].Line[0],dragged.Edges[0].Line[^1]);
+    Check(Math.Abs(reaching.X-b.X)<1e-6&&Math.Abs(reaching.Y-b.Y-50)<1e-6,$"the edge reaches b at {reaching}");
+    Check(Math.Abs(Math.Sqrt(Math.Pow(leaving.X-b.X-5,2)+Math.Pow(leaving.Y-b.Y-200,2))-25)<1e-6&&Math.Abs((leaving.X-b.X-5)*(reaching.Y-b.Y-200)-(leaving.Y-b.Y-200)*(reaching.X-b.X-5))<1e-6,$"the edge leaves a at {leaving}, not aimed at the foot");
+});
+Test("An edge's label stands at the first free place along its edge, 4 pixels clear of every node, every node's label, the labels drawn before it and the drawing's sides, and where no place is free where it always stood",()=>{
+    foreach(var spec in Widths(Pipeline()).Concat(Widths(crowded)))
+    {
+        var drawn=Measure(spec);
+        foreach(var (text,box) in drawn.Labels)
+        {
+            var (name,clear)=($"{spec.Title} {Shape(spec)}: '{text}'",box.Grown(4));
+            Check(clear.Left>=0&&clear.Top>=0&&clear.Right<=spec.Width&&clear.Bottom<=spec.Height,$"{name} leaves the drawing");
+            foreach(var (id,node) in drawn.Nodes) Check(!clear.Reaches(node.X,node.Y,23)&&!clear.Overlaps(node.Label),$"{name} lies on {id}");
+            Check(drawn.Labels.Count(other=>other.Box.Overlaps(clear))==1,$"{name} lies on another edge's label");
+        }
+    }
+    // The audit trail runs across the home page's circle just under the Sources label, which its place above the edge would lie on,
+    // so it stands below the middle of its edge, as far below as it would have stood above.
+    foreach(var width in new[]{1280,900,375})
+    {
+        var drawn=Measure(GraphEngine.Fit(Pipeline(GraphLayout.Circular),width));
+        var (trail,line)=(drawn.Labels.Single(l=>l.Text=="audit trail").Box,drawn.Edges.Single(e=>e.Edge.Label=="audit trail").Line);
+        Check(Math.Abs(line[0].Y-line[^1].Y)<1e-6&&Math.Abs((trail.Left+trail.Right)/2-(line[0].X+line[^1].X)/2)<1e-6&&Math.Abs(trail.Top-line[0].Y-6.5)<1e-6,$"at {width} the audit trail stands at {trail}");
+    }
+    // Three labelled edges between the same two nodes, placed in edge order: the first above the middle, the second below it, and the
+    // third above the point four tenths of the way along, clear of the first.
+    var three=Measure(new GraphSpec{Nodes=[new("a","A"),new("b","B")],Edges=[new("a","b","first"),new("a","b","second"),new("a","b","third")]});
+    var (from,to)=(three.Edges[0].Line[0],three.Edges[0].Line[^1]);
+    (double X,double Y) Middle(Bounds box)=>((box.Left+box.Right)/2,box.Bottom-2.5);
+    bool Near((double X,double Y) p,double x,double y)=>Math.Abs(p.X-x)<1e-6&&Math.Abs(p.Y-y)<1e-6;
+    Check(Near(Middle(three.Labels[0].Box),(from.X+to.X)/2,from.Y-9)&&Near(Middle(three.Labels[1].Box),(from.X+to.X)/2,from.Y+16)&&Near(Middle(three.Labels[2].Box),from.X+(to.X-from.X)*.4,from.Y-9),
+        string.Join(" | ",three.Labels.Select(l=>$"{l.Text} {Middle(l.Box)}")));
+    // Squeezed into its own 900 by 460 pixels, the crowded graph has labels with no free place, left to right and in a circle: each
+    // stands where it always has, above the middle of its edge's middle stretch.
+    foreach(var spec in new[]{crowded,crowded with{Layout=GraphLayout.Circular}})
+    {
+        var (drawn,routes)=(Measure(spec),GraphEngine.Routes(spec));
+        var labelled=spec.Edges.Select((e,i)=>(e,i)).Where(x=>x.e.Label is not null&&x.e.Source!=x.e.Target).Select(x=>x.i).ToArray();
+        var stuck=0;
+        for(var k=0;k<drawn.Labels.Length;k++)
+        {
+            var (text,box)=drawn.Labels[k];var clear=box.Grown(4);
+            if(clear.Left>=0&&clear.Top>=0&&clear.Right<=spec.Width&&clear.Bottom<=spec.Height&&!drawn.Nodes.Values.Any(n=>clear.Reaches(n.X,n.Y,23)||clear.Overlaps(n.Label))&&!drawn.Labels.Take(k).Any(l=>l.Box.Overlaps(clear)))continue;
+            stuck++;
+            var line=drawn.Edges[Array.IndexOf(drawn.Edges.Select(e=>e.Edge).ToArray(),spec.Edges[labelled[k]])].Line;
+            var points=routes[labelled[k]].Points.ToArray();points[0]=new(line[0].X,line[0].Y);points[^1]=new(line[^1].X,line[^1].Y);
+            var (middle,previous)=(points[points.Length/2],points[points.Length/2-1]);
+            Check(Math.Abs((box.Left+box.Right)/2-(middle.X+previous.X)/2)<1e-6&&Math.Abs(box.Bottom-2.5-((middle.Y+previous.Y)/2-9))<1e-6,$"{spec.Layout}: '{text}' has no free place but stands at {box}");
+        }
+        Check(stuck>0,$"{spec.Layout}: every label found a free place");
+    }
+});
+Test("A circle stands in from either side by half its widest label, or a node's radius if that is more, and 24 pixels, and keeps its height",()=>{
+    var letters=new GraphSpec{Title="Letters",Layout=GraphLayout.Circular,Nodes=[..Enumerable.Range(0,5).Select(i=>new GraphNode($"n{i}",((char)('A'+i)).ToString()))]};
+    foreach(var spec in new[]{Pipeline(GraphLayout.Circular),crowded with{Layout=GraphLayout.Circular},letters}.SelectMany(g=>new[]{1280,375,337,320}.Select(w=>GraphEngine.Fit(g,w)).Prepend(g)))
+    {
+        var margin=Math.Max(23,spec.Nodes.Max(n=>Estimate(Cut(n.Label),12))/2)+24;
+        var placed=GraphEngine.Layout(spec);
+        for(var i=0;i<placed.Count;i++)
+        {
+            var angle=2*Math.PI*i/placed.Count-Math.PI/2;
+            Check(Math.Abs(placed[i].X-(spec.Width/2d+(spec.Width/2d-margin)*Math.Cos(angle)))<1e-9&&Math.Abs(placed[i].Y-((spec.Height+45)/2d+(spec.Height/2d-100)*Math.Sin(angle)))<1e-9,$"{spec.Title} {Shape(spec)}: {placed[i]}");
+            // So every label keeps at least 24 pixels inside the drawing's sides.
+            var half=Estimate(Cut(spec.Nodes[i].Label),12)/2;
+            Check(placed[i].X-half>=24-1e-9&&placed[i].X+half<=spec.Width-24+1e-9,$"{spec.Title} {Shape(spec)}: {spec.Nodes[i].Label} comes within 24 pixels of a side");
+        }
+    }
+    // The home page's widest label, Validation's 74.4 pixels, stands its circle 61.2 in: 388.8 either side of the middle at 900,
+    // where a fixed 100 left 350.
+    var home=Placed(Pipeline(GraphLayout.Circular));
+    Check(Math.Abs(home["validate"].X-450-388.8*Math.Cos(2*Math.PI*2/7-Math.PI/2))<1e-9,$"{home["validate"]}");
+});
+Test("Fit: nodes at one height stand their labels at least 16 pixels apart and their circles 24, in every layout and direction",()=>{
+    foreach(var spec in Widths(Pipeline()).Concat(Widths(crowded)).Concat(new[]{337,322,320}.SelectMany(w=>new[]{GraphEngine.Fit(Pipeline(GraphLayout.Circular),w),GraphEngine.Fit(crowded with{Layout=GraphLayout.Circular},w)})))
+        foreach(var (pair,apart,gap) in Level(spec))
+            Check(gap>=16-1e-9&&apart>=70-1e-9,$"{spec.Title} {Shape(spec)}: {pair} stand {apart:0.##} apart, their labels {gap:0.##}");
+    // On a 337-pixel phone the home page's bottom pair, Transform and Charts, stand 93.1 apart and their labels 35.6, where they
+    // stood 59.4 and 1.9 before 0.31.0.
+    var bottom=Level(GraphEngine.Fit(Pipeline(GraphLayout.Circular),337)).Single(p=>p.Pair=="Transform and Charts");
+    Check(Math.Abs(bottom.Apart-93.1)<.05&&Math.Abs(bottom.Gap-35.6)<.05,$"{bottom}");
 });
 string OperateGraph(GraphSpec spec,Func<LumenGraph,Task> act,bool fit=false)
 {
@@ -5337,6 +5527,30 @@ Test("A fitted graph redraws at the width its box reports, holds dragged nodes i
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;
+
+// A box in a drawing's pixels, such as a label's.
+readonly record struct Bounds(double Left,double Top,double Right,double Bottom)
+{
+    public bool Overlaps(Bounds other)=>Left<other.Right&&other.Left<Right&&Top<other.Bottom&&other.Top<Bottom;
+    public Bounds Grown(double by)=>new(Left-by,Top-by,Right+by,Bottom+by);
+    // A circle reaches into the box when its centre is nearer the box than its radius.
+    public bool Reaches(double x,double y,double radius){double dx=Math.Max(0,Math.Max(Left-x,x-Right)),dy=Math.Max(0,Math.Max(Top-y,y-Bottom));return dx*dx+dy*dy<radius*radius;}
+    // A line crosses the box when some of one of its pieces is left inside it once clipped to each of the box's four sides; a line
+    // that only grazes a side does not.
+    public bool Crossed((double X,double Y)[] line){for(var i=1;i<line.Length;i++)if(Clips(line[i-1],line[i]))return true;return false;}
+    bool Clips((double X,double Y) a,(double X,double Y) b)
+    {
+        double low=0,high=1,dx=b.X-a.X,dy=b.Y-a.Y;
+        foreach(var (p,q) in new[]{(-dx,a.X-Left),(dx,Right-a.X),(-dy,a.Y-Top),(dy,Bottom-a.Y)})
+        {
+            if(p==0){if(q<=0)return false;continue;}
+            if(p<0)low=Math.Max(low,q/p);else high=Math.Min(high,q/p);
+            if(low>=high)return false;
+        }
+        return true;
+    }
+}
+sealed record Drawing(Dictionary<string,(double X,double Y,Bounds Label)> Nodes,(GraphEdge Edge,(double X,double Y)[] Line)[] Edges,(string Text,Bounds Box)[] Labels);
 
 sealed class NoJs:IJSRuntime
 {

@@ -20,7 +20,8 @@ public enum GridLine
 /// How a chart is drawn beyond its colours. <see cref="Refined"/> is the default: thin strokes that keep their width at any
 /// display size, line markers that appear when a point is hovered or focused, hairline dotted gridlines, legend keys shaped
 /// like their marks, ticks spaced to the room they have, and reference labels kept legible and inside the plot.
-/// <see cref="Classic"/> draws exactly as 0.23.0 did, byte for byte.
+/// <see cref="Classic"/> draws charts exactly as 0.23.0 did, byte for byte; network graphs take 0.31.0's layout, which keeps
+/// edges and their labels clear of node labels, in both finishes.
 /// </summary>
 public enum ChartFinish
 {
@@ -75,7 +76,7 @@ public sealed record ChartStyle
     /// preset and brand reads <see cref="GridLine.Dotted"/>, and solid in the classic finish, as 0.23.0 did.</summary>
     public GridLine Gridlines { get => gridlines ?? (Finish == ChartFinish.Classic ? GridLine.Solid : GridLine.Dotted); init => gridlines = value; }
     private readonly GridLine? gridlines;
-    /// <summary>The refined finish, the default, or the classic one, which draws exactly as 0.23.0 did.</summary>
+    /// <summary>The refined finish, the default, or the classic one, which draws charts exactly as 0.23.0 did.</summary>
     public ChartFinish Finish { get; init; }
     /// <summary>Rounds the far end of every column and bar, the end away from its baseline, which is the bottom of a negative
     /// column; the baseline end stays square. It is clamped to half the bar's width, where the end is a semicircle, and to

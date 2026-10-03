@@ -462,6 +462,25 @@ foreach (var layout in Enum.GetValues<GraphLayout>())
         lines.Add($"fit/pipeline-{layout}/{width} {Hash(Graph(GraphEngine.Fit(pipeline with { Layout = layout }, width)))}");
     }
 lines.Add($"fit/pipeline-midnight-360 {Hash(Graph(GraphEngine.Fit(pipeline with { Style = ChartStyle.Midnight }, 360)))}");
+// 0.31.0: edges that meet a node at the foot of its label, edge labels at the first free place along their edge, and a circle stood
+// in from the sides by half its widest label. The gallery's pipeline in each layout at its own 900 pixels and fitted to a 337-pixel
+// phone, and a crowded graph of long labels, half its edges labelled, in each layout at its own size, where some labels find no
+// free place.
+foreach (var layout in Enum.GetValues<GraphLayout>())
+{
+    lines.Add($"graph/pipeline-{layout}/900 {Hash(Graph(pipeline with { Layout = layout }))}");
+    lines.Add($"fit/pipeline-{layout}/337 {Hash(Graph(GraphEngine.Fit(pipeline with { Layout = layout }, 337)))}");
+}
+var crowded = new GraphSpec
+{
+    Title = "A crowded pipeline",
+    Nodes = [new("orders", "Customer orders feed"), new("crm", "CRM contacts export"), new("web", "Web analytics events"), new("lake", "Raw data lake (landing zone)"), new("clean", "Cleansing and dedupe"),
+        new("join", "Identity resolution"), new("model", "Revenue attribution model"), new("warehouse", "Analytics warehouse"), new("dash", "Executive dashboards"), new("alerts", "Anomaly alerts")],
+    Edges = [new("orders", "lake", "nightly"), new("crm", "lake", "hourly"), new("web", "lake", "stream"), new("lake", "clean"), new("clean", "join"), new("crm", "join", "match keys"), new("join", "model"),
+        new("clean", "warehouse", "audited rows"), new("model", "warehouse"), new("warehouse", "dash"), new("warehouse", "alerts", "thresholds"), new("model", "alerts"), new("web", "dash", "live"), new("orders", "model")]
+};
+foreach (var layout in Enum.GetValues<GraphLayout>())
+    lines.Add($"graph/crowded-{layout} {Hash(Graph(crowded with { Layout = layout }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

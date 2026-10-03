@@ -4,9 +4,9 @@ The state of Lumen.Charts and how work on it is done, for whoever picks it up ne
 
 ## Where things stand
 
-- **Released:** v0.30.0, *calendars that read on every style, graphs that fit a phone*: a calendar without `YZones` ramps from a third of the way between its empty day's `Grid` colour and `HeatmapHigh` up to `HeatmapHigh`; `GraphSpec.Direction` (`GraphDirection.TopToBottom`), `GraphEngine.Fit(graph, width)` and `LumenGraph.FitWidth`, which the home page's network graph sets. GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
-- **In progress:** nothing. The next work comes from *What is left* below. Still start with `git status`: uncommitted changes to `src/`, `samples/`, `tests/`, the docs or the skill are a delegated agent's unreleased work.
-- **Counts at v0.30.0:** 431 unit assertions, 174 HTTP checks, 44 browser checks on the gallery (20 on the WebAssembly host), 269 hashed renderings. Release build at 0 warnings.
+- **Released:** v0.31.0, *graph labels that stay clear*: an edge whose run would cross its own node's label meets the node at the label's foot; an edge label takes the first free place along its edge; a circle stands in from the sides by half its widest label. Before it, v0.30.0 brought the calendar ramp that reads on every style and `GraphSpec.Direction`, `GraphEngine.Fit` and `LumenGraph.FitWidth`. GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
+- **In progress:** nothing. Next is **0.32.0, trend families** (moving average, polynomial, exponential); its design is recorded in the brain (task "0.32.0 trend families"). Still start with `git status`: uncommitted changes to `src/`, `samples/`, `tests/`, the docs or the skill are a delegated agent's unreleased work.
+- **Counts at v0.31.0:** 435 unit assertions, 174 HTTP checks, 44 browser checks on the gallery (20 on the WebAssembly host), 275 hashed renderings. Release build at 0 warnings.
 - **NuGet:** not published. The owner chose "skip nuget for now"; packages ship as GitHub release assets, and the Claude Code skill's install scripts download them into a local feed.
 
 ## The map
@@ -21,7 +21,7 @@ The state of Lumen.Charts and how work on it is done, for whoever picks it up ne
 | `tests/Lumen.Charts.Tests` | Executable assertion suite (`Test`/`Check`/`Reject`), `dotnet run`. |
 | `tests/verify-api.ps1` | HTTP checks against a running gallery on port 5188. |
 | `tests/Lumen.Charts.BrowserTests` | Playwright suite (gallery on 5188, WebAssembly host on 5199), with axe sweeps in light, dark and Midnight. |
-| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.30.0 reference hashes (269 rows). See its README. |
+| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.31.0 reference hashes (275 rows). See its README. |
 | `integrations/claude-code/lumen-charts` | The Claude Code skill: `SKILL.md`, `references/` (API, sports recipes, HTTP), `scripts/install.sh` and `install.ps1`. |
 | `docs/FITNESS.md` | The sports-charts research and the eight-step build order this work has followed. |
 | `docs/RESEARCH.md` | The original roadmap. `docs/VERIFICATION.md` the verification record. `docs/PERFORMANCE.md` measured cost. |
@@ -65,7 +65,7 @@ If an agent stops on an API rate limit, resume it with `SendMessage` (it keeps i
 ## Decisions worth knowing before changing them
 
 - **SVG renderer**, not Canvas or WebGL: measured cost does not justify a second renderer, and SVG keeps accessibility, exports and server rendering (`docs/PERFORMANCE.md`).
-- **Refined finish by default** since 0.24.0 (thin non-scaling strokes, markers on hover or focus, dotted grid) because the owner found the old look "painted"; `ChartFinish.Classic` reproduces 0.23.0 byte for byte.
+- **Refined finish by default** since 0.24.0 (thin non-scaling strokes, markers on hover or focus, dotted grid) because the owner found the old look "painted"; `ChartFinish.Classic` reproduces 0.23.0's charts byte for byte. Layout fixes apply in both finishes: 0.31.0 moved network graphs in classic too, rather than keep their labels colliding.
 - **Fit in the space the chart draws**: trend lines and densities are computed in the space the chart draws in, so they stay straight on log axes and continuous across skipped weekends.
 - **Training metrics follow published sources only** (Allen & Coggan, TrainingPeaks); no vendor scores, hrTSS, rTSS, TRIMP, grade-adjusted pace or W′ balance without a source.
 - **Gradient IDs** are a hash of the chart's spec; every new spec property is left out of that hash at its default so existing IDs never move.
@@ -73,7 +73,7 @@ If an agent stops on an API rate limit, resume it with `SendMessage` (it keeps i
 ## What is left
 
 - Blocks (0.29.0) leave out sloped ramps (a ramp is drawn at its average), stacked blocks and text on a block; reference lines sit behind blocks, as behind columns, so a lap chart's average line is hidden behind faster laps while its label stays on top.
-- Circular graph layout (before 0.30.0 and still): edges aim at node centres, so an edge reaching a node from below runs through its label (Reports, Validation and Chart API on the home graph), and at the home graph's 460-pixel height the "audit trail" edge label sits on the "Sources" node label. On a phone its bottom pair, Charts and Transform, stands close: `Fit` gives side-by-side labels room to touch, no more.
+- Graph labels after 0.31.0: an edge keeps out of its *own* nodes' labels, but a long chord or a bend can still cross *another* node's label (the crowded test graph shows it); an edge label avoids nodes, node labels and other edge labels but not other edges' lines (on the crowded circle "nightly" sits on the "live" edge); where no place is free a label falls back to the middle of its edge and may overlap.
 - `GraphEngine.Fit` ignores edge labels. When a layered graph fits neither direction it turns top to bottom at its narrowest width, even where left to right would need less; it never grows a left-to-right graph's height for a full level.
 - No gallery page shows a calendar without `YZones` (the 0.30.0 ramp); its tiers are what the explorer and the Sports & performance page draw.
 - Screen-reader conformance (NVDA, JAWS, VoiceOver) — needs a person with the hardware; never run.

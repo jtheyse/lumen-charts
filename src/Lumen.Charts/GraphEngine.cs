@@ -8,6 +8,8 @@ public static class GraphEngine
     // 50 below the centre, at the foot of the label, rather than through the words. A row then holds a node, its label and an
     // edge long enough to carry its own label and arrowhead clear of both.
     private const double Foot = 50, Row = 110;
+    // Every candidate place for an edge's label, as a fraction of the drawn edge's length, from its middle outwards.
+    private static readonly double[] Fractions = [.5, .4, .6, .3, .7, .25, .75];
 
     /// <summary>Node coordinates. Layered graphs order each level to reduce edge crossings.</summary>
     public static IReadOnlyList<NodePosition> Layout(GraphSpec graph)
@@ -49,7 +51,10 @@ public static class GraphEngine
     }
 
     /// <summary>Draws a graph as SVG. <paramref name="positions"/> moves nodes, by id, to centres of their own, such as where a
-    /// reader dragged them; their edges follow, and the other nodes keep the layout's places.</summary>
+    /// reader dragged them; their edges follow, and the other nodes keep the layout's places. An edge whose straight run from a
+    /// node would cross that node's label meets the node at the foot of the label instead, in every layout, and an edge's label
+    /// stands at the first place along the edge, from its middle outwards, that keeps off every node, every node's label and
+    /// the edge labels drawn before it.</summary>
     public static string Render(GraphSpec graph, IReadOnlyDictionary<string, GraphPoint>? positions = null)
     {
         var layout = Layout(graph).ToDictionary(p => p.Id, p => positions is not null && positions.TryGetValue(p.Id, out var moved) ? moved : new GraphPoint(p.X, p.Y), StringComparer.Ordinal);
@@ -59,9 +64,14 @@ public static class GraphEngine
         var crossings = graph.Layout == GraphLayout.Circular ? "" : $" · {Crossings(graph)} edge crossings";
         ChartSvg.Begin(w, graph.Width, graph.Height, graph.Title,
             $"{graph.Nodes.Count} nodes · {graph.Edges.Count} directed connections · {graph.Layout} layout{(down ? " top to bottom" : "")}{crossings}", wrap: true);
-        // An edge leaves and reaches a node trimmed clear of its circle; top to bottom, one that runs on below the node meets it at
-        // the foot of its label instead, so that it never runs through the words.
-        GraphPoint End(GraphPoint node, GraphPoint towards) => down && towards.Y > node.Y + Foot ? new(node.X, node.Y + Foot) : Shift(node, towards, Trim);
+        // Every node's label box, which edges keep out of and edge labels keep off, as do the labels placed before them.
+        var labels = graph.Nodes.ToDictionary(n => n.Id, n => LabelBox(n, layout[n.Id]), StringComparer.Ordinal);
+        var placed = new List<Box>();
+        // An edge leaves and reaches a node trimmed clear of its circle. One whose straight run from the node towards its next point
+        // would cross the node's label meets the node at the foot of the label instead, and so, top to bottom, does one that runs on
+        // below the node, so that no edge runs through its own node's words.
+        bool Under(string id, GraphPoint node, GraphPoint towards) => down && towards.Y > node.Y + Foot || Crosses(node, towards, labels[id]);
+        GraphPoint End(GraphPoint node, GraphPoint towards, bool under) => under ? new(node.X, node.Y + Foot) : Shift(node, towards, Trim);
         for (var i = 0; i < graph.Edges.Count; i++)
         {
             var edge = graph.Edges[i];
@@ -78,27 +88,51 @@ public static class GraphEngine
             // Dragged endpoints replace the layout's own; the bends between them stay where the layout put them.
             var points = routes[i].Points.ToArray();
             points[0] = a; points[^1] = layout[edge.Target];
-            var start = End(points[0], points[1]);
-            // A straight edge that leaves from under a label arrives aimed from there.
-            var end = End(points[^1], down && points.Length == 2 ? start : points[^2]);
+            var straight = points.Length == 2;
+            var leaves = Under(edge.Source, points[0], points[1]);
+            var start = End(points[0], points[1], leaves);
+            // A straight edge that leaves from under a label, or runs top to bottom, arrives aimed from where it leaves; one that
+            // arrives under a label leaves aimed at it there. A straight edge meets only one of its nodes under its label: the node
+            // whose label its run crosses stands higher than the other by more than the label's top, 30.6 pixels below it, so the
+            // other's run climbs away from its own label.
+            var from = straight && (down || leaves) ? start : points[^2];
+            var arrives = Under(edge.Target, points[^1], from);
+            var end = End(points[^1], from, arrives);
+            if (arrives && straight) start = End(points[0], end, leaves);
             points[0] = start; points[^1] = end;
             w.Add($"<path d='{Path(points)}' fill='none' stroke='{w.Style.Edge}' stroke-width='1.5'{w.Fixed}/>");
             var direction = Unit(points[^2], end);
             w.Add($"<path d='M{N(end.X)},{N(end.Y)} L{N(end.X - direction.X * 9 - direction.Y * 4)},{N(end.Y - direction.Y * 9 + direction.X * 4)} L{N(end.X - direction.X * 9 + direction.Y * 4)},{N(end.Y - direction.Y * 9 - direction.X * 4)} Z' fill='{w.Style.Edge}'/>");
             if (edge.Label is not null)
             {
-                var middle = points[points.Length / 2];
-                var previous = points[points.Length / 2 - 1];
                 var text = ChartSvg.Short(edge.Label, 20);
-                if (down)
+                var wide = ChartSvg.Wide(text) * 10 / 11;
+                // A label 9 pixels above the edge, or as far below it; top to bottom, where an edge runs down, 6 pixels beside it.
+                (double X, double Y, string Anchor)[] Places(GraphPoint at) => down
+                    ? [(at.X + 6, at.Y + 3.5, "start"), (at.X - 6, at.Y + 3.5, "end")]
+                    : [(at.X, at.Y - 9, "middle"), (at.X, at.Y + 16, "middle")];
+                bool Free(Box box)
                 {
-                    // Top to bottom an edge runs down, so its label stands beside it, at the middle of its middle stretch, on its
-                    // right unless that would take it past the drawing's edge.
-                    double x = (middle.X + previous.X) / 2, y = (middle.Y + previous.Y) / 2;
-                    var right = x + 6 + ChartSvg.Wide(text) * 10 / 11 <= graph.Width - 4;
-                    w.Text(right ? x + 6 : x - 6, y + 3.5, text, $"text-anchor='{(right ? "start" : "end")}' class='lumen-muted' font-size='10'");
+                    var padded = box.Padded(4);
+                    return padded.Left >= 0 && padded.Top >= 0 && padded.Right <= graph.Width && padded.Bottom <= graph.Height
+                        && !layout.Values.Any(p => padded.Touches(p, Radius)) && !labels.Values.Any(padded.Overlaps) && !placed.Any(padded.Overlaps);
                 }
-                else w.Text((middle.X + previous.X) / 2, (middle.Y + previous.Y) / 2 - 9, text, "text-anchor='middle' class='lumen-muted' font-size='10'");
+                // The first free place along the edge, from its middle outwards, on the side tried first before the other, keeps off
+                // every node and its label, the labels placed before it and the drawing's edge, 4 pixels to spare. Where none is
+                // free the label stands where it always has: at the middle of the edge's middle stretch, above it, or top to bottom
+                // beside it, on its right unless that would take it past the drawing's edge.
+                var line = Flatten(points);
+                var place = Fractions.SelectMany(f => Places(Along(line, f))).Select(p => (p, Box: TextBox(p.X, p.Y, p.Anchor, wide))).FirstOrDefault(c => Free(c.Box)).p;
+                if (place.Anchor is null)
+                {
+                    var middle = points[points.Length / 2];
+                    var previous = points[points.Length / 2 - 1];
+                    double x = (middle.X + previous.X) / 2, y = (middle.Y + previous.Y) / 2;
+                    var right = x + 6 + wide <= graph.Width - 4;
+                    place = !down ? (x, y - 9, "middle") : right ? (x + 6, y + 3.5, "start") : (x - 6, y + 3.5, "end");
+                }
+                placed.Add(TextBox(place.X, place.Y, place.Anchor, wide));
+                w.Text(place.X, place.Y, text, $"text-anchor='{place.Anchor}' class='lumen-muted' font-size='10'");
             }
         }
         for (var i = 0; i < graph.Nodes.Count; i++)
@@ -121,33 +155,34 @@ public static class GraphEngine
     /// its rows need, up to 2,160 pixels; when its fullest level, counting the bends of longer edges that pass through it, cannot
     /// stand that far apart across the width either, it takes the narrowest width that holds it instead, wider than the box,
     /// which a fitted LumenGraph scrolls. A
-    /// circular graph keeps its circle's arithmetic and grows taller, up to 2,160 pixels, until neighbouring nodes stand that far
-    /// apart. Nodes at one height, which no height can part, need room for their two labels and their circles side by side at
-    /// least, and a width too narrow for that becomes the narrowest that has it. A graph is never drawn shorter than its own
-    /// <see cref="GraphSpec.Height"/>.
+    /// circular graph keeps its circle's arithmetic, which stands the circle in from either side by half its widest label, or a
+    /// node's radius if that is more, and 24 pixels, and grows taller, up to 2,160 pixels, until neighbouring nodes stand that far
+    /// apart. Nodes at one height, which no height can part, need the same room for their two labels, 16 pixels apart, and their
+    /// circles, 24 apart, and a width too narrow for that becomes the narrowest that has it. A graph is never drawn shorter than
+    /// its own <see cref="GraphSpec.Height"/>.
     /// </summary>
     public static GraphSpec Fit(GraphSpec graph, int width)
     {
         Validate(graph);
         width = Math.Clamp(width, 320, 4096);
         if (graph.Nodes.Count == 0) return Sized(graph, width, graph.Height, graph.Direction);
-        // A label is drawn 12 pixels high, cut to 22 characters.
-        static double Label(GraphNode node) => ChartSvg.Wide(ChartSvg.Short(node.Label, 22)) * 12 / 11;
         var room = Math.Max(graph.Nodes.Max(Label) + 16, 2 * Radius + 24);
         if (graph.Layout == GraphLayout.Circular)
         {
             var n = graph.Nodes.Count;
             var labels = graph.Nodes.Select(Label).ToArray();
+            var margin = Margin(graph);
             // A node and its mirror image across the circle stand at one height whatever the height, so only the width parts them,
-            // by twice the circle's half-width times this sine.
+            // by twice the circle's half-width times this sine, and they need the room neighbours get: their labels 16 pixels
+            // apart and their circles 24.
             for (var i = 1; i < n - i; i++)
             {
                 var apart = 2 * Math.Abs(Math.Sin(2 * Math.PI * i / n));
-                var need = Math.Max((labels[i] + labels[n - i]) / 2, 2 * Radius);
-                width = Math.Max(width, (int)Math.Min(4096, Math.Ceiling(200 + 2 * need / apart)));
+                var need = Math.Max((labels[i] + labels[n - i]) / 2 + 16, 2 * Radius + 24);
+                width = Math.Max(width, (int)Math.Min(4096, Math.Ceiling(2 * margin + 2 * need / apart)));
             }
             // Neighbours round the circle stand further apart as it grows taller, unless they stand at one height.
-            var across = width / 2d - 100;
+            var across = width / 2d - margin;
             var radius = graph.Height / 2d - 100;
             for (var i = 0; i < n && n > 1; i++)
             {
@@ -201,10 +236,97 @@ public static class GraphEngine
         return new(point.X + unit.X * distance, point.Y + unit.Y * distance);
     }
 
-    private static IReadOnlyList<NodePosition> Circle(GraphSpec graph) =>
-        graph.Nodes.Select((n, i) => new NodePosition(n.Id,
-            graph.Width / 2d + (graph.Width / 2d - 100) * Math.Cos(2 * Math.PI * i / graph.Nodes.Count - Math.PI / 2),
+    // A node's label is drawn 12 pixels high, cut to 22 characters, and is as wide as the library's generous estimate.
+    private static double Label(GraphNode node) => ChartSvg.Wide(ChartSvg.Short(node.Label, 22)) * 12 / 11;
+
+    // A circle stands in from either side by half its widest label, or a node's radius if that is more, and 24 pixels, so that
+    // the labels at its sides keep inside the drawing however long they are.
+    private static double Margin(GraphSpec graph) => Math.Max(Radius, graph.Nodes.Max(Label) / 2) + 24;
+
+    private static IReadOnlyList<NodePosition> Circle(GraphSpec graph)
+    {
+        var across = graph.Width / 2d - Margin(graph);
+        return graph.Nodes.Select((n, i) => new NodePosition(n.Id,
+            graph.Width / 2d + across * Math.Cos(2 * Math.PI * i / graph.Nodes.Count - Math.PI / 2),
             (graph.Height + 45) / 2d + (graph.Height / 2d - 100) * Math.Sin(2 * Math.PI * i / graph.Nodes.Count - Math.PI / 2))).ToArray();
+    }
+
+    private readonly record struct Box(double Left, double Top, double Right, double Bottom)
+    {
+        public Box Padded(double by) => new(Left - by, Top - by, Right + by, Bottom + by);
+        public bool Overlaps(Box other) => Left < other.Right && other.Left < Right && Top < other.Bottom && other.Top < Bottom;
+        // A circle reaches into the box when its centre is nearer the box than its radius.
+        public bool Touches(GraphPoint centre, double radius)
+        {
+            double dx = Math.Max(0, Math.Max(Left - centre.X, centre.X - Right)), dy = Math.Max(0, Math.Max(Top - centre.Y, centre.Y - Bottom));
+            return dx * dx + dy * dy < radius * radius;
+        }
+    }
+
+    // A label's box is its estimated width by its line, 1.2 em, about the middle of its letters, .35 em above the baseline: a
+    // node's 12-pixel label hangs 42 below the node's centre, so its box runs from 30.6 to 45 below it, clear of the foot at 50.
+    private static Box LabelBox(GraphNode node, GraphPoint at)
+    {
+        var half = Label(node) / 2;
+        return new(at.X - half, at.Y + 42 - 4.2 - 7.2, at.X + half, at.Y + 42 - 4.2 + 7.2);
+    }
+
+    // An edge's 10-pixel label, anchored at x and standing on the baseline y.
+    private static Box TextBox(double x, double y, string anchor, double wide)
+    {
+        var left = anchor == "start" ? x : anchor == "end" ? x - wide : x - wide / 2;
+        return new(left, y - 3.5 - 6, left + wide, y - 3.5 + 6);
+    }
+
+    // Whether the segment from a to b passes through the inside of the box: clipped to the box's four sides in turn, some of it is
+    // left. A segment that only grazes a side or a corner does not cross.
+    private static bool Crosses(GraphPoint a, GraphPoint b, Box box)
+    {
+        double low = 0, high = 1, dx = b.X - a.X, dy = b.Y - a.Y;
+        foreach (var (p, q) in new[] { (-dx, a.X - box.Left), (dx, box.Right - a.X), (-dy, a.Y - box.Top), (dy, box.Bottom - a.Y) })
+        {
+            if (p == 0) { if (q <= 0) return false; continue; }
+            if (p < 0) low = Math.Max(low, q / p); else high = Math.Min(high, q / p);
+            if (low >= high) return false;
+        }
+        return true;
+    }
+
+    // The edge as Path draws it, as a polyline: a straight edge as it is, and each quadratic segment of a bent one in sixteen pieces.
+    private static GraphPoint[] Flatten(GraphPoint[] points)
+    {
+        if (points.Length == 2) return points;
+        var line = new List<GraphPoint> { points[0] };
+        var from = points[0];
+        for (var i = 1; i < points.Length - 1; i++)
+        {
+            var to = new GraphPoint((points[i].X + points[i + 1].X) / 2, (points[i].Y + points[i + 1].Y) / 2);
+            for (var k = 1; k <= 16; k++)
+            {
+                double t = k / 16d, u = 1 - t;
+                line.Add(new(u * u * from.X + 2 * u * t * points[i].X + t * t * to.X, u * u * from.Y + 2 * u * t * points[i].Y + t * t * to.Y));
+            }
+            from = to;
+        }
+        line.Add(points[^1]);
+        return line.ToArray();
+    }
+
+    // The point a fraction of a polyline's length along it. Half way along a straight edge is its midpoint, worked out as the
+    // label's place always has been, so that a label that stays there is drawn exactly as before.
+    private static GraphPoint Along(GraphPoint[] line, double fraction)
+    {
+        if (line.Length == 2 && fraction == .5) return new((line[1].X + line[0].X) / 2, (line[1].Y + line[0].Y) / 2);
+        var left = fraction * Enumerable.Range(1, line.Length - 1).Sum(i => Distance(line[i - 1], line[i]));
+        for (var i = 1; i < line.Length; i++)
+        {
+            var piece = Distance(line[i - 1], line[i]);
+            if (piece > 0 && left <= piece) return new(line[i - 1].X + (line[i].X - line[i - 1].X) * left / piece, line[i - 1].Y + (line[i].Y - line[i - 1].Y) * left / piece);
+            left -= piece;
+        }
+        return line[^1];
+        static double Distance(GraphPoint a, GraphPoint b) => Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
+    }
 
     private sealed record Arrangement(IReadOnlyList<NodePosition> Nodes, IReadOnlyList<EdgeRoute> Routes, int Crossings);
 

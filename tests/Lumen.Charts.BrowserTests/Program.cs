@@ -363,8 +363,8 @@ if (await fittedGraph.CountAsync() > 0)
     });
 
     // On a phone, with its overlay scrollbars, touch and a device scale of 2, the page and its graph fit the screen in each layout the
-    // page offers, and no two of the graph's labels overlap.
-    await Test("On a 375-pixel phone the home page does not scroll sideways with its graph in either layout, and the graph's labels do not overlap", async () =>
+    // page offers, no two of the graph's labels overlap, no edge label lies on a node's label and no edge runs through one.
+    await Test("On a 375-pixel phone the home page does not scroll sideways with its graph in either layout, the graph's labels do not overlap and no edge runs through a node's label", async () =>
     {
         await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
         var tab = await phone.NewPageAsync();
@@ -391,6 +391,21 @@ if (await fittedGraph.CountAsync() > 0)
             Check(measured[0] <= 375, $"{name}: the page is {measured[0]} pixels wide");
             Check(measured[1] <= 0, $"{name}: the graph scrolls sideways by {measured[1]} pixels");
             Check(measured[2] == 0, $"{name}: {measured[2]} pairs of the graph's {measured[3]} labels overlap");
+            // Each drawn edge walked a pixel at a time, mapped to the screen, against each node label's box as the browser lays it out;
+            // and each edge label's box against each node label's.
+            var crossed = await shown.EvaluateAsync<string[]>(@"c => { const svg = c.querySelector(':scope > .lumen-viewport > svg'), screen = svg.getScreenCTM();
+                const words = [...c.querySelectorAll('[data-node]')].map(g => ({ name: g.getAttribute('aria-label'), box: g.querySelectorAll('text')[1].getBoundingClientRect() }));
+                const inside = (p, b) => p.x > b.left && p.x < b.right && p.y > b.top && p.y < b.bottom;
+                const found = [];
+                for (const path of svg.querySelectorAll(':scope > path[stroke-width=""1.5""]')) {
+                    const length = path.getTotalLength(), hit = new Set();
+                    for (let at = 0; at <= length; at++) { const p = path.getPointAtLength(at).matrixTransform(screen); for (const w of words) if (inside(p, w.box)) hit.add(w.name); }
+                    for (const name of hit) found.push(`an edge runs through ${name}`);
+                }
+                for (const t of svg.querySelectorAll(':scope > text[font-size=""10""]')) { const b = t.getBoundingClientRect();
+                    for (const w of words) if (b.left < w.box.right && w.box.left < b.right && b.top < w.box.bottom && w.box.top < b.bottom) found.push(`${t.textContent} lies on ${w.name}`); }
+                return found; }");
+            Check(crossed.Length == 0, $"{name}: {string.Join("; ", crossed)}");
         }
     });
 }
