@@ -37,6 +37,10 @@ It uses component selectors, so the same checks, the axe sweep included, run aga
 
 The repository NuGet.Config restores from nuget.org for one dependency: `Lumen.Charts.Blazor` references `Microsoft.AspNetCore.Components.Web` (8.0.0) rather than the ASP.NET Core shared framework, because a WebAssembly host has no shared framework to reference. `Lumen.Charts` and `Lumen.Charts.AspNetCore` add no packages of their own. With the gallery running, execute `./tests/verify-api.ps1` for HTTP integration checks.
 
+## Use it from Claude Code
+
+[`integrations/claude-code/lumen-charts`](integrations/claude-code/lumen-charts/SKILL.md) is a Claude Code skill: it teaches Claude to install Lumen in any .NET project, use the API, and draw the sports and training charts, and Claude loads it on its own whenever a project asks for a chart. Install it once for every project by copying the folder to `~/.claude/skills/lumen-charts/`, or for one project to that project's `.claude/skills/lumen-charts/`. Its `scripts/install.sh` and `install.ps1` fetch the packages from the latest GitHub release into a local NuGet feed, since they are not on nuget.org. Tested on two tasks against runs without it: a Blazor training page and an SVG report endpoint, both built, served and checked from a clean package cache.
+
 ## Blazor integration
 
 Reference `Lumen.Charts.Blazor`, add these imports to `_Imports.razor`, and add the stylesheet to your host page:
