@@ -83,7 +83,9 @@ public enum ChartKind
     /// a reversed pace axis it rises from the slowest pace up to its own, as a lap does. An axis fitted to the data reaches a little
     /// past the lowest block, so that block keeps a height. Neighbours that touch are parted by a hairline, the far end of each block
     /// is rounded by the style's <see cref="ChartStyle.BarRadius"/> or 4 pixels, up to 6, and a block takes its point's colour, its
-    /// value's zone in <see cref="ChartSeries.Zones"/> or its series' colour. Blocks in one series cannot overlap. As a series' own
+    /// value's zone in <see cref="ChartSeries.Zones"/> or its series' colour. A block whose value stands above the bottom of its axis
+    /// is drawn at least 2 pixels tall, so a bin of one among hundreds still shows; one at the bottom, such as a count of none, draws
+    /// nothing visible but keeps its name and its focus. Blocks in one series cannot overlap. As a series' own
     /// <see cref="ChartSeries.Kind"/> they draw in the column layer of a continuous chart, under its lines.</summary>
     Blocks
 }
@@ -208,13 +210,19 @@ public enum AxisSide
     /// <summary>The right edge.</summary>
     Right
 }
-/// <summary><see cref="Ends"/> labels only the lowest and highest tick of the main Y axis; every tick keeps its gridline.</summary>
+/// <summary>Which ticks of an axis carry a label: every one, the lowest and highest drawn, or none but the axis's own two ends. Every
+/// tick keeps its gridline whichever is chosen; only the labels change.</summary>
 public enum TickLabels
 {
     /// <summary>Every tick carries its value, the default.</summary>
     All,
-    /// <summary>Only the lowest and the highest tick do.</summary>
-    Ends
+    /// <summary>Only the lowest and the highest tick drawn do.</summary>
+    Ends,
+    /// <summary>No tick does; instead the axis's two ends are labelled at their exact values, in the axis's format, whether or not a tick
+    /// stands there: <see cref="ChartSpec.XMin"/> and <see cref="ChartSpec.XMax"/>, or the data's ends, along X, and the ends of the
+    /// axis as it is fitted or bounded up the side. Along the bottom the first end's label starts at the plot's left edge and the
+    /// last's ends at its right edge, so both stand whole under the plot.</summary>
+    Bounds
 }
 /// <summary>A colour a gradient takes at <paramref name="Value"/>, measured on the axis of the series it colours.</summary>
 /// <param name="Value">The value at which the stroke takes this colour.</param>
@@ -379,11 +387,18 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
 /// </summary>
 public sealed record ChartSpec
 {
-    /// <summary>The heading. With <see cref="Description"/> it is the drawing's accessible name.</summary>
+    /// <summary>The heading. With <see cref="Description"/> it is the drawing's accessible name. It stays one line: where the
+    /// library's generous estimate of its width runs past the drawing's width less 48, it is cut at a word with <c>…</c>, and the
+    /// whole of it stays in the drawing's <c>&lt;title&gt;</c> and accessible name.</summary>
     public string Title { get; init; } = "Untitled chart";
-    /// <summary>The line under the title, read after it as part of the accessible name.</summary>
+    /// <summary>The line under the title, read after it as part of the accessible name. Where it is wider than the drawing's width
+    /// less 48, by the library's generous estimate, it goes on over a second line, broken between its <c> · </c> clauses where both
+    /// lines then fit and otherwise between the words that set the two lines most nearly equal, and the plot moves down by that line,
+    /// 14 pixels. Past two lines the first takes as many words as fit and the second ends in <c>…</c>, and the whole of it stays in the
+    /// drawing's <c>&lt;desc&gt;</c> and accessible name.</summary>
     public string Description { get; init; } = "";
-    /// <summary>A line at the foot of the chart saying where the data came from.</summary>
+    /// <summary>A line at the foot of the chart saying where the data came from. It wraps as <see cref="Description"/> does, growing
+    /// upward: a second line moves the bottom of the plot, and the X axis and its title with it, up by 14 pixels.</summary>
     public string Source { get; init; } = "";
     /// <summary>Lays out X for every series, and draws each series that names no kind of its own.</summary>
     public ChartKind Kind { get; init; } = ChartKind.Line;
@@ -420,7 +435,9 @@ public sealed record ChartSpec
     /// on the left, because the right edge is taken; a horizontal bar chart, whose value axis runs along the bottom, and the
     /// charts without a Y axis refuse it.</summary>
     public AxisSide YAxisSide { get; init; }
-    /// <summary>Which ticks of the main Y axis carry a label. Gridlines stay at every tick; a secondary axis labels all of its own.</summary>
+    /// <summary>Which ticks of the main Y axis carry a label, in every pane: all of them, the lowest and highest drawn, or, with
+    /// <see cref="TickLabels.Bounds"/>, none but the axis's two ends at their exact values. Gridlines stay at every tick; a secondary
+    /// axis labels all of its own.</summary>
     public TickLabels YTickLabels { get; init; }
     /// <summary>The data: at most 32 series and 100,000 points in all.</summary>
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];
@@ -431,6 +448,13 @@ public sealed record ChartSpec
     /// <see cref="TickSource.Axis"/> always draws the axis's own ticks, and <see cref="TickSource.PointLabels"/> always the points'
     /// labels. Line, area, scatter, bubble, candlestick, OHLC, band, range and blocks charts take it; the others refuse it set.</summary>
     public TickSource XTicks { get; init; }
+    /// <summary>Which of the X axis's labels along the bottom are written: all of them, the default; the first and last drawn, with
+    /// <see cref="TickLabels.Ends"/>, as <see cref="YTickLabels"/> does up the side; or, with <see cref="TickLabels.Bounds"/>, none but
+    /// the axis's two ends at their exact values in its format, <see cref="XMin"/> and <see cref="XMax"/> or the data's ends, as a
+    /// histogram of finish times labels its first start and its last end. Gridlines stay where they are. A continuous X axis takes it:
+    /// line, area, scatter, bubble, candlestick, OHLC, band, range, blocks and timeline charts; the others refuse it set, and
+    /// <see cref="TickLabels.Bounds"/> is refused beside <see cref="TickSource.PointLabels"/>, which asks for the points' labels instead.</summary>
+    public TickLabels XTickLabels { get; init; }
     /// <summary>Names the main plot's left-hand axis. On a gauge it is the unit written after the score, such as <c>%</c>.</summary>
     public string YLabel { get; init; } = "";
     /// <summary>Names the main plot's right-hand axis, which appears when one of its series is marked secondary.</summary>
@@ -485,7 +509,8 @@ public sealed record ChartSpec
     public int? DensityCells { get; init; }
     /// <summary>Lighter lines between the labelled ticks. Off by default; a time axis never takes them.</summary>
     public bool MinorGridlines { get; init; }
-    /// <summary>Reference lines and bands drawn behind the data: a Y reference on the main plot, an X one through every pane.</summary>
+    /// <summary>Reference lines and bands drawn behind the data, or over it where one is <see cref="ChartAnnotation.InFront"/>: a Y
+    /// reference on the main plot, an X one through every pane.</summary>
     public IReadOnlyList<ChartAnnotation> Annotations { get; init; } = [];
     /// <summary>Shades each zone as a band on the main plot's primary value axis, behind the data and any annotations, named
     /// with its range. The open bottom zone and the unbounded top one stop at the plot edge, and the bands never
@@ -567,8 +592,8 @@ public enum AnnotationAxis
 }
 
 /// <summary>
-/// A reference drawn behind the data: a line at <paramref name="From"/>, or a band when <see cref="To"/>
-/// is set. Values are in data coordinates, so an annotation pans and zooms with the chart.
+/// A reference drawn behind the data, or over it when <see cref="InFront"/>: a line at <paramref name="From"/>, or a band when
+/// <see cref="To"/> is set. Values are in data coordinates, so an annotation pans and zooms with the chart.
 /// </summary>
 /// <param name="Axis">The axis the value is read on.</param>
 /// <param name="From">The value marked, or where a band starts. Unix milliseconds on a time axis.</param>
@@ -576,12 +601,22 @@ public sealed record ChartAnnotation(AnnotationAxis Axis, double From)
 {
     /// <summary>The far edge of a band. Null draws a line.</summary>
     public double? To { get; init; }
-    /// <summary>Shown with the value. Null shows the value alone.</summary>
+    /// <summary>Shown with the value, as <c>Target: 55</c>. Null shows the value alone.</summary>
     public string? Label { get; init; }
     /// <summary>Defaults to the style's muted colour.</summary>
     public string? Color { get; init; }
     /// <summary>Draws a reference line dashed, the default, or solid.</summary>
     public bool Dashed { get; init; } = true;
+    /// <summary>Writes the value after the label drawn on the chart, the default. Off, the chart draws the <see cref="Label"/> alone, as
+    /// <c>median</c> beside a median line whose time the axis already reads, while its tooltip and accessible name still read the label
+    /// and the value, <c>median: 47:12</c>. Off needs a label to draw, and is refused on a calendar, whose key names an outlined day by
+    /// its label alone already.</summary>
+    public bool ShowValue { get; init; } = true;
+    /// <summary>Draws the line or band over the data instead of behind it, so columns or blocks do not hide it: a median over a
+    /// histogram's bins, or a target over columns. A line in front stands on a halo of the background colour, as a gauge's target does,
+    /// so it shows over a mark of any colour. Its label is written over the data either way. A gauge draws its target over the score
+    /// already, and a calendar outlines its day, so both refuse it.</summary>
+    public bool InFront { get; init; }
 }
 
 /// <summary>A node of a graph.</summary>

@@ -3284,7 +3284,8 @@ Test("Each finishing touch refuses the marks and values it cannot apply to",()=>
     foreach(var radius in new[]{-1,double.NaN,double.PositiveInfinity,1e101}) Reject(()=>ChartSvg.Render(Spec(ChartKind.Column) with{Style=ChartStyle.Light with{BarRadius=radius}}));
     Reject(()=>ChartSvg.Render(Spec() with{Style=ChartStyle.Light with{Gridlines=(GridLine)4}}));
     Reject(()=>ChartSvg.Render(Spec() with{YAxisSide=(AxisSide)2}));
-    Reject(()=>ChartSvg.Render(Spec() with{YTickLabels=(TickLabels)2}));
+    // 0.35.0 made 2 TickLabels.Bounds, so an unknown labelling is a value past it.
+    Reject(()=>ChartSvg.Render(Spec() with{YTickLabels=(TickLabels)9}));
 });
 // 0.24.0: the refined finish is the default and the classic one is the exact way back. The rows below are renderings of the
 // release baseline, hashed from 0.23.0's own output, so the classic finish must reproduce every byte of them; the two graph rows
@@ -3701,10 +3702,11 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: twenty-three charts in twenty cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
-    // 0.34.0's Getting faster? card draws three sparklines in place of one chart; they are checked on their own below.
-    Check(sports.Count==20&&sports.Select(card=>card.Id).Distinct().Count()==20&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
-        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==23,"the page should have twenty-three charts in twenty cards");
+Test("Sports page: twenty-four charts in twenty-one cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+    // 0.34.0's Getting faster? card draws three sparklines in place of one chart; they are checked on their own below. 0.35.0 adds
+    // How the field finished to the Racing section.
+    Check(sports.Count==21&&sports.Select(card=>card.Id).Distinct().Count()==21&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
+        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==24,"the page should have twenty-four charts in twenty-one cards");
     // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order; 0.33.0's Racing section stands
     // before it.
     Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
@@ -3714,7 +3716,7 @@ Test("Sports page: twenty-three charts in twenty cards, each rendering in light,
                 // A wide card with a second chart beside its first gives each half its width.
                 foreach(var chart in new[]{card.Spec,card.Beside}.OfType<ChartSpec>())
                 {
-                    Check(chart.Width==(card.Wide&&card.Beside is null?1100:540)&&chart.Source.Contains("simulated"),$"{card.Id} is not drawn at a desktop's width before it is fitted, or does not say it is simulated");
+                    Check(chart.Width==(card.Wide&&card.Beside is null?1100:540)&&(chart.Source.Contains("simulated")||chart.Source.Contains("invented")),$"{card.Id} is not drawn at a desktop's width before it is fitted, or does not say it is simulated or invented");
                     // The page's charts set FitWidth, which draws each at the width its card gives it, as here.
                     foreach(var width in new[]{chart.Width,337})
                         Check(XDocument.Parse(ChartSvg.Render(chart with{Width=width,Style=style})).Descendants().Any(e=>e.Attribute("data-point") is not null),$"{card.Id} drew no marks {width} wide");
@@ -4213,13 +4215,13 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // connectors and, since 0.28.0, the calendar's layout, cell and week start, which are the last five properties written, and,
     // since 0.32.0, each series' trend fit, window and degree, written after its trend, and since 0.33.0 the chart's X ticks, written
     // after its X label, and each series' change colours, written after its value labels, and since 0.34.0 the chart's sparkline,
-    // written after its height.
+    // written after its height, and since 0.35.0 the chart's X tick labels, written after its X ticks.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
     const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
-    const string ticked="\"XLabel\":\"\",\"XTicks\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
+    const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     Check(json.EndsWith(defaults)&&json.Contains(trended)&&json.Contains(ticked)&&json.Contains(changed)&&json.Contains(sparked),json[^120..]);
     var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(defaults,"}").Replace(trended,"\"Trend\":false,")
         .Replace(ticked,"\"XLabel\":\"\",").Replace(changed,"\"ValueLabels\":false").Replace(sparked,"\"Height\":420,"))))[..12].ToLowerInvariant();
@@ -6201,9 +6203,10 @@ Test("A sparkline draws no text at all, only its title and desc, and every point
     Check(Datums(XDocument.Parse(ChartSvg.Render(Pb(),includeTitles:false)),0).All(m=>m.Element(ns+"title") is null&&m.Attribute("aria-label") is not null),"without native tooltips");
     var empty=Svg(Pb() with{Series=[]});
     Check(!empty.Descendants(ns+"text").Any()&&empty.Root!.Elements(ns+"title").Single().Value==Pb().Title&&!Datums(empty,0).Any(),"an empty sparkline");
-    // The same spec drawn as a chart has its title, axes and legend back.
+    // The same spec drawn as a chart has its title, axes and legend back. From 0.35.0 its title, 298 pixels by the library's estimate,
+    // is cut at a word with an ellipsis to fit the 272 a drawing 320 wide leaves it.
     var full=Svg(Pb() with{Sparkline=false,Width=320,Height=240});
-    Check(full.Descendants(ns+"text").Any(t=>t.Value==Pb().Title)&&full.Descendants(ns+"text").Any(t=>t.Value=="5 km")&&full.Root!.Attribute("style")!.Value.Contains(";width:100%;"),"a chart lost its words");
+    Check(full.Descendants(ns+"text").Any(t=>t.Value=="5 km: 24:10 to 22:47 over 6…")&&full.Descendants(ns+"text").Any(t=>t.Value=="5 km")&&full.Root!.Attribute("style")!.Value.Contains(";width:100%;"),"a chart lost its words");
 });
 Test("A sparkline's plot fills its drawing but for a padding that holds its largest ring whole at all four edges",()=>{
     // Rings on the lowest point at the left, the highest, and a point at the right: each touches its edge exactly, on either axis
@@ -6454,7 +6457,9 @@ Test("0.33.0's renderings do not move: rows of its baseline rebuilt here match i
             Series=[new("Pace",Enumerable.Range(0,12).Select(i=>new ChartPoint(i,330-i*4+i%3*5)).ToArray()){Trend=true}]}),
         ("guard/line-markers","6A03DBA7B8A29EB8","0AB8C0AE5E4BFCDC",line with{Series=[new("A",Twelve().Select((p,i)=>p with{Color=i==3?"#123456":null,Y=i==7?null:p.Y}).ToArray()),
             new("B",Twelve()){Zones=new([new("Low",25),new("High",double.PositiveInfinity)]),ProjectedFrom=8}]}),
-        ("race/recommended-340-midnight","C6189E3AF7D67240","95A655DDB4E9D931",new ChartSpec{Kind=ChartKind.Line,Style=ChartStyle.Midnight,Title="Position & points by race",Description="Place over field size, first at the top, and points",
+        // 0.35.0 sets this row's description, 309 pixels by the library's estimate in a drawing 340 wide, on two lines as nearly equal as
+        // its words allow, and moves its plot down by one; it was C6189E3AF7D67240 and 95A655DDB4E9D931 before.
+        ("race/recommended-340-midnight","E23F9462A56D6295","4DB7B28D805EE16E",new ChartSpec{Kind=ChartKind.Line,Style=ChartStyle.Midnight,Title="Position & points by race",Description="Place over field size, first at the top, and points",
             Width=340,Height=380,XMin=-.5,XMax=4.5,YReversed=true,YLabel="Position",Panes=[new(){Label="Points",Weight=1}],Series=[Placed(),Earned() with{Pane=1}]}),
         ("race/season-340-midnight","D19CDFC27AE78F1A","FC505B592334AF49",new ChartSpec{Kind=ChartKind.Line,Style=ChartStyle.Midnight,XAxis=AxisKind.Time,TimeZone="Africa/Johannesburg",YReversed=true,
             Title="Your season, round by round",Description="Your place in each round, first at the top",Width=340,Height=260,
@@ -6510,8 +6515,308 @@ Test("Sports page: Getting faster? rings each time faster than all before it, fr
             Check(inks.All(ink=>Contrast(ink,style.Background)>=3),$"{line.Name} on {style.Background}: {string.Join(", ",inks.Where(ink=>Contrast(ink,style.Background)<3))}");
             Check(!Svg(line.Spec with{Style=style}).Descendants(ns+"text").Any(),$"{line.Name} wrote a word");
         }
-    // The page draws each at its own size beside its words, and its sparklines and charts number twenty-three.
-    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==23,"the page's count");
+    // The page draws each at its own size beside its words, and its sparklines and charts number twenty-four.
+    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==24,"the page's count");
+});
+// 0.35.0: how the field finished, and text that fits. Blocks keep a visible height; an annotation can draw its label without its value
+// and stand over the data; an X axis chooses which of its labels it writes, and either axis can label just its two ends; and a chart's
+// title, description and source fit its width. A 900 by 420 chart's plot runs from x 76 to 870 and y 78 to 344; its X labels stand on
+// the baseline 21 below the plot and its Y labels end 12 left of it, 4 below their value's height. Every example is invented.
+ChartSpec Finish(params (double From,double To,int Count)[] bins)=>new(){Title="How the field finished",Kind=ChartKind.Blocks,IncludeZero=true,XFormat=ValueFormat.Duration,
+    Series=[new("Finishers",bins.Select(b=>ChartPoint.Block(b.From,b.To,b.Count)).ToArray())]};
+// An invented race of 312 finishers in five-minute bins from 35:00 to 1:20:00, three faster and twelve slower off the chart, 88 the most in a bin.
+ChartSpec Binned()=>Finish((2100,2400,18),(2400,2700,64),(2700,3000,88),(3000,3300,57),(3300,3600,33),(3600,3900,18),(3900,4200,10),(4200,4500,8),(4500,4800,1));
+// The labels along the bottom of a plot whose bottom is at the given height, and the labels up its left side.
+(string Text,double X,string Anchor)[] Along(XDocument doc,double bottom=344)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("class")=="lumen-muted"&&t.Attribute("transform") is null&&Attr(t,"y")==bottom+21)
+    .Select(t=>(t.Value,Attr(t,"x"),(string)t.Attribute("text-anchor")!)).ToArray();
+(string Text,double Y)[] Upward(XDocument doc,double x=64)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("class")=="lumen-muted"&&(string?)t.Attribute("text-anchor")=="end"&&Attr(t,"x")==x)
+    .Select(t=>(t.Value,Attr(t,"y"))).ToArray();
+// A reference's label as drawn, over the data in the refined finish and inside the reference's group in the classic one, and the references' names.
+string[] Printed(XDocument doc)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("paint-order")=="stroke"||(string?)t.Parent!.Attribute("role")=="img").Select(t=>t.Value).OrderBy(t=>t,StringComparer.Ordinal).ToArray();
+string[] Voiced(XDocument doc)=>doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("role")=="img").Select(g=>g.Attribute("aria-label")!.Value).OrderBy(t=>t,StringComparer.Ordinal).ToArray();
+// The description's lines as drawn, 11 px and muted from x 24 above the plot, and the top of the first plot, six inside its clip.
+string[] Said(XDocument doc)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("font-size")=="11"&&(string?)t.Attribute("class")=="lumen-muted"&&Attr(t,"x")==24&&Attr(t,"y")<70).Select(t=>t.Value).ToArray();
+double Top35(XDocument doc)=>Attr(doc.Root!.Element(ns+"svg")!,"y")+6;
+Test("Blocks keep 2 pixels: one finisher among 300 stands 2 pixels tall where it would be 0.89, a bin of none draws nothing visible and stays named and focusable, and taller blocks keep their heights",()=>{
+    // 299, 1, 0 and 3 on an axis from 0 to 299, which IncludeZero holds exactly: one would stand 266 / 299 = 0.89 pixels tall, and three 2.67.
+    var spec=Finish((2100,2400,299),(2400,2700,1),(2700,3000,0),(3000,3300,3));
+    foreach(var classic in new[]{false,true})
+    {
+        var doc=Svg(classic?Classic(spec):spec);var boxes=BlockPaths(doc).Select(BlockBox).ToArray();
+        Check(boxes.Length==4&&boxes.All(b=>Close(b.Bottom,344))&&Close(boxes[0].Top,78)&&Close(boxes[1].Top,342)&&Close(boxes[2].Top,344)&&Close(boxes[3].Top,344-3*266/299d),
+            $"classic {classic}: {string.Join(" | ",boxes.Select(b=>$"{b.Top}-{b.Bottom}"))}");
+        var marks=Datums(doc,0);
+        Check(marks.All(m=>(string?)m.Attribute("tabindex")=="0"&&m.Element(ns+"title")!.Value==m.Attribute("aria-label")!.Value)
+            &&marks.Select(m=>m.Attribute("aria-label")!.Value).SequenceEqual(["Finishers: 35:00 to 40:00, 299","Finishers: 40:00 to 45:00, 1","Finishers: 45:00 to 50:00, 0","Finishers: 50:00 to 55:00, 3"]),"the names");
+    }
+    // On a reversed pace axis held from 4:00 to 5:00 a lap at 5:00 stands at the bottom and draws nothing, and one at 4:59.9 keeps 2 pixels.
+    var laps=BlockPaths(Svg(Laps(300,299.9,270) with{YMin=240,YMax=300})).Select(BlockBox).ToArray();
+    Check(Close(laps[0].Top,344)&&Close(laps[1].Top,342)&&Close(laps[2].Top,211),string.Join(" | ",laps.Select(b=>$"{b.Top}-{b.Bottom}")));
+});
+Test("ShowValue = false draws an annotation's label alone, while its tooltip and accessible name keep the label and the value, in both finishes and on a gauge, and the label takes the room of its own words",()=>{
+    var spec=Binned() with{Annotations=[new(AnnotationAxis.X,2832){Label="median",ShowValue=false},new(AnnotationAxis.Y,50){Label="Target"}]};
+    foreach(var classic in new[]{false,true})
+    {
+        var doc=Svg(classic?Classic(spec):spec);
+        Check(Printed(doc).SequenceEqual(["Target: 50","median"]),$"classic {classic}: {string.Join(", ",Printed(doc))}");
+        Check(Voiced(doc).SequenceEqual(["Target: 50","median: 47:12"])&&doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("role")=="img").All(g=>g.Element(ns+"title")!.Value==g.Attribute("aria-label")!.Value),
+            $"classic {classic}: {string.Join(", ",Voiced(doc))}");
+    }
+    // Shown, the value follows the label, as before.
+    Check(Printed(Svg(spec with{Annotations=[spec.Annotations[0] with{ShowValue=true}]})).SequenceEqual(["median: 47:12"]),"a label with its value");
+    // A gauge's target is drawn as its label alone and named with its value.
+    var gauge=Svg(Sample(ChartKind.Gauge) with{Annotations=[new(AnnotationAxis.Y,60){Label="Average",ShowValue=false}]});
+    Check(Printed(gauge).SequenceEqual(["Average"])&&Voiced(gauge).SequenceEqual(["Average: 60"]),$"{string.Join(", ",Printed(gauge))} | {string.Join(", ",Voiced(gauge))}");
+    // A band 0.8 wide on an axis of 10, 63.5 pixels, has room inside it for "Window", 47 pixels by the generous estimate and 6 at each
+    // side, but not for "Window: 4 to 4.8", which is left out where the band shows its value.
+    var band=Spec() with{XMin=0,XMax=10,Annotations=[new(AnnotationAxis.X,4){To=4.8,Label="Window"}]};
+    Check(Printed(Svg(band)).Length==0&&Printed(Svg(band with{Annotations=[band.Annotations[0] with{ShowValue=false}]})).SequenceEqual(["Window"]),"the room a label takes");
+});
+Test("InFront draws a reference over the data instead of behind it, in both finishes, through every pane and on a timeline, a line on a halo of the background colour, the reference otherwise unchanged and its label still over the data",()=>{
+    int Index35(XDocument doc,Func<XElement,bool> found)=>doc.Descendants().ToList().FindIndex(e=>found(e));
+    int Last35(XDocument doc,Func<XElement,bool> found)=>doc.Descendants().ToList().FindLastIndex(e=>found(e));
+    bool IsMark(XElement e)=>e.Attribute("data-point") is not null;
+    Func<XElement,bool> Refers(string name)=>e=>(string?)e.Attribute("role")=="img"&&(string?)e.Attribute("aria-label")==name;
+    var target=new ChartAnnotation(AnnotationAxis.Y,20){Label="Target"};
+    var columns=Baseline(ChartKind.Column,ChartTheme.Light);
+    foreach(var classic in new[]{false,true})
+    {
+        XDocument Behind(ChartAnnotation a)=>Svg(classic?Classic(columns with{Annotations=[a]}):columns with{Annotations=[a]});
+        var (behind,front)=(Behind(target),Behind(target with{InFront=true}));
+        Check(Index35(behind,Refers("Target: 20"))<Index35(behind,IsMark)&&Index35(front,Refers("Target: 20"))>Last35(front,IsMark),$"classic {classic}: the order");
+        // In front, the line stands on a halo of the background colour 2 wider than itself, so it shows over a bar of any colour; the
+        // reference is otherwise the one drawn behind.
+        var (inFront,behindIt)=(new XElement(front.Descendants().Single(Refers("Target: 20"))),behind.Descendants().Single(Refers("Target: 20")));
+        var halo=inFront.Elements(ns+"line").Where(l=>(string?)l.Attribute("stroke")==ChartStyle.Light.Background).ToArray();
+        Check(halo.Length==1&&(string?)halo[0].Attribute("stroke-width")==(classic?"3.5":"3")&&!behindIt.Elements(ns+"line").Any(l=>(string?)l.Attribute("stroke")==ChartStyle.Light.Background),$"classic {classic}: the halo");
+        halo[0].Remove();
+        Check(inFront.ToString()==behindIt.ToString(),$"classic {classic}: the reference itself changed");
+    }
+    var labelled=Svg(columns with{Annotations=[target with{InFront=true}]});
+    Check(Index35(labelled,e=>(string?)e.Attribute("paint-order")=="stroke"&&e.Value=="Target: 20")>Index35(labelled,Refers("Target: 20")),"the label is not over the reference");
+    // An X line through two panes stands over the blocks of each, drawn alone in the lower one.
+    var paned=new ChartSpec{Title="Panes",Kind=ChartKind.Line,Panes=[new()],Series=[new("A",[ChartPoint.Block(0,1,3),ChartPoint.Block(1,2,5)]){Kind=ChartKind.Blocks},
+        new("B",[ChartPoint.Block(0,1,4),ChartPoint.Block(1,2,2)]){Kind=ChartKind.Blocks,Pane=1}],Annotations=[new(AnnotationAxis.X,1.5){Label="Now",InFront=true}]};
+    var plots=Svg(paned).Root!.Elements(ns+"svg").Select(p=>p.Descendants().ToList()).ToArray();
+    Check(plots.Length==2&&plots.All(p=>p.FindIndex(e=>e.Name==ns+"line"&&(string?)e.Attribute("stroke-opacity")=="0")>p.FindLastIndex(e=>IsMark(e))),"the panes");
+    var timeline=Svg(Sample(ChartKind.Timeline) with{Annotations=[new(AnnotationAxis.X,30){Label="Alarm",InFront=true}]});
+    Check(Index35(timeline,Refers("Alarm: 30"))>Last35(timeline,IsMark),"the timeline");
+});
+Test("TickLabels.Bounds labels only an axis's two ends at their exact values in its format, along X and up Y, with the gridlines where they were; Ends keeps the first and last drawn",()=>{
+    var spec=Binned() with{XTickLabels=TickLabels.Bounds,YTickLabels=TickLabels.Bounds};
+    foreach(var classic in new[]{false,true})
+    {
+        var doc=Svg(classic?Classic(spec):spec);var all=Svg(classic?Classic(Binned()):Binned());
+        // The first bin's start begins at the plot's left edge and the last bin's end ends at its right; 0 and the most, 88, stand at the
+        // bottom and the top.
+        Check(Along(doc).SequenceEqual([("35:00",76d,"start"),("1:20:00",870d,"end")]),$"classic {classic}: {string.Join(" | ",Along(doc))}");
+        Check(Upward(doc).SequenceEqual([("0",348d),("88",82d)]),$"classic {classic}: {string.Join(" | ",Upward(doc))}");
+        Check(Grid(doc).SequenceEqual(Grid(all))&&Grid(doc).Length>2&&Along(all).Length>2&&Upward(all).Length>2,$"classic {classic}: the gridlines moved");
+    }
+    // Set bounds are the ends written, wherever the ticks fall.
+    Check(Along(Svg(spec with{XMin=2000,XMax=5000})).Select(l=>l.Text).SequenceEqual(["33:20","1:23:20"]),"set bounds");
+    // Ends writes the first and the last of the labels the axis would draw, its ticks or its points' labels.
+    var every=Along(Svg(Binned()));
+    Check(Along(Svg(Binned() with{XTickLabels=TickLabels.Ends})).SequenceEqual([every[0],every[^1]])&&every.Length>2,string.Join(" | ",every));
+    Check(Along(Svg(Spec() with{XTickLabels=TickLabels.Ends})).Select(l=>l.Text).SequenceEqual(["A","C"])&&Along(Svg(Spec())).Length==3,"point labels at the ends");
+    // Bounds writes the axis's own ends, never the points' labels.
+    Check(Along(Svg(Spec() with{XTickLabels=TickLabels.Bounds})).SequenceEqual([("0",76d,"start"),("2",870d,"end")]),"point labels at the bounds");
+    // A reversed axis has its smaller end at the top.
+    var paces=Upward(Svg(Laps(330,310,290) with{YMin=270,YMax=345,YTickLabels=TickLabels.Bounds}));
+    Check(paces.SequenceEqual([("4:30",82d),("5:45",348d)]),string.Join(" | ",paces));
+    // A horizontal bar chart's value axis runs along the bottom, 20 under the plot, from 160 to 870.
+    var bars=Svg(Spec(ChartKind.Bar) with{YTickLabels=TickLabels.Bounds}).Descendants(ns+"text").Where(t=>Attr(t,"y")==364).Select(t=>(t.Value,Attr(t,"x"),(string)t.Attribute("text-anchor")!)).ToArray();
+    Check(bars.SequenceEqual([("0",160d,"start"),("5",870d,"end")]),string.Join(" | ",bars));
+    // A timeline's axis is labelled the same, from its lanes' plot.
+    var lanes=Svg(Sample(ChartKind.Timeline) with{XTickLabels=TickLabels.Bounds});
+    Check(Along(lanes).SequenceEqual([("0",Attr(lanes.Root!.Element(ns+"svg")!,"x")+6,"start"),("65",870d,"end")]),string.Join(" | ",Along(lanes)));
+});
+Test("A description too wide for a 340-pixel drawing goes on over a second line, at a clause where both lines fit and otherwise between the words that set the lines most nearly equal, and moves every kind's body down 14 pixels; past two lines it ends in an ellipsis, the whole kept in its desc and name",()=>{
+    var spec=new ChartSpec{Title="Field",Width=340,Height=240,Kind=ChartKind.Line,Series=[new("S",[new(0,1),new(1,3),new(2,2)])]};
+    var two="Every finisher's time in five-minute bins from the 1st to the 99th percentile";
+    var three=two+", the reader's own in race red and the median a dashed line over the bins";
+    foreach(var classic in new[]{false,true})
+    {
+        XDocument Described(string description)=>Svg(classic?Classic(spec with{Description=description}):spec with{Description=description});
+        var one=Described("312 finishers · median 47:12");
+        Check(Said(one).SequenceEqual(["312 finishers · median 47:12"])&&Top35(one)==78,$"classic {classic}: one line");
+        // The two lines fit 340 less 48 by the generous estimate, broken between the words that set them most nearly equal: a description
+        // just too wide for one line is not left with one word on the second.
+        foreach(var description in new[]{two,"Place over field size, first at the top, and points"})
+        {
+            var split=Said(Described(description));var parts=description.Split(' ');
+            var evenest=Enumerable.Range(1,parts.Length-1).Min(k=>Math.Max(Wide11(string.Join(" ",parts[..k])),Wide11(string.Join(" ",parts[k..]))));
+            Check(split.Length==2&&string.Join(" ",split)==description&&split.All(l=>Wide11(l)<=292)&&Math.Max(Wide11(split[0]),Wide11(split[1]))==evenest,$"classic {classic}: {string.Join(" / ",split)}");
+        }
+        var wrapped=Described(two);var lines=Said(wrapped);
+        Check(Top35(wrapped)==92,$"classic {classic}: the plot's top");
+        Check(wrapped.Descendants(ns+"text").Where(t=>lines.Contains(t.Value)).Select(t=>Attr(t,"y")).SequenceEqual([49d,63d]),"the lines' baselines");
+        // Too long for two, the first line takes as many words as fit and the second is cut at a word.
+        var cut=Described(three);var said=Said(cut);
+        Check(said.Length==2&&Wide11(said[0]+" "+three[(said[0].Length+1)..].Split(' ')[0])>292&&said[1].EndsWith("…")&&said.All(l=>Wide11(l)<=292)&&three.StartsWith(said[0]+" "+said[1][..^1])&&Top35(cut)==92,$"classic {classic}: {string.Join(" / ",said)}");
+        Check(cut.Root!.Element(ns+"desc")!.Value==three&&cut.Root!.Attribute("aria-label")!.Value=="Field. "+three,"the whole description");
+    }
+    // A description of clauses breaks between them where both lines then fit.
+    Check(Said(Svg(spec with{Description="Five invented races in two panes · best 19th of 52 riders"})).SequenceEqual(["Five invented races in two panes","best 19th of 52 riders"]),"the clauses");
+    // Every kind's body moves down: no word but the title and the description's lines stands above 76 at a phone's width.
+    foreach(var kind in Enum.GetValues<ChartKind>())
+    {
+        var doc=Svg(Sample(kind) with{Width=340,Height=300,Description=two});
+        var high=doc.Descendants(ns+"text").Where(t=>t.Attribute("transform") is null&&t.Ancestors().All(a=>a.Attribute("transform") is null)&&!(Attr(t,"x")==24&&Attr(t,"y") is 28 or 49 or 63)&&Attr(t,"y")<76).Select(t=>t.Value).ToArray();
+        Check(Said(doc).Length==2&&high.Length==0,$"{kind}: {string.Join(", ",high)}");
+    }
+    // Plots, bins, lanes, a donut's key, a heatmap's rows, a calendar's days, a gauge, rings, a radar and boxes stand lower.
+    XDocument Kind35(ChartKind kind,bool wide)=>Svg(Sample(kind) with{Width=340,Height=300,Description=wide?two:"Short"});
+    double Tallest(XDocument doc)=>doc.Descendants(ns+"rect").Where(r=>(string?)r.Parent!.Attribute("role")=="img").Min(r=>Attr(r,"y"));
+    double Key(XDocument doc)=>Attr(doc.Root!.Elements(ns+"circle").First(),"cy");
+    double Cell35(XDocument doc,ChartKind kind)=>Attr(Datums(doc,0)[0].Element(ns+"rect")!,"y");
+    double Centre(XDocument doc)=>double.Parse(doc.Descendants(ns+"g").First(g=>g.Attribute("transform") is not null).Attribute("transform")!.Value.Split(' ',')')[1],CultureInfo.InvariantCulture);
+    double Polygon(XDocument doc)=>doc.Descendants(ns+"polygon").First().Attribute("points")!.Value.Split(' ').Min(p=>double.Parse(p.Split(',')[1],CultureInfo.InvariantCulture));
+    Check(Top35(Kind35(ChartKind.Line,true))==92&&Top35(Kind35(ChartKind.Line,false))==78&&Top35(Kind35(ChartKind.Timeline,true))==92&&Top35(Kind35(ChartKind.Blocks,true))==92,"plots and lanes");
+    Check(Tallest(Kind35(ChartKind.Histogram,true))==92&&Tallest(Kind35(ChartKind.Histogram,false))==78,"bins");
+    Check(Key(Kind35(ChartKind.Donut,true))-Key(Kind35(ChartKind.Donut,false))==14&&Cell35(Kind35(ChartKind.Heatmap,true),ChartKind.Heatmap)-Cell35(Kind35(ChartKind.Heatmap,false),ChartKind.Heatmap)==14,"a donut's key and a heatmap's rows");
+    Check(Cell35(Kind35(ChartKind.Calendar,true),ChartKind.Calendar)>Cell35(Kind35(ChartKind.Calendar,false),ChartKind.Calendar)&&Centre(Kind35(ChartKind.Gauge,true))>Centre(Kind35(ChartKind.Gauge,false))
+        &&Centre(Kind35(ChartKind.Ring,true))>Centre(Kind35(ChartKind.Ring,false))&&Polygon(Kind35(ChartKind.Radar,true))>Polygon(Kind35(ChartKind.Radar,false))
+        &&Grid(Kind35(ChartKind.Box,true)).Min()>Grid(Kind35(ChartKind.Box,false)).Min()&&Grid(Kind35(ChartKind.Violin,true)).Min()>Grid(Kind35(ChartKind.Violin,false)).Min(),"the other kinds");
+});
+Test("A source too wide for its drawing goes on over a second line that grows upward, and moves the plot's bottom, its X axis and the axis's title up 14 pixels",()=>{
+    var spec=new ChartSpec{Title="Field",Width=340,Height=240,Kind=ChartKind.Line,XLabel="Finish time",Series=[new("S",[new(0,1),new(1,3),new(2,2)])]};
+    (string Text,double Y)[] Under(XDocument doc)=>doc.Descendants(ns+"text").Where(t=>Attr(t,"x")==24&&(string?)t.Attribute("font-size")=="11"&&Attr(t,"y")>200).Select(t=>(t.Value,Attr(t,"y"))).ToArray();
+    double Bottom35(XDocument doc){var clip=doc.Root!.Element(ns+"svg")!;return Attr(clip,"y")+Attr(clip,"height")-6;}
+    foreach(var classic in new[]{false,true})
+    {
+        XDocument Sourced(string source)=>Svg(classic?Classic(spec with{Source=source}):spec with{Source=source});
+        var one=Sourced("Off the chart: 3 faster and 12 slower");
+        var two=Sourced("Off the chart: 3 faster and 12 slower · counted from the race's 312 finishers");
+        Check(Under(one).SequenceEqual([("Off the chart: 3 faster and 12 slower",228d)])&&Bottom35(one)==164,$"classic {classic}: {string.Join(" | ",Under(one))}");
+        Check(Under(two).SequenceEqual([("Off the chart: 3 faster and 12 slower",214d),("counted from the race's 312 finishers",228d)])&&Bottom35(two)==150,$"classic {classic}: {string.Join(" | ",Under(two))}");
+        // The X axis's labels and its title rise with the plot's bottom.
+        Check(Along(one,164).Length>1&&Along(two,150).Select(l=>l.Text).SequenceEqual(Along(one,164).Select(l=>l.Text))
+            &&one.Descendants(ns+"text").Any(t=>t.Value=="Finish time"&&Attr(t,"y")==208)&&two.Descendants(ns+"text").Any(t=>t.Value=="Finish time"&&Attr(t,"y")==194),$"classic {classic}: the axis");
+    }
+});
+Test("A title wider than its drawing stays one line, cut at a word with an ellipsis, its whole kept in its title element and accessible name; one that fits is drawn as given, on graphs too",()=>{
+    var title="Nineteenth of fifty-two riders in the final round, eleven places better than the first";
+    string Heading(XDocument doc)=>doc.Descendants(ns+"text").Single(t=>(string?)t.Attribute("font-size")=="17").Value;
+    foreach(var width in new[]{320,340,600})
+    {
+        var doc=Svg(Spec() with{Title=title,Description="Invented",Width=width});var drawn=Heading(doc);
+        Check(drawn.EndsWith("…")&&Wide11(drawn)*17/11<=width-48&&title.StartsWith(drawn[..^1])&&title[drawn.Length-1] is ' ' or ',',$"{width}: {drawn}");
+        Check(doc.Root!.Element(ns+"title")!.Value==title&&doc.Root!.Attribute("aria-label")!.Value==title+". Invented",$"{width}: the whole title");
+    }
+    Check(Heading(Svg(Spec() with{Title=title,Width=1200}))==title&&Heading(Svg(Spec() with{Width=320}))=="Example","a title that fits");
+    // A word too long for the drawing by itself is cut between its letters.
+    var word=Heading(Svg(Spec() with{Title="Pneumonoultramicroscopicsilicovolcanoconiosis",Width=320}));
+    Check(word.EndsWith("…")&&Wide11(word)*17/11<=272&&"Pneumonoultramicroscopicsilicovolcanoconiosis".StartsWith(word[..^1]),word);
+    var graph=XDocument.Parse(GraphEngine.Render(new GraphSpec{Title=title,Width=340,Nodes=[new("a","A"),new("b","B")],Edges=[new("a","b")]}));
+    Check(Heading(graph).EndsWith("…")&&title.StartsWith(Heading(graph)[..^1])&&graph.Root!.Element(ns+"title")!.Value==title,Heading(graph));
+});
+Test("ShowValue, InFront and XTickLabels are refused where they would draw nothing or contradict another setting, each with its reason, and taken everywhere else",()=>{
+    foreach(var label in new[]{null,""," "})
+        Check(Refused(Spec() with{Annotations=[new(AnnotationAxis.Y,2){Label=label,ShowValue=false}]}).StartsWith("ShowValue = false draws an annotation's label without its value, so it needs a Label"),$"'{label}'");
+    var calendar=Sample(ChartKind.Calendar);
+    Check(Refused(calendar with{Annotations=[new(AnnotationAxis.X,Utc(2026,9,15,12)){Label="Today",ShowValue=false}]}).StartsWith("A calendar's key names an outlined day by its label alone already"),"a calendar's ShowValue");
+    Check(Refused(calendar with{Annotations=[new(AnnotationAxis.X,Utc(2026,9,15,12)){Label="Today",InFront=true}]}).StartsWith("InFront draws a reference over the data instead of behind it")
+        &&Refused(Sample(ChartKind.Gauge) with{Annotations=[new(AnnotationAxis.Y,60){InFront=true}]}).StartsWith("InFront draws a reference over the data"),"InFront on a calendar and a gauge");
+    foreach(var kind in Enum.GetValues<ChartKind>())
+        foreach(var labels in new[]{TickLabels.Ends,TickLabels.Bounds})
+        {
+            var spec=Sample(kind) with{XTickLabels=labels};
+            if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Blocks or ChartKind.Timeline) Svg(spec);
+            else Check(Refused(spec).StartsWith("XTickLabels chooses which labels a continuous X axis writes along the bottom"),$"{kind} {labels}: {Refused(spec)}");
+        }
+    Check(Refused(Spec() with{XTickLabels=TickLabels.Bounds,XTicks=TickSource.PointLabels}).StartsWith("XTickLabels = Bounds labels the X axis's own two ends, and XTicks = PointLabels"),"bounds beside point labels");
+    Svg(Spec() with{XTickLabels=TickLabels.Ends,XTicks=TickSource.PointLabels});Svg(Spec() with{XTickLabels=TickLabels.Bounds,XTicks=TickSource.Axis});
+    Check(Refused(Spec() with{XTickLabels=(TickLabels)7})=="Unknown X tick labelling."&&Refused(Spec() with{YTickLabels=(TickLabels)7})=="Unknown Y axis side or tick labelling.","unknown labelling");
+    // The Y axis takes Bounds wherever it takes Ends, and refuses it where it always refused Ends.
+    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Gauge,ChartKind.Ring,ChartKind.Timeline,ChartKind.Calendar}) Reject(()=>Svg(Sample(kind) with{YTickLabels=TickLabels.Bounds}));
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Column,ChartKind.Bar,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Blocks}) Svg(Sample(kind) with{YTickLabels=TickLabels.Bounds});
+    // Annotations take both settings on every other kind that takes annotations, a sparkline included, where they draw no label.
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Area,ChartKind.Column,ChartKind.Bar,ChartKind.Range,ChartKind.Blocks})
+        Svg(Sample(kind) with{Annotations=[new(AnnotationAxis.Y,3){Label="Mark",ShowValue=false,InFront=true}]});
+    Check(!Svg(Pb() with{Annotations=[new(AnnotationAxis.Y,1420){Label="Median",ShowValue=false,InFront=true}]}).Descendants(ns+"text").Any(),"a sparkline wrote a label");
+});
+Test("The new settings round-trip through the HTTP API's JSON, a request that names none keeps the defaults, and only a set one renames gradients",()=>{
+    var spec=Binned() with{XTickLabels=TickLabels.Bounds,YTickLabels=TickLabels.Bounds,Annotations=[new(AnnotationAxis.X,2832){Label="median",ShowValue=false,InFront=true}]};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,finishJson);
+    Check(json.Contains("\"xTickLabels\":\"Bounds\"")&&json.Contains("\"yTickLabels\":\"Bounds\"")&&json.Contains("\"showValue\":false")&&json.Contains("\"inFront\":true"),json);
+    var back=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,finishJson)!;
+    Check(back is {XTickLabels:TickLabels.Bounds,YTickLabels:TickLabels.Bounds}&&back.Annotations[0] is {ShowValue:false,InFront:true}&&ChartSvg.Render(back)==ChartSvg.Render(spec),"the spec changed in transit");
+    // Written by hand, as the HTTP API takes it.
+    var written="{\"title\":\"Field\",\"kind\":\"Blocks\",\"includeZero\":true,\"xFormat\":\"Duration\",\"xTickLabels\":\"Bounds\",\"annotations\":[{\"axis\":\"X\",\"from\":2832,\"label\":\"median\",\"showValue\":false,\"inFront\":true}],"
+        +"\"series\":[{\"name\":\"Finishers\",\"points\":[{\"x\":2100,\"xEnd\":2400,\"y\":299},{\"x\":2400,\"xEnd\":2700,\"y\":1},{\"x\":2700,\"xEnd\":3000,\"y\":0}]}]}";
+    var drawn=Svg(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,finishJson)!);
+    Check(Printed(drawn).SequenceEqual(["median"])&&Voiced(drawn).SequenceEqual(["median: 47:12"])&&Along(drawn).Select(l=>l.Text).SequenceEqual(["35:00","50:00"])&&Close(BlockPaths(drawn).Select(BlockBox).ToArray()[1].Top,342),
+        $"a spec written by hand: {string.Join(", ",Printed(drawn))} | {string.Join(", ",Voiced(drawn))} | {string.Join(", ",Along(drawn))}");
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"annotations\":[{\"axis\":\"Y\",\"from\":1}],\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",finishJson)!;
+    Check(old.XTickLabels==TickLabels.All&&old.Annotations[0] is {ShowValue:true,InFront:false},"the defaults");
+    // A gradient's ID is named after the spec: 0.34.0 named these two lumen-4bce89394b87 and lumen-6ad38916fb61, and the defaults leave
+    // them so; each setting away from its default names a gradient afresh.
+    string GradientId(ChartSpec s)=>System.Text.RegularExpressions.Regex.Match(ChartSvg.Render(s),"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}],Annotations=[new(AnnotationAxis.Y,2){Label="T"}]};
+    Check(GradientId(faded)=="lumen-4bce89394b87"&&GradientId(faded with{YTickLabels=TickLabels.Ends})=="lumen-6ad38916fb61",$"{GradientId(faded)} {GradientId(faded with{YTickLabels=TickLabels.Ends})}");
+    var set=new[]{faded with{XTickLabels=TickLabels.Ends},faded with{YTickLabels=TickLabels.Bounds},faded with{Annotations=[faded.Annotations[0] with{ShowValue=false}]},faded with{Annotations=[faded.Annotations[0] with{InFront=true}]}}.Select(GradientId).ToArray();
+    Check(set.Distinct().Count()==4&&!set.Contains(GradientId(faded))&&!set.Contains("lumen-6ad38916fb61"),string.Join(", ",set));
+});
+Test("0.34.0's renderings do not move: rows of its baseline rebuilt here match its hashes in both finishes, and every new setting written out at its default draws the same chart",()=>{
+    // Hashes of v0.34.0's tests/Lumen.Charts.Baseline/reference files, refined and classic, recorded on Windows.
+    if(!OperatingSystem.IsWindows())return;
+    var line=Baseline(ChartKind.Line,ChartTheme.Light);
+    ChartSpec Titled(ChartKind kind,params ChartSeries[] series)=>new(){Kind=kind,Theme=ChartTheme.Light,Title="Baseline",Description="Default output",Series=series};
+    ChartPoint[] Weights()=>new[]{37.9,37.8,38.2,38.0,38.1,38.0,37.9}.Select((kg,i)=>new ChartPoint(i,kg,$"Week {i+1}")).ToArray();
+    double[] pbTimes=[1450,1432,1445,1411,1420,1367];
+    var light=ChartStyle.Light;
+    (string Row,string Refined,string Classic,ChartSpec Spec)[] rows=[
+        ("Gauge/Light/True","77EBB6158970C838","D4E3B4E53144511E",Titled(ChartKind.Gauge,new ChartSeries("Score",[new(0,72,"Score")]))),
+        ("Calendar/Light/True","7DF486BA874B3C3B","D05CB415CCD30B80",Titled(ChartKind.Calendar,new ChartSeries("C",Enumerable.Range(0,56).Select(i=>new ChartPoint(1788825600000d+i*86400000d,i%7==0?0:10+i*3%40)).ToArray())) with{XAxis=AxisKind.Time}),
+        ("Timeline/Light/True","AB656FD0AD6DA5B1","3A4014195F6691E4",Titled(ChartKind.Timeline,new("A",[ChartPoint.Span(0,2),ChartPoint.Span(5,7)]),new("B",[ChartPoint.Span(2,5),ChartPoint.Span(7,9,"Last")]),new("C",[ChartPoint.Span(9,12)]))),
+        ("Blocks/Light/True","ED303664D2DE44C5","33DE20590ACB95F0",Titled(ChartKind.Blocks,new ChartSeries("B",[ChartPoint.Block(0,2,5,"W"),ChartPoint.Block(2,6,9),ChartPoint.Block(6,7,7),ChartPoint.Block(8,12,3,"C")]))),
+        ("Donut/Light/True","5668A60FF9FAE3CD","41B05E947E74CD0F",Baseline(ChartKind.Donut,ChartTheme.Light)),
+        ("Heatmap/Light/True","43D1B062374DE7AE","E701C0163185BA1C",Baseline(ChartKind.Heatmap,ChartTheme.Light)),
+        ("Radar/Light/True","DA6867ECC2A5836C","16406553279DC2CE",Baseline(ChartKind.Radar,ChartTheme.Light)),
+        ("Histogram/Light/True","BDD2A861ACC503CD","7A551A8B643A8CBB",Baseline(ChartKind.Histogram,ChartTheme.Light)),
+        ("annotated","90C7B27AF8A858FD","B8D59813CF5546F6",line with{Annotations=[new(AnnotationAxis.Y,25){Label="Target"},new(AnnotationAxis.X,3){To=6,Label="Window"}]}),
+        ("spark/pb-120-light","4BD6EB9C52C14881","0D333C87A3B4C598",new ChartSpec{Kind=ChartKind.Line,Style=light,Title="5 km: 24:10 to 22:47 over 6 races",Description="Each race's time, oldest first, faster higher",
+            Width=120,Height=32,Sparkline=true,YReversed=true,YFormat=ValueFormat.Duration,
+            Series=[new("5 km",pbTimes.Select((t,i)=>new ChartPoint(i,t,$"Race {i+1}"){Highlight=i%2==1?light.Zones[5]:null,ValueNote=i%2==1?" · PB":null}).ToArray(),light.Zones[0]){StrokeWidth=2}]}),
+        ("highlight/line","3BD29A55527F24D9","43E60A3FBDD8C2E2",line with{Title="Highlights",Series=[line.Series[0] with{Points=line.Series[0].Points.Select((p,i)=>i is 4 or 9?p with{Highlight="#DD4B45",ValueNote=" · best"}:p).ToArray()},
+            line.Series[1] with{Kind=ChartKind.Scatter,Points=line.Series[1].Points.Select((p,i)=>i==11?p with{Highlight="#2E9B58"}:p).ToArray()}]}),
+        ("span/line","0CC73CA1036DD7A1","D52F9E45BCB6E0A5",line with{Title="Minimum span",YMinSpan=8,Series=[new("Weight",Weights()){Markers=MarkerStyle.Filled}]})];
+    foreach(var (row,refined,classic,spec) in rows)
+    {
+        Check(Hash16(ChartSvg.Render(spec))==refined,$"{row} moved: {Hash16(ChartSvg.Render(spec))}");
+        Check(Hash16(ChartSvg.Render(Classic(spec)))==classic,$"{row} moved in the classic finish: {Hash16(ChartSvg.Render(Classic(spec)))}");
+        var spelled=spec with{XTickLabels=TickLabels.All,Annotations=spec.Annotations.Select(a=>a with{ShowValue=true,InFront=false}).ToArray()};
+        Check(ChartSvg.Render(spelled)==ChartSvg.Render(spec),$"{row}: the defaults written out moved it");
+    }
+});
+Test("Sports page: How the field finished draws the last race's invented field in bins by the page's rule, the athlete's bin in red and named so, the median over the bins without its time, and the finishers off the chart in its source",()=>{
+    var card=sports.Single(c=>c.Id=="field");var spec=card.Spec;var order=sports.Select(c=>c.Id).ToList();
+    Check(card.Section=="racing"&&card.Wide&&order.IndexOf("field")==order.IndexOf("race-results")+1,"the card or its place");
+    // The last race's field of 52, fastest first, the athlete's 40:12 the 19th, its place.
+    var field=SportsData.Field;var race=SportsData.Races[^1];
+    Check(field.Count==race.Field&&field.SequenceEqual(field.Order())&&field[race.Position-1]==2412,"the field");
+    // One-minute bins, the narrowest that set the 1st to the 99th percentile in at most 20: seventeen from 34:00 to 51:00, one finisher
+    // off each end.
+    var (bins,faster,slower)=SportsData.FinishBins(field);
+    Check(bins.Length==17&&bins[0].From==2040&&bins[^1].To==3060&&bins.Zip(bins.Skip(1)).All(p=>p.First.To==p.Second.From&&p.First.To-p.First.From==60)&&faster==1&&slower==1&&bins.Sum(b=>b.Count)+faster+slower==52,
+        string.Join(" ",bins.Select(b=>b.Count)));
+    var blocks=spec.Series.Single().Points;
+    Check(spec is {Kind:ChartKind.Blocks,IncludeZero:true,XFormat:ValueFormat.Duration,XTickLabels:TickLabels.Bounds,YTickLabels:TickLabels.Bounds,Height:300}
+        &&blocks.Select(p=>(p.X,p.XEnd,p.Y)).SequenceEqual(bins.Select(b=>(b.From,(double?)b.To,(double?)b.Count))),"the bins drawn");
+    // The athlete's bin, 40:00 to 41:00, alone is red, and says why in its name; the others are the ramp's neutral grey.
+    Check(blocks.Count(p=>p.Color is not null)==1&&blocks.Single(p=>p.Color is not null) is {X:2400,Color:"#DD4B45",ValueNote:" · you"}&&spec.Series[0].Color==ChartStyle.Light.Zones[0],"the athlete's bin");
+    Check(Datums(Svg(spec),0).Count(m=>m.Attribute("aria-label")!.Value=="Finishers: 40:00 to 41:00, 6 · you")==1,"the athlete's bin's name");
+    Check(spec.Title=="19th of 52 in 40:12"&&spec.Description=="52 finishers · median 41:29"&&spec.Source=="Off the chart: 1 faster and 1 slower · an invented field","the words");
+    Check(spec.Annotations.Single() is {Axis:AnnotationAxis.X,From:2489,Label:"median",ShowValue:false,InFront:true,Dashed:true,To:null},"the median");
+    // At a phone's widths every word drawn at the left fits the drawing by the generous estimate, the source on two lines.
+    foreach(var width in new[]{322,337,343,1100})
+    {
+        var doc=Svg(spec with{Width=width});
+        var words=doc.Descendants(ns+"text").Where(t=>Attr(t,"x")==24).ToArray();
+        Check(words.All(t=>Wide11(t.Value)*double.Parse((string?)t.Attribute("font-size")??"12",CultureInfo.InvariantCulture)/11<=width-48),$"{width}: {string.Join(" | ",words.Select(t=>t.Value))}");
+        Check(words.Count(t=>t.Value.StartsWith("Off the chart"))==1&&(width>400||words.Any(t=>t.Value=="an invented field")),$"{width}: the source");
+    }
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

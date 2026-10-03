@@ -4,9 +4,9 @@ The state of Lumen.Charts and how work on it is done, for whoever picks it up ne
 
 ## Where things stand
 
-- **Released:** v0.34.0, *sparklines* (Race Face charts #4 and #6): `ChartSpec.Sparkline`, `ChartPoint.Highlight`, `ChartSpec.YMinSpan` and `ChartPane.YMinSpan`. Before it, v0.33.0 brought race results on a line (`ChangeColors`, line value labels, `ValueNote`, `XTicks`, `recipes-race-face.md`) and v0.32.0 trend families. GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
-- **In progress:** **0.35.0, the finish-time histogram (Race Face #5) and text that fits a phone** was being built by a background agent in the working tree when this was written (3 October 2026, evening). **Start with `git status`:** uncommitted changes to `src/`, `samples/`, `tests/`, the docs or the skill are that work. If its agent is gone, verify it with the ritual below (its design is in the brain, task "0.35.0 finish-time histogram") and release it, or discard it. After 0.35.0 comes **0.36.0** (designed, see the brain task "0.36.0 reading a chart day by day").
-- **Counts at v0.34.0:** 471 unit assertions, 199 HTTP checks, 47 browser checks on the gallery (20 on the WebAssembly host), 310 hashed renderings. Release build at 0 warnings.
+- **Released:** v0.35.0, *how the field finished, and text that fits* (Race Face chart #5, and Race Face's feedback on 0.33.0): blocks keep at least 2 px; `ChartAnnotation.ShowValue` and `InFront`; `ChartSpec.XTickLabels` and `TickLabels.Bounds`; descriptions and sources wrap to two lines, titles are cut with "…". Before it, v0.34.0 brought sparklines and v0.33.0 race results on a line. With 0.35.0, Race Face's P1 charts are all covered. GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
+- **Next:** **0.36.0, reading a chart day by day** (Race Face #8: arrow keys in every chart, `SharedReadout`, `YSymmetric`, `ValueFormat.Signed`). It is fully designed in the brain (the procedure "0.36.0 design in full"). Start with `git status`: uncommitted changes to `src/`, `samples/`, `tests/`, the docs or the skill are a delegated agent's unreleased work.
+- **Counts at v0.35.0:** 482 unit assertions, 203 HTTP checks, 48 browser checks on the gallery (20 on the WebAssembly host), 318 hashed renderings, 24 recipe charts. Release build at 0 warnings.
 - **NuGet:** not published. The owner chose "skip nuget for now"; packages ship as GitHub release assets, and the Claude Code skill's install scripts download them into a local feed.
 
 ## The map
@@ -21,7 +21,7 @@ The state of Lumen.Charts and how work on it is done, for whoever picks it up ne
 | `tests/Lumen.Charts.Tests` | Executable assertion suite (`Test`/`Check`/`Reject`), `dotnet run`. |
 | `tests/verify-api.ps1` | HTTP checks against a running gallery on port 5188. |
 | `tests/Lumen.Charts.BrowserTests` | Playwright suite (gallery on 5188, WebAssembly host on 5199), with axe sweeps in light, dark and Midnight. |
-| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.34.0 reference hashes (310 rows). See its README. |
+| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.35.0 reference hashes (318 rows). See its README. |
 | `tests/Lumen.Charts.Recipes` | Compiles every recipe in the skill's `sports.md` and `recipes-race-face.md` together, as written, and renders each chart (`python check.py`, then `dotnet run -c Release`). See its README. |
 | `integrations/claude-code/lumen-charts` | The Claude Code skill: `SKILL.md`, `references/` (API, sports recipes, HTTP), `scripts/install.sh` and `install.ps1`. |
 | `docs/FITNESS.md` | The sports-charts research and the eight-step build order this work has followed. |
@@ -40,7 +40,7 @@ Where it stands (3 October 2026):
 | #1 position & points, #2 season by round | 0.33.0 | live |
 | #3 season strip | stays HTML (its ▲/▼ rule is in the recipe) | — |
 | #4 PB sparklines, #6 growth sparklines | 0.34.0 | committed in RaceSenseNet, not yet deployed (the owner deploys) |
-| #5 finish-time histogram | 0.35.0 | being built |
+| #5 finish-time histogram | 0.35.0 | released 3 October 2026; Race Face told to swap it |
 | #7–#14 (P2) | 0.36.0–0.40.0, planned in the brain (task "Race Face P2 plan") | — |
 | #15–#20 (P3) | after P2 | — |
 

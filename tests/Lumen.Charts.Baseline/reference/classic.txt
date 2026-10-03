@@ -289,11 +289,11 @@ trend/midnight-hrv 3A78E7B98C8B182A
 race/faithful-900-light 2943048CB2B38365
 race/recommended-900-light 54F69C1CD00437F0
 race/faithful-340-light C65C06791C68B26A
-race/recommended-340-light C334AA9DB205A30C
+race/recommended-340-light 321105810AEAAD93
 race/faithful-900-midnight 6E5454F804FCF06E
 race/recommended-900-midnight C967507429B65D92
 race/faithful-340-midnight 6FB58524B2D881FA
-race/recommended-340-midnight 95A655DDB4E9D931
+race/recommended-340-midnight 4DB7B28D805EE16E
 race/season-340-midnight FC505B592334AF49
 change/line/Light D669DED1E5B7A8B5
 change/line/Dark 9686D293E4B52FA8
@@ -308,3 +308,11 @@ spark/columns-120 1EA48267FB337491
 highlight/line 43E60A3FBDD8C2E2
 span/line D52F9E45BCB6E0A5
 span/pane 1572F70C5EB83E71
+field/340-light C35EA758C886988B
+field/340-midnight 5DBAAE7B8D3A131B
+field/card-1080 5D8F85E70D80F7FC
+bounds/y 97292A157D090361
+front/columns 47A727DF678C08AD
+text/description-340 6B954B76CA9AF52D
+text/source-340 09BF0374BD167F23
+text/title-340 CC682A48AF18DEA1

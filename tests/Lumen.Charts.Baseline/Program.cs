@@ -577,6 +577,31 @@ ChartPoint[] Weights() => new[] { 37.9, 37.8, 38.2, 38.0, 38.1, 38.0, 37.9 }.Sel
 lines.Add($"span/line {Hash(Render(line with { Title = "Minimum span", YMinSpan = 8, Series = [new("Weight", Weights()) { Markers = MarkerStyle.Filled }] }))}");
 lines.Add($"span/pane {Hash(Render(line with { Title = "Minimum span in a pane", YReversed = true, YFormat = ValueFormat.Duration, Panes = [new() { Label = "Weight", Weight = 1, YMinSpan = 8 }],
     Series = [new("5 km", pbTimes.Select((t, i) => new ChartPoint(i, t)).ToArray()), new("Weight", Weights().Take(6).ToArray()) { Pane = 1 }] }))}");
+// 0.35.0: how the field finished, and text that fits. An invented race of 312 finishers in five-minute bins supplied as blocks from 35:00 to
+// 1:20:00 on an axis held at zero, the last bin's one finisher kept 2 pixels tall, the reader's bin in red and noted, the median a dashed line
+// over the bins labelled without its time, both axes labelled at their bounds, at 340 by 240 in light and Midnight; the same chart as a
+// 1080 by 1350 card, every bar red with no median; bounds on a Y axis; a target in front of columns; and at 340 a description and a source
+// too long for one line and a title too long for the drawing.
+(double From, double To, int Count)[] fieldBins = [(2100, 2400, 18), (2400, 2700, 64), (2700, 3000, 88), (3000, 3300, 57), (3300, 3600, 33), (3600, 3900, 18), (3900, 4200, 10), (4200, 4500, 8), (4500, 4800, 1)];
+ChartSpec Field(ChartStyle style) => new()
+{
+    Kind = ChartKind.Blocks, Style = style with { BarRadius = 2 }, Title = "How the field finished", Description = "312 finishers · median 47:12", Source = "Off the chart: 3 faster and 12 slower",
+    Width = 340, Height = 240, IncludeZero = true, XFormat = ValueFormat.Duration, XTickLabels = TickLabels.Bounds, YTickLabels = TickLabels.Bounds,
+    Annotations = [new(AnnotationAxis.X, 2832) { Label = "median", ShowValue = false, InFront = true, Color = style.Text }],
+    Series = [new("Finishers", fieldBins.Select(b => ChartPoint.Block(b.From, b.To, b.Count) with { Color = b.From == 3000 ? style.Zones[5] : null, ValueNote = b.From == 3000 ? " · you" : null }).ToArray(), style.Zones[0])]
+};
+string Unlegended(ChartSpec spec) => ChartSvg.Render(spec with { Style = Finished(spec.Style, spec.Theme) }, includeLegend: false);
+lines.Add($"field/340-light {Hash(Unlegended(Field(ChartStyle.Light)))}");
+lines.Add($"field/340-midnight {Hash(Unlegended(Field(ChartStyle.Midnight)))}");
+var fieldCard = Field(ChartStyle.Midnight);
+lines.Add($"field/card-1080 {Hash(Unlegended(fieldCard with { Width = 1080, Height = 1350, Annotations = [],
+    Series = [fieldCard.Series[0] with { Color = ChartStyle.Midnight.Zones[5], Points = fieldCard.Series[0].Points.Select(p => p with { Color = null, ValueNote = null }).ToArray() }] }))}");
+lines.Add($"bounds/y {Hash(Render(line with { Title = "Labelled at its bounds", YTickLabels = TickLabels.Bounds }))}");
+lines.Add($"front/columns {Hash(Render(Spec(ChartKind.Column, ChartTheme.Light) with { Title = "A target in front", Annotations = [new(AnnotationAxis.Y, 25) { Label = "Target", InFront = true }] }))}");
+ChartSpec Narrow(string description, string source, string title = "How the field finished") => line with { Width = 340, Title = title, Description = description, Source = source };
+lines.Add($"text/description-340 {Hash(Render(Narrow("Every finisher's time in five-minute bins from the 1st to the 99th percentile, the reader's own in red and the median a dashed line over the bins", "Source: invented")))}");
+lines.Add($"text/source-340 {Hash(Render(Narrow("312 finishers · median 47:12", "Off the chart: 3 faster and 12 slower · counted from the race's 312 finishers")))}");
+lines.Add($"text/title-340 {Hash(Render(Narrow("312 finishers · median 47:12", "Source: invented", "Nineteenth of fifty-two riders in the final round, eleven places better than the first")))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

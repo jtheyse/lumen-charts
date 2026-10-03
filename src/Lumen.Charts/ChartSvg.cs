@@ -24,6 +24,10 @@ internal sealed class SvgWriter
     public ChartSpec? Spec { get; init; }
     /// <summary>A sparkline's data alone: no words are written, and references draw their shapes without their labels.</summary>
     public bool Bare { get; init; }
+    /// <summary>How far a chart's body moves down because its description takes a second line, 14 pixels or none.</summary>
+    public int Head { get; set; }
+    /// <summary>How far a chart's body moves up from its foot because its source takes a second line, 14 pixels or none.</summary>
+    public int Foot { get; set; }
     /// <summary>The refined finish rather than the classic one, which draws as 0.23.0 did.</summary>
     public bool Refined => Style.Finish == ChartFinish.Refined;
     /// <summary>In the refined finish a stroke keeps its width at any display size; in the classic one it scales with the drawing.</summary>
@@ -83,7 +87,7 @@ public static class ChartSvg
     // every record, so leaving out the nulls loses nothing, and it halves the text a long series makes.
     private static readonly JsonSerializerOptions Hashing = new()
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended, Unchanged, Unsparked } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended, Unchanged, Unsparked, Unmarked } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
     /// <summary>A classic style is serialized for hashing as 0.23.0 serialized it, without its finish.</summary>
     private static void Unfinished(JsonTypeInfo info)
@@ -148,6 +152,18 @@ public static class ChartSvg
         foreach (var property in info.Properties)
             if (property.Name == nameof(ChartSpec.Sparkline)) property.ShouldSerialize = (_, sparkline) => sparkline is true;
     }
+    /// <summary>An annotation that writes its value and stands behind the data, and a chart that labels every X tick, are serialized for
+    /// hashing as 0.34.0, which had none of these settings, serialized them, so every chart drawn before them keeps its IDs.</summary>
+    private static void Unmarked(JsonTypeInfo info)
+    {
+        if (info.Type == typeof(ChartAnnotation))
+            foreach (var property in info.Properties)
+                if (property.Name == nameof(ChartAnnotation.ShowValue)) property.ShouldSerialize = (_, shown) => shown is false;
+                else if (property.Name == nameof(ChartAnnotation.InFront)) property.ShouldSerialize = (_, front) => front is true;
+        if (info.Type == typeof(ChartSpec))
+            foreach (var property in info.Properties)
+                if (property.Name == nameof(ChartSpec.XTickLabels)) property.ShouldSerialize = (_, labels) => labels is not TickLabels.All;
+    }
     private static byte[] Hashed<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, Hashing);
     /// <summary>
     /// The prefix of every ID a chart defines: <c>lumen-</c> and the first twelve hex digits of the SHA-256 of its spec as
@@ -181,6 +197,10 @@ public static class ChartSvg
         var legendRows = includeLegend && !bare && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Box and not ChartKind.Violin and not ChartKind.Gauge and not ChartKind.Calendar
             && (spec.Kind != ChartKind.Histogram || spec.Series.Count > 1) ? (int)Math.Ceiling(spec.Series.Count / (double)legendColumns) : 0;
         Begin(w, spec.Width, spec.Height + legendRows * 22, spec.Title, spec.Description);
+        // The source wraps as the description does, but upward from the foot, so a second line takes 14 pixels from the bottom of the
+        // body, which is laid out knowing it.
+        var source = bare ? [] : Wrap(spec.Source, spec.Width - 48);
+        w.Foot = 14 * Math.Max(0, source.Length - 1);
         // An empty sparkline is an empty drawing: its title, which a host writes for the data it has, says what is missing.
         if (!HasData(spec))
         {
@@ -198,9 +218,9 @@ public static class ChartSvg
         else if (spec.Kind == ChartKind.Calendar) Calendar(w, spec);
         else Cartesian(w, spec);
         if (spec.Kind == ChartKind.Scatter && spec.DensityCells is not null && !bare)
-            w.Text(spec.Width - 30, 64, $"{Count(spec.Series.Where(series => Mark(spec, series) == ChartKind.Scatter).Sum(series => series.Points.Count(p => p.Y.HasValue)))} observations aggregated into {spec.DensityCells} cells across",
+            w.Text(spec.Width - 30, 64 + w.Head, $"{Count(spec.Series.Where(series => Mark(spec, series) == ChartKind.Scatter).Sum(series => series.Points.Count(p => p.Y.HasValue)))} observations aggregated into {spec.DensityCells} cells across",
                 "text-anchor='end' class='lumen-muted' font-size='11'");
-        if (!bare) w.Text(24, spec.Height - 12, spec.Source, "class='lumen-muted' font-size='11'");
+        for (var i = 0; i < source.Length; i++) w.Text(24, spec.Height - 12 - 14 * (source.Length - 1 - i), source[i], "class='lumen-muted' font-size='11'");
         if (legendRows > 0)
             for (var i = 0; i < spec.Series.Count; i++)
             {
@@ -303,8 +323,11 @@ public static class ChartSvg
             : $"<rect x='{N(x + 2.5)}' y='{N(y)}' width='9' height='9' rx='2' fill='{inks[0]}'/>";
     }
 
-    /// <summary>Opens the drawing with its title and description. With <paramref name="wrap"/>, a description of clauses parted by
-    /// <c> · </c> that is too wide for the drawing, as a graph's own may be on a phone, goes on over a second line.</summary>
+    /// <summary>Opens the drawing with its title and description. The title stays one line, cut at a word with <c>…</c> where it is
+    /// too wide. A chart's description too wide for one line goes on over a second, as <see cref="Wrap"/> sets it, and the chart's body
+    /// moves down by that line. With <paramref name="wrap"/>, a graph's description of clauses parted by <c> · </c> that is too wide,
+    /// as its own may be on a phone, goes on over a second line as it always has: as many clauses as fit on the first and the rest
+    /// on the second.</summary>
     internal static void Begin(SvgWriter w, int width, int height, string title, string description, bool wrap = false)
     {
         var style = w.Style;
@@ -319,17 +342,88 @@ public static class ChartSvg
         w.MarkDefinitions();
         // A sparkline's title and description are its accessible name, its title and its desc, and are not written.
         if (w.Bare) return;
-        w.Text(24, 28, title, "font-size='17' font-weight='600'");
-        var clauses = description.Split(" · ");
-        if (wrap && clauses.Length > 1 && Wide(description) > width - 48)
+        // The title is 17 pixels to the description's 11, so its width is the estimate for 11 px text scaled by 17 / 11.
+        var room = width - 48d;
+        w.Text(24, 28, Wide(title) * 17 / 11 <= room ? title : Cut(title, room * 11 / 17), "font-size='17' font-weight='600'");
+        if (!wrap)
         {
-            // As many clauses as fit go on the first line, at least one, and the rest on the second.
-            var count = clauses.Length - 1;
-            while (count > 1 && Wide(string.Join(" · ", clauses[..count])) > width - 48) count--;
+            var lines = Wrap(description, room);
+            for (var i = 0; i < lines.Length; i++) w.Text(24, 49 + 14 * i, lines[i], "class='lumen-muted' font-size='11'");
+            w.Head = 14 * (lines.Length - 1);
+            return;
+        }
+        var clauses = description.Split(" · ");
+        if (clauses.Length > 1 && Wide(description) > room)
+        {
+            var count = Clauses(clauses, room);
             w.Text(24, 49, string.Join(" · ", clauses[..count]), "class='lumen-muted' font-size='11'");
             w.Text(24, 62, string.Join(" · ", clauses[count..]), "class='lumen-muted' font-size='11'");
         }
         else w.Text(24, 49, description, "class='lumen-muted' font-size='11'");
+    }
+
+    /// <summary>How many of <paramref name="clauses"/> go on a first line <paramref name="room"/> pixels wide: as many as fit, at least
+    /// one, the rest going on the second.</summary>
+    private static int Clauses(string[] clauses, double room)
+    {
+        var count = clauses.Length - 1;
+        while (count > 1 && Wide(string.Join(" · ", clauses[..count])) > room) count--;
+        return count;
+    }
+
+    /// <summary>
+    /// 11 px text set in at most two lines <paramref name="room"/> pixels wide, by the library's generous estimate of its width: as given
+    /// where it fits on one; else broken between its <c> · </c> clauses, as a graph's description is, where both lines then fit; else
+    /// between the words that set the two lines most nearly equal, so no word is left alone on the second; and where no break leaves
+    /// both lines within the room, the first takes as many words as fit and the second the rest, cut at a word with <c>…</c>. A word too
+    /// wide for a line by itself is broken, or cut, between its letters.
+    /// </summary>
+    internal static string[] Wrap(string text, double room)
+    {
+        if (Wide(text) <= room) return [text];
+        var clauses = text.Split(" · ");
+        if (clauses.Length > 1)
+        {
+            var count = Clauses(clauses, room);
+            string first = string.Join(" · ", clauses[..count]), second = string.Join(" · ", clauses[count..]);
+            if (Wide(first) <= room && Wide(second) <= room) return [first, second];
+        }
+        // A clause's separator at the break would end one line or start the other, so it is left out there.
+        string[]? balanced = null;
+        var widest = double.MaxValue;
+        for (var space = text.IndexOf(' '); space >= 0; space = text.IndexOf(' ', space + 1))
+        {
+            string first = text[..space].TrimEnd(' ', '·'), second = text[(space + 1)..].TrimStart(' ', '·');
+            if (first.Length == 0 || second.Length == 0) continue;
+            var wider = Math.Max(Wide(first), Wide(second));
+            if (wider <= room && wider < widest) (balanced, widest) = ([first, second], wider);
+        }
+        if (balanced is not null) return balanced;
+        var start = Fill(text, room, "");
+        var rest = text[start.Length..].TrimStart(' ', '·');
+        return rest.Length == 0 ? [start] : [start.TrimEnd(' ', '·'), Wide(rest) <= room ? rest : Cut(rest, room)];
+    }
+
+    /// <summary>Text cut at a word, with <c>…</c> after it, to fit <paramref name="room"/> pixels of 11 px text; a first word too wide by
+    /// itself is cut between its letters. The punctuation a cut would leave before the ellipsis is dropped.</summary>
+    private static string Cut(string text, double room) => Fill(text, room, "…").TrimEnd(' ', ',', ';', ':', '·', '-', '—') + "…";
+
+    /// <summary>The longest start of <paramref name="text"/> that ends between words and fits <paramref name="room"/> pixels with
+    /// <paramref name="after"/> written after it, or, where its first word alone does not, the most letters that do, and one at least.</summary>
+    private static string Fill(string text, double room, string after)
+    {
+        var end = 0;
+        for (var space = text.IndexOf(' '); space >= 0; space = text.IndexOf(' ', space + 1))
+        {
+            var line = text[..space].TrimEnd();
+            if (line.Length == 0) continue;
+            if (Wide(line + after) > room) break;
+            end = space;
+        }
+        if (end > 0) return text[..end];
+        var letters = 1;
+        while (letters < text.Length && Wide(text[..(letters + 1)] + after) <= room) letters++;
+        return text[..letters];
     }
 
     /// <summary>A focusable, labelled data mark. <paramref name="attributes"/> are presentation attributes on the group, which
@@ -390,7 +484,7 @@ public static class ChartSvg
         // A block reaches to its XEnd, and only a block has one here.
         var xs = Axis.Create(s.XAxis, points.Select(p => p.X).Concat(points.Where(p => p.XEnd.HasValue).Select(p => p.XEnd!.Value)), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone),
             weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null) with { ValueFormat = s.XFormat };
-        var plots = Plots(s, cats, points, pad);
+        var plots = Plots(s, cats, points, pad, w.Head, w.Foot);
         // A range bar stands centred on its X, so a continuous chart that draws range bars insets its X axis by half the slot
         // they take, and the first and last bars stand whole inside the plot. The slot follows the closest gap on screen, which
         // the inset narrows, so the two are settled together.
@@ -435,6 +529,7 @@ public static class ChartSvg
                     YTick(w, s, ticks, i, y, left, right);
                 }
             }
+            YBounds(w, s, ys, left, right, top, bottom, horizontal);
             // Ticks on the right, but no second set of gridlines: one grid is what a reader can follow.
             if (paired)
                 foreach (var (tick, label) in Spaced(w, ys2, bottom - top).Ticks)
@@ -463,21 +558,27 @@ public static class ChartSvg
                         .Where(p => p.Label is not null && p.X >= xs.Min && p.X <= xs.Max).DistinctBy(p => p.X).OrderBy(p => p.X).ToArray();
                     // A time axis writes its own dates, so the points' labels take their place only where none would be cut short;
                     // a round's long name stays in its point's name rather than reading "Round 1 · Hi…" under it.
-                    var pointed = s.XTicks switch
+                    // An axis labelled at its bounds writes its own two ends, never the points' labels.
+                    var pointed = s.XTickLabels != TickLabels.Bounds && s.XTicks switch
                     {
                         TickSource.Axis => false,
                         TickSource.PointLabels => labels.Length > 0,
                         _ => labels.Length is > 0 and <= 24 && (s.XAxis != AxisKind.Time || labels.All(p => p.Label!.Length <= 12))
                     };
-                    if (pointed)
+                    if (s.XTickLabels == TickLabels.Bounds) XBounds(w, xs, X(xs.Min), X(xs.Max), bottom + 21);
+                    else if (pointed)
                     {
                         var step = Math.Max(1, (int)Math.Ceiling(labels.Length / 7d));
                         if (w.Refined)
                             while (step < labels.Length && !Apart(labels.Where((_, i) => i % step == 0).Select(p => (X(p.X), Short(p.Label!, 12))))) step++;
+                        // Labelled at its ends, the axis keeps the first and the last of the labels it would draw.
+                        var drawn = (labels.Length - 1) / step + 1;
                         for (var i = 0; i < labels.Length; i += step)
-                            w.Text(X(labels[i].X), bottom + 21, Short(labels[i].Label!, 12), "text-anchor='middle' class='lumen-muted'");
+                            if (Written(s.XTickLabels, i / step, drawn)) w.Text(X(labels[i].X), bottom + 21, Short(labels[i].Label!, 12), "text-anchor='middle' class='lumen-muted'");
                     }
-                    else foreach (var (tick, label) in xTicks) w.Text(X(tick), bottom + 21, label, "text-anchor='middle' class='lumen-muted'");
+                    else
+                        for (var i = 0; i < xTicks.Count; i++)
+                            if (Written(s.XTickLabels, i, xTicks.Count)) w.Text(X(xTicks[i].Value), bottom + 21, xTicks[i].Label, "text-anchor='middle' class='lumen-muted'");
                 }
                 w.Text((left + right) / 2, bottom + 44, horizontal ? s.YLabel : s.XLabel, "text-anchor='middle' class='lumen-muted'");
             }
@@ -565,7 +666,7 @@ public static class ChartSvg
                 else if (k == 0) references.Add(Measure(w, annotation, X, Y, xs, ys, left, right, top, bottom));
                 else if (annotation.Axis == AnnotationAxis.X) references.Add(Measure(w, annotation, X, Y, xs, ys, left, right, top, bottom, named: false));
             if (w.Refined) Place(references, left, right, top, bottom);
-            foreach (var reference in references) Draw(w, reference);
+            foreach (var reference in references) if (!reference.Front) Draw(w, reference);
             // Column and range series share each slot side by side. On a continuous axis a slot takes its width from the closest
             // two X values any of them in the pane has, as a candle does from its own, so no two slots overlap.
             var columns = Enumerable.Range(0, s.Series.Count).Where(i => s.Series[i].Pane == k && Mark(s, s.Series[i]) is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Range).ToArray();
@@ -705,6 +806,9 @@ public static class ChartSvg
                         if (ends.Contains(p.X)) from += gap;
                         if (starts.Contains(end)) to -= gap;
                         var far = Math.Min(At(p.Y!.Value), bottom);
+                        // A block above the bottom of its plot keeps 2 pixels of height, so a bin of one among hundreds still shows;
+                        // one at the bottom, a count of none, draws nothing visible and keeps its name and its focus.
+                        if (bottom - far > 1e-9) far = Math.Min(far, bottom - 2);
                         Datum(w, si, pi, BlockLabel(series, p, xs, scale, several), Block(from, far, to - from, bottom - far, radius, Ink(p)));
                     }
                 }
@@ -766,6 +870,8 @@ public static class ChartSvg
                 }
                 if (series.Trend) Trend(w, series, color, X, At, left, right, scale.Reversed, s.MaxRenderedPoints);
             }
+            // A reference in front stands over the data, so columns and blocks do not hide it, and under the labels.
+            foreach (var reference in references) if (reference.Front) Draw(w, reference);
             if (w.Refined) foreach (var reference in references) Label(w, reference);
             w.Add("</svg>");
             w.Add(named.ToString());
@@ -804,15 +910,39 @@ public static class ChartSvg
         return Math.Min(pad, (Math.Min(s.Width, s.Height) - 2) / 2d);
     }
 
-    /// <summary>A main Y axis tick label, on the side the spec puts the axis, unless the spec labels only the ends.</summary>
+    /// <summary>A main Y axis tick label, on the side the spec puts the axis, unless the spec labels only the ends or the bounds.</summary>
     private static void YTick(SvgWriter w, ChartSpec s, IReadOnlyList<(double Value, string Label)> ticks, int i, double y, double left, double right)
     {
         if (!Labelled(s, ticks, i)) return;
-        if (s.YAxisSide == AxisSide.Right) w.Text(right + 12, y + 4, ticks[i].Label, "text-anchor='start' class='lumen-muted'");
-        else w.Text(left - 12, y + 4, ticks[i].Label, "text-anchor='end' class='lumen-muted'");
+        YLabel(w, s, y, ticks[i].Label, left, right);
     }
-    private static bool Labelled(ChartSpec s, IReadOnlyList<(double Value, string Label)> ticks, int i) =>
-        s.YTickLabels == TickLabels.All || i == 0 || i == ticks.Count - 1;
+    /// <summary>A main Y axis label at <paramref name="y"/>, beside the plot on the side the spec puts the axis.</summary>
+    private static void YLabel(SvgWriter w, ChartSpec s, double y, string label, double left, double right)
+    {
+        if (s.YAxisSide == AxisSide.Right) w.Text(right + 12, y + 4, label, "text-anchor='start' class='lumen-muted'");
+        else w.Text(left - 12, y + 4, label, "text-anchor='end' class='lumen-muted'");
+    }
+    private static bool Labelled(ChartSpec s, IReadOnlyList<(double Value, string Label)> ticks, int i) => Written(s.YTickLabels, i, ticks.Count);
+    /// <summary>Whether tick <paramref name="i"/> of the <paramref name="count"/> an axis draws carries its label: every one does, or the
+    /// first and the last, or, where the axis is labelled at its bounds, none, its ends being labelled instead.</summary>
+    private static bool Written(TickLabels labels, int i, int count) => labels == TickLabels.All || labels == TickLabels.Ends && (i == 0 || i == count - 1);
+    /// <summary>The main Y axis's two ends, labelled at their exact values in its format where the spec labels its bounds: beside the
+    /// plot, or along the bottom of a horizontal bar chart, the lower end's label starting at its end and the upper's ending at its.</summary>
+    private static void YBounds(SvgWriter w, ChartSpec s, Axis ys, double left, double right, double top, double bottom, bool horizontal = false)
+    {
+        if (s.YTickLabels != TickLabels.Bounds) return;
+        // A horizontal bar chart's value ticks stand 20 pixels under its plot.
+        if (horizontal) XBounds(w, ys, ys.Map(ys.Min, left, right), ys.Map(ys.Max, left, right), bottom + 20);
+        else foreach (var end in new[] { ys.Min, ys.Max }) YLabel(w, s, ys.Map(end, bottom, top), ys.Format(end), left, right);
+    }
+    /// <summary>An axis along the bottom labelled at its two ends, at their exact values in its format, on the baseline
+    /// <paramref name="y"/>: the first's label starts at <paramref name="from"/> and the last's ends at <paramref name="to"/>, so both
+    /// stand whole under the plot however long they are.</summary>
+    private static void XBounds(SvgWriter w, Axis axis, double from, double to, double y)
+    {
+        w.Text(from, y, axis.Format(axis.Min), "text-anchor='start' class='lumen-muted'");
+        w.Text(to, y, axis.Format(axis.Max), "text-anchor='end' class='lumen-muted'");
+    }
     /// <summary>A main Y axis title, read upwards on the left or downwards on the right.</summary>
     private static void YTitle(SvgWriter w, ChartSpec s, string label, double top, double bottom)
     {
@@ -1031,12 +1161,13 @@ public static class ChartSvg
     /// <summary>
     /// The main plot and the panes under it, top to bottom, each with the Y axes its own series are measured against. The
     /// height between the title and the X axis is shared out by weight, the main plot weighing 1, after a fixed gap
-    /// between each two. A sparkline's one plot fills its drawing but for <paramref name="pad"/>.
+    /// between each two; a description on two lines takes <paramref name="head"/> from its top and a source on two lines
+    /// <paramref name="foot"/> from its bottom. A sparkline's one plot fills its drawing but for <paramref name="pad"/>.
     /// </summary>
-    private static (ChartPane Pane, double Top, double Bottom, Axis Ys, Axis Ys2, bool Paired)[] Plots(ChartSpec s, double[] cats, ChartPoint[] points, double pad)
+    private static (ChartPane Pane, double Top, double Bottom, Axis Ys, Axis Ys2, bool Paired)[] Plots(ChartSpec s, double[] cats, ChartPoint[] points, double pad, int head, int foot)
     {
         const double gap = 24;
-        double top = s.Sparkline ? pad : 78, bottom = s.Height - (s.Sparkline ? pad : 76d);
+        double top = s.Sparkline ? pad : 78 + head, bottom = s.Height - (s.Sparkline ? pad : 76d + foot);
         var room = bottom - top - gap * s.Panes.Count;
         var weight = 1 + s.Panes.Sum(p => p.Weight);
         var zero = s.IncludeZero || s.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Area;
@@ -1293,10 +1424,14 @@ public static class ChartSvg
         }
     }
 
-    /// <summary>A reference line or band measured for drawing: its shape, its name, which its label shows, and where.</summary>
+    /// <summary>A reference line or band measured for drawing: its shape, its name, the label it shows, and where.</summary>
     private sealed class Reference
     {
         public required string Name { get; init; }
+        /// <summary>The label drawn on the chart: its name, or its annotation's label alone where it shows no value.</summary>
+        public required string Text { get; init; }
+        /// <summary>Drawn over the data rather than behind it.</summary>
+        public bool Front { get; init; }
         public required string Shape { get; init; }
         public required string Ink { get; init; }
         /// <summary>False draws the shape alone, as an X reference does in the panes below the one that names it.</summary>
@@ -1351,28 +1486,34 @@ public static class ChartSvg
             var dash = annotation.Dashed ? " stroke-dasharray='6 4'" : "";
             double x1 = horizontal ? left : at, y1 = horizontal ? at : top, x2 = horizontal ? right : at, y2 = horizontal ? at : bottom;
             // An invisible wider line carries the pointer, so a dashed reference is hoverable
-            // along its whole length rather than only where a dash happens to fall. A refined line is thinner than the data.
+            // along its whole length rather than only where a dash happens to fall. A refined line is thinner than the data. A line in
+            // front of the data stands on a halo of the background colour, as a gauge's target does, so it shows over a bar of any
+            // colour, a muted line over grey bins included.
+            var thin = w.Refined ? 1 : 1.5;
             shape = $"<line x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{colour}' stroke-opacity='0' stroke-width='12'{w.Fixed}/>" +
-                $"<line x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{colour}' stroke-width='{(w.Refined ? "1" : "1.5")}'{dash}{w.Fixed}/>";
+                (annotation.InFront ? $"<line x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{w.Style.Background}' stroke-width='{N(thin + 2)}'{w.Fixed}/>" : "") +
+                $"<line x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{colour}' stroke-width='{N(thin)}'{dash}{w.Fixed}/>";
             reading ??= axis.Format(annotation.From);
             (labelX, labelY, anchor) = horizontal ? (right - 6, at - 6, "end") : Upright(at, at);
             (near, far) = (at, at);
         }
+        // The name always reads the value; the label drawn leaves it out where the annotation shows its label alone.
+        var name = annotation.Label is null ? reading : $"{annotation.Label}: {reading}";
         return new()
         {
-            Name = annotation.Label is null ? reading : $"{annotation.Label}: {reading}", Shape = shape, Ink = ink ?? colour, Named = named,
+            Name = name, Text = annotation.ShowValue ? name : annotation.Label!, Front = annotation.InFront, Shape = shape, Ink = ink ?? colour, Named = named,
             Upright = !horizontal, Band = annotation.To is not null, Near = near, Far = far, X = labelX, Y = labelY, Anchor = anchor
         };
     }
 
-    /// <summary>Draws a reference behind the data. The classic finish writes its label with it; the refined one writes the label
+    /// <summary>Draws a reference, behind the data or, in front, over it. The classic finish writes its label with it; the refined one writes the label
     /// over the data afterwards, with <see cref="Label"/>, so the group carries the name and the shape alone, as a sparkline's does in
     /// either finish.</summary>
     private static void Draw(SvgWriter w, Reference reference)
     {
         if (!reference.Named) { w.Add(reference.Shape); return; }
         Aggregate(w, reference.Name, reference.Shape + (w.Refined || w.Bare ? "" :
-            $"<text x='{N(reference.X)}' y='{N(reference.Y)}' text-anchor='{reference.Anchor}' fill='{reference.Ink}' font-size='11'>{SvgWriter.E(reference.Name)}</text>"));
+            $"<text x='{N(reference.X)}' y='{N(reference.Y)}' text-anchor='{reference.Anchor}' fill='{reference.Ink}' font-size='11'>{SvgWriter.E(reference.Text)}</text>"));
     }
 
     /// <summary>A refined reference label, over the data with a halo in the background colour so it reads across lines. The
@@ -1382,7 +1523,7 @@ public static class ChartSvg
     {
         if (!reference.Named || !reference.Shown || w.Bare) return;
         w.Add($"<text x='{N(reference.X)}' y='{N(reference.Y)}' text-anchor='{reference.Anchor}' fill='{reference.Ink}' font-size='11' " +
-            $"stroke='{w.Style.Background}' stroke-width='3' stroke-linejoin='round' paint-order='stroke' pointer-events='none' aria-hidden='true'>{SvgWriter.E(reference.Name)}</text>");
+            $"stroke='{w.Style.Background}' stroke-width='3' stroke-linejoin='round' paint-order='stroke' pointer-events='none' aria-hidden='true'>{SvgWriter.E(reference.Text)}</text>");
     }
 
     /// <summary>
@@ -1445,7 +1586,7 @@ public static class ChartSvg
             return false;
         }
         foreach (var reference in references.Where(r => r.Named).OrderBy(r => r.Upright).ThenBy(r => r.Band).ThenBy(r => Math.Min(r.Near, r.Far)))
-            reference.Shown = reference.Upright ? Upright(reference, Wide(reference.Name)) : Level(reference, Wide(reference.Name));
+            reference.Shown = reference.Upright ? Upright(reference, Wide(reference.Text)) : Level(reference, Wide(reference.Text));
     }
 
     private static void Candles(SvgWriter w, int si, ChartSeries series, Func<double, double> X, Func<double, double> Y, Axis xs, Axis ys)
@@ -1526,7 +1667,7 @@ public static class ChartSvg
         var names = s.Series.Select(series => Short(series.Name, 14)).ToArray();
         // The lane names stand 12 pixels from the plot, with room beyond them for the Y title.
         var margin = Math.Clamp(Math.Ceiling(names.Max(Broad)) + 42, 76, 180);
-        double left = flipped ? 30 : margin, right = s.Width - (flipped ? margin : 30), top = 78, bottom = s.Height - 76;
+        double left = flipped ? 30 : margin, right = s.Width - (flipped ? margin : 30), top = 78 + w.Head, bottom = s.Height - 76 - w.Foot;
         var xs = Axis.Create(s.XAxis, s.Series.SelectMany(series => series.Points).SelectMany(p => new[] { p.X, p.XEnd!.Value }), min: s.XMin, max: s.XMax,
             zone: TimeAxis.Zone(s.TimeZone), weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null) with { ValueFormat = s.XFormat };
         double X(double x) => xs.Map(x, left, right);
@@ -1536,12 +1677,13 @@ public static class ChartSvg
         var (xCount, xTicks) = Spaced(w, xs, right - left, across: true, count: s.XAxis == AxisKind.Time ? 6 : 5);
         if (s.MinorGridlines)
             foreach (var minor in xs.MinorTicks(xCount)) { var x = X(minor); Gridline(w, x, top, x, bottom, minor: true); }
-        foreach (var (tick, label) in xTicks)
+        for (var i = 0; i < xTicks.Count; i++)
         {
-            var x = X(tick);
+            var x = X(xTicks[i].Value);
             Gridline(w, x, top, x, bottom);
-            w.Text(x, bottom + 21, label, "text-anchor='middle' class='lumen-muted'");
+            if (Written(s.XTickLabels, i, xTicks.Count)) w.Text(x, bottom + 21, xTicks[i].Label, "text-anchor='middle' class='lumen-muted'");
         }
+        if (s.XTickLabels == TickLabels.Bounds) XBounds(w, xs, left, right, bottom + 21);
         for (var i = 0; i < s.Series.Count; i++)
             w.Text(flipped ? right + 12 : left - 12, Middle(i) + 4, names[i], $"text-anchor='{(flipped ? "start" : "end")}' class='lumen-muted'");
         w.Text((left + right) / 2, bottom + 44, s.XLabel, "text-anchor='middle' class='lumen-muted'");
@@ -1551,7 +1693,7 @@ public static class ChartSvg
         // Moments marked along X stand behind the spans, as references do behind data.
         var references = s.Annotations.Select(annotation => Measure(w, annotation, X, y => y, xs, xs, left, right, top, bottom)).ToList();
         if (w.Refined) Place(references, left, right, top, bottom);
-        foreach (var reference in references) Draw(w, reference);
+        foreach (var reference in references) if (!reference.Front) Draw(w, reference);
         if (s.TimelineConnectors)
         {
             // The lanes each moment starts a span in; within a lane spans cannot overlap, so a lane starts at most one there.
@@ -1584,6 +1726,7 @@ public static class ChartSvg
                     $"<rect class='lumen-span' x='{N(x1)}' y='{N(Middle(i) - thick / 2)}' width='{N(width)}' height='{N(thick)}' rx='{N(Math.Min(radius, Math.Min(width, thick) / 2))}' fill='{color}'/>");
             }
         }
+        foreach (var reference in references) if (reference.Front) Draw(w, reference);
         if (w.Refined) foreach (var reference in references) Label(w, reference);
         w.Add("</svg>");
     }
@@ -1657,8 +1800,8 @@ public static class ChartSvg
     /// </summary>
     private static void Calendar(SvgWriter w, ChartSpec s)
     {
-        const double margin = 24, top = 64;
-        var bottom = s.Height - 30d;
+        const double margin = 24;
+        double top = 64 + w.Head, bottom = s.Height - 30d - w.Foot;
         var series = s.Series[0];
         var zone = TimeAxis.Zone(s.TimeZone);
         var (first, last) = CalendarSpan(s);
@@ -1872,6 +2015,7 @@ public static class ChartSvg
             Gridline(w, left, y, right, y);
             YTick(w, s, ticks, i, y, left, right);
         }
+        YBounds(w, s, ys, left, right, top, bottom);
         w.Text((left + right) / 2, bottom + 44, s.XLabel, "text-anchor='middle' class='lumen-muted'");
         YTitle(w, s, s.YLabel, top, bottom);
     }
@@ -1892,7 +2036,7 @@ public static class ChartSvg
         var observations = s.Series.Select(series => series.Points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray()).ToArray();
         var counted = Statistics.SharedBins(observations, s.Bins);
         var bins = counted[0];
-        var (left, right) = Across(s); double top = 78, bottom = s.Height - 76;
+        var (left, right) = Across(s); double top = 78 + w.Head, bottom = s.Height - 76 - w.Foot;
         var xs = new Axis(AxisKind.Linear, bins[0].Start, bins[^1].End);
         var ys = Axis.Create(AxisKind.Linear, counted.SelectMany(set => set).Select(b => (double)b.Count), true, s.YMin, s.YMax);
         Frame(w, s, ys, left, right, top, bottom);
@@ -1921,14 +2065,14 @@ public static class ChartSvg
             w.Text(xs.Map(edge, left, right), bottom + 21, LinearScale.Label(edge), "text-anchor='middle' class='lumen-muted'");
         }
         var total = observations.Sum(set => set.Length);
-        w.Text(right, 64, several ? $"{total} observations across {s.Series.Count} series in {bins.Count} shared equal-width bins" : $"{total} observations in {bins.Count} equal-width bins",
+        w.Text(right, 64 + w.Head, several ? $"{total} observations across {s.Series.Count} series in {bins.Count} shared equal-width bins" : $"{total} observations in {bins.Count} equal-width bins",
             "text-anchor='end' class='lumen-muted' font-size='11'");
     }
 
     private static void Box(SvgWriter w, ChartSpec s)
     {
         var observations = s.Series.Select(series => series.Points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray()).ToArray();
-        var (left, right) = Across(s); double top = 78, bottom = s.Height - 76;
+        var (left, right) = Across(s); double top = 78 + w.Head, bottom = s.Height - 76 - w.Foot;
         // A supplied summary has no observations behind it, so its whiskers and outliers are what the axis must reach.
         var supplied = s.Series.Select(series => series.Summary).OfType<BoxSummary>()
             .SelectMany(summary => summary.Outliers.Append(summary.LowerWhisker).Append(summary.UpperWhisker));
@@ -1981,7 +2125,7 @@ public static class ChartSvg
     private static void Violin(SvgWriter w, ChartSpec s)
     {
         var observations = s.Series.Select(series => series.Points.Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray()).ToArray();
-        var (left, right) = Across(s); double top = 78, bottom = s.Height - 76;
+        var (left, right) = Across(s); double top = 78 + w.Head, bottom = s.Height - 76 - w.Foot;
         var ys = Axis.Create(s.YAxis, observations.SelectMany(v => v), s.IncludeZero, s.YMin, s.YMax) with { ValueFormat = s.YFormat, Reversed = s.YReversed };
         Frame(w, s, ys, left, right, top, bottom);
         var band = (right - left) / s.Series.Count;
@@ -2029,8 +2173,8 @@ public static class ChartSvg
         double Angle(double v) => start + sweep * (Math.Clamp(v, min, max) - min) / (max - min);
         const double ratio = .16;
         // A target's label over the upper half of the arc stands above it, so the arc starts lower to leave it room.
-        var top = s.Annotations.Any(annotation => Math.Abs(Angle(annotation.From)) < 70) ? 78d : 64d;
-        var bottom = s.Height - 30d;
+        var top = (s.Annotations.Any(annotation => Math.Abs(Angle(annotation.From)) < 70) ? 78d : 64d) + w.Head;
+        var bottom = s.Height - 30d - w.Foot;
         // How far below the centre the arc's ends reach, in radii; under them go the end labels.
         var drop = Math.Max(0, -Math.Cos(sweep / 2 * Math.PI / 180));
         var radius = Math.Min((s.Width - 48d) / (2 + ratio), (bottom - top - 18) / (1 + ratio + drop));
@@ -2116,10 +2260,12 @@ public static class ChartSvg
             var angle = Angle(annotation.From);
             var colour = annotation.Color ?? w.Style.Muted;
             var name = annotation.Label is null ? scale.Format(annotation.From) : $"{annotation.Label}: {scale.Format(annotation.From)}";
+            // The tick's name always reads its value; the label drawn leaves it out where the annotation shows its label alone.
+            var text = annotation.ShowValue ? name : annotation.Label!;
             var (x1, y1) = Polar(inner - 5, angle); var (x2, y2) = Polar(outer + 5, angle);
             string Tick(string ink, string width) => $"<line class='lumen-gauge-target' x1='{N(x1)}' y1='{N(y1)}' x2='{N(x2)}' y2='{N(y2)}' stroke='{ink}' stroke-width='{width}' stroke-linecap='round'{w.Fixed}/>";
             Aggregate(w, name, Tick(w.Style.Background, "5") + Tick(colour, "2"));
-            var wide = Wide(name);
+            var wide = Wide(text);
             // Near the top or the bottom of the arc a label is centred on its tick; elsewhere it runs away from the tick, outward
             // outside the arc and toward the middle inside it.
             (double X, double Y, string Anchor, (double X1, double Y1, double X2, double Y2) Box) Place(double distance, bool outside)
@@ -2132,7 +2278,7 @@ public static class ChartSvg
                 return (x, baseline, anchor, (left, baseline - 9, left + wide, baseline + 3));
             }
             var label = Place(outer + 9, true);
-            var placed = cx + label.Box.X1 >= 8 && cx + label.Box.X2 <= s.Width - 8 && cy + label.Box.Y1 >= 56 && Free(label.Box);
+            var placed = cx + label.Box.X1 >= 8 && cx + label.Box.X2 <= s.Width - 8 && cy + label.Box.Y1 >= 56 + w.Head && Free(label.Box);
             for (var distance = inner - 9; !placed && distance > inner / 3; distance -= 4)
             {
                 label = Place(distance, false);
@@ -2141,7 +2287,7 @@ public static class ChartSvg
             }
             if (!placed) continue;
             taken.Add(label.Box);
-            w.Add($"<text x='{R(label.X)}' y='{R(label.Y)}' text-anchor='{label.Anchor}' fill='{colour}' font-size='11' stroke='{w.Style.Background}' stroke-width='3' stroke-linejoin='round' paint-order='stroke' pointer-events='none' aria-hidden='true'>{SvgWriter.E(name)}</text>");
+            w.Add($"<text x='{R(label.X)}' y='{R(label.Y)}' text-anchor='{label.Anchor}' fill='{colour}' font-size='11' stroke='{w.Style.Background}' stroke-width='3' stroke-linejoin='round' paint-order='stroke' pointer-events='none' aria-hidden='true'>{SvgWriter.E(text)}</text>");
         }
         w.Add("</g>");
     }
@@ -2156,8 +2302,7 @@ public static class ChartSvg
     /// </summary>
     private static void Rings(SvgWriter w, ChartSpec s)
     {
-        const double top = 64;
-        var bottom = s.Height - 30d;
+        double top = 64 + w.Head, bottom = s.Height - 30d - w.Foot;
         var outer = Math.Min(s.Width - 48d, bottom - top) / 2;
         var pitch = Math.Min(outer * .22, outer * .72 / s.Series.Count);
         var thick = pitch * .84;
@@ -2238,8 +2383,9 @@ public static class ChartSvg
     {
         var series = s.Series[0]; var total = series.Points.Sum(p => p.Y ?? 0);
         if (total <= 0) { w.Text(s.Width / 2, s.Height / 2, "No positive values", "text-anchor='middle'"); return; }
-        var cx = s.Width * .35; var cy = (s.Height + 30) / 2d;
-        var r = Math.Min(s.Width * .23, (s.Height - 140) / 2d); var inner = r * .67;
+        // A description or a source on two lines takes its 14 pixels from the height the ring and its key are laid out in.
+        var cx = s.Width * .35; var cy = w.Head + (s.Height - w.Head - w.Foot + 30) / 2d;
+        var r = Math.Min(s.Width * .23, (s.Height - w.Head - w.Foot - 140) / 2d); var inner = r * .67;
         var angle = -Math.PI / 2;
         for (var i = 0; i < series.Points.Count; i++)
         {
@@ -2253,7 +2399,7 @@ public static class ChartSvg
             Datum(w, 0, i, $"{p.Label ?? LinearScale.Label(p.X)}: {LinearScale.Label(p.Y.Value)}{p.ValueNote} ({p.Y / total:P1})", $"<path d='{path}' fill='{color}'/>");
             if (i < 10)
             {
-                var ly = 95 + i * 25;
+                var ly = 95 + w.Head + i * 25;
                 w.Add($"<circle cx='{N(s.Width * .65)}' cy='{ly-4}' r='4' fill='{color}'/>");
                 w.Text(s.Width * .65 + 14, ly, $"{Short(p.Label ?? LinearScale.Label(p.X),18)}  {LinearScale.Label(p.Y.Value)}");
             }
@@ -2268,10 +2414,11 @@ public static class ChartSvg
         var cats = s.Series.SelectMany(x => x.Points).Select(p => p.X).Distinct().Order().ToArray();
         var values = s.Series.SelectMany(x => x.Points).Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToArray();
         var scale = LinearScale.Create(values);
-        var cw = (s.Width - 165d) / cats.Length; var ch = (s.Height - 160d) / s.Series.Count;
+        // A description or a source on two lines takes its 14 pixels from the rows' height.
+        var cw = (s.Width - 165d) / cats.Length; var ch = (s.Height - w.Head - w.Foot - 160d) / s.Series.Count;
         for (var si = 0; si < s.Series.Count; si++)
         {
-            w.Text(118, 80 + (si + .5) * ch + 4, Short(s.Series[si].Name,17), "text-anchor='end' class='lumen-muted'");
+            w.Text(118, 80 + w.Head + (si + .5) * ch + 4, Short(s.Series[si].Name,17), "text-anchor='end' class='lumen-muted'");
             for (var pi = 0; pi < s.Series[si].Points.Count; pi++)
             {
                 var p = s.Series[si].Points[pi]; if (!p.Y.HasValue) continue;
@@ -2279,12 +2426,12 @@ public static class ChartSvg
                 var t = scale.Map(p.Y.Value, 0, 1);
                 var color = Mix(w.Style.HeatmapLow, w.Style.HeatmapHigh, t);
                 // A hairline keeps the palest cells distinguishable from the chart background.
-                Datum(w,si,pi,PointLabel(s.Series[si],p),$"<rect x='{N(x+1)}' y='{N(80+si*ch+1)}' width='{N(Math.Max(0,cw-2))}' height='{N(Math.Max(0,ch-2))}' rx='3' fill='{color}' stroke='var(--lumen-muted)' stroke-opacity='.4'{w.Fixed}/>");
+                Datum(w,si,pi,PointLabel(s.Series[si],p),$"<rect x='{N(x+1)}' y='{N(80+w.Head+si*ch+1)}' width='{N(Math.Max(0,cw-2))}' height='{N(Math.Max(0,ch-2))}' rx='3' fill='{color}' stroke='var(--lumen-muted)' stroke-opacity='.4'{w.Fixed}/>");
             }
         }
         for (var i = 0; i < cats.Length; i += Math.Max(1,(int)Math.Ceiling(cats.Length/12d)))
-            w.Text(130+(i+.5)*cw, s.Height-62, Short(s.Series.SelectMany(x=>x.Points).First(p=>p.X==cats[i]).Label ?? LinearScale.Label(cats[i]),10), "text-anchor='middle' class='lumen-muted'");
-        w.Text(130, s.Height-36, $"Color scale: {LinearScale.Label(scale.Min)} (light) to {LinearScale.Label(scale.Max)} (dark)", "class='lumen-muted'");
+            w.Text(130+(i+.5)*cw, s.Height-w.Foot-62, Short(s.Series.SelectMany(x=>x.Points).First(p=>p.X==cats[i]).Label ?? LinearScale.Label(cats[i]),10), "text-anchor='middle' class='lumen-muted'");
+        w.Text(130, s.Height-w.Foot-36, $"Color scale: {LinearScale.Label(scale.Min)} (light) to {LinearScale.Label(scale.Max)} (dark)", "class='lumen-muted'");
     }
 
     private static void Radar(SvgWriter w, ChartSpec s)
@@ -2292,7 +2439,8 @@ public static class ChartSvg
         var cats = s.Series.SelectMany(x=>x.Points).Select(p=>p.X).Distinct().Order().ToArray();
         if (cats.Length < 3) throw new ArgumentException("Radar charts require at least three categories.");
         var max = Math.Max(1,s.Series.SelectMany(x=>x.Points).Max(p=>p.Y ?? 0));
-        var cx=s.Width/2d; var cy=(s.Height+32)/2d; var r=(s.Height-180)/2d;
+        // A description or a source on two lines takes its 14 pixels from the height the web is laid out in.
+        var cx=s.Width/2d; var cy=w.Head+(s.Height-w.Head-w.Foot+32)/2d; var r=(s.Height-w.Head-w.Foot-180)/2d;
         (double X,double Y) At(int i,double value) { var a=2*Math.PI*i/cats.Length-Math.PI/2; return(cx+r*value/max*Math.Cos(a),cy+r*value/max*Math.Sin(a)); }
         for(var ring=1;ring<=4;ring++)
             w.Add($"<polygon points='{string.Join(" ",Enumerable.Range(0,cats.Length).Select(i=> {var p=At(i,max*ring/4);return $"{N(p.X)},{N(p.Y)}";}))}' fill='none' class='lumen-grid'{w.Fixed}/>");
@@ -2313,7 +2461,7 @@ public static class ChartSvg
                 Datum(w,si,pi,PointLabel(series,p),$"<circle cx='{N(pos.X)}' cy='{N(pos.Y)}' r='4' fill='{color}'/>");
             }
         }
-        w.Text(24,s.Height-38,$"Radial scale: 0 to {LinearScale.Label(max)}","class='lumen-muted'");
+        w.Text(24,s.Height-w.Foot-38,$"Radial scale: 0 to {LinearScale.Label(max)}","class='lumen-muted'");
     }
     /// <summary>Linear interpolation per channel, truncated, which is how the heatmap ramp has always been computed.</summary>
     private static string Mix(string low, string high, double t)

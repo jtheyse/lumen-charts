@@ -56,6 +56,11 @@ public static partial class ChartValidation
         if (!Enum.IsDefined(spec.XTicks)) throw new ArgumentException("Unknown tick source.");
         if (spec.XTicks != TickSource.Auto && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Blocks))
             throw new ArgumentException("XTicks chooses between a continuous X axis's own ticks and its points' labels, so it applies to line, area, scatter, bubble, candlestick, OHLC, band, range and blocks charts; column, bar and stacked column charts label each category, a timeline and a calendar write their own time, and the other kinds have no X axis to label.");
+        if (!Enum.IsDefined(spec.XTickLabels)) throw new ArgumentException("Unknown X tick labelling.");
+        if (spec.XTickLabels != TickLabels.All && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Blocks or ChartKind.Timeline))
+            throw new ArgumentException("XTickLabels chooses which labels a continuous X axis writes along the bottom, so it applies to line, area, scatter, bubble, candlestick, OHLC, band, range, blocks and timeline charts; column, bar and stacked column charts label each category, a histogram the edges of its bins and a calendar its own dates, and the other kinds have no X axis.");
+        if (spec.XTickLabels == TickLabels.Bounds && spec.XTicks == TickSource.PointLabels)
+            throw new ArgumentException("XTickLabels = Bounds labels the X axis's own two ends, and XTicks = PointLabels asks for the points' labels instead, so a chart takes one or the other.");
         if (secondary)
         {
             if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Band or ChartKind.Range or ChartKind.Blocks))
@@ -113,6 +118,12 @@ public static partial class ChartValidation
             if (axis == AxisKind.Log && annotation.From <= 0) throw new ArgumentException("Log axes require positive annotation values.");
             if (annotation.Axis == AnnotationAxis.X && spec.XAxis == AxisKind.Time && !TimeAxis.InRange(annotation.From))
                 throw new ArgumentException("Time annotations must be Unix milliseconds between year 1 and year 9999.");
+            if (!annotation.ShowValue && string.IsNullOrWhiteSpace(annotation.Label))
+                throw new ArgumentException("ShowValue = false draws an annotation's label without its value, so it needs a Label to draw; its tooltip and accessible name still read the value.");
+            if (!annotation.ShowValue && spec.Kind == ChartKind.Calendar)
+                throw new ArgumentException("A calendar's key names an outlined day by its label alone already, so ShowValue does not apply to a calendar's annotations.");
+            if (annotation.InFront && spec.Kind is ChartKind.Gauge or ChartKind.Calendar)
+                throw new ArgumentException("InFront draws a reference over the data instead of behind it; a gauge draws its target over the score already, and a calendar outlines its day, so neither takes it.");
             Text(annotation.Label); Color(annotation.Color);
         }
         var style = ChartSvg.ResolveStyle(spec);

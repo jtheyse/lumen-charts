@@ -732,15 +732,15 @@ if (await sportsLink.CountAsync() > 0)
     var charts = sports.Locator(".lumen-chart");
     // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
-        return svgs.length === 23 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+        return svgs.length === 24 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
-    await Test("The Sports & performance page renders its twenty-three charts, each live and drawn at the width it is shown", async () =>
+    await Test("The Sports & performance page renders its twenty-four charts, each live and drawn at the width it is shown", async () =>
     {
-        Check(await charts.CountAsync() == 23, $"the page shows {await charts.CountAsync()} charts");
-        for (var i = 0; i < 23; i++)
+        Check(await charts.CountAsync() == 24, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 24; i++)
             Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
-        // Each chart's script adds its tooltip, so twenty-three of them prove every chart, sparklines included, is interactive.
-        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 23");
+        // Each chart's script adds its tooltip, so twenty-four of them prove every chart, sparklines included, is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 24");
         await sports.WaitForFunctionAsync(drawnToFit);
     });
 
@@ -788,7 +788,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 23", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 24", null, new() { Timeout = 120_000 });
             await Sparklines(tab, "phone");
         });
     }
@@ -853,6 +853,35 @@ if (await sportsLink.CountAsync() > 0)
             Check(await tip.TextContentAsync() == await mark.GetAttributeAsync("aria-label") && (await tip.TextContentAsync())!.EndsWith("27/51, worse than the previous"), $"the tooltip reads {await tip.TextContentAsync()}");
         });
     else Console.WriteLine("SKIP race results phone check: this host's Sports & performance page has no race results");
+    // On the same phone every word of How the field finished stands inside its drawing as the browser lays it out, and so does every
+    // chart's title, description and source, which are written from the left: a description or a source too wide for its card goes on
+    // over a second line, and a title too wide is cut, rather than running past the drawing's edge.
+    if (await sports.Locator("#field .lumen-chart").CountAsync() > 0)
+        await Test("On a 375-pixel phone no word of How the field finished, and no chart's title, description or source on the Sports & performance page, runs outside its drawing", async () =>
+        {
+            await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+            var tab = await phone.NewPageAsync();
+            tab.SetDefaultTimeout(15_000);
+            await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 24", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
+            var card = tab.Locator("#field .lumen-chart");
+            await card.ScrollIntoViewIfNeededAsync();
+            var measured = await tab.EvaluateAsync<double[]>(@"() => {
+                const outside = (s, texts) => { const box = s.getBoundingClientRect();
+                    return texts.filter(t => { const b = t.getBoundingClientRect(); return b.width > 0 && (b.left < box.left - .5 || b.right > box.right + .5 || b.top < box.top - .5 || b.bottom > box.bottom + .5); }).length; };
+                const field = document.querySelector('#field .lumen-viewport > svg');
+                const charts = [...document.querySelectorAll('.lumen-chart:not(.lumen-spark) .lumen-viewport > svg')];
+                const written = charts.map(s => [...s.querySelectorAll(':scope > text[x=""24""]')]);
+                return [field.querySelectorAll('text').length, outside(field, [...field.querySelectorAll('text')]), field.querySelectorAll(':scope > text[x=""24""]').length,
+                    charts.length, written.reduce((n, texts) => n + texts.length, 0), charts.reduce((n, s, i) => n + outside(s, written[i]), 0),
+                    Number(field.getAttribute('viewBox').split(' ')[2]), field.getBoundingClientRect().width, document.documentElement.scrollWidth]; }");
+            Check(measured[0] > 10 && measured[1] == 0, $"{measured[1]} of the card's {measured[0]} texts run outside its drawing");
+            // Its title, its description and its source on two lines, the card drawn at the width it is shown and the page not scrolling sideways.
+            Check(measured[2] == 4 && measured[6] <= 375 && Math.Abs(measured[7] - measured[6]) < 1.5 && measured[8] <= 375, $"{measured[2]} lines written from the left, drawn {measured[6]} wide and shown {measured[7]:0.#}, the page {measured[8]} wide");
+            Check(measured[3] == 21 && measured[4] >= 63 && measured[5] == 0, $"{measured[5]} of the {measured[4]} titles, descriptions and sources of {measured[3]} charts run outside their drawings");
+        });
+    else Console.WriteLine("SKIP field phone check: this host's Sports & performance page has no How the field finished");
     await sports.CloseAsync();
 }
 else Console.WriteLine("SKIP Sports & performance checks: this host has no Sports & performance page");

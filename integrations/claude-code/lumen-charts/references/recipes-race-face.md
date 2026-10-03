@@ -1,6 +1,6 @@
 # Race results recipes
 
-Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.34.0, together with the recipes in `sports.md`.
+Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, and how a race's whole field finished, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.35.0, together with the recipes in `sports.md`.
 
 ```csharp
 using System.Globalization;
@@ -10,7 +10,8 @@ using Lumen.Charts;
 ## What every chart here meets
 
 - **Static output is complete.** `ChartSvg.Render` writes every label, colour, tooltip (`<title>`) and accessible name into the SVG; nothing needs JavaScript, and nothing is fetched from a CDN.
-- **Phone width.** For SVG rendered on the server set `Width` to the width the card shows it at, `Width = 340` here: drawn at the width it is shown, every label is 11 px or larger (axis ticks 12, value labels and notes 11, the title 17), and none needs the 8 to 9 px text a stretched 340-unit viewBox gives. A card a little narrower, 320 px, still shows 10.4 px. On an interactive page `FitWidth="true"` redraws the chart at its card's width instead.
+- **Phone width.** For SVG rendered on the server set `Width` to the width the card shows it at, `Width = 340` here: drawn at the width it is shown, every label is 11 px or larger (axis ticks 12, value labels and notes 11, the title 17), and none needs the 8 to 9 px text a stretched 340-unit viewBox gives. A card a little narrower, 320 px, still shows 10.4 px. On an interactive page `FitWidth="true"` redraws the chart at its card's width instead. A chart is at least 240 units tall (a sparkline at least 60 wide and 16 tall), and keeps its `Height` at any width, so choose a height that reads at a phone's width.
+- **Text that fits.** From 0.35.0 a description or a source too wide for the card, by the library's generous estimate of its width, goes on over a second line, between its ` · ` clauses where both lines then fit and otherwise as evenly as its words allow, and the plot gives up 14 units for it; past two lines the second ends in `…`. A title stays one line, cut at a word with `…`. The whole of each stays in the drawing's `<title>`, `<desc>` and accessible name, so a long description written for a desktop no longer runs off a 340-pixel card.
 - **Accessible.** `Title` and `Description` are the drawing's accessible name; each mark is focusable and named, `Position: 16-05-2026, 24/48, better than the previous`, and the same words are its tooltip.
 - **Missing data is a gap, never a zero.** A race without a position or without points is a `null` Y: its line breaks there and no mark is drawn. A race without a field size writes its place alone.
 - **Never colour alone.** A place coloured by its change also says the change in words, in its tooltip and its accessible name.
@@ -65,6 +66,7 @@ ChartSeries RacePoints() => new("Pts", races.Select((r, i) => new ChartPoint(i, 
 - `X` is the race's index, and `XMin = -0.5`, `XMax = races.Length - 0.5` below put each race in the middle of its slot, so the first and last dates and values stand clear of the card's edges.
 - `r.Position` of `null` is a gap in the line and no mark; `r.Points` of `null` likewise; a `null` field size writes the place without a note. A season with no positions at all is better shown as the app's own empty state.
 - `ChangeColors = ChangeColors.LowerIsBetter` draws a place better than the race before in `Rising`, worse in `Falling`, and the first place, or one level with the last, in the series colour, hi. The marker and the segment arriving at it take the colour. It compares with the nearest earlier race that has a place, across a gap. Each mark's name ends `, better than the previous`, `, worse than the previous` or `, level with the previous`.
+- `ChangeColors` compares a place with the one before it **in the same series**, so put each competition in a series of its own: a rider who rides league rounds and open races gets a `League` series and an `Open` series of placings, both on the races' shared X (each race's index in the one season), each with `ChangeColors` of its own. A 12th in an open race of 80 is then never called worse than a 4th in a league round of 30. A race of the other competition is simply absent from a series, not a gap in it: leave its point out rather than give it a `null` Y, so the line joins that series' races.
 - `ValueLabels = true` writes `24` in the point's colour at weight 600 above its marker — every colour in this style clears 4.5:1 on the card, so each label keeps its point's colour; a colour that did not would write it in the text colour — and its `ValueNote`, `/48`, straight after it in the muted colour. A label moves in from the plot's sides rather than being cut, drops below its marker where above would leave the plot or meet another label, and is left out where neither has room; its value stays in the mark's name.
 - The dates label the axis: up to 24 labelled points do on a linear axis. At 340 px every other date is left out so none touch; each race keeps its date in its tooltip.
 
@@ -207,6 +209,68 @@ string growthSvg = ChartSvg.Render(growth);
 - `YMinSpan = 8` keeps the axis 8 kg tall about the weights; for height, a span in centimetres. It is refused beside `YMin` or `YMax`, on a logarithmic axis and on an axis that must include zero (`IncludeZero`, columns, areas).
 - The caption and the summary are the page's words, worked out above from the same numbers: write them in HTML beside the drawing, which carries no text, as `<figure>` `@((MarkupString)growthSvg)` `<figcaption>scale 34–42 kg</figcaption>` `</figure>` and `<p>Weight: 4 measurements, from 37.9 to 38.1 kg.</p>`. Each measurement stays a focusable mark named `Weight: Measurement 2, 37.8 kg`.
 - At 270 by 54 the plot stands 4 units in, room for a marker shown on hover, so the line runs 46 units tall: 34 kg at the bottom, 42 at the top, the weights a band of 2.3 units through the middle.
+
+## How the field finished
+
+A race's finish times as a histogram on a continuous time axis: the app supplies the bins already counted, each drawn as a block from where it starts to where it ends and as tall as its count; the bin that holds the reader's time is race red and says so; the median is a dashed line over the bins; and the finishers off the chart are counted under it.
+
+The app chooses the bins. Its rule, as caller code: the narrowest width of 1, 2, 5, 10, 15, 30 or 60 minutes that sets the 1st to the 99th percentile of the times in at most 20 bins, each starting on a whole multiple of the width, and the finishers outside those bins, faster and slower. `Statistics.Quantile` interpolates between order statistics, as Excel's `PERCENTILE.INC` does.
+
+```csharp
+static ((double From, double To, int Count)[] Bins, int Faster, int Slower) FinishBins(IReadOnlyList<double> seconds)
+{
+    var sorted = seconds.Order().ToArray();
+    double low = Statistics.Quantile(sorted, .01), high = Statistics.Quantile(sorted, .99);
+    // The first width whose bins, from the one holding the 1st percentile to the one holding the 99th, number 20 or fewer.
+    var width = new[] { 60d, 120, 300, 600, 900, 1800, 3600 }.FirstOrDefault(w => Math.Floor(high / w) - Math.Floor(low / w) < 20, 3600);
+    double from = Math.Floor(low / width) * width, to = (Math.Floor(high / width) + 1) * width;
+    var bins = Enumerable.Range(0, (int)Math.Round((to - from) / width)).Select(i => (From: from + i * width, To: from + (i + 1) * width))
+        .Select(bin => (bin.From, bin.To, Count: sorted.Count(t => t >= bin.From && t < bin.To))).ToArray();
+    return (bins, sorted.Count(t => t < from), sorted.Count(t => t >= to));
+}
+```
+
+What the page is given for one race, as the app's API sends it — an invented race of 312 finishers in 5-minute bins from 35:00 to 1:20:00, three faster and twelve slower off the chart, its median and the reader's own time:
+
+```csharp
+(double FromSeconds, double ToSeconds, int Count)[] fieldBins = [
+    (2100, 2400, 18), (2400, 2700, 64), (2700, 3000, 88), (3000, 3300, 57), (3300, 3600, 33),
+    (3600, 3900, 18), (3900, 4200, 10), (4200, 4500, 8), (4500, 4800, 1)];
+int finishers = 312, offFaster = 3, offSlower = 12;
+double medianSeconds = 2832, yourSeconds = 3160;     // 47:12, and 52:40 in the 50:00 to 55:00 bin
+bool Yours((double FromSeconds, double ToSeconds, int Count) bin) => yourSeconds >= bin.FromSeconds && yourSeconds < bin.ToSeconds;
+var fieldChart = new ChartSpec {
+    Title = "How the field finished", Description = $"{finishers} finishers · median {Clock(medianSeconds)}",
+    Source = $"Off the chart: {offFaster} faster and {offSlower} slower",
+    Kind = ChartKind.Blocks, Width = 340, Height = 240, Style = raceFace with { BarRadius = 2 },
+    IncludeZero = true, XFormat = ValueFormat.Duration, XTickLabels = TickLabels.Bounds, YTickLabels = TickLabels.Bounds,
+    Annotations = [new(AnnotationAxis.X, medianSeconds) { Label = "median", ShowValue = false, InFront = true, Color = "#F5F6F7" }],
+    Series = [new("Finishers", fieldBins.Select(bin => ChartPoint.Block(bin.FromSeconds, bin.ToSeconds, bin.Count)
+        with { Color = Yours(bin) ? "#E30613" : null, ValueNote = Yours(bin) ? " · you" : null }).ToArray(), "#80858E")]
+};
+string fieldSvg = ChartSvg.Render(fieldChart, includeLegend: false);
+// Interactive: <LumenChart Spec="fieldChart" FitWidth="true" />
+```
+
+- **Bins.** Each bin is `ChartPoint.Block(from, to, count)`: it covers its span of time exactly and stands on the bottom of the plot. Bins that touch are parted by a hairline, as a series' blocks are, and `BarRadius = 2` rounds their tops by 2 units. The bars are the token `low`, `#80858E`, neutral: a bin is not good or bad.
+- **Heights.** `IncludeZero = true` runs the axis from exactly 0 to the most in a bin, 88, so each block's height is its count. A block above the bottom of the axis is drawn at least 2 units tall (0.35.0), so the last bin's one finisher of 312, 0.98 units at this size, still shows; a bin of none draws nothing and keeps its name.
+- **Axes.** `XFormat = ValueFormat.Duration` writes times as `35:00` and `1:20:00`. `XTickLabels = TickLabels.Bounds` labels only the axis's two ends, at their exact values: the first bin's start, starting at the plot's left edge, and the last bin's end, ending at its right edge. `YTickLabels = TickLabels.Bounds` labels `0` and `88`. The gridlines stay at round counts.
+- **Never colour alone.** The reader's bin takes race red, `#E30613`, 3.70:1 on the card, which a filled mark needs, and the note ` · you`, which its tooltip and accessible name read after its count: `Finishers: 50:00 to 55:00, 57 · you`. Every bin is a focusable mark named the same way, `Finishers: 45:00 to 50:00, 88`.
+- **Median.** An X annotation, dashed as annotations are by default. `ShowValue = false` draws its label as `median` alone, since the description and the axis already give the time; its tooltip and accessible name still read `median: 47:12`. `InFront = true` draws the line over the bins, which would otherwise hide it, on a halo of the card colour so it shows over a bar of any colour. Its colour is the token `hi`, `#F5F6F7`, 16.70:1, so its label clears 4.5:1.
+- **Words.** `Description` holds the summary sentence and `Source` the finishers off the chart, in the muted `low`, 4.87:1. Both stay one line here; on a narrower card either goes on over a second line rather than running off it. Leave `Source` empty when nobody is off the chart.
+- **One series.** `includeLegend: false` leaves out the legend row a lone series would otherwise get; its name, `Finishers`, leads each bin's name.
+
+The 1080 × 1350 social card is the same chart drawn large, every bar race red, with no median and no reader's bin:
+
+```csharp
+var fieldCard = fieldChart with {
+    Width = 1080, Height = 1350, Annotations = [],
+    Series = [fieldChart.Series[0] with { Color = "#E30613", Points = fieldChart.Series[0].Points.Select(p => p with { Color = null, ValueNote = null }).ToArray() }]
+};
+string fieldCardSvg = ChartSvg.Render(fieldCard, includeLegend: false);
+```
+
+Its words keep their sizes, 11 to 17 units, so on a 1080-pixel card they read small: set the card's headline in its own display type round the chart, or draw the card at 360 × 450 and rasterise it at three times.
 
 ## Rendering notes
 

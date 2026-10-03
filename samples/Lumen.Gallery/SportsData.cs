@@ -84,6 +84,28 @@ public static class SportsData
     public static readonly IReadOnlyList<(DateOnly Day, int Position, int? Field, int? Points)> Races =
         [(new(2026, 4, 11), 31, 50, 40), (new(2026, 5, 16), 24, 48, 52), (new(2026, 7, 4), 27, 51, 47), (new(2026, 8, 8), 21, 49, 58), (new(2026, 9, 19), 19, 52, 61)];
 
+    /// <summary>An invented field for the last of <see cref="Races"/>: its 52 finishers' times in seconds, fastest first, the athlete's
+    /// own, 40:12, the 19th, as its place has it. Most finish within a few minutes of 41, the slower tail the longer, as a field does;
+    /// one rider finishes just ahead of the rest, and one behind.</summary>
+    public static readonly IReadOnlyList<double> Field =
+        [2025, 2060, 2141, 2168, 2207, 2225, 2249, 2272, 2283, 2298, 2316, 2335, 2342, 2354, 2367, 2380, 2398, 2406, 2412, 2425, 2433, 2448, 2457,
+         2464, 2475, 2482, 2496, 2504, 2519, 2529, 2541, 2558, 2566, 2575, 2591, 2606, 2620, 2638, 2657, 2673, 2691, 2708, 2730, 2752, 2774, 2801,
+         2839, 2870, 2907, 2976, 3015, 3080];
+
+    /// <summary>The bins a race's finish times are drawn in, by the rule a results page uses: the narrowest width of 1, 2, 5, 10, 15, 30
+    /// or 60 minutes that sets the 1st to the 99th percentile in at most 20 bins, each starting on a whole multiple of the width; and
+    /// how many finishers fall off the chart, faster and slower.</summary>
+    public static ((double From, double To, int Count)[] Bins, int Faster, int Slower) FinishBins(IReadOnlyList<double> seconds)
+    {
+        var sorted = seconds.Order().ToArray();
+        double low = Statistics.Quantile(sorted, .01), high = Statistics.Quantile(sorted, .99);
+        var width = new[] { 60d, 120, 300, 600, 900, 1800, 3600 }.FirstOrDefault(w => Math.Floor(high / w) - Math.Floor(low / w) < 20, 3600);
+        double from = Math.Floor(low / width) * width, to = (Math.Floor(high / width) + 1) * width;
+        var bins = Enumerable.Range(0, (int)Math.Round((to - from) / width)).Select(i => (From: from + i * width, To: from + (i + 1) * width))
+            .Select(bin => (bin.From, bin.To, Count: sorted.Count(t => t >= bin.From && t < bin.To))).ToArray();
+        return (bins, sorted.Count(t => t < from), sorted.Count(t => t >= to));
+    }
+
     /// <summary>An invented weigh-in each Monday of the season, in kilograms, steady about <see cref="BodyMass"/>: a few hundred grams
     /// either way, as a scale reads from week to week.</summary>
     public static readonly IReadOnlyList<double> WeighIns = [68.2, 68.0, 68.3, 67.9, 68.1, 68.0, 67.8, 68.1, 67.9, 68.0, 67.8, 67.9, 67.7, 67.9, 67.8, 67.8];
@@ -806,13 +828,29 @@ public static class SportsData
         var results = Chart(wide, 400) with
         {
             Kind = ChartKind.Line, XMin = -.5, XMax = Races.Count - .5, YReversed = true,
-            Title = $"Up {Races[0].Position - Races[^1].Position} places since the first race", Description = $"Five invented races · best {Ordinal(highest.Position)} of {highest.Field}",
+            Title = $"Up {Races[0].Position - Races[^1].Position} places this season", Description = $"Five invented races · best {Ordinal(highest.Position)} of {highest.Field}",
             XLabel = "Race", YLabel = "Position",
             Panes = [new() { Label = "Points", Weight = 1 }],
             Series = [
                 new("Position", Races.Select((r, i) => new ChartPoint(i, r.Position, raced[i]) { ValueNote = r.Field is { } field ? $"/{field}" : null }).ToArray())
                     { ChangeColors = ChangeColors.LowerIsBetter, ValueLabels = true, Markers = MarkerStyle.Filled },
                 new("Points", Races.Select((r, i) => new ChartPoint(i, r.Points, raced[i])).ToArray(), zones[0]) { Pane = 1, ValueLabels = true, Markers = MarkerStyle.Filled }]
+        };
+
+        // How the field of the last race finished: its times in bins by the results page's rule, each a block from where it starts to
+        // where it ends, as tall as its count, in the ramp's neutral grey; the athlete's bin in its red and noted, so its name says why;
+        // the median a dashed line over the bins, labelled without its time, which the axis reads; and the finishers off the chart
+        // counted in the source line.
+        var (bins, faster, slower) = FinishBins(Field);
+        var (place, mine, median) = (Races[^1].Position, Field[Races[^1].Position - 1], Statistics.Quantile(Field, .5));
+        var finish = Chart(wide, 300) with
+        {
+            Kind = ChartKind.Blocks, IncludeZero = true, XFormat = ValueFormat.Duration, XTickLabels = TickLabels.Bounds, YTickLabels = TickLabels.Bounds,
+            Title = $"{Ordinal(place)} of {Field.Count} in {Clock(mine)}", Description = $"{Field.Count} finishers · median {Clock(median)}",
+            Source = $"Off the chart: {faster} faster and {slower} slower · an invented field", XLabel = "Finish time", YLabel = "Finishers",
+            Annotations = [new(AnnotationAxis.X, median) { Label = "median", ShowValue = false, InFront = true }],
+            Series = [new("Finishers", bins.Select(b => ChartPoint.Block(b.From, b.To, b.Count) with
+                { Color = mine >= b.From && mine < b.To ? zones[5] : null, ValueNote = mine >= b.From && mine < b.To ? " · you" : null }).ToArray(), zones[0])]
         };
 
         // Last night's stages, one lane each, on the clock: awake in the ramp's orange, REM blue, light sleep its neutral grey and
@@ -872,6 +910,7 @@ public static class SportsData
                 { Lines = [fiveK, kilometre, weighed] },
             new("fitness", "hrv", "HRV against its baseline", "Each night's HRV in green inside a band of the mean ± one standard deviation of the 28 nights before, from `Statistics.Rolling`, orange below it and blue above it, its `ValueNote` naming that status in its tooltip; the dashed purple line is a seven-night `TrendFit.MovingAverage`.", true, hrv),
             new("racing", "race-results", "Race results", "Five invented races in two `Panes` on one race-by-race axis: the place each finished on a reversed axis, first at the top, `ChangeColors.LowerIsBetter` drawing a race that finished higher than the one before in the style's rising colour and one that finished lower in its falling colour, and saying so in its tooltip, and `ValueLabels` writing each place with its field as a muted `ValueNote`; beneath, the points each race earned.", true, results),
+            new("racing", "field", "How the field finished", "An invented field for the last race, its finish times in bins the page works out, each a `ChartPoint.Block` on an axis that `IncludeZero`; the athlete's bin in red with the `ValueNote` `· you`, so its tooltip says why, a bin of one kept 2 pixels tall, `TickLabels.Bounds` labelling only the ends of each axis, and the median a dashed X annotation `InFront` of the bins, its label drawn without its time by `ShowValue = false`; the finishers off the chart are counted in the source line.", true, finish),
             new("sleep", "hypnogram", "Last night's sleep stages", "A `ChartKind.Timeline`: one series per stage, each period a `ChartPoint.Span`, joined where the stage changes; the higher the HRV sits above its baseline, the more deep sleep.", true, hypnogram),
             new("sleep", "sleep-timing", "Sleep timing", "Bedtime to waking as `ChartKind.Range` bars on a reversed `ValueFormat.TimeOfDay` axis, its seconds running past 24 hours so a night never crosses zero.", false, timing),
             new("sleep", "heart-range", "Daily heart rate", "Each day's lowest and highest heart rate as `ChartPoint.Interval` range bars, the dot its average; today's highest is the run's.", false, heartRange)];
