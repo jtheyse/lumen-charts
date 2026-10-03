@@ -27,6 +27,8 @@ ChartSpec Sample(ChartKind kind)=>kind switch{
     ChartKind.Histogram or ChartKind.Box or ChartKind.Violin=>Spec(kind) with{Series=[new("Sample",Enumerable.Range(0,40).Select(i=>new ChartPoint(i,i%7+1)).ToArray())]},
     ChartKind.Gauge=>Spec(kind) with{Series=[new("Recovery",[new(0,72,"Recovery")])]},
     ChartKind.Ring=>Spec(kind) with{Series=[new("Move",[new(0,540,"kcal")]){Goal=600},new("Exercise",[new(0,47,"min")]){Goal=30},new("Stand",[new(0,9,"h")]){Goal=12}]},
+    ChartKind.Timeline=>Spec(kind) with{Series=[new("Awake",[ChartPoint.Span(0,10),ChartPoint.Span(60,65)]),new("Light",[ChartPoint.Span(10,40),ChartPoint.Span(50,60)]),new("Deep",[ChartPoint.Span(40,50)])]},
+    ChartKind.Range=>Spec(kind) with{Series=[new("Heart rate",[ChartPoint.Interval(0,70,50,150,"A"),ChartPoint.Interval(1,null,55,130,"B"),ChartPoint.Interval(2,64,48,170,"C")])]},
     _=>Spec(kind)};
 foreach(var kind in Enum.GetValues<ChartKind>())
 {
@@ -1855,7 +1857,7 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
     foreach(var kind in Enum.GetValues<ChartKind>())
     {
         var spec=Sample(kind);
-        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band)
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline)
             ChartSvg.Render(spec with{XFormat=ValueFormat.Duration});
         else Check(Refusal(spec with{XFormat=ValueFormat.Duration}).Contains("X format"),$"{kind}: X format");
         if(kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Histogram)
@@ -1863,6 +1865,9 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
             Check(Refusal(spec with{YFormat=ValueFormat.Compact}).Contains("Y format"),$"{kind}: Y format");
             Check(Refusal(spec with{Y2Format=ValueFormat.Duration}).Contains("Y format"),$"{kind}: Y2 format");
         }
+        // A timeline's lanes are states, not values on a Y axis.
+        else if(kind==ChartKind.Timeline)
+            Check(Refusal(spec with{YFormat=ValueFormat.Compact}).Contains("lanes")&&Refusal(spec with{Y2Format=ValueFormat.Duration}).Contains("lanes"),$"{kind}: Y format");
         else ChartSvg.Render(spec with{YFormat=ValueFormat.Duration,Y2Format=ValueFormat.Compact});
         if(kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Area or ChartKind.Histogram)
         {
@@ -1870,6 +1875,7 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
             Check(Refusal(spec with{Y2Reversed=true}).Contains("zero baseline"),$"{kind}: reversed Y2");
         }
         else if(kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Gauge or ChartKind.Ring) Check(Refusal(spec with{YReversed=true}).Contains("no Y axis"),$"{kind}: reversed Y");
+        else if(kind==ChartKind.Timeline) Check(Refusal(spec with{YReversed=true}).Contains("lanes"),$"{kind}: reversed Y");
         else ChartSvg.Render(spec with{YReversed=true,Y2Reversed=true});
     }
     Reject(()=>ChartSvg.Render(Spec() with{YFormat=(ValueFormat)9}));
@@ -2139,7 +2145,7 @@ Test("Zones and point colours are refused where colour already means something e
         var zoned=sample with{Series=sample.Series.Select(s=>s with{Zones=Effort()}).ToArray()};
         var coloured=sample with{Series=sample.Series.Select(s=>s with{Points=s.Points.Select(p=>p with{Color="#ABCDEF"}).ToArray()}).ToArray()};
         Check(Accepts(zoned)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar),$"zones on {kind}");
-        Check(Accepts(coloured)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Donut),$"point colours on {kind}");
+        Check(Accepts(coloured)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Range or ChartKind.Donut),$"point colours on {kind}");
         // Zone bands go wherever a Y annotation goes, and nowhere else.
         Check(Accepts(sample with{YZones=Effort()})==Accepts(sample with{Annotations=[new(AnnotationAxis.Y,1)]}),$"zone bands on {kind}");
     }
@@ -2402,14 +2408,14 @@ Test("Series kinds and projections are refused where they cannot draw, each with
     foreach(var kind in Enum.GetValues<ChartKind>())
     {
         var lined=Sample(kind) with{Series=Sample(kind).Series.Select(s=>s with{Kind=ChartKind.Line}).ToArray()};
-        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Column) ChartSvg.Render(lined);
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Column or ChartKind.Range) ChartSvg.Render(lined);
         else Check(Refusal(lined).Contains("own kind"),$"{kind}: {Refusal(lined)}");
     }
-    // A series can be a line, area, column, scatter or band, and nothing else.
+    // A series can be a line, area, column, scatter, band or range, and nothing else; a range series is drawn from its bounds.
     foreach(var mark in Enum.GetValues<ChartKind>().Append((ChartKind)99))
     {
-        var spec=Spec() with{Series=[new("S",[new(0,1),new(1,2)]){Kind=mark}]};
-        if(mark is ChartKind.Line or ChartKind.Area or ChartKind.Column or ChartKind.Scatter or ChartKind.Band) ChartSvg.Render(spec);
+        var spec=Spec() with{Series=[new("S",mark==ChartKind.Range?[ChartPoint.Interval(0,1,0,2),ChartPoint.Interval(1,2,1,3)]:[new(0,1),new(1,2)]){Kind=mark}]};
+        if(mark is ChartKind.Line or ChartKind.Area or ChartKind.Column or ChartKind.Scatter or ChartKind.Band or ChartKind.Range) ChartSvg.Render(spec);
         else Check(Refusal(spec).Contains("can be drawn as"),$"{mark}: {Refusal(spec)}");
     }
     // Columns and areas draw from zero, on whichever axis measures them; the other axis stays free.
@@ -2705,11 +2711,14 @@ Test("Panes are refused where they cannot be drawn, each with its reason",()=>{
     {
         var below=Sample(kind) with{Panes=[new()],Series=[..Sample(kind).Series,Sample(kind).Series[0] with{Name="Below",Pane=1,Kind=kind is ChartKind.Candlestick or ChartKind.Ohlc?ChartKind.Line:null}]};
         var pointed=Sample(kind) with{Series=[Sample(kind).Series[0] with{Pane=1}]};
-        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Candlestick or ChartKind.Ohlc)
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc)
         {
             ChartSvg.Render(below);
             Check(Refusal(pointed).Contains("pane is 0"),$"{kind}: {Refusal(pointed)}");
         }
+        // A timeline's lanes are its one plot.
+        else if(kind==ChartKind.Timeline)
+            Check(Refusal(below).Contains("no panes")&&Refusal(pointed).Contains("no panes")&&Refusal(Sample(kind) with{Panes=[new()]}).Contains("no panes"),$"{kind}: {Refusal(below)}");
         else Check(Refusal(below).Contains("Panes share")&&Refusal(pointed).Contains("Panes share")&&Refusal(Sample(kind) with{Panes=[new()]}).Contains("Panes share"),$"{kind}: {Refusal(below)}");
     }
     var spec=Stacked();
@@ -2754,8 +2763,10 @@ Test("A chart that sets no panes draws in one plot, as before",()=>{
     {
         var sample=Sample(kind);
         var doc=Svg(sample);
-        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Band or ChartKind.Ohlc)
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Band or ChartKind.Ohlc or ChartKind.Range)
             Check(PaneClips(doc).Select(PaneSpan).SequenceEqual([(78d,344d)])&&doc.Descendants(ns+"g").Where(g=>g.Attribute("data-series") is not null).All(g=>(string?)g.Attribute("data-series")=="0"),$"{kind} is not one plot");
+        // A timeline's lanes share its one plot.
+        else if(kind==ChartKind.Timeline) Check(PaneClips(doc).Select(PaneSpan).SequenceEqual([(78d,344d)]),$"{kind} is not one plot");
         else Check(PaneClips(doc).Length==0,$"{kind} drew a plot");
     }
 });
@@ -3672,8 +3683,10 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: twelve charts, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
-    Check(sports.Count==12&&sports.Select(card=>card.Id).Distinct().Count()==12,"the page should have twelve charts");
+Test("Sports page: fifteen charts, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+    Check(sports.Count==15&&sports.Select(card=>card.Id).Distinct().Count()==15,"the page should have fifteen charts");
+    // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order.
+    Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
     foreach(var (theme,style,zones) in new[]{(ChartTheme.Light,(ChartStyle?)null,ChartStyle.Light.Zones),(ChartTheme.Dark,null,ChartStyle.Light.Zones),(ChartTheme.Dark,ChartStyle.Midnight,ChartStyle.Midnight.Zones)})
         foreach(var markers in new[]{true,false})
             foreach(var card in SportsData.Cards(theme,zones,markers))
@@ -4135,12 +4148,13 @@ Test("Gauge and ring: specs survive JSON, a request that names no sweep draws 27
     Check(!ChartExport.Csv(Spec()).Contains("Goal"),"another kind's CSV carries a goal");
 });
 Test("A gauge's sweep left at its default is left out of the hash that names gradients, so every other chart keeps its IDs",()=>{
-    // 0.25.0 had no sweep: its hash of a spec is the JSON written today less the sweep, which is the last property written.
+    // 0.25.0 had no sweep: its hash of a spec is the JSON written today less the sweep and, since 0.27.0, the timeline's
+    // connectors, which are the last two properties written.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    Check(json.EndsWith(",\"GaugeSweep\":270}"),json[^60..]);
-    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(",\"GaugeSweep\":270}","}"))))[..12].ToLowerInvariant();
+    Check(json.EndsWith(",\"GaugeSweep\":270,\"TimelineConnectors\":true}"),json[^60..]);
+    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(",\"GaugeSweep\":270,\"TimelineConnectors\":true}","}"))))[..12].ToLowerInvariant();
     Check(Prefix(ChartSvg.Render(faded))==before,$"{Prefix(ChartSvg.Render(faded))} is not 0.25.0's {before}");
     // Gauges and rings define no IDs: a gradient gauge draws its arc in pieces.
     var strain=Gauge(14) with{YMax=21,Series=[new("Strain",[new(0,14)]){Gradient=[new(0,"#3F87D9"),new(21,"#DD4B45")]}]};
@@ -4163,6 +4177,360 @@ Test("Gauge and ring: the component draws them without zoom, its legend and stat
     Check(hidden.Contains("No data to display"),"hiding every ring broke the chart");
     var gauge=Operate(Gauge(72) with{YLabel="%"},async chart=>await chart.SelectPoint(0,0));
     Check(gauge.Contains("Recovery: 72 %</span>"),"the status line does not read the gauge");
+});
+// 0.27.0: state timelines, range bars and the time of day. A night from 23:00 to 05:00 on a time-of-day axis, in four lanes: the
+// plot runs down from 78 to 344, so each lane is 66.5 high and each span 24, on its lane's middle; across, it runs from the clip's
+// edge, which the lane names set.
+ChartSpec Hypnogram(bool connectors=true)=>new(){Kind=ChartKind.Timeline,Title="Night",TimelineConnectors=connectors,XFormat=ValueFormat.TimeOfDay,
+    Series=[new("Awake",[ChartPoint.Span(82800,83400),ChartPoint.Span(97200,97380)]),new("REM",[ChartPoint.Span(90000,91800)]),
+        new("Light",[ChartPoint.Span(83400,86400),ChartPoint.Span(91800,97200,"Second cycle"),ChartPoint.Span(97380,104400)]),new("Deep",[ChartPoint.Span(86400,90000)])]};
+XElement MarkOf(XDocument doc,int series,int point)=>doc.Descendants(ns+"g").Single(g=>(string?)g.Attribute("data-series")==$"{series}"&&(string?)g.Attribute("data-point")==$"{point}");
+XElement SpanOf(XDocument doc,int series,int point)=>MarkOf(doc,series,point).Element(ns+"rect")!;
+XElement[] Classes(XDocument doc,string name)=>doc.Descendants().Where(e=>(string?)e.Attribute("class")==name).ToArray();
+(double Left,double Right) PlotOf(XDocument doc){var clip=PaneClips(doc).Single();return (Attr(clip,"x")+6,Attr(clip,"x")+Attr(clip,"width")-6);}
+double LaneMiddle(int lane,int lanes=4,double height=420)=>78+(lane+.5)*(height-154)/lanes;
+Test("Timeline: each span lies in its lane at its exact extents, half the lane high up to 24 pixels, its corners rounded",()=>{
+    var spec=Hypnogram();var doc=Svg(spec);var (left,right)=PlotOf(doc);
+    double X(double seconds)=>left+(seconds-82800)/21600*(right-left);
+    for(var s=0;s<spec.Series.Count;s++)
+        for(var p=0;p<spec.Series[s].Points.Count;p++)
+        {
+            var rect=SpanOf(doc,s,p);var span=spec.Series[s].Points[p];var width=X(span.XEnd!.Value)-X(span.X);
+            Check(Close(Attr(rect,"x"),X(span.X))&&Close(Attr(rect,"width"),width)&&Close(Attr(rect,"y"),LaneMiddle(s)-12)&&Close(Attr(rect,"height"),24),$"{spec.Series[s].Name} {p}: {rect}");
+            Check(Close(Attr(rect,"rx"),Math.Min(4,width/2))&&(string?)rect.Attribute("fill")==ChartStyle.Light.Series[s]&&(string?)rect.Attribute("class")=="lumen-span",$"{spec.Series[s].Name} {p}: {rect}");
+        }
+    // The plot leaves the widest name 12 pixels and the Y title room, and ends 30 pixels from the right edge.
+    Check(left is >=76 and <=180&&Close(right,870),$"the plot runs from {left} to {right}");
+    // The lanes stand top to bottom in series order, each named at its middle on the left.
+    var names=doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="end"&&Close(Attr(t,"x"),left-12)).ToArray();
+    Check(names.Select(t=>t.Value).SequenceEqual(["Awake","REM","Light","Deep"])&&names.Select((t,i)=>Close(Attr(t,"y"),LaneMiddle(i)+4)).All(b=>b),"the lanes are not named in order at their middles");
+    // On the right, as YAxisSide puts them, they are named 12 pixels past the plot.
+    var flipped=Svg(spec with{YAxisSide=AxisSide.Right});var (_,edge)=PlotOf(flipped);
+    Check(flipped.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="start"&&Close(Attr(t,"x"),edge+12)).Select(t=>t.Value).SequenceEqual(["Awake","REM","Light","Deep"])&&Close(PlotOf(flipped).Left,30),"the lanes are not named on the right");
+    // A short lane's span is half its height: 340 high leaves 186 for four lanes of 46.5, and spans of 23.25.
+    var tall=Svg(spec with{Height=340});
+    Check(Close(Attr(SpanOf(tall,3,0),"height"),23.25)&&Close(Attr(SpanOf(tall,3,0),"y"),LaneMiddle(3,4,340)-11.625),"a short lane's span is not half its height");
+    // A style's bar radius rounds the corners, Midnight's into capsules, each clamped to half the span's width and height.
+    var midnight=Svg(spec with{Style=ChartStyle.Midnight});var squarer=Svg(spec with{Style=ChartStyle.Light with{BarRadius=2}});
+    Check(Spans(midnight).All(r=>Close(Attr(r,"rx"),Math.Min(Attr(r,"width"),24)/2))&&Spans(squarer).All(r=>Close(Attr(r,"rx"),Math.Min(2,Attr(r,"width")/2))),"the bar radius does not round the spans");
+    // A span too short to see is drawn a pixel wide, from its start.
+    var blip=Svg(spec with{Series=[..spec.Series,new("Blip",[ChartPoint.Span(90000,90001)])]});
+    Check(Close(Attr(SpanOf(blip,4,0),"width"),1),"a one-second span is not a pixel wide");
+    XElement[] Spans(XDocument d)=>Classes(d,"lumen-span");
+});
+Test("Timeline: a connector joins each span to the one in another lane that starts where it ends, behind the spans, and none when they are off",()=>{
+    var doc=Svg(Hypnogram());var (left,right)=PlotOf(doc);
+    double X(double seconds)=>left+(seconds-82800)/21600*(right-left);
+    (double At,int From,int To)[] Drawn(XDocument d)=>Classes(d,"lumen-connectors").SelectMany(p=>Commands(p.Attribute("d")!.Value).Chunk(2)).Select(pair=>
+    {
+        Check(pair[0].Op=='M'&&pair[1].Op=='L'&&Close(pair[0].Args[0],pair[1].Args[0]),"a connector is not upright");
+        int Lane(double y)=>Enumerable.Range(0,4).Single(i=>Close(LaneMiddle(i),y));
+        return (pair[0].Args[0],Lane(pair[0].Args[1]),Lane(pair[1].Args[1]));
+    }).ToArray();
+    // Lane by lane, each span's end: awake into light at 23:10 and 03:03, REM into light at 01:30, light into deep at 00:00 and
+    // into awake at 03:00, and deep into REM at 01:00. The last light span ends the night, so nothing follows it.
+    (double,int,int)[] expected=[(X(83400),0,2),(X(97380),0,2),(X(91800),1,2),(X(86400),2,3),(X(97200),2,0),(X(90000),3,1)];
+    var drawn=Drawn(doc);
+    Check(drawn.Length==6&&drawn.Zip(expected).All(p=>Close(p.First.At,p.Second.Item1)&&p.First.From==p.Second.Item2&&p.First.To==p.Second.Item3),string.Join(" ",drawn));
+    var path=Classes(doc,"lumen-connectors").Single();
+    Check((string?)path.Attribute("stroke")==ChartStyle.Light.Muted&&(string?)path.Attribute("stroke-width")=="1"&&(string?)path.Attribute("fill")=="none"&&(string?)path.Attribute("vector-effect")=="non-scaling-stroke","the connectors are not hairlines");
+    var order=doc.Descendants().ToList();
+    Check(order.IndexOf(path)<Classes(doc,"lumen-span").Min(order.IndexOf),"the connectors are drawn over the spans");
+    // Turned off, the connectors go and the spans stay exactly where they were.
+    var plain=Svg(Hypnogram(false));
+    Check(Classes(plain,"lumen-connectors").Length==0&&Classes(plain,"lumen-span").Select(r=>r.ToString()).SequenceEqual(Classes(doc,"lumen-span").Select(r=>r.ToString())),"turning connectors off moved a span or left a connector");
+    // A span that starts a second after another ends is not joined to it; spans that touch in one lane need no connector; and two
+    // lanes that start where a third ends are both joined to it.
+    var gap=Hypnogram() with{Series=[..Hypnogram().Series.Take(3),new("Deep",[ChartPoint.Span(86401,90000)])]};
+    Check(Drawn(Svg(gap)).Length==5&&!Drawn(Svg(gap)).Any(c=>c.From==2&&c.To==3),"a span was joined across a gap");
+    var forked=Svg(new ChartSpec{Kind=ChartKind.Timeline,Series=[new("A",[ChartPoint.Span(0,10),ChartPoint.Span(10,20)]),new("B",[ChartPoint.Span(20,30)]),new("C",[ChartPoint.Span(20,25)])]});
+    var joins=Classes(forked,"lumen-connectors").SelectMany(p=>Commands(p.Attribute("d")!.Value)).Count(c=>c.Op=='M');
+    Check(joins==2,$"{joins} connectors where two lanes start as one ends, and a lane touches itself");
+});
+Test("Timeline: the legend gives each state its total time and its share, and each span names its state, its times and its length",()=>{
+    var spec=Hypnogram();
+    var legend=Enumerable.Range(0,4).Select(i=>ChartSvg.LegendLabel(spec,i)).ToArray();
+    // Awake 13 minutes, REM 30, light 4 h 17 and deep an hour: 4, 8, 71 and 17 % of six hours.
+    Check(legend.SequenceEqual(["Awake 0:13, 4 %","REM 0:30, 8 %","Light 4:17, 71 %","Deep 1:00, 17 %"]),string.Join(" | ",legend));
+    var doc=Svg(spec);
+    Check(legend.All(label=>doc.Descendants(ns+"text").Any(t=>t.Value==label)),"the chart's own legend does not total the states");
+    string Name(int s,int p)=>MarkOf(doc,s,p).Attribute("aria-label")!.Value;
+    Check(Name(0,0)=="Awake: 23:00 to 23:10, 10 min"&&Name(0,1)=="Awake: 03:00 to 03:03, 3 min"&&Name(3,0)=="Deep: 00:00 to 01:00, 1 h"
+        &&Name(2,1)=="Light: Second cycle, 01:30 to 03:00, 1 h 30 min"&&Name(2,2)=="Light: 03:03 to 05:00, 1 h 57 min",$"{Name(0,0)} | {Name(2,1)} | {Name(2,2)}");
+    // Every span is a button for its lane and its point, in the tab order, with a tooltip.
+    var marks=doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).ToArray();
+    Check(marks.Length==7&&marks.All(m=>(string?)m.Attribute("role")=="button"&&(string?)m.Attribute("tabindex")=="0"&&m.Element(ns+"title")?.Value==m.Attribute("aria-label")!.Value),"a span is not a labelled button");
+    // On a time axis the clock is the zone's: 02:14 in Johannesburg is 00:14 UTC. Under a minute a span reads in seconds.
+    var start=TimeAxis.Value(new DateTimeOffset(2026,9,27,2,14,0,TimeSpan.FromHours(2)));
+    var zoned=new ChartSpec{Kind=ChartKind.Timeline,XAxis=AxisKind.Time,TimeZone="Africa/Johannesburg",Series=[new("REM",[ChartPoint.Span(start,start+27*60_000)]),new("Awake",[ChartPoint.Span(start+27*60_000,start+27*60_000+45_000)])]};
+    var local=Svg(zoned);
+    Check(MarkOf(local,0,0).Attribute("aria-label")!.Value=="REM: 02:14 to 02:41, 27 min"&&MarkOf(local,1,0).Attribute("aria-label")!.Value=="Awake: 02:41 to 02:41, 45 s",MarkOf(local,0,0).Attribute("aria-label")!.Value);
+    Check(ChartSvg.LegendLabel(zoned,0)=="REM 0:27, 97 %"&&ChartSvg.LegendLabel(zoned,1)=="Awake 0:01, 3 %"&&local.Descendants(ns+"text").Any(t=>t.Value=="02:20"),"the zone's clock does not reach the legend or the ticks");
+    // Over two days or more a span names its day too; on a plain number axis its length is a plain number.
+    var shifts=Svg(new ChartSpec{Kind=ChartKind.Timeline,XAxis=AxisKind.Time,Series=[new("Shift",[ChartPoint.Span(Utc(2026,9,1,8),Utc(2026,9,1,9)),ChartPoint.Span(Utc(2026,9,3,8),Utc(2026,9,3,17))])]});
+    Check(MarkOf(shifts,0,0).Attribute("aria-label")!.Value=="Shift: 1 Sep 08:00 to 1 Sep 09:00, 1 h"&&MarkOf(shifts,0,1).Attribute("aria-label")!.Value=="Shift: 3 Sep 08:00 to 3 Sep 17:00, 9 h",MarkOf(shifts,0,1).Attribute("aria-label")!.Value);
+    var plain=new ChartSpec{Kind=ChartKind.Timeline,Series=[new("A",[ChartPoint.Span(0,2.5)]),new("B",[ChartPoint.Span(2.5,5)])]};
+    Check(MarkOf(Svg(plain),0,0).Attribute("aria-label")!.Value=="A: 0 to 2.5, 2.5"&&ChartSvg.LegendLabel(plain,1)=="B 2.5, 50 %","a plain timeline reads units of time");
+    // The legend key is a rounded bar along X.
+    var key=XDocument.Parse(ChartSvg.LegendKey(spec,1)).Root!.Elements().Single();
+    Check(Attr(key,"width")==14&&Attr(key,"height")==6&&Attr(key,"rx")==3&&(string?)key.Attribute("fill")==ChartStyle.Light.Series[1],key.ToString());
+});
+ChartSpec Ranges(params ChartPoint[] points)=>new(){Kind=ChartKind.Range,Title="Ranges",YMin=40,YMax=200,Series=[new("Heart rate",points)]};
+double RY(double value)=>344-(value-40)/160*266;
+XElement[] Capsules(XDocument doc)=>doc.Descendants(ns+"rect").Where(r=>(string?)r.Attribute("class")=="lumen-range").ToArray();
+Test("Range: each capsule runs exactly from its low to its high, up to 18 pixels wide and centred on its X, with a dot at its typical value",()=>{
+    var points=Enumerable.Range(0,5).Select(i=>ChartPoint.Interval(i,i==2?null:70+i,50+i*5,150+i*10,$"D{i}")).ToArray();
+    var doc=Svg(Ranges(points));
+    // Five bars a quarter of the axis apart take a 34-pixel slot, so the axis is inset 17 pixels each side: X runs 93 to 853.
+    double X(double x)=>93+x*190;
+    var capsules=Capsules(doc);
+    Check(capsules.Length==5,$"{capsules.Length} capsules");
+    for(var i=0;i<5;i++)
+    {
+        var p=points[i];var c=capsules[i];
+        Check(Close(Attr(c,"x"),X(i)-9)&&Close(Attr(c,"width"),18)&&Close(Attr(c,"y"),RY(p.High!.Value))&&Close(Attr(c,"height"),RY(p.Low!.Value)-RY(p.High!.Value))&&Close(Attr(c,"rx"),9)&&(string?)c.Attribute("fill")==ChartStyle.Light.Series[0],$"bar {i}: {c}");
+        var dot=c.Parent!.Element(ns+"circle");
+        if(p.Y is null) Check(dot is null,$"bar {i} has a dot without a value");
+        else Check(Close(Attr(dot!,"cx"),X(i))&&Close(Attr(dot!,"cy"),RY(p.Y.Value))&&Close(Attr(dot!,"r"),4.5)&&(string?)dot!.Attribute("fill")==ChartStyle.Light.Background&&(string?)dot!.Attribute("stroke")==ChartStyle.Light.Series[0]&&(string?)dot!.Attribute("vector-effect")=="non-scaling-stroke",$"bar {i}'s dot: {dot}");
+    }
+    // A bar whose ends meet is a pixel long, rounded by half that, and a day without bounds draws nothing but keeps its place.
+    var flat=Capsules(Svg(Ranges(ChartPoint.Interval(0,null,90,90),ChartPoint.Interval(1,null,60,120))))[0];
+    Check(Close(Attr(flat,"height"),1)&&Close(Attr(flat,"y"),RY(90)-.5)&&Close(Attr(flat,"rx"),.5),flat.ToString());
+    var missing=Capsules(Svg(Ranges([..points.Take(2),new(2,null),..points.Skip(3)])));
+    Check(missing.Length==4&&Close(Attr(missing[2],"x"),X(3)-9),"a missing day moved the bars after it");
+    // A thin bar's dot stands proud of it: three pixels at least, ringed in its colour.
+    var thin=Svg(Ranges(Enumerable.Range(0,120).Select(i=>ChartPoint.Interval(i,90,60,120)).ToArray()));
+    Check(Capsules(thin).All(c=>Attr(c,"width")<6)&&thin.Descendants(ns+"circle").Where(e=>e.Parent?.Attribute("data-point") is not null).All(e=>Attr(e,"r")==3),"a thin bar's dot is too small to see");
+});
+Test("Range: a bar takes the slot a column would, up to 18 pixels: on a continuous axis from the closest gap, inset to stand whole, and on a column chart in its category",()=>{
+    double Centre(XElement c)=>Attr(c,"x")+Attr(c,"width")/2;
+    // Forty bars a step apart, and one more half a step on: the slot is .7 of the closest gap on screen, under 18 pixels.
+    var dense=Capsules(Svg(Ranges([..Enumerable.Range(0,40).Select(i=>ChartPoint.Interval(i,null,60,120)),ChartPoint.Interval(39.5,null,60,120)])));
+    var closest=Enumerable.Range(1,dense.Length-1).Min(i=>Centre(dense[i])-Centre(dense[i-1]));
+    Check(Close(closest,Centre(dense[^1])-Centre(dense[^2]))&&dense.All(c=>Close(Attr(c,"width"),.7*closest))&&.7*closest<18,$"bars {Attr(dense[0],"width")} wide for a closest gap of {closest}");
+    // The axis is inset by half a slot, so the first and last bars stand whole at the plot's edges.
+    var even=Capsules(Svg(Ranges(Enumerable.Range(0,40).Select(i=>ChartPoint.Interval(i,null,60,120)).ToArray())));
+    Check(Math.Abs(Attr(even[0],"x")-76)<.01&&Math.Abs(Attr(even[^1],"x")+Attr(even[^1],"width")-870)<.01,$"the bars run from {Attr(even[0],"x")} to {Attr(even[^1],"x")+Attr(even[^1],"width")}");
+    // A line beside them shares the inset axis.
+    var beside=Svg(Ranges(Enumerable.Range(0,5).Select(i=>ChartPoint.Interval(i,null,60,120)).ToArray()) with{Kind=ChartKind.Line,Series=[new("Range",Enumerable.Range(0,5).Select(i=>ChartPoint.Interval(i,90,60,120)).ToArray()){Kind=ChartKind.Range},new("Resting",Enumerable.Range(0,5).Select(i=>new ChartPoint(i,55)).ToArray())]});
+    var markers=beside.Descendants(ns+"g").Where(g=>(string?)g.Attribute("data-series")=="1").Select(g=>Attr(g.Element(ns+"circle")!,"cx")).ToArray();
+    Check(markers.Zip(Capsules(beside)).All(p=>Close(p.First,Centre(p.Second)))&&Close(markers[0],93),"the line and the bars do not share X");
+    // On a column chart a range series takes its share of each category's slot, beside the columns, centred in its share.
+    var mixed=Svg(Spec(ChartKind.Column) with{Series=[new("Rain",[new(0,20,"A"),new(1,30,"B"),new(2,25,"C")]),new("Temperature",[ChartPoint.Interval(0,15,8,24,"A"),ChartPoint.Interval(1,16,9,25,"B"),ChartPoint.Interval(2,17,10,26,"C")]){Kind=ChartKind.Range}]});
+    double band=794/3d,share=band*.72/2;double CY(double v)=>344-v/30*266;
+    var bars=Capsules(mixed);var rain=mixed.Descendants(ns+"g").Where(g=>(string?)g.Attribute("data-series")=="0").Select(g=>g.Elements().Last()).ToArray();
+    for(var i=0;i<3;i++)
+    {
+        Check(Close(Attr(bars[i],"x"),76+i*band+band*.14+share+(share-18)/2)&&Close(Attr(bars[i],"width"),18)&&Close(Attr(bars[i],"y"),CY(24+i))&&Close(Attr(bars[i],"height"),CY(8+i)-CY(24+i)),$"bar {i}: {bars[i]}");
+        Check(Close(Attr(rain[i],"x"),76+i*band+band*.14)&&Close(Attr(rain[i],"width"),share),$"column {i} lost its share: {rain[i]}");
+    }
+});
+Test("Range: drawn from no baseline, so a reversed axis puts the low end on top, a logarithmic one measures both ends, and the axis spans the bars, not zero",()=>{
+    // Sleep timing: bedtime to waking on a reversed time-of-day axis from 22:00 to 08:00, earlier at the top.
+    var timing=new ChartSpec{Kind=ChartKind.Range,YFormat=ValueFormat.TimeOfDay,YReversed=true,YMin=79200,YMax=115200,Series=[new("Sleep",[ChartPoint.Interval(0,null,82800,109800,"Mon"),ChartPoint.Interval(1,null,84600,111600,"Tue")])]};
+    double TY(double v)=>78+(v-79200)/36000*266;
+    var doc=Svg(timing);var bars=Capsules(doc);
+    Check(Close(Attr(bars[0],"y"),TY(82800))&&Close(Attr(bars[0],"height"),TY(109800)-TY(82800))&&Close(Attr(bars[1],"y"),TY(84600)),$"{bars[0]}");
+    Check(bars[0].Parent!.Attribute("aria-label")!.Value=="Mon: 23:00 to 06:30"&&bars[1].Parent!.Attribute("aria-label")!.Value=="Tue: 23:30 to 07:00",bars[0].Parent!.Attribute("aria-label")!.Value);
+    // Ten hours take three-hour steps, on the hour, each label 4 pixels below its tick on the left.
+    foreach(var (tick,label) in new[]{(86400d,"00:00"),(97200d,"03:00"),(108000d,"06:00")})
+        Check(doc.Descendants(ns+"text").Any(t=>t.Value==label&&Close(Attr(t,"y"),TY(tick)+4)),$"no {label} at {TY(tick)}");
+    // On a logarithmic axis from 1 to 1000 both ends and the dot are measured in decades.
+    var log=Svg(new ChartSpec{Kind=ChartKind.Range,YAxis=AxisKind.Log,YMin=1,YMax=1000,Series=[new("Load",[ChartPoint.Interval(0,10,2,50),ChartPoint.Interval(1,100,20,500)])]});
+    double LY(double v)=>344-Math.Log10(v)/3*266;
+    var logged=Capsules(log);
+    Check(Close(Attr(logged[0],"y"),LY(50))&&Close(Attr(logged[0],"height"),LY(2)-LY(50))&&Close(Attr(logged[1].Parent!.Element(ns+"circle")!,"cy"),LY(100)),"a log axis does not measure the bar");
+    // Without bounds the axis runs from the lowest low to the highest high: no zero below the bars.
+    var floating=Svg(new ChartSpec{Kind=ChartKind.Range,Series=[new("Heart rate",[ChartPoint.Interval(0,70,52,168,"Mon"),ChartPoint.Interval(1,68,48,150,"Tue")])]});
+    var free=Capsules(floating);
+    Check(Close(Attr(free[0],"y"),78)&&Close(Attr(free[1],"y")+Attr(free[1],"height"),344)&&!floating.Descendants(ns+"text").Any(t=>t.Value=="0"),"the axis does not span the bars, or reaches zero");
+    // A bar takes its point's colour ahead of its series', and its dot follows.
+    var coloured=Svg(new ChartSpec{Kind=ChartKind.Range,Series=[new("Heart rate",[ChartPoint.Interval(0,70,52,168) with{Color="#123456"},ChartPoint.Interval(1,null,48,150)],"#ABCDEF")]});
+    Check(Capsules(coloured).Select(c=>(string?)c.Attribute("fill")).SequenceEqual(["#123456","#ABCDEF"])&&(string?)coloured.Descendants(ns+"circle").Single(e=>e.Parent?.Attribute("data-point") is not null).Attribute("stroke")=="#123456","a point's colour does not win");
+});
+Test("Range: each bar is a labelled button that reads its day, its two ends and its average, its series named only beside another range",()=>{
+    var day=Utc(2026,9,12);
+    var spec=new ChartSpec{Kind=ChartKind.Range,XAxis=AxisKind.Time,Series=[new("Heart rate",[ChartPoint.Interval(day,74,52,168,"12 Sep"),ChartPoint.Interval(day+86_400_000,null,50,140),ChartPoint.Interval(day+2*86_400_000,70,49,120,"14 Sep")])]};
+    var doc=Svg(spec);
+    var marks=doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).ToArray();
+    Check(marks.Select(g=>g.Attribute("aria-label")!.Value).SequenceEqual(["12 Sep: 52 to 168, average 74","13 Sep 2026: 50 to 140","14 Sep: 49 to 120, average 70"]),string.Join(" | ",marks.Select(g=>g.Attribute("aria-label")!.Value)));
+    Check(marks.Select(g=>(g.Attribute("data-series")!.Value,g.Attribute("data-point")!.Value,g.Attribute("role")!.Value,g.Attribute("tabindex")!.Value)).SequenceEqual([("0","0","button","0"),("0","1","button","0"),("0","2","button","0")]),"a bar is not a button for its point");
+    var two=Svg(spec with{Series=[spec.Series[0],new("Last year",[ChartPoint.Interval(day,70,50,150,"12 Sep")])]});
+    Check(two.Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")=="Heart rate, 12 Sep: 52 to 168, average 74")&&two.Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")=="Last year, 12 Sep: 50 to 150, average 70"),"two range series are not told apart");
+    // In a duration format, and with a line beside it, whose points keep their own names.
+    var paced=Svg(new ChartSpec{Kind=ChartKind.Line,YFormat=ValueFormat.Duration,Series=[new("Pace",[new(1,300),new(2,295)]),new("Spread",[ChartPoint.Interval(1,300,280,330,"km 1"),ChartPoint.Interval(2,295,270,320,"km 2")]){Kind=ChartKind.Range}]});
+    Check(paced.Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")=="km 1: 4:40 to 5:30, average 5:00")&&paced.Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")=="Pace: 1, 5:00"),"a range beside a line does not read its format");
+    // Its legend key is a capsule standing upright.
+    var key=XDocument.Parse(ChartSvg.LegendKey(spec,0)).Root!.Elements().Single();
+    Check(Attr(key,"width")==6&&Attr(key,"height")==9&&Attr(key,"rx")==3&&(string?)key.Attribute("fill")==ChartStyle.Light.Series[0],key.ToString());
+});
+Test("Time of day: seconds since a midnight read HH:mm, rounded to the minute and wrapping at 24 hours",()=>{
+    var clock=new Axis(AxisKind.Linear,0,1){ValueFormat=ValueFormat.TimeOfDay};
+    foreach(var (seconds,text) in new[]{(84600d,"23:30"),(110400d,"06:40"),(0d,"00:00"),(86400d,"00:00"),(-1800d,"23:30"),(29.9,"00:00"),(30d,"00:01"),(86399d,"00:00"),(172800+3600*13.5,"13:30"),(45240d,"12:34")})
+        Check(clock.Format(seconds)==text,$"{seconds} reads {clock.Format(seconds)}, not {text}");
+    // On a chart: ticks, tooltips and the data table read the clock; CSV keeps the seconds.
+    var bed=Spec() with{YFormat=ValueFormat.TimeOfDay,Series=[new("Bedtime",[new(0,82800),new(1,84600),new(2,88200)])]};
+    var doc=Svg(bed);
+    Check(doc.Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")=="Bedtime: 1, 23:30")&&doc.Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")=="Bedtime: 2, 00:30"),"a point does not read the clock");
+    Check(ChartExport.Csv(bed).Contains("\"Bedtime\",1,84600,"),"CSV does not keep the seconds");
+});
+Test("Time of day: ticks land on whole hours, or on half and quarter hours when the range is short, and minor lines divide them evenly",()=>{
+    IReadOnlyList<(double Value,string Label)> Ticks(double min,double max,int count=5)=>new Axis(AxisKind.Linear,min,max){ValueFormat=ValueFormat.TimeOfDay}.Ticks(count);
+    // A night from 22:30 to 07:30 takes two-hour steps on the even hour.
+    Check(Ticks(81000,113400).Select(t=>t.Label).SequenceEqual(["00:00","02:00","04:00","06:00"])&&Ticks(81000,113400).All(t=>t.Value%7200==0),string.Join(",",Ticks(81000,113400)));
+    // Two hours take half hours, and three quarters of an hour take quarters.
+    Check(Ticks(82800,90000).Select(t=>t.Label).SequenceEqual(["23:00","23:30","00:00","00:30","01:00"]),string.Join(",",Ticks(82800,90000)));
+    Check(Ticks(84600,87300).Select(t=>t.Label).SequenceEqual(["23:30","23:45","00:00","00:15"]),string.Join(",",Ticks(84600,87300)));
+    // Ten hours with five ticks take three-hour steps; a day takes six-hour ones; every step is a whole hour from an hour up.
+    Check(Ticks(79200,115200).Select(t=>t.Label).SequenceEqual(["00:00","03:00","06:00"])&&Ticks(0,86400).Select(t=>t.Label).SequenceEqual(["00:00","06:00","12:00","18:00","00:00"]),string.Join(",",Ticks(0,86400)));
+    foreach(var (min,max) in new[]{(0d,3600d),(3000d,90000d),(80000d,120000d),(-7200d,7200d),(0d,4*86400d)})
+        Check(Ticks(min,max).Count is >=2 and <=5&&Ticks(min,max).All(t=>t.Value%900==0&&t.Value>=min&&t.Value<=max),$"{min} to {max}: {string.Join(",",Ticks(min,max))}");
+    // An hour's step is divided into quarters and a two-hour one into half hours; a quarter-hour step into fives.
+    var minors=new Axis(AxisKind.Linear,79200,108000){ValueFormat=ValueFormat.TimeOfDay}.MinorTicks(5);
+    Check(minors.Count>0&&minors.All(v=>v%1800==0&&v%7200!=0),string.Join(",",minors));
+    var quarters=new Axis(AxisKind.Linear,84600,87300){ValueFormat=ValueFormat.TimeOfDay}.MinorTicks(5);
+    Check(quarters.Count>0&&quarters.All(v=>v%300==0&&v%900!=0),string.Join(",",quarters));
+});
+Test("Timeline and range: what has no meaning on them is refused, each with its reason",()=>{
+    string Refusal(ChartSpec spec){try{ChartSvg.Render(spec);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
+    var night=Hypnogram();var range=Ranges(ChartPoint.Interval(0,70,50,150),ChartPoint.Interval(1,72,52,160));
+    ChartSpec Lane(ChartSeries series)=>night with{Series=[series,..night.Series.Skip(1)]};
+    ChartSpec Bar(ChartPoint point)=>range with{Series=[range.Series[0] with{Points=[point]}]};
+    foreach(var (spec,reason) in new (ChartSpec,string)[]{
+        (night with{YZones=Tiers()},"no zones"),(Lane(night.Series[0] with{Trend=true}),"no trend line"),(Lane(night.Series[0] with{Secondary=true}),"no secondary axis"),
+        (Lane(night.Series[0] with{Kind=ChartKind.Line}),"own kind"),(night with{Panes=[new()]},"no panes"),(Lane(night.Series[0] with{Pane=1}),"no panes"),
+        (night with{Annotations=[new(AnnotationAxis.Y,1)]},"takes X annotations"),(night with{XFormat=ValueFormat.Number,XAxis=AxisKind.Log},"linear or a time X axis"),
+        (night with{YReversed=true},"lanes"),(night with{YAxis=AxisKind.Log},"lanes"),(night with{YFormat=ValueFormat.Compact},"lanes"),(night with{YMin=0},"lanes"),(night with{Y2Max=5},"lanes"),(night with{YTickLabels=TickLabels.Ends},"lanes"),
+        (Lane(new("Awake",[new(82800,1)])),"ChartPoint.Span"),(Lane(new("Awake",[ChartPoint.Span(83400,83400)])),"above its X"),(Lane(new("Awake",[ChartPoint.Span(83400,82800)])),"above its X"),
+        (Lane(new("Awake",[ChartPoint.Span(82800,double.NaN)])),"above its X"),(Lane(new("Awake",[ChartPoint.Span(82800,84000),ChartPoint.Span(83400,85000)])),"cannot overlap"),
+        (Lane(new("Awake",[ChartPoint.Span(97200,97380),ChartPoint.Span(82800,99000)])),"cannot overlap"),(Lane(night.Series[0] with{Points=[night.Series[0].Points[0] with{Color="#123456"}]}),"state a timeline's lane"),
+        (Lane(night.Series[0] with{Gradient=[new(0,"#3F87D9"),new(1,"#DD4B45")]}),"gradient"),(Lane(night.Series[0] with{StrokeWidth=3}),"stroke width"),
+        (new ChartSpec{Kind=ChartKind.Timeline,XAxis=AxisKind.Time,Series=[new("A",[ChartPoint.Span(Utc(2026,1,1),TimeAxis.MaxValue+1)])]},"Unix milliseconds"),
+        (range with{Series=[range.Series[0] with{ProjectedFrom=.5}]},"lines or areas"),(range with{Series=[range.Series[0] with{Trend=true}]},"trend line"),(range with{Series=[range.Series[0] with{Zones=Tiers()}]},"range series takes no zones"),
+        (Bar(new ChartPoint(0,70){Low=50}),"both Low and High"),(Bar(new ChartPoint(0,70)),"both Low and High"),(Bar(ChartPoint.Interval(0,null,160,150)),"no greater than High"),
+        (Bar(ChartPoint.Interval(0,170,50,150)),"between its Low and its High"),(Bar(ChartPoint.Interval(0,40,50,150)),"between its Low and its High"),(Bar(ChartPoint.Interval(0,null,50,double.PositiveInfinity)),"finite"),
+        (range with{YAxis=AxisKind.Log,YMin=null,Series=[range.Series[0] with{Points=[ChartPoint.Interval(0,null,0,150)]}]},"positive range bounds"),
+        (range with{Series=[range.Series[0] with{Points=[ChartPoint.Interval(0,70,50,150),ChartPoint.Interval(0,72,52,160)]}]},"unique X values"),
+        (range with{Series=[range.Series[0] with{Curve=LineCurve.Smooth}]},"smooth or stepped"),(range with{Series=[range.Series[0] with{Markers=MarkerStyle.Filled}]},"Marker styles"),
+        (Spec(ChartKind.Bar) with{Series=[new("S",[ChartPoint.Interval(0,2,1,3)]){Kind=ChartKind.Range}]},"own kind"),(Spec(ChartKind.Donut) with{Series=[new("S",[ChartPoint.Interval(0,2,1,3)]){Kind=ChartKind.Range}]},"own kind"),
+        (Spec() with{Series=[new("S",[new ChartPoint(0,1){XEnd=2},new(1,2)])]},"timeline charts only"),(range with{Series=[range.Series[0] with{Points=[ChartPoint.Interval(0,70,50,150) with{XEnd=1}]}]},"timeline charts only"),
+        (Spec() with{TimelineConnectors=false},"only a timeline"),(range with{TimelineConnectors=false},"only a timeline"),
+        (Spec() with{XAxis=AxisKind.Time,XFormat=ValueFormat.TimeOfDay,Series=[new("S",[new(Utc(2026,1,1),1)])]},"time-of-day"),(Spec() with{XAxis=AxisKind.Log,XFormat=ValueFormat.TimeOfDay,Series=[new("S",[new(1,1)])]},"time-of-day"),
+        (Spec() with{YAxis=AxisKind.Log,YFormat=ValueFormat.TimeOfDay},"time-of-day"),(Spec() with{Y2Axis=AxisKind.Log,Y2Format=ValueFormat.TimeOfDay},"time-of-day"),
+        (Spec() with{Panes=[new(){YAxis=AxisKind.Log,YFormat=ValueFormat.TimeOfDay}],Series=[Spec().Series[0],Spec().Series[0] with{Pane=1}]},"time-of-day")})
+        Check(Refusal(spec).Contains(reason),$"{spec.Kind}: \"{Refusal(spec)}\" does not say \"{reason}\"");
+    // Within the rules: spans that touch in a lane, spans that overlap across lanes, X annotations, lanes on the right, empty lanes,
+    // a missing day, a range without a value, a dot at either end, and ranges on reversed, logarithmic and right-hand axes.
+    foreach(var spec in new[]{Lane(new("Awake",[ChartPoint.Span(82800,83400),ChartPoint.Span(83400,84000)])),night with{Annotations=[new(AnnotationAxis.X,90000){Label="Alarm"},new(AnnotationAxis.X,84000){To=86000}]},
+        night with{YAxisSide=AxisSide.Right,MinorGridlines=true,XLabel="Time"},night with{Series=[..night.Series,new("Unscored",[])]},Bar(new ChartPoint(0,null)),Bar(ChartPoint.Interval(0,50,50,150)),Bar(ChartPoint.Interval(0,150,50,150)),
+        range with{YReversed=true,YAxis=AxisKind.Log,YMin=10,YMax=1000,YZones=Tiers(),Annotations=[new(AnnotationAxis.Y,100),new(AnnotationAxis.X,.5)]},
+        Spec() with{Y2Label="Spread",Series=[Spec().Series[0],new("Spread",[ChartPoint.Interval(0,2,1,3),ChartPoint.Interval(1,5,4,6)]){Kind=ChartKind.Range,Secondary=true}]}})
+        ChartSvg.Render(spec);
+    var overlapping=new ChartSpec{Kind=ChartKind.Timeline,Series=[new("Stress",[ChartPoint.Span(0,10)]),new("Activity",[ChartPoint.Span(5,15)])]};
+    Check(Svg(overlapping).Descendants(ns+"g").Count(g=>g.Attribute("data-point") is not null)==2,"spans overlapping across lanes are refused");
+    Check(ChartSvg.Render(night with{Series=[]}).Contains("No data to display")&&ChartSvg.Render(range with{Series=[new("S",[new(0,null)])]}).Contains("No data to display"),"an empty timeline or range does not draw its empty state");
+});
+Test("Timeline and range: specs survive JSON, a request that names no connectors draws them, and CSV carries each span's end and each bar's bounds",()=>{
+    var options=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web){Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}};
+    var timing=Ranges(ChartPoint.Interval(0,null,82800,109800,"Mon"),ChartPoint.Interval(1,95000,84600,111600,"Tue")) with{YFormat=ValueFormat.TimeOfDay,YReversed=true,YMin=null,YMax=null};
+    foreach(var spec in new[]{Hypnogram(),Hypnogram(false),timing,Hypnogram() with{XFormat=ValueFormat.Number,XAxis=AxisKind.Time,Series=[new("REM",[ChartPoint.Span(Utc(2026,9,27,1),Utc(2026,9,27,2))])],TimeZone="Europe/London"}})
+    {
+        var json=System.Text.Json.JsonSerializer.Serialize(spec,options);
+        Check(ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,options)!)==ChartSvg.Render(spec),$"{spec.Kind} changed in transit");
+    }
+    var written=System.Text.Json.JsonSerializer.Serialize(Hypnogram(false),options)+System.Text.Json.JsonSerializer.Serialize(timing,options);
+    Check(written.Contains("\"kind\":\"Timeline\"")&&written.Contains("\"xEnd\":83400")&&written.Contains("\"timelineConnectors\":false")&&written.Contains("\"kind\":\"Range\"")&&written.Contains("\"yFormat\":\"TimeOfDay\"")&&written.Contains("\"low\":82800"),written);
+    var request=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Timeline\",\"xFormat\":\"TimeOfDay\",\"series\":[{\"name\":\"Light\",\"points\":[{\"x\":82800,\"xEnd\":86400}]},{\"name\":\"Deep\",\"points\":[{\"x\":86400,\"xEnd\":90000}]}]}",options)!;
+    Check(request.TimelineConnectors&&request.Series[0].Points[0].XEnd==86400&&request.Series[0].Points[0].Y is null&&ChartSvg.Render(request).Contains("class='lumen-connectors'")&&ChartSvg.Render(request).Contains("aria-label='Deep: 00:00 to 01:00, 1 h'"),"a request without connectors does not draw them");
+    // CSV adds an XEnd column to a timeline, after a time axis's own columns, and a range's bounds as a band's are.
+    var csv=ChartExport.Csv(Hypnogram());
+    Check(csv.StartsWith("Series,X,Y,Label,Size,XEnd\r\n")&&csv.Contains("\"Awake\",82800,,\"\",1,83400\r\n")&&csv.Contains("\"Light\",91800,,\"Second cycle\",1,97200\r\n"),csv);
+    var timed=ChartExport.Csv(new ChartSpec{Kind=ChartKind.Timeline,XAxis=AxisKind.Time,Series=[new("REM",[ChartPoint.Span(Utc(2026,9,27,1),Utc(2026,9,27,2))])]});
+    Check(timed.StartsWith("Series,X,XTime,Y,Label,Size,XEnd\r\n")&&timed.Contains($"\"REM\",{Utc(2026,9,27,1).ToString(CultureInfo.InvariantCulture)},2026-09-27T01:00:00.000Z,,\"\",1,{Utc(2026,9,27,2).ToString(CultureInfo.InvariantCulture)}"),timed);
+    var bars=ChartExport.Csv(timing);
+    Check(bars.StartsWith("Series,X,Y,Label,Size,Low,High\r\n")&&bars.Contains("\"Heart rate\",0,,\"Mon\",1,82800,109800")&&bars.Contains("\"Heart rate\",1,95000,\"Tue\",1,84600,111600"),bars);
+    Check(!ChartExport.Csv(Spec()).Contains("XEnd")&&!ChartExport.Csv(Sample(ChartKind.Band)).Contains("XEnd"),"another kind's CSV carries XEnd");
+});
+Test("Charts that use none of 0.27.0 draw byte for byte as 0.26.0 did, in both finishes, gradient IDs included",()=>{
+    // Five rows of the release baseline, hashed by 0.26.0: its own specs rebuilt here, refined and classic.
+    ChartPoint[] Points()=>Enumerable.Range(0,12).Select(i=>new ChartPoint(i,10+i*3+(i%3)*4,$"P{i}")).ToArray();
+    ChartSpec Base(ChartKind kind,ChartTheme theme)=>new(){Kind=kind,Theme=theme,Title="Baseline",Description="Default output",Series=[new("A",Points()),new("B",Points().Select(p=>p with{Y=p.Y+5}).ToArray())]};
+    var climb=Enumerable.Range(0,120).Select(i=>new ChartPoint(i*30,Math.Round(24+16*Math.Sin(i/9d)+6*Math.Sin(i/3.1),1))).ToArray();
+    (string Row,ChartSpec Spec,bool Titles,string Refined,string Classic)[] rows=[
+        ("Line/Light/True",Base(ChartKind.Line,ChartTheme.Light),true,"D991008D3106193D","CB7DF56598CE861F"),
+        ("Area/Dark/False",Base(ChartKind.Area,ChartTheme.Dark),false,"EDBB1E4E6F34DC8D","CBF026C145B854C8"),
+        ("Band/Light/True",new ChartSpec{Kind=ChartKind.Band,Series=[new("F",Enumerable.Range(0,8).Select(i=>ChartPoint.Interval(i,10+i,8+i,13+i)).ToArray())]},true,"5F679A5E47A0F467","BA35FFE76F28B956"),
+        ("finish/smooth-fade-area",new ChartSpec{Kind=ChartKind.Area,Title="Smooth fade",XFormat=ValueFormat.Duration,Series=[new("Climb",climb){Curve=LineCurve.Smooth,Fill=AreaFill.Fade,StrokeWidth=2,Markers=MarkerStyle.None}]},true,"975F1AFFAAD75178","4E9548279D4A245D"),
+        ("finish/gradient-log",Base(ChartKind.Line,ChartTheme.Light) with{Title="Gradient on a log axis",YAxis=AxisKind.Log,MinorGridlines=true,
+            Series=[new("Load",Points().Select((p,i)=>p with{Y=Math.Pow(10,i*.3)}).ToArray()){Gradient=[new(1,"#2E9B58"),new(30,"#A88200"),new(1000,"#DD4B45")],StrokeWidth=3}]},true,"D6E1DE0EDA8D6A08","A7C9FD0BF532D07B")];
+    foreach(var (row,spec,titles,refined,classic) in rows)
+    {
+        Check(Hash16(ChartSvg.Render(spec,includeTitles:titles))==refined,$"{row} is not 0.26.0's: {Hash16(ChartSvg.Render(spec,includeTitles:titles))}");
+        Check(Hash16(ChartSvg.Render(Classic(spec),includeTitles:titles))==classic,$"{row} is not 0.26.0's in the classic finish: {Hash16(ChartSvg.Render(Classic(spec),includeTitles:titles))}");
+        // Spelling out the connectors' default changes nothing, gradient IDs included.
+        Check(ChartSvg.Render(spec with{TimelineConnectors=true},includeTitles:titles)==ChartSvg.Render(spec,includeTitles:titles),$"{row} changes when its connectors are spelled out");
+    }
+});
+Test("Timeline and range: the component zooms their X, reads them in its legend, status line and data table, and keeps a hidden lane",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    string Drawn(LumenChart chart)=>(string)typeof(LumenChart).GetField("svg",flags)!.GetValue(chart)!;
+    var night=Hypnogram();
+    var html=RenderInside(null,night);
+    Check(html.Contains("aria-label=\"Zoom in\"")&&new[]{"Awake 0:13, 4 %","REM 0:30, 8 %","Light 4:17, 71 %","Deep 1:00, 17 %"}.All(html.Contains),"the timeline offers no zoom, or its legend does not total the states");
+    double before=0,after=0;string hidden="";
+    var shown=Operate(night,async chart=>{
+        typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);
+        before=Attr(XDocument.Parse(Drawn(chart)).Descendants(ns+"rect").First(r=>(string?)r.Attribute("class")=="lumen-span"&&r.Parent!.Attribute("data-series")!.Value=="2"&&r.Parent!.Attribute("data-point")!.Value=="1"),"width");
+        // Zooming in halves the X axis about its middle, so a span in the middle is drawn twice as wide.
+        typeof(LumenChart).GetMethod("Zoom",flags)!.Invoke(chart,[.5]);
+        after=Attr(XDocument.Parse(Drawn(chart)).Descendants(ns+"rect").First(r=>(string?)r.Attribute("class")=="lumen-span"&&r.Parent!.Attribute("data-series")!.Value=="2"&&r.Parent!.Attribute("data-point")!.Value=="1"),"width");
+        typeof(LumenChart).GetMethod("ResetView",flags)!.Invoke(chart,[]);
+        typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[0]);hidden=Drawn(chart);typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[0]);
+        await chart.SelectPoint(2,1);
+    });
+    Check(Close(after,2*before),$"zooming drew the span {after} wide, {before} before");
+    Check(shown.Contains("<tr><td>Awake</td><td>23:00</td><td>to 23:10</td></tr>")&&shown.Contains("Light: 01:30 to 03:00</span>"),"the table or the status line does not read a span");
+    var lanes=XDocument.Parse(hidden);
+    Check(!lanes.Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")=="Awake: 23:00 to 23:10, 10 min")&&lanes.Descendants(ns+"text").Count(t=>t.Value is "Awake" or "REM" or "Light" or "Deep")==4,"hiding a state removed its lane or kept its spans");
+    // A range chart zooms as a continuous chart does, and reads each bar's bounds and average.
+    var heart=new ChartSpec{Kind=ChartKind.Range,XAxis=AxisKind.Time,Series=[new("Heart rate",[ChartPoint.Interval(Utc(2026,9,12),74,52,168,"12 Sep"),ChartPoint.Interval(Utc(2026,9,13),null,50,140,"13 Sep")])]};
+    Check(RenderInside(null,heart).Contains("aria-label=\"Zoom in\""),"a range chart offers no zoom");
+    var read=Operate(heart,async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,0);});
+    Check(read.Contains("<tr><td>Heart rate</td><td>12 Sep</td><td>74 (52 to 168)</td></tr>")&&read.Contains("<tr><td>Heart rate</td><td>13 Sep</td><td>50 to 140</td></tr>")&&read.Contains("Heart rate: 12 Sep = 52 to 168, average 74</span>"),"the table or the status line does not read a bar");
+});
+// The gallery's sleep section reads the same athlete: last night is the HRV chart's last night and this morning's readiness.
+Test("Sports page: last night's stages fill the night the sleep-timing chart ends on, and its deep sleep follows the HRV the readiness reads",()=>{
+    var nights=SportsData.Nights(athlete);var last=nights[^1];
+    var hypnogram=Sports("hypnogram");var timing=Sports("sleep-timing").Series.Single().Points;
+    var spans=hypnogram.Series.SelectMany(s=>s.Points.Select(p=>(Stage:s.Name,p.X,End:p.XEnd!.Value))).OrderBy(s=>s.X).ToArray();
+    var evening=SportsData.When(SportsData.Today.AddDays(-1));
+    // The spans run without a gap or an overlap from bedtime to waking, which are the timing chart's last bar, on the morning
+    // the HRV chart ends on.
+    Check(spans.Zip(spans.Skip(1)).All(p=>p.First.End==p.Second.X)&&spans[0].X==evening+last.Bedtime*1000&&spans[^1].End==evening+last.Wake*1000,"the stages do not fill the night");
+    Check(nights.Count==SportsData.SleepNights&&last.Morning==SportsData.Today&&timing[^1].Low==last.Bedtime&&timing[^1].High==last.Wake&&timing[^1].X==Sports("hrv").Series[0].Points[^1].X,"the timing chart does not end on last night");
+    Check(hypnogram.Series.Select(s=>s.Name).SequenceEqual(SportsData.SleepStages)&&spans.Zip(spans.Skip(1)).All(p=>p.First.Stage!=p.Second.Stage)&&spans.All(s=>s.X%60_000==0),"the lanes are not the stages, or a stage follows itself, or a span leaves the minute");
+    Check(hypnogram.Description.Contains($"HRV {athlete.Hrv[^1].ToString(CultureInfo.InvariantCulture)} ms")&&Sports("readiness").Series[0].Points[0].Y==SportsData.Readiness(athlete)[^1],"the hypnogram does not name the readiness's HRV");
+    double Deep(Night n)=>n.Stages.Where(s=>s.Stage=="Deep").Sum(s=>s.To-s.From);
+    Check(hypnogram.Title==$"{SportsData.HoursMinutes(last.Wake-last.Bedtime-last.Stages.Where(s=>s.Stage=="Awake").Sum(s=>s.To-s.From))} asleep, {SportsData.HoursMinutes(Deep(last))} deep","the title does not total the stages");
+    // Each night's deep sleep rises and its lowest heart rate falls with its HRV against the 28 nights before, as readiness reads it.
+    var rolling=Statistics.Rolling(athlete.Hrv.Select(v=>(double?)v).ToArray(),SportsData.BaselineNights);
+    var z=nights.Select((n,i)=>{var day=SportsData.Weeks*7-SportsData.SleepNights+i;var w=rolling[day+SportsData.BaselineNights-1]!;return (athlete.Hrv[day+SportsData.BaselineNights]-w.Mean)/w.Deviation;}).ToArray();
+    double Correlation(double[] a,double[] b){double ma=a.Average(),mb=b.Average();return a.Zip(b).Sum(p=>(p.First-ma)*(p.Second-mb))/Math.Sqrt(a.Sum(v=>(v-ma)*(v-ma))*b.Sum(v=>(v-mb)*(v-mb)));}
+    Check(Correlation(nights.Select(Deep).ToArray(),z)>.5&&Correlation(nights.Select(n=>n.LowestHeartRate).ToArray(),z)<-.5,"deep sleep and the lowest heart rate do not follow the HRV");
+    Check((Deep(last)==nights.Min(Deep))==(z[^1]==z.Min()),"last night's HRV and its deep sleep disagree");
+    Check(SportsData.Nights(SportsData.Simulate()).Select(n=>(n.Bedtime,n.Wake,n.Stages.Count,n.LowestHeartRate)).SequenceEqual(nights.Select(n=>(n.Bedtime,n.Wake,n.Stages.Count,n.LowestHeartRate))),"two simulations sleep differently");
+});
+Test("Sports page: each day's heart rate runs from the night's lowest to the day's highest, today's the run's, its average between",()=>{
+    var nights=SportsData.Nights(athlete);var bars=Sports("heart-range").Series.Single().Points;var timing=Sports("sleep-timing").Series.Single().Points;
+    Check(bars.Count==SportsData.SleepNights&&bars.Select(b=>b.X).SequenceEqual(timing.Select(t=>t.X))&&bars.Select(b=>b.Label).SequenceEqual(timing.Select(t=>t.Label)),"the two charts do not show the same days");
+    for(var i=0;i<bars.Count;i++)
+    {
+        // The day's highest is its hardest session's peak, unless that stayed under an ordinary day's 105 to 125.
+        var day=nights[i].Morning;var peak=athlete.Sessions.Where(s=>s.Day==day).Select(s=>s.PeakHeartRate).DefaultIfEmpty(0).Max();
+        Check(bars[i].Low==nights[i].LowestHeartRate&&bars[i].Y>bars[i].Low&&bars[i].Y<bars[i].High&&(bars[i].High==peak||peak<=125&&bars[i].High is >=105 and <=125),$"{day}: {bars[i]}");
+    }
+    Check(bars[^1].High==Sports("stream").Series.Single(s=>s.Name=="Heart rate").Points.Max(p=>p.Y)&&latest.PeakHeartRate==latest.Track!.HeartRate.Max(),"today's highest is not the run's");
+    Check(athlete.Sessions.Where(s=>s.Track is not null).All(s=>s.PeakHeartRate==s.Track!.HeartRate.Max()),"a run's peak is not its highest sample");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

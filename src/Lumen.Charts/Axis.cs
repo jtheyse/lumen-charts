@@ -15,8 +15,9 @@ public enum AxisKind
 
 /// <summary>
 /// How an axis writes its values. <see cref="Duration"/> reads them as seconds: m:ss and h:mm:ss on a linear
-/// axis, 1s, 5m and 1h on a logarithmic one. <see cref="Compact"/> writes 1.2k, 3.4M and 1.5B. A time axis
-/// writes its calendar and takes neither.
+/// axis, 1s, 5m and 1h on a logarithmic one. <see cref="Compact"/> writes 1.2k, 3.4M and 1.5B.
+/// <see cref="TimeOfDay"/> reads seconds since a midnight and writes the clock, HH:mm. A time axis writes its calendar
+/// and takes none of them.
 /// </summary>
 public enum ValueFormat
 {
@@ -25,7 +26,11 @@ public enum ValueFormat
     /// <summary>Seconds, written as a clock or a span.</summary>
     Duration,
     /// <summary>Thousands, millions, billions and trillions with a suffix.</summary>
-    Compact
+    Compact,
+    /// <summary>Seconds since a midnight, written as the time of day, HH:mm, rounded to the minute and wrapping at 24 hours:
+    /// 84600 reads 23:30 and 110400, the next morning, 06:40, so a night is one unbroken span that never crosses zero. Ticks
+    /// land on whole hours, or on half and quarter hours over a short range. Linear axes only.</summary>
+    TimeOfDay
 }
 
 /// <summary>Time axis values are Unix milliseconds. Ticks and labels read in UTC unless <see cref="ChartSpec.TimeZone"/> names a zone,
@@ -135,6 +140,10 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         (1, 5), (2, 4), (5, 5), (10, 5), (15, 3), (30, 6), (60, 4), (120, 4), (300, 5), (600, 5), (900, 3), (1800, 6),
         (3600, 4), (7200, 4), (10800, 3), (21600, 6), (43200, 4)
     ];
+    /// <summary>The steps of a time-of-day axis in seconds — quarter and half hours, then whole hours — each with the parts its
+    /// minor lines divide it into.</summary>
+    private static readonly (double Step, int Parts)[] ClockSteps =
+        [(900, 3), (1800, 2), (3600, 4), (7200, 4), (10800, 3), (21600, 6), (43200, 4), (86400, 4)];
     /// <summary>Round durations for a logarithmic axis. Past five hours every whole hour is one too.</summary>
     private static readonly double[] LogDurations = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 7200, 10800, 14400, 18000];
     private static readonly (double Size, string Suffix)[] Magnitudes = [(1e3, "k"), (1e6, "M"), (1e9, "B"), (1e12, "T")];
@@ -232,8 +241,21 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     {
         ValueFormat.Duration => Kind == AxisKind.Log ? Span(value) : Clock(value),
         ValueFormat.Compact => Compact(value),
+        ValueFormat.TimeOfDay => TimeOfDay(value),
         _ => LinearScale.Label(value)
     };
+
+    /// <summary>Seconds since a midnight as the time of day, HH:mm: rounded half up to the minute and wrapped into one day, so
+    /// a value past 24 hours, or below zero, reads as the clock it stands at.</summary>
+    private static string TimeOfDay(double seconds)
+    {
+        var minutes = Math.Round(seconds / 60, MidpointRounding.AwayFromZero) % 1440;
+        if (minutes < 0) minutes += 1440;
+        return string.Create(CultureInfo.InvariantCulture, $"{Math.Floor(minutes / 60):00}:{minutes % 60:00}");
+    }
+
+    /// <summary>A moment on a time axis as its zone's clock shows it, in <paramref name="format"/>.</summary>
+    internal string LocalText(double value, string format) => Local(value).ToString(format, CultureInfo.InvariantCulture);
 
     /// <summary>Seconds as m:ss below an hour and h:mm:ss from an hour up, rounded half up to the second.</summary>
     private static string Clock(double seconds)
@@ -297,8 +319,15 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         if (Kind != AxisKind.Time)
         {
             var axis = this;
-            if (ValueFormat != ValueFormat.Duration) return new LinearScale(Min, Max).Ticks(count).Select(v => (v, axis.Label(v))).ToArray();
+            if (ValueFormat is not (ValueFormat.Duration or ValueFormat.TimeOfDay)) return new LinearScale(Min, Max).Ticks(count).Select(v => (v, axis.Label(v))).ToArray();
             var target = Math.Max(2, count);
+            if (ValueFormat == ValueFormat.TimeOfDay)
+            {
+                var hours = ClockStep(target);
+                var start = Math.Ceiling(Min / hours);
+                return Enumerable.Range(0, target).Select(i => (start + i) * hours).Where(value => value <= axis.Max)
+                    .Select(value => (value, TimeOfDay(value))).ToArray();
+            }
             var step = DurationStep(target);
             var first = Math.Ceiling(Min / step);
             // Counted in whole steps, so a huge value whose next step rounds to itself cannot loop for ever.
@@ -316,7 +345,8 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     /// four or five depending on its step, a log axis marks the mantissas between decades, and a time
     /// axis has none, because half of a month is not a boundary anyone reads. A duration axis divides
     /// its steps into round durations, and has none when logarithmic, where a mantissa of 20 minutes
-    /// is no duration anyone reads either.
+    /// is no duration anyone reads either. A time-of-day axis divides an hour into quarters and a
+    /// quarter hour into fives.
     /// </summary>
     public IReadOnlyList<double> MinorTicks(int count = 5)
     {
@@ -336,7 +366,7 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         }
         var step = major[1] - major[0];
         var magnitude = Math.Pow(10, Math.Floor(Math.Log10(Math.Abs(step))));
-        var divisions = ValueFormat == ValueFormat.Duration ? Parts(step)
+        var divisions = ValueFormat == ValueFormat.Duration ? Parts(step) : ValueFormat == ValueFormat.TimeOfDay ? Parts(step, ClockSteps)
             : Math.Abs(step / magnitude - 2) < .01 || Math.Abs(step / magnitude - 2.5) < .01 ? 4 : 5;
         // Counted as well as summed: near 1e21 a step can be too small to move the value, which would never reach Max.
         for (var (value, interval) = (major[0] - step, 0); value < Max && interval <= major.Length; value += step, interval++)
@@ -374,12 +404,18 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     }
 
     /// <summary>The smallest round duration that puts no more than <paramref name="target"/> ticks on the axis.</summary>
-    private double DurationStep(int target)
+    private double DurationStep(int target) => Step(DurationSteps, target);
+
+    /// <summary>The smallest step of the clock — a quarter or half hour, or a whole number of hours dividing the day — that
+    /// puts no more than <paramref name="target"/> ticks on the axis.</summary>
+    private double ClockStep(int target) => Step(ClockSteps, target);
+
+    private double Step((double Step, int Parts)[] ladder, int target)
     {
         double min = Min, max = Max;
         bool Fits(double step) => Math.Floor(max / step) - Math.Ceiling(min / step) + 1 <= target;
-        foreach (var (step, _) in DurationSteps) if (Fits(step)) return step;
-        // Past twelve hours the steps are whole days, and any fewer than this always give too many ticks.
+        foreach (var (step, _) in ladder) if (Fits(step)) return step;
+        // Past the ladder the steps are whole days, and any fewer than this always give too many ticks.
         const double day = 86400;
         var days = Math.Floor((max - min) / day / (target + 1)) + 1;
         for (var tries = 0; tries < 1000 && !Fits(days * day); tries++) days++;
@@ -390,9 +426,11 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
 
     /// <summary>The parts a duration step divides into, so its minor lines land on round durations too: a
     /// minute into quarters, an hour into quarters, a day into six-hour parts and a few days into days.</summary>
-    private static int Parts(double step)
+    private static int Parts(double step) => Parts(step, DurationSteps);
+
+    private static int Parts(double step, (double Step, int Parts)[] steps)
     {
-        foreach (var (ladder, parts) in DurationSteps) if (ladder == step) return parts;
+        foreach (var (ladder, parts) in steps) if (ladder == step) return parts;
         var days = step / 86400;
         return days == 1 ? 4 : days <= 7 ? (int)days : 1;
     }

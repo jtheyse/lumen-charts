@@ -81,7 +81,7 @@ public static class ChartSvg
     // every record, so leaving out the nulls loses nothing, and it halves the text a long series makes.
     private static readonly JsonSerializerOptions Hashing = new()
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
     /// <summary>A classic style is serialized for hashing as 0.23.0 serialized it, without its finish.</summary>
     private static void Unfinished(JsonTypeInfo info)
@@ -97,6 +97,14 @@ public static class ChartSvg
         if (info.Type != typeof(ChartSpec)) return;
         foreach (var property in info.Properties)
             if (property.Name == nameof(ChartSpec.GaugeSweep)) property.ShouldSerialize = (_, sweep) => sweep is not 270d;
+    }
+    /// <summary>A spec that leaves a timeline's connectors on, the default, is serialized for hashing as 0.26.0, which had no
+    /// timelines, serialized it, so every chart drawn before them keeps its IDs.</summary>
+    private static void Unconnected(JsonTypeInfo info)
+    {
+        if (info.Type != typeof(ChartSpec)) return;
+        foreach (var property in info.Properties)
+            if (property.Name == nameof(ChartSpec.TimelineConnectors)) property.ShouldSerialize = (_, connected) => connected is false;
     }
     private static byte[] Hashed<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, Hashing);
     /// <summary>
@@ -138,6 +146,7 @@ public static class ChartSvg
         else if (spec.Kind == ChartKind.Histogram) Histogram(w, spec);
         else if (spec.Kind == ChartKind.Violin) Violin(w, spec);
         else if (spec.Kind == ChartKind.Box) Box(w, spec);
+        else if (spec.Kind == ChartKind.Timeline) Timeline(w, spec);
         else Cartesian(w, spec);
         if (spec.Kind == ChartKind.Scatter && spec.DensityCells is not null)
             w.Text(spec.Width - 30, 64, $"{Count(spec.Series.Where(series => Mark(spec, series) == ChartKind.Scatter).Sum(series => series.Points.Count(p => p.Y.HasValue)))} observations aggregated into {spec.DensityCells} cells across",
@@ -178,13 +187,15 @@ public static class ChartSvg
     /// <summary>
     /// What the legend writes for series <paramref name="index"/>: its name, and on a ring or a gauge its value too, so that a
     /// ring reads <c>Move: 540 of 600 kcal</c>, its point's label being the unit, and a gauge <c>Recovery: 72 %</c>, its
-    /// <see cref="ChartSpec.YLabel"/> being the unit. Values are written in <see cref="ChartSpec.YFormat"/>. The chart's own
-    /// legend and the component's write the same.
+    /// <see cref="ChartSpec.YLabel"/> being the unit. Values are written in <see cref="ChartSpec.YFormat"/>. On a timeline a
+    /// state adds its total time and its share of every lane's, <c>REM 1:42, 22 %</c>. The chart's own legend and the
+    /// component's write the same.
     /// </summary>
     public static string LegendLabel(ChartSpec spec, int index)
     {
         ArgumentNullException.ThrowIfNull(spec);
         var series = spec.Series[index];
+        if (spec.Kind == ChartKind.Timeline) return Lane(spec, index);
         if (spec.Kind is not (ChartKind.Ring or ChartKind.Gauge) || series.Points.Count != 1 || series.Points[0].Y is not { } value) return series.Name;
         var scale = Radial(spec);
         return spec.Kind == ChartKind.Ring
@@ -199,7 +210,8 @@ public static class ChartSvg
     /// <summary>
     /// A refined legend key in the 14 × 9 box whose top left is (<paramref name="x"/>, <paramref name="y"/>), shaped like the
     /// series' mark: a short line for a line, dashed when the whole series is projected; a dot for scatter points and bubbles;
-    /// and a square for columns, bars, areas and the rest. A key whose series draws in colours other than its own is split
+    /// a rounded bar for a timeline's lane and an upright capsule for range bars; and a square for columns, bars, areas and
+    /// the rest. A key whose series draws in colours other than its own is split
     /// into them, left to right: up to four of the point colours when every drawn point has one, as time-in-zone bars do, a
     /// donut's slice colours, a gauge's zone or gradient colours, a heatmap row's low and high colours, and the rising and
     /// falling colours of candles and OHLC bars.
@@ -208,7 +220,8 @@ public static class ChartSvg
     {
         var series = spec.Series[index];
         var mark = Mark(spec, series);
-        var drawn = series.Points.Where(p => p.Y.HasValue).ToArray();
+        // A range bar is drawn from its bounds, with or without a typical value.
+        var drawn = series.Points.Where(p => p.Y.HasValue || mark == ChartKind.Range && p.Low.HasValue).ToArray();
         IReadOnlyList<string> inks = mark is ChartKind.Candlestick or ChartKind.Ohlc ? [style.Rising, style.Falling]
             : spec.Kind == ChartKind.Heatmap ? [style.HeatmapLow, style.HeatmapHigh]
             : spec.Kind == ChartKind.Donut ? series.Points.Select((p, i) => (p, i)).Where(t => t.p.Y > 0).Select(t => t.p.Color ?? style.SeriesColor(t.i)).Distinct().Take(4).ToArray()
@@ -227,6 +240,9 @@ public static class ChartSvg
         }
         if (inks.Count > 1)
             return string.Concat(inks.Select((ink, k) => $"<rect x='{N(x + 14d * k / inks.Count)}' y='{N(y)}' width='{N(14d / inks.Count)}' height='9' fill='{ink}'/>"));
+        // A timeline's span is a rounded bar along X, and a range bar a capsule standing upright.
+        if (mark == ChartKind.Timeline) return $"<rect x='{N(x)}' y='{N(y + 1.5)}' width='14' height='6' rx='3' fill='{inks[0]}'/>";
+        if (mark == ChartKind.Range) return $"<rect x='{N(x + 4)}' y='{N(y)}' width='6' height='9' rx='3' fill='{inks[0]}'/>";
         return mark is ChartKind.Scatter or ChartKind.Bubble
             ? $"<circle cx='{N(x + 7)}' cy='{middle}' r='4.5' fill='{inks[0]}'/>"
             : $"<rect x='{N(x + 2.5)}' y='{N(y)}' width='9' height='9' rx='2' fill='{inks[0]}'/>";
@@ -259,9 +275,10 @@ public static class ChartSvg
         (s.ProjectedFrom is { } from && p.X >= from ? ", projected" : "") +
         (p.Low.HasValue && p.High.HasValue ? $" (band {y.Format(p.Low.Value)} to {y.Format(p.High.Value)})" : "");
     private static string ZoneColor(ChartStyle style, ZoneScale zones, int index) => zones.Zones[index].Color ?? style.Zones[index];
-    private static bool HasData(ChartSpec spec) => spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc
+    // A timeline's spans and a range's bars have no Y of their own to be missing.
+    private static bool HasData(ChartSpec spec) => spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Timeline
         ? spec.Series.Any(s => s.Points.Count > 0)
-        : spec.Series.Any(s => s.Summary is not null || s.Points.Any(p => p.Y.HasValue));
+        : spec.Series.Any(s => s.Summary is not null || s.Points.Any(p => p.Y.HasValue || p.Low.HasValue && Mark(spec, s) == ChartKind.Range));
     private static string N(double n) => SvgWriter.N(n);
     /// <summary>Counts are grouped invariantly, so a host's culture cannot change what the chart reads.</summary>
     private static string Count(int value) => value.ToString("N0", CultureInfo.InvariantCulture);
@@ -281,8 +298,16 @@ public static class ChartSvg
         var xs = Axis.Create(s.XAxis, points.Select(p => p.X), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone),
             weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null) with { ValueFormat = s.XFormat };
         var plots = Plots(s, cats, points);
-        double X(double x) => category ? left + (Array.IndexOf(cats, x) + .5) / cats.Length * (right - left) : xs.Map(x, left, right);
-        var (xCount, xTicks) = category ? (5, []) : Spaced(w, xs, right - left, across: true, count: s.XAxis == AxisKind.Time ? 6 : 5);
+        // A range bar stands centred on its X, so a continuous chart that draws range bars insets its X axis by half the slot
+        // they take, and the first and last bars stand whole inside the plot. The slot follows the closest gap on screen, which
+        // the inset narrows, so the two are settled together.
+        var inset = 0d;
+        var ranged = category ? Array.Empty<double>() : s.Series.Where(series => Mark(s, series) == ChartKind.Range).SelectMany(series => series.Points).Select(p => xs.Map(p.X, 0, 1)).Distinct().Order().ToArray();
+        if (ranged.Length > 0)
+            for (var pass = 0; pass < 3; pass++)
+                inset = Math.Clamp((ranged.Length > 1 ? Enumerable.Range(1, ranged.Length - 1).Min(i => ranged[i] - ranged[i - 1]) * (right - left - 2 * inset) : 30) * .7, 1, 34) / 2;
+        double X(double x) => category ? left + (Array.IndexOf(cats, x) + .5) / cats.Length * (right - left) : xs.Map(x, left + inset, right - inset);
+        var (xCount, xTicks) = category ? (5, []) : Spaced(w, xs, right - left - 2 * inset, across: true, count: s.XAxis == AxisKind.Time ? 6 : 5);
         for (var k = 0; k < plots.Length; k++)
         {
             var (pane, top, bottom, ys, ys2, paired) = plots[k];
@@ -404,9 +429,9 @@ public static class ChartSvg
                 else if (annotation.Axis == AnnotationAxis.X) references.Add(Measure(w, annotation, X, Y, xs, ys, left, right, top, bottom, named: false));
             if (w.Refined) Place(references, left, right, top, bottom);
             foreach (var reference in references) Draw(w, reference);
-            // Column series share each slot side by side. On a continuous axis a slot takes its width from the closest two X
-            // values any column series in the pane has, as a candle does from its own, so no two slots overlap.
-            var columns = Enumerable.Range(0, s.Series.Count).Where(i => s.Series[i].Pane == k && Mark(s, s.Series[i]) is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn).ToArray();
+            // Column and range series share each slot side by side. On a continuous axis a slot takes its width from the closest
+            // two X values any of them in the pane has, as a candle does from its own, so no two slots overlap.
+            var columns = Enumerable.Range(0, s.Series.Count).Where(i => s.Series[i].Pane == k && Mark(s, s.Series[i]) is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Range).ToArray();
             var slot = 0d;
             if (!category && columns.Length > 0)
             {
@@ -473,6 +498,30 @@ public static class ChartSvg
                             Datum(w, si, start + i, PointLabel(series,p,xs,scale), shape, attributes);
                         }
                         start = end;
+                    }
+                }
+                else if (mark == ChartKind.Range)
+                {
+                    // A range bar takes its share of the slot a column would, on a category chart or a continuous axis alike. One
+                    // range series needs no name in each bar's label; several are told apart by it.
+                    var several = s.Series.Count(other => Mark(s, other) == ChartKind.Range) > 1;
+                    for (var pi = 0; pi < series.Points.Count; pi++)
+                    {
+                        var p = series.Points[pi];
+                        if (p.Low is not { } low || p.High is not { } high) continue;
+                        double share, from;
+                        if (category)
+                        {
+                            var band = (right - left) / cats.Length;
+                            share = band * .72 / columns.Length;
+                            from = left + Array.IndexOf(cats, p.X) * band + band * .14 + place * share;
+                        }
+                        else
+                        {
+                            share = slot / columns.Length;
+                            from = X(p.X) - slot / 2 + place * share;
+                        }
+                        Datum(w, si, pi, RangeLabel(series, p, xs, scale, several), Capsule(w, from, share, At(low), At(high), p.Y is { } y ? At(y) : null, p.Color ?? color));
                     }
                 }
                 else for (var pi = 0; pi < series.Points.Count; pi++)
@@ -757,8 +806,8 @@ public static class ChartSvg
             var pane = Pane(s, k);
             var mine = s.Series.Where(x => x.Pane == k).ToArray();
             var values = mine.Where(x => !x.Secondary).SelectMany(x => x.Points).Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
-            // Prices and band edges reach the axis of the series that carries them.
-            IEnumerable<ChartPoint> Bounded(bool right) => mine.Where(x => x.Secondary == right && Mark(s, x) is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band)
+            // Prices, band edges and the ends of range bars reach the axis of the series that carries them.
+            IEnumerable<ChartPoint> Bounded(bool right) => mine.Where(x => x.Secondary == right && Mark(s, x) is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range)
                 .SelectMany(x => x.Points).Where(p => p.Low.HasValue && p.High.HasValue);
             foreach (var p in Bounded(false)) { values.Add(p.Low!.Value); values.Add(p.High!.Value); }
             if (s.Kind == ChartKind.StackedColumn)
@@ -854,7 +903,7 @@ public static class ChartSvg
             w.Add($"<path d='{path}' fill='none' stroke='{ink}' stroke-width='{N(width)}' stroke-linejoin='round'{(dashed ? $" stroke-dasharray='{dash}'" : "")}{Rounded(w)}/>");
     }
 
-    private static int Layer(ChartKind mark) => mark switch { ChartKind.Band => 0, ChartKind.Area => 1, ChartKind.Column or ChartKind.Candlestick or ChartKind.Ohlc => 2, ChartKind.Line => 3, _ => 4 };
+    private static int Layer(ChartKind mark) => mark switch { ChartKind.Band => 0, ChartKind.Area => 1, ChartKind.Column or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc => 2, ChartKind.Line => 3, _ => 4 };
 
     /// <summary>
     /// Each zone as a band on the value axis, drawn through the annotation path so it clips, pans and zooms as a Y
@@ -1106,6 +1155,145 @@ public static class ChartSvg
                 $"<line x1='{N(columns[pi] - tick)}' y1='{N(Y(open))}' x2='{N(columns[pi])}' y2='{N(Y(open))}' stroke='{color}' stroke-width='1.5'{w.Fixed}/>" +
                 $"<line x1='{N(columns[pi])}' y1='{N(Y(close))}' x2='{N(columns[pi] + tick)}' y2='{N(Y(close))}' stroke='{color}' stroke-width='1.5'{w.Fixed}/>");
         }
+    }
+
+    /// <summary>
+    /// A range bar in the share of its slot that starts at <paramref name="from"/>: a capsule centred in the share, as wide as
+    /// the share up to 18 pixels, running exactly from one end of its range to the other on screen, or 1 pixel long when they
+    /// meet, its ends rounded by half its width, or by half its length when it is shorter than it is wide. A typical value is
+    /// a dot on the bar's centre line, filled with the background and ringed in the bar's colour, 3 to 4.5 pixels in radius,
+    /// so it stands proud of a thin bar and reads as a hole in a wide one.
+    /// </summary>
+    private static string Capsule(SvgWriter w, double from, double share, double y1, double y2, double? dot, string ink)
+    {
+        var width = Math.Min(share, 18);
+        var x = from + (share - width) / 2;
+        double top = Math.Min(y1, y2), length = Math.Abs(y2 - y1);
+        if (length < 1) { top -= (1 - length) / 2; length = 1; }
+        var shape = $"<rect class='lumen-range' x='{N(x)}' y='{N(top)}' width='{N(width)}' height='{N(length)}' rx='{N(Math.Min(width, length) / 2)}' fill='{ink}'/>";
+        return dot is { } at
+            ? shape + $"<circle cx='{N(x + width / 2)}' cy='{N(at)}' r='{N(Math.Clamp(width / 2, 3, 4.5))}' fill='{w.Style.Background}' stroke='{ink}' stroke-width='2'{w.Fixed}/>"
+            : shape;
+    }
+
+    /// <summary>A range bar's name: its category or X, its two ends in the axis's format and its typical value, as
+    /// <c>12 Sep: 52 to 168, average 74</c>, led by its series' name where several series draw ranges.</summary>
+    private static string RangeLabel(ChartSeries s, ChartPoint p, Axis x, Axis y, bool named) =>
+        $"{(named ? s.Name + ", " : "")}{p.Label ?? x.Format(p.X)}: {y.Format(p.Low!.Value)} to {y.Format(p.High!.Value)}{(p.Y is { } value ? $", average {y.Format(value)}" : "")}";
+
+    /// <summary>
+    /// A state timeline: one lane per series, top to bottom in series order, named on the side the Y axis would stand. Each
+    /// span is a rounded bar in its lane's colour from its X to its XEnd, at least 1 pixel wide, half the lane's height up to
+    /// 24 pixels and centred in it, its corners the style's bar radius, or 4 pixels, clamped to half its width and height.
+    /// Where a span ends as one in another lane begins, a hairline joins the middles of the two lanes at that moment, drawn
+    /// behind the bars, unless <see cref="ChartSpec.TimelineConnectors"/> is off. Gridlines stand at the X ticks. The spans and
+    /// any X annotations are clipped to the plot, so a zoom cuts spans at its edges, as it does lines.
+    /// </summary>
+    private static void Timeline(SvgWriter w, ChartSpec s)
+    {
+        var flipped = s.YAxisSide == AxisSide.Right;
+        var names = s.Series.Select(series => Short(series.Name, 14)).ToArray();
+        // The lane names stand 12 pixels from the plot, with room beyond them for the Y title.
+        var margin = Math.Clamp(Math.Ceiling(names.Max(Broad)) + 42, 76, 180);
+        double left = flipped ? 30 : margin, right = s.Width - (flipped ? margin : 30), top = 78, bottom = s.Height - 76;
+        var xs = Axis.Create(s.XAxis, s.Series.SelectMany(series => series.Points).SelectMany(p => new[] { p.X, p.XEnd!.Value }), min: s.XMin, max: s.XMax,
+            zone: TimeAxis.Zone(s.TimeZone), weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null) with { ValueFormat = s.XFormat };
+        double X(double x) => xs.Map(x, left, right);
+        var lane = (bottom - top) / s.Series.Count;
+        var thick = Math.Min(lane * .5, 24);
+        double Middle(int i) => top + (i + .5) * lane;
+        var (xCount, xTicks) = Spaced(w, xs, right - left, across: true, count: s.XAxis == AxisKind.Time ? 6 : 5);
+        if (s.MinorGridlines)
+            foreach (var minor in xs.MinorTicks(xCount)) { var x = X(minor); Gridline(w, x, top, x, bottom, minor: true); }
+        foreach (var (tick, label) in xTicks)
+        {
+            var x = X(tick);
+            Gridline(w, x, top, x, bottom);
+            w.Text(x, bottom + 21, label, "text-anchor='middle' class='lumen-muted'");
+        }
+        for (var i = 0; i < s.Series.Count; i++)
+            w.Text(flipped ? right + 12 : left - 12, Middle(i) + 4, names[i], $"text-anchor='{(flipped ? "start" : "end")}' class='lumen-muted'");
+        w.Text((left + right) / 2, bottom + 44, s.XLabel, "text-anchor='middle' class='lumen-muted'");
+        YTitle(w, s, s.YLabel, top, bottom);
+        const double bleed = 6;
+        w.Add($"<svg x='{N(left - bleed)}' y='{N(top - bleed)}' width='{N(right - left + 2 * bleed)}' height='{N(bottom - top + 2 * bleed)}' viewBox='{N(left - bleed)} {N(top - bleed)} {N(right - left + 2 * bleed)} {N(bottom - top + 2 * bleed)}' overflow='hidden'>");
+        // Moments marked along X stand behind the spans, as references do behind data.
+        var references = s.Annotations.Select(annotation => Measure(w, annotation, X, y => y, xs, xs, left, right, top, bottom)).ToList();
+        if (w.Refined) Place(references, left, right, top, bottom);
+        foreach (var reference in references) Draw(w, reference);
+        if (s.TimelineConnectors)
+        {
+            // The lanes each moment starts a span in; within a lane spans cannot overlap, so a lane starts at most one there.
+            var starts = new Dictionary<double, List<int>>();
+            for (var i = 0; i < s.Series.Count; i++)
+                foreach (var p in s.Series[i].Points)
+                {
+                    if (!starts.TryGetValue(p.X, out var lanes)) starts[p.X] = lanes = new List<int>();
+                    lanes.Add(i);
+                }
+            var path = new StringBuilder();
+            for (var i = 0; i < s.Series.Count; i++)
+                foreach (var p in s.Series[i].Points)
+                    if (starts.TryGetValue(p.XEnd!.Value, out var next))
+                        foreach (var j in next.Where(j => j != i))
+                            path.Append($"{(path.Length == 0 ? "" : " ")}M{N(X(p.XEnd.Value))},{N(Middle(i))} L{N(X(p.XEnd.Value))},{N(Middle(j))}");
+            if (path.Length > 0)
+                w.Add($"<path class='lumen-connectors' d='{path}' fill='none' stroke='{w.Style.Muted}' stroke-opacity='.5' stroke-width='1'{w.Fixed}/>");
+        }
+        var radius = w.Style.BarRadius ?? 4;
+        string When(double x) => s.XAxis == AxisKind.Time ? xs.LocalText(x, xs.Max - xs.Min < 2 * 86_400_000 ? "HH:mm" : "d MMM HH:mm") : xs.Format(x);
+        for (var i = 0; i < s.Series.Count; i++)
+        {
+            var series = s.Series[i]; var color = SeriesColor(series, i, w.Style);
+            for (var pi = 0; pi < series.Points.Count; pi++)
+            {
+                var p = series.Points[pi]; var end = p.XEnd!.Value;
+                double x1 = X(p.X), width = Math.Max(X(end) - x1, 1);
+                Datum(w, i, pi, $"{series.Name}: {(p.Label is null ? "" : p.Label + ", ")}{When(p.X)} to {When(end)}, {Spoken(s, end - p.X)}",
+                    $"<rect class='lumen-span' x='{N(x1)}' y='{N(Middle(i) - thick / 2)}' width='{N(width)}' height='{N(thick)}' rx='{N(Math.Min(radius, Math.Min(width, thick) / 2))}' fill='{color}'/>");
+            }
+        }
+        if (w.Refined) foreach (var reference in references) Label(w, reference);
+        w.Add("</svg>");
+    }
+
+    /// <summary>How long a stretch of a timeline's X lasts in seconds: a time axis counts milliseconds, and a duration or
+    /// time-of-day axis seconds. A plain number has no unit, so it has no length in time.</summary>
+    private static double? Seconds(ChartSpec s, double length) =>
+        s.XAxis == AxisKind.Time ? length / 1000 : s.XFormat is ValueFormat.Duration or ValueFormat.TimeOfDay ? length : null;
+
+    /// <summary>A span's length as it is said: <c>45 s</c>, <c>27 min</c>, <c>2 h</c> or <c>1 h 42 min</c>, rounded half up to
+    /// the second below a minute and to the minute from one; a length in no unit of time is the plain number.</summary>
+    private static string Spoken(ChartSpec s, double length)
+    {
+        if (Seconds(s, length) is not { } seconds) return LinearScale.Label(length);
+        var whole = Math.Round(seconds, MidpointRounding.AwayFromZero);
+        if (whole < 60) return string.Create(CultureInfo.InvariantCulture, $"{whole} s");
+        var minutes = Math.Round(seconds / 60, MidpointRounding.AwayFromZero);
+        if (minutes < 60) return string.Create(CultureInfo.InvariantCulture, $"{minutes} min");
+        var (hours, rest) = (Math.Floor(minutes / 60), minutes % 60);
+        return rest == 0 ? string.Create(CultureInfo.InvariantCulture, $"{hours} h") : string.Create(CultureInfo.InvariantCulture, $"{hours} h {rest} min");
+    }
+
+    /// <summary>A timeline lane's legend: its state, its total time as h:mm, and its share of the time in every lane as a whole
+    /// percentage, as <c>REM 1:42, 22 %</c>. A lane in no unit of time totals the plain number; a chart with no spans names
+    /// the state alone.</summary>
+    private static string Lane(ChartSpec s, int index)
+    {
+        static double Total(ChartSeries series) => series.Points.Sum(p => p.XEnd is { } end ? end - p.X : 0);
+        var all = s.Series.Sum(Total);
+        var name = s.Series[index].Name;
+        if (!(all > 0)) return name;
+        var total = Total(s.Series[index]);
+        var share = Math.Round(total / all * 100, MidpointRounding.AwayFromZero);
+        string text;
+        if (Seconds(s, total) is { } seconds)
+        {
+            var minutes = Math.Round(seconds / 60, MidpointRounding.AwayFromZero);
+            text = string.Create(CultureInfo.InvariantCulture, $"{Math.Floor(minutes / 60)}:{minutes % 60:00}");
+        }
+        else text = LinearScale.Label(total);
+        return string.Create(CultureInfo.InvariantCulture, $"{name} {text}, {share} %");
     }
 
     private static void Bands(SvgWriter w, ChartSeries series, string color, Func<double, double> X, Func<double, double> Y, int budget)

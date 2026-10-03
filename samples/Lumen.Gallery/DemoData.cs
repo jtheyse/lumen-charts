@@ -120,6 +120,46 @@ public static class DemoData
                 new("Stand",[new(0,7+random.Next(4),"h")],palette[1]){Goal=12}];
             title="Close your rings";desc="Today's move, exercise and stand against their goals · exercise is past its goal, so its ring runs on over itself";x="";y="";
         }
+        if(kind==Lumen.Charts.ChartKind.Timeline)
+        {
+            // One simulated night in cycles of light, deep and light sleep and REM, deep sleep giving way to REM as the night goes
+            // on, with a little waking between cycles. A stage that follows itself lengthens the span before.
+            var at=Lumen.Charts.TimeAxis.Value(new DateTimeOffset(2026,9,26,22,40+random.Next(0,20),0,TimeSpan.FromHours(2)));
+            string[] stages=["Awake","REM","Light","Deep"];
+            var spans=stages.ToDictionary(stage=>stage,_=>new List<Lumen.Charts.ChartPoint>());
+            var last="";
+            void Add(string stage,double minutes)
+            {
+                var to=at+Math.Round(minutes)*60_000;
+                if(stage==last)spans[stage][^1]=spans[stage][^1] with{XEnd=to};else spans[stage].Add(Lumen.Charts.ChartPoint.Span(at,to));
+                (at,last)=(to,stage);
+            }
+            Add("Awake",8+random.Next(8));
+            for(var cycle=0;cycle<5;cycle++)
+            {
+                Add("Light",22+random.Next(10));
+                if(cycle<4)Add("Deep",Math.Max(4,38-cycle*10+random.Next(-4,5)));
+                Add("Light",10+random.Next(10));
+                Add("REM",10+cycle*7+random.Next(6));
+                if(cycle<4&&random.NextDouble()<.5)Add("Awake",1+random.Next(4));
+            }
+            Add("Awake",4+random.Next(6));
+            series=stages.Select((stage,i)=>new Lumen.Charts.ChartSeries(stage,spans[stage],new[]{palette[4],palette[1],palette[0],palette[6]}[i])).ToArray();
+            title="See how the night went";desc="One simulated night, stage by stage · each stage a lane, joined where sleep moves from one to the next";x="Time (Johannesburg)";y="";
+            xKind=Lumen.Charts.AxisKind.Time;
+        }
+        if(kind==Lumen.Charts.ChartKind.Range)
+        {
+            // A fortnight of simulated heart rate: the lowest overnight, the highest in the day's training or an ordinary day's
+            // walk, and the day's average above the lowest.
+            var first=new DateOnly(2026,9,14);
+            series=[new("Heart rate",Enumerable.Range(0,14).Select(d=>{
+                var low=46+random.Next(8);var high=d%7 is 1 or 3 or 5?150+random.Next(30):105+random.Next(25);var day=first.AddDays(d);
+                return Lumen.Charts.ChartPoint.Interval(Lumen.Charts.TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue),TimeSpan.Zero)),low+18+random.Next(8)+(high>140?6:0),low,high,
+                    day.ToString("d MMM",System.Globalization.CultureInfo.InvariantCulture));}).ToArray(),palette[5])];
+            title="Read a day's heart rate at a glance";desc="Lowest to highest heart rate each day for a fortnight · the dot is the day's average";x="Day";y="Heart rate (bpm)";
+            xKind=Lumen.Charts.AxisKind.Time;
+        }
         if(kind==Lumen.Charts.ChartKind.Bar) {title="Compare plans without the clutter";x="Month";}
         if(kind==Lumen.Charts.ChartKind.Scatter || kind==Lumen.Charts.ChartKind.Bubble)
         {
@@ -127,6 +167,7 @@ public static class DemoData
             series=series.Select(s=>s with {Points=s.Points.Select(p=>p with {X=p.X*8+random.Next(6)}).ToArray(),Trend=kind==Lumen.Charts.ChartKind.Scatter}).ToArray();
         }
         var spec=new Lumen.Charts.ChartSpec{Kind=kind,Theme=theme,XAxis=xKind,SkipWeekends=weekends,TimeSkips=holidays,Title=title,Description=desc,Series=series,XLabel=x,YLabel=y,Source="Source: deterministic demonstration data · not business results",Height=height,Panes=panes};
+        if(kind==Lumen.Charts.ChartKind.Timeline) spec=spec with{TimeZone="Africa/Johannesburg"};
         if(kind==Lumen.Charts.ChartKind.Gauge)
             spec=spec with{YZones=new([new("Low",33,palette[5]),new("Moderate",66,palette[3]),new("Good",double.PositiveInfinity,palette[2])]),
                 Annotations=[new(Lumen.Charts.AnnotationAxis.Y,Math.Round(52+random.NextDouble()*16)){Label="7-day average"}]};

@@ -11,9 +11,14 @@ public sealed record Track(IReadOnlyList<double> HeartRate, IReadOnlyList<double
 
 /// <summary>One workout. Its stress is <see cref="Training.StressScore"/> of its power record, rounded, and its time in zone
 /// <see cref="Training.TimeInZone"/> of its heart rate. A ride keeps its mean-maximal power; a run keeps its samples and the
-/// fastest 5 km inside it.</summary>
+/// fastest 5 km inside it. Both keep the highest heart rate they recorded.</summary>
 public sealed record Session(DateOnly Day, Sport Sport, string Name, double Seconds, double Metres, double Stress,
-    IReadOnlyList<double> TimeInZone, IReadOnlyList<(double Seconds, double Value)> PowerCurve, double? Best5k, Track? Track);
+    IReadOnlyList<double> TimeInZone, IReadOnlyList<(double Seconds, double Value)> PowerCurve, double? Best5k, Track? Track, double PeakHeartRate);
+
+/// <summary>One night's sleep, named by the morning it ends. Bedtime and waking are seconds since the midnight before the
+/// night, so 22:48 is 82080 and 06:35 the next morning 110100, and so is each stage's start and end, in order from bedtime to
+/// waking. The lowest heart rate is the night's.</summary>
+public sealed record Night(DateOnly Morning, double Bedtime, double Wake, IReadOnlyList<(string Stage, double From, double To)> Stages, double LowestHeartRate);
 
 /// <summary>The sessions trained, the stress planned after them, <see cref="Training.Load"/> over both, and one overnight HRV
 /// reading a night from four weeks before the season to its last day, so that the first night has a baseline.</summary>
@@ -98,7 +103,7 @@ public static class SportsData
                 }
             var np = Training.NormalizedPower(watts) ?? watts.Average();
             return new(day, Sport.Ride, name, total, 0, Math.Round(Training.StressScore(total, np, ftp)),
-                Training.TimeInZone(heart, HeartZones), Training.MeanMaximal(watts, Training.StandardDurations), null, null);
+                Training.TimeInZone(heart, HeartZones), Training.MeanMaximal(watts, Training.StandardDurations), null, null, heart.Max());
         }
 
         // A run is planned by distance and recorded every ten seconds. A climb costs effort and pace both, and its stress comes
@@ -129,7 +134,7 @@ public static class SportsData
             var track = new Track(heart, pace, distance, elevation);
             metres = Math.Round(metres, 1);
             return new(day, Sport.Run, name, seconds, metres, Math.Round(Training.StressScore(seconds, np, ftp)),
-                Training.TimeInZone(heart, HeartZones, RunSample), [], Fastest(track, metres, 5000), track);
+                Training.TimeInZone(heart, HeartZones, RunSample), [], Fastest(track, metres, 5000), track, heart.Max());
         }
 
         static (double, double, double)[] Repeat(int count, (double, double, double)[] steps) => Enumerable.Repeat(steps, count).SelectMany(step => step).ToArray();
@@ -313,6 +318,93 @@ public static class SportsData
             ("Exercise", Math.Round(sessions.Sum(s => s.Seconds) / 60), "min", 45),
             ("Stress", season.Load.Single(d => d.Day == day).Stress, "TSS", Math.Round(fitness))];
     }
+
+    /// <summary>How many nights the sleep charts show, the last of the season.</summary>
+    public const int SleepNights = 14;
+    /// <summary>The sleep stages, in the order their lanes stand, awake at the top.</summary>
+    public static readonly IReadOnlyList<string> SleepStages = ["Awake", "REM", "Light", "Deep"];
+
+    /// <summary>
+    /// The last <see cref="SleepNights"/> nights of the season, each simulated from a seed of its own so the training is untouched.
+    /// A night reads the HRV the HRV chart draws for it, measured as the readiness score measures it, in standard deviations from
+    /// the mean of the 28 nights before: each one above it adds a tenth to every cycle's deep sleep and takes a beat and a half
+    /// off the night's lowest heart rate. A day of 150 or more training stress sends the athlete to bed a quarter of an hour
+    /// early, and a Friday or Saturday night twenty minutes late. Sleep runs in cycles of about ninety minutes, each light, deep,
+    /// light again and REM, the deep sleep shrinking and the REM growing through the night, with a few minutes awake falling
+    /// asleep, now and then between cycles, and before rising. Every stage starts and ends on a whole minute.
+    /// </summary>
+    public static IReadOnlyList<Night> Nights(Season season)
+    {
+        var rolling = Statistics.Rolling(season.Hrv.Select(v => (double?)v).ToArray(), BaselineNights);
+        var nights = new List<Night>();
+        for (var day = Weeks * 7 - SleepNights; day < Weeks * 7; day++)
+        {
+            var random = new Random(7000 + day);
+            double Noise(double deviation) => deviation * Math.Sqrt(-2 * Math.Log(1 - random.NextDouble())) * Math.Cos(Math.Tau * random.NextDouble());
+            static double Minute(double seconds) => Math.Round(seconds / 60) * 60;
+            var morning = Start.AddDays(day);
+            var window = rolling[day + BaselineNights - 1]!;
+            var z = (season.Hrv[day + BaselineNights] - window.Mean) / window.Deviation;
+            var hard = season.Load[day - 1].Stress >= 150;
+            var late = morning.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+            var bedtime = Minute(82200 + Noise(900) - (hard ? 900 : 0) + (late ? 1200 : 0));
+            var wake = Minute(109800 + Noise(720) + (morning.DayOfWeek == DayOfWeek.Saturday ? 1800 : 0));
+            var stages = new List<(string Stage, double From, double To)>();
+            var at = bedtime;
+            // A stage runs on from where the last one ended; one that follows itself lengthens it.
+            void Add(string stage, double until)
+            {
+                var to = Minute(until);
+                if (to <= at) return;
+                if (stages.Count > 0 && stages[^1].Stage == stage) stages[^1] = (stage, stages[^1].From, to);
+                else stages.Add((stage, at, to));
+                at = to;
+            }
+            Add("Awake", at + 360 + random.NextDouble() * 600);
+            var rise = wake - Minute(180 + random.NextDouble() * 420);
+            var start = at;
+            var cycles = Math.Max(3, (int)Math.Round((rise - start) / 5400));
+            for (var c = 0; c < cycles; c++)
+            {
+                var end = c == cycles - 1 ? rise : start + (rise - start) * (c + 1) / cycles;
+                if (c > 0 && random.NextDouble() < .45) Add("Awake", at + 60 + random.NextDouble() * 150);
+                var deep = Math.Max(0, .36 - .1 * c) * Math.Clamp(1 + .1 * z, .6, 1.4);
+                var rem = Math.Min(.1 + .07 * c, .38);
+                var light = 1 - deep - rem;
+                var room = end - at;
+                Add("Light", at + room * light * .55);
+                Add("Deep", at + room * deep);
+                Add("Light", at + room * light * .45);
+                Add("REM", end);
+            }
+            Add("Awake", wake);
+            nights.Add(new(morning, bedtime, wake, stages, Math.Round(47 - 1.5 * z + (hard ? 2 : 0) + Noise(1))));
+        }
+        return nights;
+    }
+
+    /// <summary>The heart rate of each day the sleep charts show: its lowest the night before's, its highest the peak of the day's
+    /// sessions or, on a day without one, an ordinary day's 105 to 125, and its average 17 to 21 beats above the lowest, and more
+    /// for every hour trained.</summary>
+    public static IReadOnlyList<(DateOnly Day, double Low, double High, double Average)> HeartRates(Season season, IReadOnlyList<Night> nights) =>
+        nights.Select(night =>
+        {
+            var random = new Random(9000 + night.Morning.DayNumber);
+            var sessions = season.Sessions.Where(s => s.Day == night.Morning).ToArray();
+            var high = Math.Max(105 + random.Next(0, 21), sessions.Length == 0 ? 0 : sessions.Max(s => s.PeakHeartRate));
+            var trained = sessions.Sum(s => s.Seconds) / 3600;
+            return (night.Morning, night.LowestHeartRate, high, Math.Round(night.LowestHeartRate + 17 + random.Next(0, 5) + trained * 4));
+        }).ToArray();
+
+    /// <summary>Seconds as hours and minutes, the way a sleep app writes them: <c>7 h 21 min</c>, or <c>48 min</c> under an hour.</summary>
+    public static string HoursMinutes(double seconds)
+    {
+        var minutes = Math.Round(seconds / 60);
+        return minutes < 60 ? $"{Text(minutes)} min" : $"{Text(Math.Floor(minutes / 60))} h {Text(minutes % 60)} min";
+    }
+
+    /// <summary>Seconds since a midnight as the clock reads them, the way the sleep-timing chart writes them.</summary>
+    public static string ClockTime(double seconds) => new Axis(AxisKind.Linear, 0, 1) { ValueFormat = ValueFormat.TimeOfDay }.Format(seconds);
 
     /// <summary>The headline numbers above the dashboard, each a value and what it is.</summary>
     public static IReadOnlyList<(string Value, string Label)> Facts()
@@ -535,6 +627,44 @@ public static class SportsData
                 new("Above baseline", above, zones[1]) { Kind = ChartKind.Scatter, Markers = MarkerStyle.Filled }]
         };
 
+        // Last night's stages, one lane each, on the clock: awake in the ramp's orange, REM blue, light sleep its neutral grey and
+        // deep sleep purple. Each night runs from the midnight before it, so its seconds are added to that midnight.
+        var sleep = Nights(season);
+        var lastNight = sleep[^1];
+        double OnClock(Night n, double seconds) => When(n.Morning.AddDays(-1)) + seconds * 1000;
+        string[] stageInks = [zones[4], zones[1], zones[0], zones[6]];
+        double Stage(string stage) => lastNight.Stages.Where(s => s.Stage == stage).Sum(s => s.To - s.From);
+        var hypnogram = Chart(wide, 360) with
+        {
+            Kind = ChartKind.Timeline, XAxis = AxisKind.Time,
+            Title = $"{HoursMinutes(lastNight.Wake - lastNight.Bedtime - Stage("Awake"))} asleep, {HoursMinutes(Stage("Deep"))} deep",
+            Description = $"Into {lastNight.Morning.ToString("dddd d MMMM", CultureInfo.InvariantCulture)}, HRV {Text(nights[^1])} ms",
+            XLabel = "Time (UTC)",
+            Series = SleepStages.Select((stage, i) => new ChartSeries(stage, lastNight.Stages.Where(s => s.Stage == stage)
+                .Select(s => ChartPoint.Span(OnClock(lastNight, s.From), OnClock(lastNight, s.To))).ToArray(), stageInks[i])).ToArray()
+        };
+        // Two weeks of bedtimes on a reversed time-of-day axis, earlier higher, from the three-hour mark before the earliest
+        // bedtime to the one after the latest waking, so both ends are labelled.
+        var timing = Chart(half, 360) with
+        {
+            Kind = ChartKind.Range, XAxis = AxisKind.Time, YFormat = ValueFormat.TimeOfDay, YReversed = true,
+            YMin = Math.Floor(sleep.Min(n => n.Bedtime) / 10800) * 10800, YMax = Math.Ceiling(sleep.Max(n => n.Wake) / 10800) * 10800,
+            Title = $"In bed at {ClockTime(Math.Round(sleep.Average(n => n.Bedtime) / 60) * 60)} on average, up at {ClockTime(Math.Round(sleep.Average(n => n.Wake) / 60) * 60)}",
+            Description = $"Bedtime to waking, the last {SleepNights} nights, earlier higher",
+            XLabel = "Night ending", YLabel = "Clock time (UTC)",
+            Series = [new("Sleep", sleep.Select(n => ChartPoint.Interval(When(n.Morning), null, n.Bedtime, n.Wake, Day(n.Morning))).ToArray(), zones[1])]
+        };
+        // Each day's heart rate from its lowest, overnight, to its highest, the dot its average.
+        var rates = HeartRates(season, sleep);
+        var heartRange = Chart(half, 360) with
+        {
+            Kind = ChartKind.Range, XAxis = AxisKind.Time,
+            Title = $"{Text(rates[^1].Low)} to {Text(rates[^1].High)} bpm today, {Text(rates[^1].Average)} on average",
+            Description = "Each day's lowest and highest heart rate, the dot its average",
+            XLabel = "Day", YLabel = "Heart rate (bpm)",
+            Series = [new("Heart rate", rates.Select(r => ChartPoint.Interval(When(r.Day), r.Average, r.Low, r.High, Day(r.Day))).ToArray(), zones[5])]
+        };
+
         return [
             new("today", "readiness", "Readiness", "An illustrative score, no vendor's: 60, plus 10 for each standard deviation last night's HRV sits above its 28-night baseline, plus half of today's form, on a `Gauge` whose `YZones` tint the track; the tick is the 28-day average.", false, readiness),
             new("today", "activity", "Today's activity", "The run's active calories at 1 kcal per kg per km, its minutes and its training stress, each a `Ring` series against its `Goal` — stress against fitness, the athlete's average day. Past 100 % a ring runs on over itself.", false, rings),
@@ -547,6 +677,9 @@ public static class SportsData
             new("session", "elevation", "Elevation coloured by grade", "The same route as an area, each 100 m segment taking a point `Color` from its grade band.", true, elevation),
             new("fitness", "power-curve", "Power–duration curve", "`Training.MeanMaximal` over this month's rides against last month's on a logarithmic duration axis, with the `Training.CriticalPower` fit as a reference line.", false, power),
             new("fitness", "records", "5 km record progression", "Each week's fastest 5 km inside a run, and the record as a `LineCurve.Step` envelope on a reversed axis, so faster is higher.", false, best),
-            new("fitness", "hrv", "HRV against its baseline", "Each night's HRV, coloured by where it falls against a band of the mean ± one standard deviation of the 28 nights before, from `Statistics.Rolling`.", true, hrv)];
+            new("fitness", "hrv", "HRV against its baseline", "Each night's HRV, coloured by where it falls against a band of the mean ± one standard deviation of the 28 nights before, from `Statistics.Rolling`.", true, hrv),
+            new("sleep", "hypnogram", "Last night's sleep stages", "A `ChartKind.Timeline`: one series per stage, each period a `ChartPoint.Span`, joined where the stage changes; the higher the HRV sits above its baseline, the more deep sleep.", true, hypnogram),
+            new("sleep", "sleep-timing", "Sleep timing", "Bedtime to waking as `ChartKind.Range` bars on a reversed `ValueFormat.TimeOfDay` axis, its seconds running past 24 hours so a night never crosses zero.", false, timing),
+            new("sleep", "heart-range", "Daily heart rate", "Each day's lowest and highest heart rate as `ChartPoint.Interval` range bars, the dot its average; today's highest is the run's.", false, heartRange)];
     }
 }

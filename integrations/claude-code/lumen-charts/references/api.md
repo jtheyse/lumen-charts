@@ -30,7 +30,7 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 | `XLabel`, `YLabel`, `Y2Label` | string | Axis titles. `Y2Label` names the right axis. On a gauge `YLabel` is the unit written after the score (`"%"`). |
 | `Width`, `Height` | int, 900 × 420 | The SVG's viewBox, 320–4096 by 240–2160; the component scales it to its container, or with `FitWidth` draws it at the container's width. |
 | `XAxis`, `YAxis`, `Y2Axis` | `AxisKind`, `Linear` | `Linear`, `Log`, or (X only) `Time` in Unix milliseconds. |
-| `XFormat`, `YFormat`, `Y2Format` | `ValueFormat`, `Number` | `Duration` reads seconds; `Compact` writes 1.2k. Not on a time axis. |
+| `XFormat`, `YFormat`, `Y2Format` | `ValueFormat`, `Number` | `Duration` reads seconds; `Compact` writes 1.2k; `TimeOfDay` (0.27.0) reads seconds since a midnight as `HH:mm`, wrapping at 24 h, linear axes only. None on a time axis. |
 | `YReversed`, `Y2Reversed` | bool | Smaller values higher (pace). Refused for kinds that draw from zero. |
 | `YAxisSide` | `AxisSide`, `Left` | `Right` moves the main axis right; refused with a secondary series. |
 | `YTickLabels` | `TickLabels`, `All` | `Ends` labels only the lowest and highest tick. |
@@ -46,6 +46,7 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 | `DensityCells` | int? | Scatter only: aggregate into shaded cells (8–200 across). |
 | `MaxRenderedPoints` | int, 1200 | Line and area sampling budget per continuous run (min/max sampling keeps extremes). |
 | `GaugeSweep` | double, 270 | Gauge only (0.26.0): how far round the arc runs, 180 (semicircle) to 360 (full circle), centred at the top. Any other kind refuses a value but 270. |
+| `TimelineConnectors` | bool, true | Timeline only (0.27.0): join a span to the span in another lane that starts exactly where it ends with a thin vertical line, as a hypnogram does. `false` draws a plain state chart; every other kind refuses `false`. |
 
 ## ChartSeries
 
@@ -54,7 +55,7 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 | Member | Meaning |
 |---|---|
 | `Secondary` | Measure on the right-hand axis. At least one series per pane stays on the left. |
-| `Kind` | Override this series' mark: `Line`, `Area`, `Column`, `Scatter` or `Band`. Allowed on line, area, scatter, bubble, band, column, candlestick and OHLC charts. |
+| `Kind` | Override this series' mark: `Line`, `Area`, `Column`, `Scatter`, `Band` or `Range` (0.27.0). Allowed on line, area, scatter, bubble, band, range, column, candlestick and OHLC charts. |
 | `Pane` | 0 is the main plot; *k* needs `ChartSpec.Panes[k − 1]`. |
 | `Trend` | Draw a least-squares line (line, area, scatter, bubble marks). |
 | `ProjectedFrom` | Dash a line or area from this X onward (planned values). |
@@ -73,9 +74,9 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 
 ## ChartPoint
 
-`new ChartPoint(double X, double? Y, string? Label = null, double Size = 1)` — `Size` is bubble area. Init properties: `Open`, `High`, `Low`, `Close`, `Color` (this mark's colour; beats zone and series colour).
+`new ChartPoint(double X, double? Y, string? Label = null, double Size = 1)` — `Size` is bubble area. Init properties: `Open`, `High`, `Low`, `Close`, `Color` (this mark's colour; beats zone and series colour), and `XEnd` (0.27.0, timelines only: where a span ends, above `X`; Unix milliseconds on a time axis).
 
-Factories: `ChartPoint.Candle(x, open, high, low, close, label?)`; `ChartPoint.Interval(x, y, low, high, label?)` for band charts and band series; `ChartPoint.Observation(value)` for histogram, box and violin input.
+Factories: `ChartPoint.Candle(x, open, high, low, close, label?)`; `ChartPoint.Interval(x, y, low, high, label?)` for band and range points (`y` may be `null`; on a range it is the dot, and must lie between `low` and `high`); `ChartPoint.Span(start, end, label?)` (0.27.0) for a timeline span, with no `Y`; `ChartPoint.Observation(value)` for histogram, box and violin input.
 
 ## ChartPane
 
@@ -87,7 +88,7 @@ Init properties: `Label` (left axis title), `Weight` (height beside the main plo
 
 ## Enums
 
-`ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc, Gauge, Ring }` · `ChartTheme { Light, Dark }` · `AxisKind { Linear, Log, Time }` · `ValueFormat { Number, Duration, Compact }` · `LineCurve { Linear, Smooth, Step }` · `AreaFill { Flat, Fade }` · `MarkerStyle { Auto, None, Hollow, Filled }` · `AxisSide { Left, Right }` · `TickLabels { All, Ends }` · `GridLine { Solid, Dotted, Dashed, Hidden }` · `ChartFinish { Refined, Classic }` · `AnnotationAxis { X, Y }` · `GraphLayout { Circular, Layered }`.
+`ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc, Gauge, Ring, Timeline, Range }` · `ChartTheme { Light, Dark }` · `AxisKind { Linear, Log, Time }` · `ValueFormat { Number, Duration, Compact, TimeOfDay }` · `LineCurve { Linear, Smooth, Step }` · `AreaFill { Flat, Fade }` · `MarkerStyle { Auto, None, Hollow, Filled }` · `AxisSide { Left, Right }` · `TickLabels { All, Ends }` · `GridLine { Solid, Dotted, Dashed, Hidden }` · `ChartFinish { Refined, Classic }` · `AnnotationAxis { X, Y }` · `GraphLayout { Circular, Layered }`.
 
 ## ChartStyle
 
@@ -105,8 +106,8 @@ public static readonly ChartStyle Brand = new() {
 ## Rendering and export
 
 - `ChartSvg.Render(spec, includeLegend = true, includeTitles = true)` → SVG string. Throws `ArgumentException` for an invalid spec.
-- `ChartSvg.ResolveStyle(spec)`, `ChartSvg.SeriesColor(series, index, style)`, `ChartSvg.LegendKey(spec, index)` (a series' legend key as a small SVG) and `ChartSvg.LegendLabel(spec, index)` (what the legend writes: the name, and on a ring `Move: 540 of 600 kcal`, on a gauge `Recovery: 72 %`).
-- `ChartExport.Csv(spec)` → CSV of the original observations (time charts add an ISO `XTime` column, ring charts a `Goal` column).
+- `ChartSvg.ResolveStyle(spec)`, `ChartSvg.SeriesColor(series, index, style)`, `ChartSvg.LegendKey(spec, index)` (a series' legend key as a small SVG) and `ChartSvg.LegendLabel(spec, index)` (what the legend writes: the name, and on a ring `Move: 540 of 600 kcal`, on a gauge `Recovery: 72 %`, on a timeline `REM 1:42, 22 %`).
+- `ChartExport.Csv(spec)` → CSV of the original observations (time charts add an ISO `XTime` column, band and range series `Low,High`, ring charts a `Goal` column, timelines an `XEnd` column).
 - `ChartValidation.Validate(spec)` validates without rendering.
 
 ## Axes and time

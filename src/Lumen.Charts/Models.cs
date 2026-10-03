@@ -1,9 +1,10 @@
 namespace Lumen.Charts;
 
 /// <summary>The kind of chart, which decides how X is laid out and how a series that names no kind of its own is drawn.
-/// Line, area, scatter, bubble, band, candlestick and OHLC charts place points along a continuous X axis by their X;
+/// Line, area, scatter, bubble, band, range, candlestick and OHLC charts place points along a continuous X axis by their X;
 /// column, bar, stacked column, donut, heatmap and radar charts place them by category and show their labels; gauge and
-/// ring charts draw one value a series round an arc and have no X axis.</summary>
+/// ring charts draw one value a series round an arc and have no X axis; a timeline draws spans along a continuous X axis,
+/// one lane a series.</summary>
 public enum ChartKind
 {
     /// <summary>Each series as a line through its points in X order.</summary>
@@ -52,7 +53,19 @@ public enum ChartKind
     /// <summary>Concentric progress rings, as activity rings are drawn: one series per ring, outermost first, at most six, each
     /// of one nonnegative point measured against the series' <see cref="ChartSeries.Goal"/>. A ring past its goal keeps going
     /// round over itself, up to three times.</summary>
-    Ring
+    Ring,
+    /// <summary>A state timeline, as sleep stages are drawn in a hypnogram: one series per state, drawn as a lane, top to
+    /// bottom in series order, each point a span from its X to its <see cref="ChartPoint.XEnd"/> made with
+    /// <see cref="ChartPoint.Span"/>. Spans are rounded bars in their lane's colour, joined across lanes by thin connectors
+    /// where one ends as the next begins, unless <see cref="ChartSpec.TimelineConnectors"/> is off. The legend names each
+    /// state with its total time and its share.</summary>
+    Timeline,
+    /// <summary>Floating range bars: each point a capsule from its <see cref="ChartPoint.Low"/> to its
+    /// <see cref="ChartPoint.High"/>, made with <see cref="ChartPoint.Interval"/>, with a dot at its Y when Y is set, as daily
+    /// heart-rate ranges and bedtime-to-wake sleep timing are drawn. It has no zero baseline, so it takes reversed and
+    /// logarithmic axes. As a series' own <see cref="ChartSeries.Kind"/> it draws beside lines on a continuous chart, or in its
+    /// category's slot on a column chart.</summary>
+    Range
 }
 /// <summary>The preset a chart draws with when it sets no <see cref="ChartSpec.Style"/>.</summary>
 public enum ChartTheme
@@ -129,24 +142,32 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// <summary>Prices. All four are required of the series a candlestick or OHLC chart draws as candles or bars, and
     /// ignored everywhere else.</summary>
     public double? Open { get; init; }
-    /// <summary>The highest price, or the upper bound of a band point.</summary>
+    /// <summary>The highest price, or the upper bound of a band point or a range bar.</summary>
     public double? High { get; init; }
-    /// <summary>The lowest price, or the lower bound of a band point.</summary>
+    /// <summary>The lowest price, or the lower bound of a band point or a range bar.</summary>
     public double? Low { get; init; }
+    /// <summary>Timeline charts only: where this span ends along X, above <see cref="X"/>, where it starts. Unix milliseconds
+    /// on a time axis. Every other kind refuses it.</summary>
+    public double? XEnd { get; init; }
     /// <summary>The closing price. A candle carries it as its Y too.</summary>
     public double? Close { get; init; }
-    /// <summary>This point's mark in its own colour, ahead of a zone colour and the series colour: a column, bar,
+    /// <summary>This point's mark in its own colour, ahead of a zone colour and the series colour: a column, bar, range,
     /// scatter or bubble mark, a donut slice, or a line or area marker together with the segment that starts from it.
-    /// Kinds whose colours mean something else — direction, value or a distribution — refuse it, as do stacked columns,
-    /// whose colours tell the stacked series apart.</summary>
+    /// Kinds whose colours mean something else — direction, value, a state or a distribution — refuse it, as do stacked
+    /// columns, whose colours tell the stacked series apart.</summary>
     public string? Color { get; init; }
 
     /// <summary>A candle or OHLC bar, its Y the close. High must be the highest of the four prices and low the lowest.</summary>
     public static ChartPoint Candle(double x, double open, double high, double low, double close, string? label = null) =>
         new(x, close, label) { Open = open, High = high, Low = low, Close = close };
-    /// <summary>A band point: Y is the central value, Low and High are the interval bounds.</summary>
+    /// <summary>A band point or a range bar: Low and High are the interval bounds, and Y is the band's central value or the
+    /// range's typical value, drawn as a dot within it; a range bar without one passes null.</summary>
     public static ChartPoint Interval(double x, double? y, double low, double high, string? label = null) =>
         new(x, y, label) { Low = low, High = high };
+    /// <summary>A timeline span from <paramref name="start"/> to <paramref name="end"/> along X, in the lane of the series
+    /// that holds it. It has no Y. <paramref name="label"/>, if given, names it in its tooltip.</summary>
+    public static ChartPoint Span(double start, double end, string? label = null) =>
+        new(start, null, label) { XEnd = end };
     /// <summary>A raw observation for histogram and box charts, which read values from Y and ignore X.</summary>
     public static ChartPoint Observation(double value) => new(value, value);
 }
@@ -171,11 +192,11 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// area stroke is split where it crosses a bound, so each piece changes colour exactly at the threshold; its fill
     /// keeps the series colour. Applies to series drawn as lines, areas, scatter points, bubbles, columns and bars.</summary>
     public ZoneScale? Zones { get; init; }
-    /// <summary>Draws this series as a line, area, column, scatter or band instead of the chart's kind, so fitness lines
-    /// can stand over daily stress columns. The chart's kind still lays out X: line, area, scatter, bubble and band charts
-    /// place every series along a continuous axis, and column charts by category. A candlestick or OHLC chart draws the one
-    /// series that names no kind as candles or bars, and takes others beside it, such as a moving average or volume. Null
-    /// draws the chart's kind.</summary>
+    /// <summary>Draws this series as a line, area, column, scatter, band or range instead of the chart's kind, so fitness
+    /// lines can stand over daily stress columns. The chart's kind still lays out X: line, area, scatter, bubble, band and
+    /// range charts place every series along a continuous axis, and column charts by category. A candlestick or OHLC chart
+    /// draws the one series that names no kind as candles or bars, and takes others beside it, such as a moving average or
+    /// volume. Null draws the chart's kind.</summary>
     public ChartKind? Kind { get; init; }
     /// <summary>Dashes a line or area stroke from this X onward, such as planned workouts projected forward. The stroke is
     /// split exactly where it reaches the X, and each mark from there on is named projected; markers and fill are drawn
@@ -247,7 +268,8 @@ public sealed record ChartSpec
     /// <summary>The main plot's right-hand axis, which measures the series marked <see cref="ChartSeries.Secondary"/>.</summary>
     public AxisKind Y2Axis { get; init; } = AxisKind.Linear;
     /// <summary>How each axis writes its values, in ticks, tooltips and the data table. Duration reads values as
-    /// seconds and Compact writes 1.2k; a time X axis keeps <see cref="ValueFormat.Number"/>. CSV keeps raw numbers.</summary>
+    /// seconds, TimeOfDay reads them as seconds since a midnight and writes the clock, and Compact writes 1.2k; a time X axis
+    /// keeps <see cref="ValueFormat.Number"/>. CSV keeps raw numbers.</summary>
     public ValueFormat XFormat { get; init; }
     /// <summary>How the main plot's left-hand axis writes its values, as <see cref="XFormat"/> describes.</summary>
     public ValueFormat YFormat { get; init; }
@@ -311,12 +333,15 @@ public sealed record ChartSpec
     public ZoneScale? YZones { get; init; }
     /// <summary>Plots stacked under the main one, sharing its X axis, each with Y axes of its own, such as volume under
     /// prices. The main plot is pane 0 and takes this spec's Y properties; <c>Panes[k - 1]</c> sets up pane k, which holds
-    /// the series whose <see cref="ChartSeries.Pane"/> is k. Line, area, scatter, bubble, band, candlestick and OHLC charts
-    /// take them, at most three. Empty draws one plot.</summary>
+    /// the series whose <see cref="ChartSeries.Pane"/> is k. Line, area, scatter, bubble, band, range, candlestick and OHLC
+    /// charts take them, at most three. Empty draws one plot.</summary>
     public IReadOnlyList<ChartPane> Panes { get; init; } = [];
     /// <summary>Gauge charts only: how far round the arc runs, in degrees, from 180, a semicircle, to 360, a full circle. The arc
     /// is centred at the top, so the default 270 leaves its opening at the bottom.</summary>
     public double GaugeSweep { get; init; } = 270;
+    /// <summary>Timeline charts only: joins a span to the span in another lane that starts where it ends with a thin vertical
+    /// connector, as a hypnogram does. On by default; off draws a plain state chart. Every other kind refuses it off.</summary>
+    public bool TimelineConnectors { get; init; } = true;
 }
 
 /// <summary>

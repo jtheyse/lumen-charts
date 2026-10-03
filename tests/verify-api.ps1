@@ -7,9 +7,9 @@ foreach($path in @('/health','/_framework/blazor.web.js','/_content/Lumen.Charts
  Verify ($r.StatusCode -eq 200) "Asset/health $path"
 }
 $r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 12 -and $r.Content.Contains('not real training data')) 'The Sports & performance page answers 200 and prerenders its twelve simulated charts, each set to fit its card'
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 15 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'")) 'The Sports & performance page answers 200 and prerenders its fifteen simulated charts, each set to fit its card, last night''s sleep stages among them'
 $types=Invoke-RestMethod "$BaseUrl/api/charts/types"
-Verify ($types.Count -eq 18 -and $types -contains 'Gauge' -and $types -contains 'Ring') 'Eighteen chart types, gauge and ring among them'
+Verify ($types.Count -eq 20 -and $types -contains 'Gauge' -and $types -contains 'Ring' -and $types -contains 'Timeline' -and $types -contains 'Range') 'Twenty chart types, gauge, ring, timeline and range among them'
 foreach($kind in @('Line','Area','Scatter','Bubble','Column','Bar','StackedColumn','Donut','Heatmap','Radar')){
  $spec=@{title='API test';kind=$kind;series=@(@{name='Sample';points=@(@{x=0;y=2;label='A'},@{x=1;y=4;label='B'},@{x=2;y=3;label='C'})})}
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body ($spec|ConvertTo-Json -Depth 10) -SkipHttpErrorCheck
@@ -28,7 +28,9 @@ $families=@(
  @{name='Box';marker='median';body='{"title":"Spread","kind":"Box","series":[{"name":"Europe","points":[{"x":0,"y":1},{"x":1,"y":2},{"x":2,"y":3},{"x":3,"y":4},{"x":4,"y":40}]}]}'},
  @{name='Violin';marker='observations, median';body='{"title":"Shape","kind":"Violin","series":[{"name":"Europe","points":[{"x":0,"y":1},{"x":1,"y":2},{"x":2,"y":2},{"x":3,"y":3},{"x":4,"y":5},{"x":5,"y":8},{"x":6,"y":13},{"x":7,"y":21}]}]}'},
  @{name='Gauge';marker="class='lumen-gauge-value'";body='{"title":"Recovery","kind":"Gauge","yLabel":"%","gaugeSweep":270,"yZones":{"zones":[{"name":"Low","upper":33,"color":"#DD4B45"},{"name":"Moderate","upper":66,"color":"#A88200"},{"name":"Good","upper":"Infinity","color":"#2E9B58"}]},"annotations":[{"axis":"Y","from":60,"label":"Average"}],"series":[{"name":"Recovery","points":[{"x":0,"y":72,"label":"Recovery"}]}]}'},
- @{name='Ring';marker="class='lumen-ring-progress'";body='{"title":"Activity","kind":"Ring","series":[{"name":"Move","goal":600,"points":[{"x":0,"y":540,"label":"kcal"}]},{"name":"Exercise","goal":30,"points":[{"x":0,"y":47,"label":"min"}]},{"name":"Stand","goal":12,"points":[{"x":0,"y":9,"label":"h"}]}]}'})
+ @{name='Ring';marker="class='lumen-ring-progress'";body='{"title":"Activity","kind":"Ring","series":[{"name":"Move","goal":600,"points":[{"x":0,"y":540,"label":"kcal"}]},{"name":"Exercise","goal":30,"points":[{"x":0,"y":47,"label":"min"}]},{"name":"Stand","goal":12,"points":[{"x":0,"y":9,"label":"h"}]}]}'},
+ @{name='Timeline';marker="class='lumen-span'";body='{"title":"Night","kind":"Timeline","xFormat":"TimeOfDay","series":[{"name":"Light","points":[{"x":82800,"xEnd":84600}]},{"name":"REM","points":[{"x":84600,"xEnd":86220}]}]}'},
+ @{name='Range';marker="class='lumen-range'";body='{"title":"Heart rate","kind":"Range","xAxis":"Time","series":[{"name":"Heart rate","points":[{"x":1789171200000,"y":74,"low":52,"high":168,"label":"12 Sep"},{"x":1789257600000,"y":70,"low":48,"high":150,"label":"13 Sep"},{"x":1789344000000,"low":50,"high":140,"label":"14 Sep"}]}]}'})
 foreach($family in $families){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $family.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') "$($family.name) SVG response"
@@ -49,6 +51,38 @@ foreach($bad in @(@{body=$gauge.body.Replace('{"x":0,"y":72,"label":"Recovery"}'
   @{body=$gauge.body.Replace('"gaugeSweep":270','"gaugeSweep":120');reason='between 180';name='A gauge sweep of 120 degrees'},
   @{body=$ring.body.Replace('"goal":600','"goal":0');reason='positive';name='A ring goal of zero'},
   @{body=$ring.body.Replace('"kind":"Ring",','"kind":"Ring","yZones":{"zones":[{"name":"All","upper":"Infinity"}]},');reason='no zones';name='Zones on rings'})){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
+}
+# A timeline names each span with its state, times and length, totals each state in its legend and joins the stages where one
+# ends as the next begins; a range bar names its day, its ends and its average, and a time-of-day axis reads the clock.
+$timeline=$families|Where-Object{$_.name -eq 'Timeline'};$range=$families|Where-Object{$_.name -eq 'Range'}
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $timeline.body
+Verify ($r.Content.Contains("aria-label='REM: 23:30 to 23:57, 27 min'") -and $r.Content.Contains('>Light 0:30, 53 %<') -and $r.Content.Contains('>REM 0:27, 47 %<') -and ([regex]::Matches($r.Content,"class='lumen-connectors'")).Count -eq 1 -and $r.Content.Contains('>23:30<')) 'A timeline posted as JSON names its spans, totals its states and joins them'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $timeline.body.Replace('"kind":"Timeline",','"kind":"Timeline","timelineConnectors":false,')
+Verify ($r.StatusCode -eq 200 -and -not $r.Content.Contains('lumen-connectors') -and ([regex]::Matches($r.Content,"class='lumen-span'")).Count -eq 2) 'A timeline without connectors draws its spans alone'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $timeline.body
+Verify ($r.Content.StartsWith('Series,X,Y,Label,Size,XEnd') -and $r.Content.Contains('"Light",82800,,"",1,84600')) 'Timeline CSV carries where each span ends'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $range.body
+Verify ($r.Content.Contains("aria-label='12 Sep: 52 to 168, average 74'") -and $r.Content.Contains("aria-label='14 Sep: 50 to 140'") -and ([regex]::Matches($r.Content,"<circle cx=")).Count -ge 2) 'Range bars posted as JSON name their ends and averages, with a dot for each average'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $range.body
+Verify ($r.Content.StartsWith('Series,X,XTime,Y,Label,Size,Low,High') -and $r.Content.Contains('"Heart rate",1789344000000,2026-09-14T00:00:00.000Z,,"14 Sep",1,50,140')) 'Range CSV carries each bar''s bounds'
+$sleep='{"title":"Sleep timing","kind":"Range","yFormat":"TimeOfDay","yReversed":true,"series":[{"name":"Sleep","points":[{"x":0,"low":82800,"high":109800,"label":"Mon"},{"x":1,"low":84600,"high":111600,"label":"Tue"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $sleep
+$early=[double][regex]::Match($r.Content,"y='([\d.]+)'[^>]*>00:00<").Groups[1].Value;$late=[double][regex]::Match($r.Content,"y='([\d.]+)'[^>]*>06:00<").Groups[1].Value
+Verify ($r.StatusCode -eq 200 -and $early -gt 0 -and $early -lt $late -and $r.Content.Contains("aria-label='Mon: 23:00 to 06:30'")) 'Sleep timing on a reversed time-of-day axis reads the clock past midnight, earlier at the top'
+$beside='{"title":"Heart rate","kind":"Line","series":[{"name":"Resting","points":[{"x":0,"y":52},{"x":1,"y":48}]},{"name":"Range","kind":"Range","points":[{"x":0,"y":74,"low":52,"high":168},{"x":1,"y":70,"low":48,"high":150}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $beside
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,"class='lumen-range'")).Count -eq 2 -and $r.Content.Contains("aria-label='Resting: 1, 48'")) 'A range series beside a line posted as JSON draws both'
+foreach($bad in @(@{body='{"kind":"Timeline","series":[{"name":"Light","points":[{"x":0,"xEnd":10},{"x":5,"xEnd":15}]}]}';reason='cannot overlap';name='Overlapping spans in one lane'},
+  @{body=$timeline.body.Replace('"xEnd":84600','"xEnd":82800');reason='above its X';name='A span that ends where it starts'},
+  @{body='{"kind":"Line","series":[{"name":"S","points":[{"x":0,"y":1,"xEnd":2}]}]}';reason='timeline charts only';name='XEnd on a line chart'},
+  @{body='{"kind":"Line","timelineConnectors":false,"series":[{"name":"S","points":[{"x":0,"y":1}]}]}';reason='only a timeline';name='Connectors turned off on a line chart'},
+  @{body=$timeline.body.Replace('"kind":"Timeline",','"kind":"Timeline","annotations":[{"axis":"Y","from":1}],');reason='X annotations';name='A Y annotation on a timeline'},
+  @{body=$timeline.body.Replace('{"name":"REM",','{"name":"REM","secondary":true,');reason='secondary axis';name='A secondary series on a timeline'},
+  @{body=$range.body.Replace('"name":"Heart rate","points"','"name":"Heart rate","zones":{"zones":[{"name":"All","upper":"Infinity"}]},"points"');reason='takes no zones';name='Zones on a range series'},
+  @{body=$range.body.Replace('"y":74,','"y":200,');reason='between its Low and its High';name='A range average outside its bar'},
+  @{body='{"kind":"Line","yAxis":"Log","yFormat":"TimeOfDay","series":[{"name":"S","points":[{"x":0,"y":1}]}]}';reason='time-of-day';name='A time-of-day format on a log axis'})){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
 }

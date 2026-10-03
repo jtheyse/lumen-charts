@@ -12,15 +12,17 @@ public static class ChartExport
         ChartValidation.Validate(spec);
         var time=spec.XAxis==AxisKind.Time;
         var prices=spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc;
-        // A band drawn by any series carries its edges into the file, whatever kind the chart is.
-        var band=!prices&&spec.Series.Any(s=>ChartSvg.Mark(spec,s)==ChartKind.Band);
+        // A band or range bar drawn by any series carries its edges into the file, whatever kind the chart is.
+        var band=!prices&&spec.Series.Any(s=>ChartSvg.Mark(spec,s) is ChartKind.Band or ChartKind.Range);
         // A ring is measured against its series' goal, which the file carries beside its value.
         var rings=spec.Kind==ChartKind.Ring;
-        var columns=prices?",Open,High,Low,Close":band?",Low,High":rings?",Goal":"";
+        // A timeline's spans carry where each ends.
+        var spans=spec.Series.Any(s=>s.Points.Any(p=>p.XEnd.HasValue));
+        var columns=(prices?",Open,High,Low,Close":band?",Low,High":rings?",Goal":"")+(spans?",XEnd":"");
         var result=new StringBuilder($"Series,X,{(time?"XTime,":"")}Y,Label,Size{columns}\r\n");
         foreach(var s in spec.Series)
             foreach(var p in s.Points)
-                result.AppendLine($"{Cell(s.Name)},{Number(p.X)},{(time?TimeAxis.Moment(p.X).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ",CultureInfo.InvariantCulture)+",":"")}{Number(p.Y)},{Cell(p.Label ?? "")},{Number(p.Size)}{(prices?$",{Number(p.Open)},{Number(p.High)},{Number(p.Low)},{Number(p.Close)}":band?$",{Number(p.Low)},{Number(p.High)}":rings?$",{Number(s.Goal ?? 100)}":"")}");
+                result.AppendLine($"{Cell(s.Name)},{Number(p.X)},{(time?TimeAxis.Moment(p.X).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ",CultureInfo.InvariantCulture)+",":"")}{Number(p.Y)},{Cell(p.Label ?? "")},{Number(p.Size)}{(prices?$",{Number(p.Open)},{Number(p.High)},{Number(p.Low)},{Number(p.Close)}":band?$",{Number(p.Low)},{Number(p.High)}":rings?$",{Number(s.Goal ?? 100)}":"")}{(spans?$",{Number(p.XEnd)}":"")}");
         return result.ToString();
     }
     private static string Number(double? value)=>value?.ToString("R",CultureInfo.InvariantCulture) ?? "";

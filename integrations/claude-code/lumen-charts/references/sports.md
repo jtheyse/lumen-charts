@@ -1,11 +1,12 @@
 # Sports and training charts
 
-Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.26.0.
+Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.27.0.
 
 ## Conventions the numbers follow
 
 - **Time on a time axis** is Unix milliseconds: `TimeAxis.Value(dateTimeOffset)`. For a `DateOnly`: `TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero))`.
 - **Elapsed time and durations** are seconds, shown with `ValueFormat.Duration` (`5:30`, `1:02:05`).
+- **Clock times** for bedtimes and wake times are seconds since the midnight before the night, shown with `ValueFormat.TimeOfDay` (`23:30`, `06:40`): 23:30 is 84600 and 06:40 the next morning 110400, so a night never crosses zero.
 - **Pace** is seconds per km (or mile): 300 = `5:00 /km`. Set `YReversed = true` so faster is higher, as every running app does. Put the unit in the axis title.
 - **Power** is watts; **heart rate** bpm; samples must be uniformly spaced (pass `sampleSeconds` when not 1 s). Fill or cut gaps before computing.
 - **Zones:** `Zone.Upper` is inclusive, the last zone's is `double.PositiveInfinity`. `ZoneScale.CogganPower(ftp)` and `ZoneScale.CogganHeartRate(thresholdHr)` follow Allen & Coggan. A value in a published gap (55 % vs 56 %) belongs to the higher zone.
@@ -200,6 +201,57 @@ var activity = new ChartSpec {
 ```
 
 One to six rings, one nonnegative point each; `Goal` defaults to 100, so percentages need none. The legend reads `Move: 540 of 600 kcal` and each ring's name adds its progress, `90 %`; past 300 % a ring is drawn at 300 % and says so. A ring in seconds takes `YFormat = ValueFormat.Duration`, which applies to every ring of the chart. CSV adds a `Goal` column.
+
+## Sleep stages (hypnogram)
+
+Last night as a state timeline: one series per stage, top to bottom, each period a span, joined where the stage changes, as Oura, Apple Health, Garmin and WHOOP draw it.
+
+```csharp
+// stages: (string Stage, DateTimeOffset From, DateTimeOffset To) for each period of the night, in any order
+string[] order = ["Awake", "REM", "Light", "Deep"];
+string[] colours = ["#DB6A1F", "#3F87D9", "#848484", "#9E63D3"];   // ChartStyle.Light.Zones[4], [1], [0], [6]
+var hypnogram = new ChartSpec {
+    Title = "Last night", Description = "Sleep stages through the night",
+    Kind = ChartKind.Timeline, XAxis = AxisKind.Time, TimeZone = "Europe/London", XLabel = "Time",
+    Series = order.Select((stage, i) => new ChartSeries(stage, stages.Where(s => s.Stage == stage)
+        .Select(s => ChartPoint.Span(TimeAxis.Value(s.From), TimeAxis.Value(s.To))).ToArray(), colours[i])).ToArray()
+};
+```
+
+Each lane is named on the left and the legend reads each stage's total and share, `Deep 1:13, 17 %`; each span reads `REM: 02:14 to 02:41, 27 min` on the zone's clock. Spans in one lane must not overlap; a connector joins two spans only where one ends exactly as the next begins, so build the night from contiguous periods. `TimelineConnectors = false` draws a plain state chart, such as rest, stress and activity through a day, where lanes may overlap. A `ChartAnnotation` on X marks a moment, such as an alarm.
+
+## Sleep timing
+
+Bedtime to waking for each night as floating bars on a clock that runs past midnight, earlier at the top, as Oura, WHOOP and Calm show it.
+
+```csharp
+// nights: (DateOnly Morning, double Bedtime, double Wake), seconds since the midnight before each night
+var timing = new ChartSpec {
+    Title = "Sleep timing", Description = "Bedtime to waking, the last two weeks",
+    Kind = ChartKind.Range, XAxis = AxisKind.Time, YFormat = ValueFormat.TimeOfDay, YReversed = true, YLabel = "Clock time",
+    YMin = 75600, YMax = 118800,                                     // 21:00 to 09:00, both ends labelled
+    Series = [new("Sleep", nights.Select(n => ChartPoint.Interval(Day(n.Morning), null, n.Bedtime, n.Wake,
+        n.Morning.ToString("d MMM", System.Globalization.CultureInfo.InvariantCulture))).ToArray(), "#3F87D9")]
+};
+```
+
+A bar reads `27 Sep: 22:46 to 06:24`. Ticks land on whole hours, or on half and quarter hours over a short range. Add a target as `new ChartAnnotation(AnnotationAxis.Y, 82800) { Label = "Target bedtime" }`.
+
+## Daily heart-rate range
+
+Each day's lowest to highest heart rate, the dot its average, as Apple Fitness draws it; the same shape draws Garmin's Body Battery high and low.
+
+```csharp
+// heartDays: (DateOnly Day, double Low, double High, double Average)
+var heartRange = new ChartSpec {
+    Title = "Heart rate", Description = "Each day's lowest and highest heart rate, the dot its average",
+    Kind = ChartKind.Range, XAxis = AxisKind.Time, YLabel = "Heart rate (bpm)",
+    Series = [new("Heart rate", heartDays.Select(d => ChartPoint.Interval(Day(d.Day), d.Average, d.Low, d.High,
+        d.Day.ToString("d MMM", System.Globalization.CultureInfo.InvariantCulture))).ToArray(), "#DD4B45")]
+};
+```
+
+A bar reads `12 Sep: 52 to 168, average 74`. There is no zero baseline, so the axis spans the bars. A range can also be a series' own kind: `new("Range", points) { Kind = ChartKind.Range }` beside a resting-heart-rate line, or on a column chart in each category's slot. Range series refuse `Trend`, `Zones` and `ProjectedFrom`; colour a single bar with its point's `Color`.
 
 ## Look
 

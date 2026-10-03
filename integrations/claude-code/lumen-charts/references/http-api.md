@@ -51,6 +51,9 @@ Property names are camelCase; enums are strings; time values are Unix millisecon
 {"title":"Classic look","kind":"Line","style":{"finish":"Classic"},"series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":3}]}]}
 {"title":"Recovery","kind":"Gauge","gaugeSweep":270,"yLabel":"%","yZones":{"zones":[{"name":"Low","upper":33,"color":"#DD4B45"},{"name":"Moderate","upper":66,"color":"#A88200"},{"name":"Good","upper":"Infinity","color":"#2E9B58"}]},"series":[{"name":"Recovery","points":[{"x":0,"y":72,"label":"Recovery"}]}]}
 {"title":"Activity","kind":"Ring","series":[{"name":"Move","goal":600,"points":[{"x":0,"y":540,"label":"kcal"}]},{"name":"Exercise","goal":30,"points":[{"x":0,"y":47,"label":"min"}]}]}
+{"title":"Last night","kind":"Timeline","xAxis":"Time","timeZone":"Europe/London","series":[{"name":"Light","points":[{"x":1790466000000,"xEnd":1790467800000}]},{"name":"Deep","points":[{"x":1790467800000,"xEnd":1790470200000}]}]}
+{"title":"Heart rate","kind":"Range","xAxis":"Time","series":[{"name":"Heart rate","points":[{"x":1789171200000,"y":74,"low":52,"high":168,"label":"12 Sep"},{"x":1789257600000,"y":70,"low":48,"high":150,"label":"13 Sep"}]}]}
+{"title":"Sleep timing","kind":"Range","yFormat":"TimeOfDay","yReversed":true,"series":[{"name":"Sleep","points":[{"x":0,"low":82800,"high":109800,"label":"Mon"},{"x":1,"low":84600,"high":111600,"label":"Tue"}]}]}
 ```
 
-A series with a `summary` still sends `"points": []`. A field left out of a hand-written object reads as its default (zero for numbers), so send every number you mean.
+A timeline point sends `"xEnd"` and no `"y"`; `"timelineConnectors":false` turns its connectors off. A range point sends `"low"` and `"high"`, and `"y"` only for its dot. A time-of-day axis takes seconds since a midnight, past 86400 for the morning after. A series with a `summary` still sends `"points": []`. A field left out of a hand-written object reads as its default (zero for numbers), so send every number you mean.

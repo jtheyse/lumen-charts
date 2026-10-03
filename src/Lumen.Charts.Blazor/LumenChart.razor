@@ -73,7 +73,7 @@
     private bool fitting;
     private const int Narrowest=320, Widest=4096;
     private int Width => FitWidth && fitted is { } width ? width : Spec.Width;
-    private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band;
+    private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline;
     private string Value(ChartSeries series,ChartPoint point)
     {
         var y=Measure(series);
@@ -81,6 +81,9 @@
         {
             ChartKind.Candlestick or ChartKind.Ohlc=>$"O {y.Format(point.Open ?? 0)} · H {y.Format(point.High ?? 0)} · L {y.Format(point.Low ?? 0)} · C {y.Format(point.Close ?? 0)}",
             ChartKind.Ring when point.Y.HasValue=>$"{y.Format(point.Y.Value)} of {y.Format(series.Goal ?? 100)}",
+            // A timeline span reads its start in the X column, and how long it runs to its end here.
+            ChartKind.Timeline when point.XEnd is {} end=>$"to {xAxis.Format(end)}",
+            ChartKind.Range when point.Y is null&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Low.Value)} to {y.Format(point.High.Value)}",
             _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Y.Value)} ({y.Format(point.Low.Value)} to {y.Format(point.High.Value)})",
             _=>point.Y.HasValue?y.Format(point.Y.Value):"Missing"
         };
@@ -92,7 +95,8 @@
         var pane=series.Pane>0&&series.Pane<=Spec.Panes.Count?Spec.Panes[series.Pane-1]:null;
         return series.Secondary ? new(pane?.Y2Axis ?? Spec.Y2Axis,1,10){ValueFormat=pane?.Y2Format ?? Spec.Y2Format} : new(pane?.YAxis ?? Spec.YAxis,1,10){ValueFormat=pane?.YFormat ?? Spec.YFormat};
     }
-    private Axis FullRange => Axis.Create(Spec.XAxis,Spec.Series.SelectMany(s=>s.Points).Select(p=>p.X), min:Spec.XMin, max:Spec.XMax, zone:TimeAxis.Zone(Spec.TimeZone),
+    // A timeline's spans reach to their ends.
+    private Axis FullRange => Axis.Create(Spec.XAxis,Spec.Series.SelectMany(s=>s.Points).SelectMany(p=>p.XEnd is {} end?new[]{p.X,end}:new[]{p.X}), min:Spec.XMin, max:Spec.XMax, zone:TimeAxis.Zone(Spec.TimeZone),
         weekends:Spec.SkipWeekends, skips:Spec.TimeSkips.Count>0?Spec.TimeSkips:null) with {ValueFormat=Spec.XFormat};
     // The view is tracked as a fraction of the full axis so log and time domains zoom in their own space.
     private (double Min,double Max) View { get { var full=FullRange;return (viewMin.HasValue?full.Map(viewMin.Value,0,1):0,viewMax.HasValue?full.Map(viewMax.Value,0,1):1); } }
@@ -125,8 +129,9 @@
         return spec with { YLabel=main.Label, YAxis=main.YAxis, YMin=main.YMin, YMax=main.YMax, YFormat=main.YFormat, YReversed=main.YReversed, YZones=main.YZones,
             Y2Label=main.Y2Label, Y2Axis=main.Y2Axis, Y2Min=main.Y2Min, Y2Max=main.Y2Max, Y2Format=main.Y2Format, Y2Reversed=main.Y2Reversed, Annotations=Spec.Annotations.Where(a=>a?.Axis!=AnnotationAxis.Y).ToArray() };
     }
-    // Hidden candles stay without their points, because a candlestick or OHLC chart draws its other series beside them.
-    private bool Candles(int index) => Spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc && Spec.Series[index].Kind is null;
+    // Hidden candles stay without their points, because a candlestick or OHLC chart draws its other series beside them; and a
+    // hidden state keeps its lane, so the timeline's lanes stand where they did.
+    private bool Candles(int index) => Spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc && Spec.Series[index].Kind is null || Spec.Kind == ChartKind.Timeline;
     // The component draws its own tooltips, so marks render without the native SVG title.
     private void Render() { xAxis=FullRange;visible=Enumerable.Range(0,Spec.Series.Count).Where(i=>!hidden.Contains(i)||Candles(i)).ToArray();svg=ChartSvg.Render(VisibleSpec(), includeLegend:false, includeTitles:false); }
     private void Toggle(int index) { if(!hidden.Add(index))hidden.Remove(index);Render(); }
@@ -157,7 +162,11 @@
         var index=visible[series];if(point<0||point>=Spec.Series[index].Points.Count)return;
         var p=Spec.Series[index].Points[point];
         // A gauge's or a ring's one point reads as its legend does, with its unit and a ring's goal.
-        status=Spec.Kind is ChartKind.Gauge or ChartKind.Ring ? ChartSvg.LegendLabel(Spec,index) : $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y) : "missing")}";
+        // A span reads from its start to its end, and a range bar from its low to its high and its typical value.
+        status=Spec.Kind is ChartKind.Gauge or ChartKind.Ring ? ChartSvg.LegendLabel(Spec,index)
+            : p.XEnd is {} end ? $"{Spec.Series[index].Name}: {xAxis.Format(p.X)} to {xAxis.Format(end)}"
+            : (Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Range&&p.Low is {} low&&p.High is {} high ? $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {Measure(Spec.Series[index]).Format(low)} to {Measure(Spec.Series[index]).Format(high)}{(p.Y is {} typical ? $", average {Measure(Spec.Series[index]).Format(typical)}" : "")}"
+            : $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y) : "missing")}";
         await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
     }
     private async Task Download(string format)

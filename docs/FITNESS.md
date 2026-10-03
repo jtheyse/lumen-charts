@@ -77,7 +77,7 @@ Cross-cutting work comes first, because each piece unlocks several charts. Each 
 3. **Zones on charts** — zone bands behind a line, a line coloured by zone, and bars and markers coloured from a zone scale. Unlocks the activity stream, time in zone, grade-coloured elevation and baseline trends. Shipped in 0.20.0.
 4. **Several marks in one chart** — lines, areas, columns and points together, and a band whose edges are series. Unlocks performance management, load against target, elevation behind pace and the Activity Path. The volume pane on the existing roadmap is the same need with panels stacked instead of overlaid, so synchronised panels belong here too. Mixed marks shipped in 0.21.0 and stacked panes sharing an X axis in 0.22.0, so this step has shipped in full.
 5. **Gauges and rings.** A score gauge on an open arc of any sweep from a semicircle to a full circle, its track tinted by zones and its score coloured by its zone, with a target tick; and Apple-style activity rings, each a value against its goal, running on over themselves past it. Shipped in 0.26.0.
-6. **State timelines and range columns** — hypnograms, intraday states, sleep timing and minimum–maximum bars.
+6. **State timelines and range columns** — hypnograms, intraday states, sleep timing and minimum–maximum bars. A state timeline with one lane per state, its spans joined where one ends as the next begins; floating range bars from a low to a high with a dot at the typical value, as a chart or beside other marks; and a time-of-day format that runs past midnight, for sleep timing on a reversed axis. Shipped in 0.27.0.
 7. **Calendar layout.**
 8. **Variable-width blocks** — laps sized by their length, and structured workout profiles.
 
