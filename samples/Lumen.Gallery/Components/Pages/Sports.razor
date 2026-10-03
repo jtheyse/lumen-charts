@@ -10,7 +10,7 @@
         <a class="nav-item" href="/#playground"><span>▦</span> Chart explorer <b>22</b></a>
         <a class="nav-item" href="/#network"><span>⌘</span> Network graphs <b>2</b></a>
         <a class="nav-item" href="/#integration"><span>⌁</span> Developer API</a>
-        <a class="nav-item active" href="sports" aria-current="page"><span>∿</span> Sports &amp; performance <b>20</b></a>
+        <a class="nav-item active" href="sports" aria-current="page"><span>∿</span> Sports &amp; performance <b>23</b></a>
         <div class="nav-label">ON THIS PAGE</div>
         @foreach (var section in Sections)
         { <a class="purpose" href="sports#@section.Id">@section.Name<span>↓</span></a> }
@@ -21,7 +21,7 @@
         <section class="sports-intro">
             <div class="eyebrow"><span></span> TRAINING DASHBOARD</div>
             <h1>One athlete. <em>Every training chart.</em></h1>
-            <p>A simulated athlete who runs and rides: sixteen weeks from 8 June, and two weeks planned towards a 10 km race on 11 October. Every chart but the race results, five invented races of their own, is drawn from that one season, so they agree with one another —this morning's readiness reads the HRV and form charted below, last night's sleep follows the same HRV, the activity stream is the last run, its time in zone is counted from the samples it draws and its laps are the steps of its progression, the next session is drawn as the workout whose stress the performance chart projects, and each week adds up the days above it. Each is a live <code>LumenChart</code>: hover or focus a mark, hide a series, zoom, or export it.</p>
+            <p>A simulated athlete who runs and rides: sixteen weeks from 8 June, and two weeks planned towards a 10 km race on 11 October. Every chart but the race results, five invented races of their own, and a weekly weigh-in, invented too, is drawn from that one season, so they agree with one another —this morning's readiness reads the HRV and form charted below, last night's sleep follows the same HRV, the activity stream is the last run, its time in zone is counted from the samples it draws and its laps are the steps of its progression, the next session is drawn as the workout whose stress the performance chart projects, and each week adds up the days above it. Each is a live <code>LumenChart</code>: hover or focus a mark, hide a series, zoom, or export it.</p>
             <div class="segmented" role="group" aria-label="Chart brand">
                 @foreach (var (choice, name) in Brands)
                 { <button class="@(Look.Brand == choice ? "selected" : "")" aria-pressed="@(Look.Brand == choice ? "true" : "false")" @onclick="() => SetBrand(choice)">@name</button> }
@@ -44,7 +44,15 @@
                                 <h3>@card.Title</h3>
                                 <p>@foreach (var (part, i) in card.Note.Split('`').Select((part, i) => (part, i))) { if (i % 2 == 1) { <code>@part</code> } else { @part } }</p>
                             </header>
-                            @if (card.Beside is { } beside)
+                            @if (card.Lines is { } lines)
+                            {
+                                @* Each sparkline stands at its own size, with the words that give its numbers beside it, or under it where the card is too narrow. *@
+                                <ul class="sparklines">
+                                    @foreach (var line in lines)
+                                    { <li>@Branded(@<LumenChart Spec="line.Spec"/>)<p><b>@line.Name</b> @line.Text</p></li> }
+                                </ul>
+                            }
+                            else if (card.Beside is { } beside)
                             {
                                 <div class="sports-pair">@Branded(@<LumenChart Spec="Spec(card)" FitWidth="true"/>)@Branded(@<LumenChart Spec="beside" FitWidth="true"/>)</div>
                             }

@@ -1,5 +1,12 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
+@if(Spec.Sparkline)
+{
+    @* A sparkline is its drawing alone, read through its marks' tooltips: no legend, toolbar, zoom or data table, and no scrolling region. *@
+    <div class="@(FitWidth ? "lumen-chart lumen-spark lumen-fit" : "lumen-chart lumen-spark")" @ref="root"><div class="lumen-viewport">@((MarkupString)svg)</div></div>
+}
+else
+{
 <div class="@(FitWidth ? "lumen-chart lumen-fit" : "lumen-chart")" @ref="root">
     <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart">@((MarkupString)svg)</div>
     <div class="lumen-legend" aria-label="Chart series">
@@ -39,6 +46,7 @@
         </tbody></table><p>Table shows up to 500 observations per series. CSV contains all original observations.</p></div>
     }
 </div>
+}
 @code {
     /// <summary>The chart to draw. Set a new spec to update it. Whenever it is set, the zoom resets and the series the reader
     /// has hidden stay hidden.</summary>
@@ -52,7 +60,7 @@
     /// minimum for this chart alone. The width is measured in the browser once the component is interactive, and again
     /// whenever the container settles at a new width. Until then, and in static rendering, the chart is drawn at
     /// <see cref="ChartSpec.Width"/> and scaled to fit. It is never drawn narrower than 320 pixels, the narrowest width a chart
-    /// accepts, and the SVG and PNG exports take the width it is drawn at.
+    /// accepts, or 60 for a sparkline, and the SVG and PNG exports take the width it is drawn at.
     /// </summary>
     [Parameter] public bool FitWidth { get; set; }
     /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style on the spec itself wins.</summary>
@@ -68,10 +76,11 @@
     private Axis xAxis;
     private double? viewMin, viewMax;
     // The width the container last reported while FitWidth is on, and whether the script is measuring it. A chart accepts
-    // widths from 320 to 4096 pixels.
+    // widths from 320 to 4096 pixels, and a sparkline from 60.
     private int? fitted;
     private bool fitting;
-    private const int Narrowest=320, Widest=4096;
+    private const int Widest=4096;
+    private int Narrowest => Spec.Sparkline ? 60 : 320;
     private int Width => FitWidth && fitted is { } width ? width : Spec.Width;
     private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Blocks;
     private string Value(ChartSeries series,ChartPoint point)
@@ -129,7 +138,7 @@
         spec=spec with { Panes=used.Skip(1).Select(p=>Spec.Panes[p-1]).ToArray(), Series=spec.Series.Select(s=>s with {Pane=Math.Max(0,Array.IndexOf(used,s.Pane))}).ToArray() };
         if(used[0]==0)return spec;
         var main=Spec.Panes[used[0]-1];
-        return spec with { YLabel=main.Label, YAxis=main.YAxis, YMin=main.YMin, YMax=main.YMax, YFormat=main.YFormat, YReversed=main.YReversed, YZones=main.YZones,
+        return spec with { YLabel=main.Label, YAxis=main.YAxis, YMin=main.YMin, YMax=main.YMax, YMinSpan=main.YMinSpan, YFormat=main.YFormat, YReversed=main.YReversed, YZones=main.YZones,
             Y2Label=main.Y2Label, Y2Axis=main.Y2Axis, Y2Min=main.Y2Min, Y2Max=main.Y2Max, Y2Format=main.Y2Format, Y2Reversed=main.Y2Reversed, Annotations=Spec.Annotations.Where(a=>a?.Axis!=AnnotationAxis.Y).ToArray() };
     }
     // Hidden candles stay without their points, because a candlestick or OHLC chart draws its other series beside them; and a

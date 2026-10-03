@@ -553,6 +553,30 @@ lines.Add($"labels/edges {Hash(Render(line with { Title = "Value labels at the e
     Series = [new("A", [new(0, 5) { ValueNote = "/48" }, new(3, 4), new(6, 10) { ValueNote = "/52" }]) { ValueLabels = true, Markers = MarkerStyle.Filled }, new("B", [new(1, 6), new(3, 4.2), new(5, 7)]) { Kind = ChartKind.Scatter, ValueLabels = true }] }))}");
 foreach (var ticks in Enum.GetValues<TickSource>())
     lines.Add($"ticks/time-long-{ticks} {Hash(Render(Rounds(ticks, null, 900)))}");
+// 0.34.0: sparklines. An invented run of six 5 km times by index, faster higher on a reversed duration axis, each personal best ringed by a
+// highlight in the style's red and noted, at 120 by 32 in light and Midnight; a weight logged five times, steady about 38 kg, in one neutral
+// colour on an axis held 8 kg tall at 270 by 54; a week of columns at 120 by 32; highlights on a full line and on scatter points; and a
+// minimum span on a full chart's main plot and in a pane.
+double[] pbTimes = [1450, 1432, 1445, 1411, 1420, 1367];
+string[] weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+ChartSpec Pb(ChartStyle style) => new()
+{
+    Kind = ChartKind.Line, Style = style, Title = "5 km: 24:10 to 22:47 over 6 races", Description = "Each race's time, oldest first, faster higher",
+    Width = 120, Height = 32, Sparkline = true, YReversed = true, YFormat = ValueFormat.Duration,
+    Series = [new("5 km", pbTimes.Select((t, i) => new ChartPoint(i, t, $"Race {i + 1}") { Highlight = i % 2 == 1 ? style.Zones[5] : null, ValueNote = i % 2 == 1 ? " · PB" : null }).ToArray(), style.Zones[0]) { StrokeWidth = 2 }]
+};
+lines.Add($"spark/pb-120-light {Hash(Render(Pb(ChartStyle.Light)))}");
+lines.Add($"spark/pb-120-midnight {Hash(Render(Pb(ChartStyle.Midnight)))}");
+lines.Add($"spark/growth-270 {Hash(Render(new ChartSpec { Kind = ChartKind.Line, Theme = ChartTheme.Dark, Title = "Weight: 5 measurements, from 37.9 to 38.1 kg", Description = "Scale 34 to 42 kg",
+    Width = 270, Height = 54, Sparkline = true, YMinSpan = 8, Series = [new("Weight", new[] { 37.9, 37.8, 38.2, 38.0, 38.1 }.Select((kg, i) => new ChartPoint(i, kg) { ValueNote = " kg" }).ToArray(), "#B7BCC4") { StrokeWidth = 2 }] }))}");
+lines.Add($"spark/columns-120 {Hash(Render(new ChartSpec { Kind = ChartKind.Column, Title = "Seven days", Description = "Minutes each day", Width = 120, Height = 32, Sparkline = true,
+    Series = [new("Minutes", new[] { 30, 0, 45, 20, 60, 0, 90 }.Select((m, i) => new ChartPoint(i, m, weekdays[i])).ToArray())] }))}");
+lines.Add($"highlight/line {Hash(Render(line with { Title = "Highlights", Series = [line.Series[0] with { Points = line.Series[0].Points.Select((p, i) => i is 4 or 9 ? p with { Highlight = "#DD4B45", ValueNote = " · best" } : p).ToArray() },
+    line.Series[1] with { Kind = ChartKind.Scatter, Points = line.Series[1].Points.Select((p, i) => i == 11 ? p with { Highlight = "#2E9B58" } : p).ToArray() }] }))}");
+ChartPoint[] Weights() => new[] { 37.9, 37.8, 38.2, 38.0, 38.1, 38.0, 37.9 }.Select((kg, i) => new ChartPoint(i, kg, $"Week {i + 1}")).ToArray();
+lines.Add($"span/line {Hash(Render(line with { Title = "Minimum span", YMinSpan = 8, Series = [new("Weight", Weights()) { Markers = MarkerStyle.Filled }] }))}");
+lines.Add($"span/pane {Hash(Render(line with { Title = "Minimum span in a pane", YReversed = true, YFormat = ValueFormat.Duration, Panes = [new() { Label = "Weight", Weight = 1, YMinSpan = 8 }],
+    Series = [new("5 km", pbTimes.Select((t, i) => new ChartPoint(i, t)).ToArray()), new("Weight", Weights().Take(6).ToArray()) { Pane = 1 }] }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

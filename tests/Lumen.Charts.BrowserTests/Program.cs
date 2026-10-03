@@ -732,15 +732,15 @@ if (await sportsLink.CountAsync() > 0)
     var charts = sports.Locator(".lumen-chart");
     // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
-        return svgs.length === 20 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+        return svgs.length === 23 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
-    await Test("The Sports & performance page renders its twenty charts, each live and drawn at the width it is shown", async () =>
+    await Test("The Sports & performance page renders its twenty-three charts, each live and drawn at the width it is shown", async () =>
     {
-        Check(await charts.CountAsync() == 20, $"the page shows {await charts.CountAsync()} charts");
-        for (var i = 0; i < 20; i++)
+        Check(await charts.CountAsync() == 23, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 23; i++)
             Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
-        // Each chart's script adds its tooltip, so twenty of them prove every chart is interactive.
-        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 20");
+        // Each chart's script adds its tooltip, so twenty-three of them prove every chart, sparklines included, is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 23");
         await sports.WaitForFunctionAsync(drawnToFit);
     });
 
@@ -755,6 +755,44 @@ if (await sportsLink.CountAsync() > 0)
         Check(await tip.TextContentAsync() == label, $"the tooltip reads \"{await tip.TextContentAsync()}\", the mark \"{label}\"");
         await sports.Mouse.MoveAsync(1, 1);
     });
+
+    // The Getting faster? card draws three sparklines, each at its own size with no words inside it and none of a chart's controls, every
+    // personal best ringed and named so, and a mark's tooltip, as wide as its words, standing above the drawing rather than over the line.
+    if (await sports.Locator("#getting-faster").CountAsync() > 0)
+    {
+        async Task Sparklines(IPage tab, string where)
+        {
+            var card = tab.Locator("#getting-faster");
+            await card.ScrollIntoViewIfNeededAsync();
+            var shown = await card.EvaluateAsync<double[][]>(@"c => [...c.querySelectorAll('.lumen-chart.lumen-spark > .lumen-viewport > svg')].map(s => { const b = s.getBoundingClientRect();
+                return [Number(s.getAttribute('viewBox').split(' ')[2]), b.width, s.querySelectorAll('text').length, s.closest('.lumen-chart').querySelectorAll('button, .lumen-legend, .lumen-tools, .lumen-table').length]; })");
+            Check(shown.Length == 3 && shown.Select(s => s[0]).SequenceEqual([120d, 120, 270]) && shown.All(s => Math.Abs(s[1] - s[0]) < .5 && s[2] == 0 && s[3] == 0), $"{where}: {string.Join(" | ", shown.Select(s => string.Join(",", s)))}");
+            var bests = await card.Locator(".lumen-chart").Nth(0).Locator(".lumen-datum").EvaluateAllAsync<string[]>("ms => ms.map(m => m.getAttribute('aria-label')).filter(n => n.endsWith(' · PB'))");
+            Check(bests.Length == 4 && bests.All(n => Regex.IsMatch(n, @"^5 km: \d{1,2} [A-Z][a-z]{2} · .+, \d\d:\d\d · PB$")), $"{where}: {string.Join(" | ", bests)}");
+            var first = card.Locator(".lumen-chart").First;
+            var mark = first.Locator(".lumen-datum[data-point='12']");
+            var label = await mark.GetAttributeAsync("aria-label");
+            if (where.Contains("phone")) await mark.FocusAsync(); else await mark.HoverAsync();
+            var tip = first.Locator(".lumen-tooltip");
+            await tip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            var placed = await first.EvaluateAsync<double[]>(@"c => { const t = c.querySelector('.lumen-tooltip').getBoundingClientRect(), s = c.querySelector('svg').getBoundingClientRect();
+                return [t.left, t.right, t.bottom, s.top, t.width, t.height, document.documentElement.clientWidth]; }");
+            Check(await tip.TextContentAsync() == label && label!.EndsWith(" · PB"), $"{where}: the tooltip reads {await tip.TextContentAsync()}");
+            Check(placed[2] <= placed[3] && placed[4] > 120 && placed[5] < 40 && placed[0] >= 15.5 && placed[1] <= placed[6] - 15.5, $"{where}: the tooltip stands at {string.Join(", ", placed.Select(v => Math.Round(v, 1)))}");
+            await tab.Mouse.MoveAsync(1, 1);
+        }
+        await Test("The Getting faster? card draws three sparklines at their own sizes with no words or controls in them, each best named, its tooltip above the drawing", () => Sparklines(sports, "desktop"));
+        await Test("On a 375-pixel phone the Getting faster? sparklines keep their sizes and a focused best's tooltip stands above the drawing, inside the screen", async () =>
+        {
+            await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+            var tab = await phone.NewPageAsync();
+            tab.SetDefaultTimeout(15_000);
+            await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 23", null, new() { Timeout = 120_000 });
+            await Sparklines(tab, "phone");
+        });
+    }
+    else Console.WriteLine("SKIP sparkline checks: this host's Sports & performance page has no Getting faster? card");
 
     await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page", () => SweepOf(sports));
 

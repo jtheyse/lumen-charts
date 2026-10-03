@@ -301,3 +301,10 @@ labels/edges 56F1C0E042038E5A
 ticks/time-long-Auto 11017BABD00D8E3F
 ticks/time-long-Axis 11017BABD00D8E3F
 ticks/time-long-PointLabels EB235AE5A6E3287F
+spark/pb-120-light 4BD6EB9C52C14881
+spark/pb-120-midnight 6F5977BF62276037
+spark/growth-270 87088A37B2FB64EF
+spark/columns-120 01B520F9BD25BF9E
+highlight/line 3BD29A55527F24D9
+span/line 0CC73CA1036DD7A1
+span/pane 6265B841C4BDFEE7

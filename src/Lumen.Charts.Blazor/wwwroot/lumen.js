@@ -18,6 +18,14 @@ export function attach(root, dotnet) {
         const box = element.getBoundingClientRect();
         const x = event && event.clientX ? event.clientX : box.left + box.width / 2;
         const y = event && event.clientY ? Math.min(event.clientY, box.top + box.height / 2) : box.top;
+        // A sparkline is too small to hold its tooltip: it stands just above the drawing rather than over the line, as wide as its
+        // words need, and is moved in from the page's sides by the 16 pixels a page keeps clear, so it is never cut.
+        if (root.classList.contains('lumen-spark')) {
+            const half = tooltip.offsetWidth / 2, page = document.documentElement.clientWidth;
+            tooltip.style.left = Math.min(Math.max(x, half + 16), page - half - 16) - bounds.left + 'px';
+            tooltip.style.top = '-6px';
+            return;
+        }
         tooltip.style.left = Math.min(Math.max(x - bounds.left, 60), bounds.width - 60) + 'px';
         tooltip.style.top = Math.max(y - bounds.top - 12, 26) + 'px';
     };

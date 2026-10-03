@@ -22,6 +22,8 @@ internal sealed class SvgWriter
     public bool MinorGrid { get; init; }
     /// <summary>The chart being drawn, whose hash names its gradients.</summary>
     public ChartSpec? Spec { get; init; }
+    /// <summary>A sparkline's data alone: no words are written, and references draw their shapes without their labels.</summary>
+    public bool Bare { get; init; }
     /// <summary>The refined finish rather than the classic one, which draws as 0.23.0 did.</summary>
     public bool Refined => Style.Finish == ChartFinish.Refined;
     /// <summary>In the refined finish a stroke keeps its width at any display size; in the classic one it scales with the drawing.</summary>
@@ -73,7 +75,7 @@ public static class ChartSvg
     /// <summary>What pane <paramref name="index"/> draws with: the spec's own Y properties for the main plot, and
     /// <c>Panes[index - 1]</c> below it.</summary>
     internal static ChartPane Pane(ChartSpec spec, int index) => index == 0
-        ? new() { Label = spec.YLabel, Weight = 1, YAxis = spec.YAxis, YMin = spec.YMin, YMax = spec.YMax, YFormat = spec.YFormat, YReversed = spec.YReversed, YZones = spec.YZones,
+        ? new() { Label = spec.YLabel, Weight = 1, YAxis = spec.YAxis, YMin = spec.YMin, YMax = spec.YMax, YMinSpan = spec.YMinSpan, YFormat = spec.YFormat, YReversed = spec.YReversed, YZones = spec.YZones,
             Y2Label = spec.Y2Label, Y2Axis = spec.Y2Axis, Y2Min = spec.Y2Min, Y2Max = spec.Y2Max, Y2Format = spec.Y2Format, Y2Reversed = spec.Y2Reversed }
         : spec.Panes[index - 1];
 
@@ -81,7 +83,7 @@ public static class ChartSvg
     // every record, so leaving out the nulls loses nothing, and it halves the text a long series makes.
     private static readonly JsonSerializerOptions Hashing = new()
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended, Unchanged } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended, Unchanged, Unsparked } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
     /// <summary>A classic style is serialized for hashing as 0.23.0 serialized it, without its finish.</summary>
     private static void Unfinished(JsonTypeInfo info)
@@ -138,6 +140,14 @@ public static class ChartSvg
             foreach (var property in info.Properties)
                 if (property.Name == nameof(ChartSpec.XTicks)) property.ShouldSerialize = (_, ticks) => ticks is not TickSource.Auto;
     }
+    /// <summary>A chart that is not a sparkline is serialized for hashing as 0.33.0, which had none, serialized it, so every chart drawn
+    /// before them keeps its IDs. A minimum span and a point's highlight are null unless set, and nulls are left out already.</summary>
+    private static void Unsparked(JsonTypeInfo info)
+    {
+        if (info.Type != typeof(ChartSpec)) return;
+        foreach (var property in info.Properties)
+            if (property.Name == nameof(ChartSpec.Sparkline)) property.ShouldSerialize = (_, sparkline) => sparkline is true;
+    }
     private static byte[] Hashed<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, Hashing);
     /// <summary>
     /// The prefix of every ID a chart defines: <c>lumen-</c> and the first twelve hex digits of the SHA-256 of its spec as
@@ -159,17 +169,23 @@ public static class ChartSvg
     {
         ChartValidation.Validate(spec);
         var style = ResolveStyle(spec);
-        var w = new SvgWriter { Titles = includeTitles, Style = style, MinorGrid = spec.MinorGridlines && style.Gridlines != GridLine.Hidden, Spec = spec };
+        // A sparkline draws no gridlines, so it carries no rule for minor ones either.
+        var bare = spec.Sparkline;
+        var w = new SvgWriter { Titles = includeTitles, Style = style, MinorGrid = !bare && spec.MinorGridlines && style.Gridlines != GridLine.Hidden, Spec = spec, Bare = bare };
         // A ring's key carries its value and goal as well as its name, so its columns are wider.
         var ring = spec.Kind == ChartKind.Ring;
         var legendColumns = Math.Max(1, (spec.Width - 48) / (ring ? 220 : 180));
         // A histogram of one distribution needs no key; of several, its colours are the only way to tell them apart.
         // A gauge's one score is written in its centre, so it needs no key either, and a calendar draws its colour scale under its days.
-        var legendRows = includeLegend && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Box and not ChartKind.Violin and not ChartKind.Gauge and not ChartKind.Calendar
+        // A sparkline is read beside words that name what it draws.
+        var legendRows = includeLegend && !bare && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Box and not ChartKind.Violin and not ChartKind.Gauge and not ChartKind.Calendar
             && (spec.Kind != ChartKind.Histogram || spec.Series.Count > 1) ? (int)Math.Ceiling(spec.Series.Count / (double)legendColumns) : 0;
         Begin(w, spec.Width, spec.Height + legendRows * 22, spec.Title, spec.Description);
+        // An empty sparkline is an empty drawing: its title, which a host writes for the data it has, says what is missing.
         if (!HasData(spec))
-            w.Text(spec.Width / 2, spec.Height / 2, "No data to display", "text-anchor='middle'");
+        {
+            if (!bare) w.Text(spec.Width / 2, spec.Height / 2, "No data to display", "text-anchor='middle'");
+        }
         else if (spec.Kind == ChartKind.Gauge) Gauge(w, spec);
         else if (spec.Kind == ChartKind.Ring) Rings(w, spec);
         else if (spec.Kind == ChartKind.Donut) Donut(w, spec);
@@ -181,10 +197,10 @@ public static class ChartSvg
         else if (spec.Kind == ChartKind.Timeline) Timeline(w, spec);
         else if (spec.Kind == ChartKind.Calendar) Calendar(w, spec);
         else Cartesian(w, spec);
-        if (spec.Kind == ChartKind.Scatter && spec.DensityCells is not null)
+        if (spec.Kind == ChartKind.Scatter && spec.DensityCells is not null && !bare)
             w.Text(spec.Width - 30, 64, $"{Count(spec.Series.Where(series => Mark(spec, series) == ChartKind.Scatter).Sum(series => series.Points.Count(p => p.Y.HasValue)))} observations aggregated into {spec.DensityCells} cells across",
                 "text-anchor='end' class='lumen-muted' font-size='11'");
-        w.Text(24, spec.Height - 12, spec.Source, "class='lumen-muted' font-size='11'");
+        if (!bare) w.Text(24, spec.Height - 12, spec.Source, "class='lumen-muted' font-size='11'");
         if (legendRows > 0)
             for (var i = 0; i < spec.Series.Count; i++)
             {
@@ -292,13 +308,17 @@ public static class ChartSvg
     internal static void Begin(SvgWriter w, int width, int height, string title, string description, bool wrap = false)
     {
         var style = w.Style;
-        w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{style.Grid};--lumen-muted:{style.Muted};width:100%;height:auto;display:block;background:{style.Background};color:{style.Text};font-family:{style.FontFamily};font-size:12px' fill='currentColor'>");
+        // A chart fills the width of its box. A sparkline is shown at its own width, as a word is, and never wider than its box.
+        var shown = w.Bare ? $"width:{width}px;max-width:100%" : "width:100%";
+        w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{style.Grid};--lumen-muted:{style.Muted};{shown};height:auto;display:block;background:{style.Background};color:{style.Text};font-family:{style.FontFamily};font-size:12px' fill='currentColor'>");
         w.Add($"<title>{SvgWriter.E(title)}</title><desc>{SvgWriter.E(description)}</desc>");
         // A refined line marker is drawn but transparent, so it is hovered and focused where a visible one would be, and
         // appears while it is.
         w.Add("<style>.lumen-svg .lumen-grid{stroke:var(--lumen-grid);stroke-width:1}"+(w.MinorGrid?".lumen-svg .lumen-grid-minor{stroke:var(--lumen-grid);stroke-width:1;stroke-opacity:.45}":"")+".lumen-svg .lumen-muted{fill:var(--lumen-muted)}.lumen-svg .lumen-datum{outline:none;cursor:pointer}.lumen-svg .lumen-datum:focus{stroke:currentColor;stroke-width:3}.lumen-svg .lumen-datum:hover{filter:brightness(.87)}"
             +(w.Refined?".lumen-svg .lumen-marker{opacity:0}.lumen-svg .lumen-datum:hover .lumen-marker,.lumen-svg .lumen-datum:focus .lumen-marker{opacity:1}":"")+".lumen-svg .lumen-node{cursor:grab;outline:none}.lumen-svg .lumen-node:focus circle{stroke-width:4}.lumen-svg .lumen-node:active{cursor:grabbing}</style>");
         w.MarkDefinitions();
+        // A sparkline's title and description are its accessible name, its title and its desc, and are not written.
+        if (w.Bare) return;
         w.Text(24, 28, title, "font-size='17' font-weight='600'");
         var clauses = description.Split(" · ");
         if (wrap && clauses.Length > 1 && Wide(description) > width - 48)
@@ -360,7 +380,9 @@ public static class ChartSvg
         var secondary = s.Series.Any(series => series.Secondary);
         // A Y axis on the right takes the margin a secondary axis would, and gives the left one back.
         var flipped = s.YAxisSide == AxisSide.Right;
-        var left = horizontal ? 160d : flipped ? 30d : 76d; var right = s.Width - (secondary || flipped ? 76d : 30d);
+        // A sparkline has no axes to make room for: its plot fills the drawing but for the padding its largest mark needs.
+        var pad = s.Sparkline ? Padding(s, w.Refined) : 0;
+        var left = s.Sparkline ? pad : horizontal ? 160d : flipped ? 30d : 76d; var right = s.Width - (s.Sparkline ? pad : secondary || flipped ? 76d : 30d);
         var points = s.Series.SelectMany(x => x.Points).ToArray();
         var bubbles = s.Series.Where(x => Mark(s, x) == ChartKind.Bubble).SelectMany(x => x.Points).ToArray();
         var maxSize = bubbles.Length == 0 ? 0 : bubbles.Max(point => point.Size);
@@ -368,7 +390,7 @@ public static class ChartSvg
         // A block reaches to its XEnd, and only a block has one here.
         var xs = Axis.Create(s.XAxis, points.Select(p => p.X).Concat(points.Where(p => p.XEnd.HasValue).Select(p => p.XEnd!.Value)), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone),
             weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null) with { ValueFormat = s.XFormat };
-        var plots = Plots(s, cats, points);
+        var plots = Plots(s, cats, points, pad);
         // A range bar stands centred on its X, so a continuous chart that draws range bars insets its X axis by half the slot
         // they take, and the first and last bars stand whole inside the plot. The slot follows the closest gap on screen, which
         // the inset narrows, so the two are settled together.
@@ -379,7 +401,8 @@ public static class ChartSvg
                 inset = Math.Clamp((ranged.Length > 1 ? Enumerable.Range(1, ranged.Length - 1).Min(i => ranged[i] - ranged[i - 1]) * (right - left - 2 * inset) : 30) * .7, 1, 34) / 2;
         double X(double x) => category ? left + (Array.IndexOf(cats, x) + .5) / cats.Length * (right - left) : xs.Map(x, left + inset, right - inset);
         var (xCount, xTicks) = category ? (5, []) : Spaced(w, xs, right - left - 2 * inset, across: true, count: s.XAxis == AxisKind.Time ? 6 : 5);
-        for (var k = 0; k < plots.Length; k++)
+        // A sparkline draws no axes: no gridlines, ticks or axis titles.
+        for (var k = 0; k < plots.Length && !s.Sparkline; k++)
         {
             var (pane, top, bottom, ys, ys2, paired) = plots[k];
             double Y(double y) => ys.Map(y, bottom, top);
@@ -475,12 +498,13 @@ public static class ChartSvg
         }
         // Nested SVG provides a local clipping viewport without global clip-path IDs, one for each pane. It is inset by
         // one marker radius so a mark on the first or last value is drawn whole and stays hoverable, or by the ring of a
-        // highlighted last point where there is one.
+        // highlighted last point, or of a highlighted point, where there is one.
         for (var k = 0; k < plots.Length; k++)
         {
             var (pane, top, bottom, ys, ys2, _) = plots[k];
             double Y(double y) => ys.Map(y, bottom, top);
-            var bleed = s.Series.Any(series => series.Pane == k && series.HighlightLast) ? 12d : 6d;
+            var bleed = s.Series.Any(series => series.Pane == k && series.HighlightLast) ? 12d
+                : s.Series.Any(series => series.Pane == k && series.Points.Any(p => p.Highlight is not null)) ? 7d : 6d;
             // Value labels are drawn over the clip, so the label of the tallest column can rise into the margin above the
             // plot; a label whose column the plot does not show is left out with it.
             var named = new StringBuilder();
@@ -597,6 +621,9 @@ public static class ChartSvg
                         var end = start; while (end < series.Points.Count && series.Points[end].Y.HasValue) end++;
                         var run = series.Points.Skip(start).Take(end - start).ToArray();
                         var indices = Sampling.MinMax(run, s.MaxRenderedPoints);
+                        // Sampling keeps every highlighted point, so the point a host picks out is always drawn.
+                        if (run.Any(p => p.Highlight is not null))
+                            indices = indices.Union(Enumerable.Range(0, run.Length).Where(n => run[n].Highlight is not null)).Order().ToArray();
                         // A stroke piece takes the colour of the point it starts from, and a change colour belongs to the segment that
                         // arrives at its point, so for the stroke each drawn point carries the change colour of the next one drawn.
                         var traced = run;
@@ -618,9 +645,11 @@ public static class ChartSvg
                             string cx = N(X(p.X)), cy = N(At(p.Y!.Value)), ink = Moved(start + i) ?? Ink(p), r = indices.Count > 80 ? "2" : "4";
                             // A hidden marker keeps an invisible target, so the point can still be focused, hovered and announced.
                             // A refined chart's own markers are hidden the same way until the point is hovered or focused, except
-                            // a point between two gaps, which has no line to show it.
+                            // a point between two gaps, which has no line to show it. A highlighted point is ringed in its highlight,
+                            // whatever the markers, and the last point's ring takes it too.
                             var (shape, attributes) = start + i == last
-                                ? ($"<circle cx='{cx}' cy='{cy}' r='10' fill='{ink}' fill-opacity='.2'/><circle cx='{cx}' cy='{cy}' r='5.5' fill='{ink}' stroke='{w.Style.Background}' stroke-width='2'{w.Fixed}/>", "")
+                                ? ($"<circle cx='{cx}' cy='{cy}' r='10' fill='{p.Highlight ?? ink}' fill-opacity='.2'/><circle cx='{cx}' cy='{cy}' r='5.5' fill='{p.Highlight ?? ink}' stroke='{w.Style.Background}' stroke-width='2'{w.Fixed}/>", "")
+                                : p.Highlight is { } highlight ? Ringed(w, cx, cy, highlight)
                                 : series.Markers switch
                                 {
                                     MarkerStyle.None => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{ink}' fill-opacity='0'/>", ""),
@@ -629,7 +658,7 @@ public static class ChartSvg
                                     _ => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", "")
                                 };
                             Datum(w, si, start + i, PointLabel(series,p,xs,scale,changes[start + i]), shape, attributes);
-                            if (series.ValueLabels) Over(X(p.X), At(p.Y!.Value), start + i == last ? 5.5 : indices.Count > 80 ? 2 : 4, scale.Format(p.Y!.Value), p.ValueNote, Lettered(start + i, p));
+                            if (series.ValueLabels) Over(X(p.X), At(p.Y!.Value), start + i == last || p.Highlight is not null ? Highlighted : indices.Count > 80 ? 2 : 4, scale.Format(p.Y!.Value), p.ValueNote, Lettered(start + i, p));
                         }
                         start = end;
                     }
@@ -724,14 +753,15 @@ public static class ChartSvg
                         var radius = mark == ChartKind.Bubble ? Math.Sqrt(p.Size / Math.Max(maxSize, double.Epsilon)) * 22 : 4;
                         var ink = Moved(pi) ?? Ink(p);
                         string cx = N(X(p.X)), cy = N(At(y));
-                        var (shape, attributes) = mark != ChartKind.Scatter ? ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'{w.Fixed}/>", "") : series.Markers switch
+                        var (shape, attributes) = mark != ChartKind.Scatter ? ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'{w.Fixed}/>", "")
+                            : p.Highlight is { } highlight ? Ringed(w, cx, cy, highlight) : series.Markers switch
                         {
                             MarkerStyle.Filled => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}'/>", ""),
                             MarkerStyle.Hollow => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{w.Style.Background}'{w.Fixed}/>", $" stroke='{ink}' stroke-width='2'"),
                             _ => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'{w.Fixed}/>", "")
                         };
                         Datum(w, si, pi, PointLabel(series,p,xs,scale,changes[pi]), shape, attributes);
-                        if (series.ValueLabels) Over(X(p.X), At(y), radius, scale.Format(y), p.ValueNote, Lettered(pi, p));
+                        if (series.ValueLabels) Over(X(p.X), At(y), p.Highlight is null ? radius : Highlighted, scale.Format(y), p.ValueNote, Lettered(pi, p));
                     }
                 }
                 if (series.Trend) Trend(w, series, color, X, At, left, right, scale.Reversed, s.MaxRenderedPoints);
@@ -740,6 +770,38 @@ public static class ChartSvg
             w.Add("</svg>");
             w.Add(named.ToString());
         }
+    }
+
+    /// <summary>The radius of a highlighted point's marker, as large as the latest point's ring, outlined 2 units wide in the
+    /// background colour, so it reaches 6.5 from its centre.</summary>
+    private const double Highlighted = 5.5;
+
+    /// <summary>A highlighted point's marker: a dot in its highlight colour, outlined in the background colour so it stands off the
+    /// line it sits on. The outline is set on the mark's group, as a hollow marker's is, so the focus rule overrides it and a focused
+    /// highlight shows its ring.</summary>
+    private static (string Shape, string Attributes) Ringed(SvgWriter w, string cx, string cy, string highlight) =>
+        ($"<circle cx='{cx}' cy='{cy}' r='{N(Highlighted)}' fill='{highlight}'{w.Fixed}/>", $" stroke='{w.Style.Background}' stroke-width='2'");
+
+    /// <summary>
+    /// How far a sparkline's plot stands in from each edge of its drawing: just far enough that its largest mark, stroke included, is
+    /// drawn whole at any edge. A ring round the last point reaches 10, a highlighted point 6.5, a hollow marker 5, a scatter point's
+    /// outlined dot 4.5, a filled marker, or a marker shown on hover, 4, and a line or an area half its stroke; columns need none. A
+    /// drawing too small to hold that on both sides keeps 2 units of plot, and a ring at its edge is cut.
+    /// </summary>
+    private static double Padding(ChartSpec s, bool refined)
+    {
+        var pad = 0d;
+        foreach (var series in s.Series)
+        {
+            var mark = Mark(s, series);
+            if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter)) continue;
+            if (mark != ChartKind.Scatter) pad = Math.Max(pad, (series.StrokeWidth ?? (refined ? 1.6 : 2.5)) / 2);
+            var marker = series.Markers switch { MarkerStyle.None => 0, MarkerStyle.Hollow => 5, MarkerStyle.Filled => 4, _ => mark == ChartKind.Scatter ? 4.5 : 4 };
+            if (series.Points.Any(p => p.Highlight is not null)) marker = Math.Max(marker, Highlighted + 1);
+            if (series.HighlightLast) marker = 10;
+            pad = Math.Max(pad, marker);
+        }
+        return Math.Min(pad, (Math.Min(s.Width, s.Height) - 2) / 2d);
     }
 
     /// <summary>A main Y axis tick label, on the side the spec puts the axis, unless the spec labels only the ends.</summary>
@@ -969,12 +1031,12 @@ public static class ChartSvg
     /// <summary>
     /// The main plot and the panes under it, top to bottom, each with the Y axes its own series are measured against. The
     /// height between the title and the X axis is shared out by weight, the main plot weighing 1, after a fixed gap
-    /// between each two.
+    /// between each two. A sparkline's one plot fills its drawing but for <paramref name="pad"/>.
     /// </summary>
-    private static (ChartPane Pane, double Top, double Bottom, Axis Ys, Axis Ys2, bool Paired)[] Plots(ChartSpec s, double[] cats, ChartPoint[] points)
+    private static (ChartPane Pane, double Top, double Bottom, Axis Ys, Axis Ys2, bool Paired)[] Plots(ChartSpec s, double[] cats, ChartPoint[] points, double pad)
     {
         const double gap = 24;
-        double top = 78, bottom = s.Height - 76d;
+        double top = s.Sparkline ? pad : 78, bottom = s.Height - (s.Sparkline ? pad : 76d);
         var room = bottom - top - gap * s.Panes.Count;
         var weight = 1 + s.Panes.Sum(p => p.Weight);
         var zero = s.IncludeZero || s.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Area;
@@ -1008,7 +1070,11 @@ public static class ChartSvg
                 var foot = axis.Invert((heights.Min() - Rise) / (1 - Rise), 0, 1);
                 return axis.Reversed ? axis with { Max = foot } : axis with { Min = foot };
             }
-            var ys = Footed(Axis.Create(pane.YAxis, values, zero || Filled(false), pane.YMin, pane.YMax) with { ValueFormat = pane.YFormat, Reversed = pane.YReversed },
+            // A minimum span centres the axis on its data wherever the data spans less, so a small wobble reads as small. It is refused
+            // beside set bounds, so it stands in their place; blocks still reach below the lowest block, as on any fitted axis.
+            var (low, high) = pane.YMinSpan is { } span && values.Count > 0 && values.Max() - values.Min() < span
+                ? ((values.Max() + values.Min()) / 2 - span / 2, (values.Max() + values.Min()) / 2 + span / 2) : (pane.YMin, pane.YMax);
+            var ys = Footed(Axis.Create(pane.YAxis, values, zero || Filled(false), low, high) with { ValueFormat = pane.YFormat, Reversed = pane.YReversed },
                 false, zero || Filled(false), pane.YReversed ? pane.YMax : pane.YMin);
             var paired = mine.Any(x => x.Secondary);
             var secondValues = mine.Where(x => x.Secondary).SelectMany(x => x.Points).Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
@@ -1300,11 +1366,12 @@ public static class ChartSvg
     }
 
     /// <summary>Draws a reference behind the data. The classic finish writes its label with it; the refined one writes the label
-    /// over the data afterwards, with <see cref="Label"/>, so the group carries the name and the shape alone.</summary>
+    /// over the data afterwards, with <see cref="Label"/>, so the group carries the name and the shape alone, as a sparkline's does in
+    /// either finish.</summary>
     private static void Draw(SvgWriter w, Reference reference)
     {
         if (!reference.Named) { w.Add(reference.Shape); return; }
-        Aggregate(w, reference.Name, reference.Shape + (w.Refined ? "" :
+        Aggregate(w, reference.Name, reference.Shape + (w.Refined || w.Bare ? "" :
             $"<text x='{N(reference.X)}' y='{N(reference.Y)}' text-anchor='{reference.Anchor}' fill='{reference.Ink}' font-size='11'>{SvgWriter.E(reference.Name)}</text>"));
     }
 
@@ -1313,7 +1380,7 @@ public static class ChartSvg
     /// reference's own name.</summary>
     private static void Label(SvgWriter w, Reference reference)
     {
-        if (!reference.Named || !reference.Shown) return;
+        if (!reference.Named || !reference.Shown || w.Bare) return;
         w.Add($"<text x='{N(reference.X)}' y='{N(reference.Y)}' text-anchor='{reference.Anchor}' fill='{reference.Ink}' font-size='11' " +
             $"stroke='{w.Style.Background}' stroke-width='3' stroke-linejoin='round' paint-order='stroke' pointer-events='none' aria-hidden='true'>{SvgWriter.E(reference.Name)}</text>");
     }

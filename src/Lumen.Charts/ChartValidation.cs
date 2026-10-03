@@ -13,8 +13,9 @@ public static partial class ChartValidation
     public static void Validate(ChartSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
-        Dimensions(spec.Width, spec.Height);
+        Dimensions(spec.Width, spec.Height, spec.Sparkline);
         if (!Enum.IsDefined(spec.Kind) || !Enum.IsDefined(spec.Theme)) throw new ArgumentException("Unknown chart kind or theme.");
+        if (spec.Sparkline) Sparkline(spec);
         if (!Enum.IsDefined(spec.XAxis) || !Enum.IsDefined(spec.YAxis)) throw new ArgumentException("Unknown axis kind.");
         Style(spec.Style);
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");
@@ -216,7 +217,14 @@ public static partial class ChartValidation
             {
                 if (p is null || !Finite(p.X) || (p.Y.HasValue && !Finite(p.Y.Value)) || !Finite(p.Size) || p.Size < 0)
                     throw new ArgumentException("Coordinates must be finite, magnitude <= 1e100; bubble sizes must be nonnegative.");
-                Text(p.Label); Color(p.Color); Text(p.ValueNote);
+                Text(p.Label); Color(p.Color); Text(p.ValueNote); Color(p.Highlight);
+                if (p.Highlight is not null)
+                {
+                    if (mark is not (ChartKind.Line or ChartKind.Scatter))
+                        throw new ArgumentException("A highlight rings one point of a line or scatter series with an enlarged marker; an area's points are its outline, and the other kinds draw a bar, a span, a slice, a cell or a distribution rather than a point to ring, so colour such a mark with its point's Color.");
+                    if (spec.DensityCells is not null)
+                        throw new ArgumentException("A density scatter shades cells rather than points, so it rings no point with a highlight.");
+                }
                 if (p.ValueNote is not null)
                 {
                     if (p.ValueNote.Length > 20)
@@ -305,6 +313,7 @@ public static partial class ChartValidation
             if (reversed) throw new ArgumentException("Column and area series draw from a zero baseline, which a reversed axis would hang from the top.");
             if (min > 0 || max < 0) throw new ArgumentException("Column and area series draw from a zero baseline, so the bounds of their axis must include zero.");
         }
+        for (var pane = 0; pane <= spec.Panes.Count; pane++) Spanned(spec, pane);
         // A calendar draws a cell for every day it spans, so the span is bounded; it is read in the chart's zone, checked above.
         if (spec.Kind == ChartKind.Calendar && spec.Series.Any(series => series.Points.Count > 0))
         {
@@ -338,6 +347,39 @@ public static partial class ChartValidation
                 throw new ArgumentException("Each ring's series has exactly one point, whose Y is its value, and the value cannot be missing.");
             if (value < 0) throw new ArgumentException("A ring's value cannot be negative: its progress is the value over its goal.");
         }
+    }
+
+    /// <summary>A sparkline draws its data alone at the size of a word, so it takes the marks whose shape reads without axes, and
+    /// nothing that needs room or words of its own. Checked before the general rules, so each refusal gives the sparkline's reason.</summary>
+    private static void Sparkline(ChartSpec spec)
+    {
+        if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Column))
+            throw new ArgumentException("A sparkline draws a line, an area, scatter points or columns, whose shape reads without axes; the other kinds need their axes, their keys or their labels to be read, so draw them as a full chart.");
+        if (spec.Series?.Any(series => series?.Kind is not (null or ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Column)) == true)
+            throw new ArgumentException("A sparkline's series are drawn as lines, areas, scatter points or columns; bands, ranges and blocks need an axis to be read against, so draw them on a full chart.");
+        if (spec.Panes is { Count: > 0 } || spec.Series?.Any(series => series is not null && series.Pane != 0) == true)
+            throw new ArgumentException("A sparkline is one small plot, so it takes no panes; draw each measure as a sparkline of its own.");
+        if (spec.Series?.Any(series => series?.ValueLabels == true) == true)
+            throw new ArgumentException("A sparkline draws its data alone, so it writes no value labels; write the numbers in the words beside it, and each point's value stays in its tooltip and accessible name.");
+    }
+
+    /// <summary>A minimum span widens an axis fitted to the data about the data's middle, so it needs an axis that is fitted to the
+    /// data, linear, and free to leave zero out. Pane 0 is the main plot.</summary>
+    private static void Spanned(ChartSpec spec, int index)
+    {
+        var pane = ChartSvg.Pane(spec, index);
+        if (pane.YMinSpan is not { } span) return;
+        if (!Finite(span) || span <= 0) throw new ArgumentException("YMinSpan is the least a Y axis spans, so it must be positive and finite, magnitude <= 1e100.");
+        if (spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Blocks
+            or ChartKind.Area or ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Histogram))
+            throw new ArgumentException("YMinSpan widens a Y axis fitted to the data, so it applies to line, scatter, bubble, band, range, candlestick, OHLC and blocks charts; donut, heatmap, radar, gauge, ring, timeline and calendar charts have no such axis, and box and violin charts fit theirs to their distributions.");
+        if (pane.YMin is not null || pane.YMax is not null)
+            throw new ArgumentException("YMinSpan centres an axis fitted to the data, and YMin or YMax sets where that axis ends instead, so an axis takes one or the other.");
+        if (pane.YAxis == AxisKind.Log)
+            throw new ArgumentException("YMinSpan centres a span of values on the data, and a logarithmic axis measures ratios, which have no one width in values; use a linear axis.");
+        if (spec.IncludeZero || spec.Kind is ChartKind.Area or ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Histogram
+            || spec.Series.Any(series => series.Pane == index && !series.Secondary && ChartSvg.Mark(spec, series) is ChartKind.Column or ChartKind.Area))
+            throw new ArgumentException("YMinSpan centres an axis on its data, and an axis that must include zero is held at zero instead: one set to IncludeZero, a kind drawn from zero, or one that carries columns or an area.");
     }
 
     /// <summary>A pane's settings meet the rules the spec's own Y properties meet for the main plot, on the kinds that take panes.</summary>
@@ -599,9 +641,12 @@ public static partial class ChartValidation
     }
 
     internal static bool Finite(double n) => double.IsFinite(n) && Math.Abs(n) <= 1e100;
-    internal static void Dimensions(int width, int height)
+    /// <summary>A sparkline needs no room for axes, a title or a legend, so it may be as small as a word; the largest drawing is the
+    /// same for both.</summary>
+    internal static void Dimensions(int width, int height, bool sparkline = false)
     {
-        if (width is < 320 or > 4096 || height is < 240 or > 2160) throw new ArgumentException("Dimensions must be 320–4096 by 240–2160.");
+        if (sparkline && (width is < 60 or > 4096 || height is < 16 or > 2160)) throw new ArgumentException("A sparkline's dimensions must be 60–4096 by 16–2160.");
+        if (!sparkline && (width is < 320 or > 4096 || height is < 240 or > 2160)) throw new ArgumentException("Dimensions must be 320–4096 by 240–2160.");
     }
     internal static void Text(string? text)
     {

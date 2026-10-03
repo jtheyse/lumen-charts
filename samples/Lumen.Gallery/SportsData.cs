@@ -44,7 +44,14 @@ public sealed record SportsCard(string Section, string Id, string Title, string 
     /// <summary>A second chart drawn beside the first in the same wide card, each half its width, as the training calendar's month
     /// stands beside its season.</summary>
     public ChartSpec? Beside { get; init; }
+    /// <summary>Sparklines the card draws instead of one chart, each with a line of words beside it; the first is its
+    /// <see cref="SportsCard.Spec"/>.</summary>
+    public IReadOnlyList<SportsLine>? Lines { get; init; }
 }
+
+/// <summary>A sparkline on the Sports &amp; performance page and the words written beside it: what it measures, in bold, and what
+/// it shows, worked out from the same numbers it draws.</summary>
+public sealed record SportsLine(ChartSpec Spec, string Name, string Text);
 
 /// <summary>
 /// One simulated athlete who runs and rides: sixteen weeks of training from 8 June 2026 and two planned weeks tapering to a
@@ -76,6 +83,10 @@ public static class SportsData
     /// size would write its place alone.</summary>
     public static readonly IReadOnlyList<(DateOnly Day, int Position, int? Field, int? Points)> Races =
         [(new(2026, 4, 11), 31, 50, 40), (new(2026, 5, 16), 24, 48, 52), (new(2026, 7, 4), 27, 51, 47), (new(2026, 8, 8), 21, 49, 58), (new(2026, 9, 19), 19, 52, 61)];
+
+    /// <summary>An invented weigh-in each Monday of the season, in kilograms, steady about <see cref="BodyMass"/>: a few hundred grams
+    /// either way, as a scale reads from week to week.</summary>
+    public static readonly IReadOnlyList<double> WeighIns = [68.2, 68.0, 68.3, 67.9, 68.1, 68.0, 67.8, 68.1, 67.9, 68.0, 67.8, 67.9, 67.7, 67.9, 67.8, 67.8];
 
     /// <summary>Coggan's five heart-rate levels at a threshold of 170 bpm, under the short names the apps use.</summary>
     public static ZoneScale HeartZones { get; } = new(ZoneScale.CogganHeartRate(ThresholdHeartRate).Zones
@@ -336,6 +347,15 @@ public static class SportsData
     /// <summary>The run with each week's fastest 5 km.</summary>
     public static IReadOnlyList<Session> WeeklyBests(Season season) => season.Sessions.Where(s => s.Best5k is not null)
         .GroupBy(s => (s.Day.DayNumber - Start.DayNumber) / 7).Select(week => week.MinBy(s => s.Best5k)!).ToArray();
+
+    /// <summary>The fastest kilometre inside each session of repeats, the 800 m and the 1600 m, in seconds, oldest first.</summary>
+    public static IReadOnlyList<(Session Run, double Seconds)> RepeatBests(Season season) => season.Sessions
+        .Where(s => s.Sport == Sport.Run && s.Name.EndsWith("repeats", StringComparison.Ordinal)).Select(s => (s, Fastest(s.Track!, s.Metres, 1000)!.Value)).ToArray();
+
+    /// <summary>Which of a run of times, oldest first, are personal bests: faster than every time before them. The first time only
+    /// sets the mark to beat.</summary>
+    public static IReadOnlyList<bool> Bests(IReadOnlyList<double> seconds) =>
+        seconds.Select((time, i) => i > 0 && seconds.Take(i).All(before => time < before)).ToArray();
 
     /// <summary>Each week's training stress, from the days the load model counts.</summary>
     public static IReadOnlyList<double> WeeklyLoad(Season season) =>
@@ -718,6 +738,37 @@ public static class SportsData
                 ChartSeries.From("Week's fastest 5 km", WeeklyBests(season), s => When(s.Day), s => s.Best5k) with { Kind = ChartKind.Scatter }]
         };
 
+        // Getting faster? Each week's fastest 5 km inside a run, the records chart's dots, and the fastest kilometre of each session of
+        // repeats, as sparklines by index, oldest first on a reversed duration axis so faster is higher, in the ramp's neutral grey. Each
+        // time faster than every one before it is ringed in the ramp's red and noted as a best, so its tooltip says why it is ringed.
+        SportsLine Faster(string name, string unit, IReadOnlyList<(Session Run, double Seconds)> times)
+        {
+            var taken = times.Select(t => t.Seconds).ToArray();
+            var bests = Bests(taken);
+            var fastest = times[Array.IndexOf(taken, taken.Min())];
+            var spark = new ChartSpec
+            {
+                Theme = theme, Kind = ChartKind.Line, Sparkline = true, Width = 120, Height = 32, YReversed = true, YFormat = ValueFormat.Duration,
+                Title = $"{name}: {Clock(taken[0])} to {Clock(taken[^1])} over {taken.Length} {unit}", Description = "Oldest first, faster higher, each personal best ringed",
+                Series = [new(name, times.Select((t, i) => new ChartPoint(i, t.Seconds, $"{Day(t.Run.Day)} · {t.Run.Name}")
+                    { Highlight = bests[i] ? zones[5] : null, ValueNote = bests[i] ? " · PB" : null }).ToArray(), zones[0]) { StrokeWidth = 2 }]
+            };
+            return new(spark, name, $"{Clock(taken[0])} to {Clock(taken[^1])} over {taken.Length} {unit} · best {Clock(fastest.Seconds)} on {Day(fastest.Run.Day)} · {bests.Count(b => b)} personal bests, ringed");
+        }
+        var fiveK = Faster("5 km", "weeks", WeeklyBests(season).Select(s => (s, s.Best5k!.Value)).ToArray());
+        var kilometre = Faster("1 km", "sessions", RepeatBests(season));
+        // An invented weigh-in each Monday, in grey alone, never good or bad, on an axis at least 8 kg tall centred on the weights, so a
+        // few hundred grams read as the steady weight they are: the lightest 67.7 and the heaviest 68.3 kg centre it on 68.0, and the
+        // axis runs 4 kg either side, from 64 to 72.
+        var (lightest, heaviest) = (WeighIns.Min(), WeighIns.Max());
+        var span = Math.Max(8, heaviest - lightest);
+        var weighed = new SportsLine(new ChartSpec
+        {
+            Theme = theme, Kind = ChartKind.Line, Sparkline = true, Width = 270, Height = 54, YMinSpan = 8,
+            Title = $"Body mass: {Text(WeighIns[0], "0.0")} to {Text(WeighIns[^1], "0.0")} kg over {WeighIns.Count} weeks", Description = "An invented weigh-in each Monday, on a scale at least 8 kg tall",
+            Series = [new("Body mass", WeighIns.Select((kg, i) => new ChartPoint(i, kg, Day(Start.AddDays(7 * i))) { ValueNote = " kg" }).ToArray(), zones[0]) { StrokeWidth = 2 }]
+        }, "Body mass", $"{Text(WeighIns[0], "0.0")} to {Text(WeighIns[^1], "0.0")} kg over {WeighIns.Count} weigh-ins, never under {Text(lightest, "0.0")} or over {Text(heaviest, "0.0")} · scale {Text((lightest + heaviest) / 2 - span / 2)}–{Text((lightest + heaviest) / 2 + span / 2)} kg");
+
         // Each night against the mean and standard deviation of the nights before it, in the ramp's green inside the band, orange
         // below it and blue above it. A night's note names its status after its value, so its tooltip and accessible name say what
         // its colour shows, and the seven-night moving average runs through them in the ramp's purple, which no night is drawn in.
@@ -817,6 +868,8 @@ public static class SportsData
             new("session", "elevation", "Elevation coloured by grade", "The same route as an area, each 100 m segment taking a point `Color` from its grade band.", true, elevation),
             new("fitness", "power-curve", "Power–duration curve", "`Training.MeanMaximal` over this month's rides against last month's on a logarithmic duration axis, with the `Training.CriticalPower` fit as a reference line.", false, power),
             new("fitness", "records", "5 km record progression", "Each week's fastest 5 km inside a run, and the record as a `LineCurve.Step` envelope on a reversed axis, so faster is higher.", false, best),
+            new("fitness", "getting-faster", "Getting faster?", "Word-sized `Sparkline` charts, no axes, beside the numbers they draw: each week's fastest 5 km and each session's fastest kilometre, faster higher, every time faster than all before it ringed by a `Highlight` and noted `· PB` so its tooltip says why; and an invented weekly weigh-in in grey alone, its axis held at least 8 kg tall by `YMinSpan` so a few hundred grams read as steady.", true, fiveK.Spec)
+                { Lines = [fiveK, kilometre, weighed] },
             new("fitness", "hrv", "HRV against its baseline", "Each night's HRV in green inside a band of the mean ± one standard deviation of the 28 nights before, from `Statistics.Rolling`, orange below it and blue above it, its `ValueNote` naming that status in its tooltip; the dashed purple line is a seven-night `TrendFit.MovingAverage`.", true, hrv),
             new("racing", "race-results", "Race results", "Five invented races in two `Panes` on one race-by-race axis: the place each finished on a reversed axis, first at the top, `ChangeColors.LowerIsBetter` drawing a race that finished higher than the one before in the style's rising colour and one that finished lower in its falling colour, and saying so in its tooltip, and `ValueLabels` writing each place with its field as a muted `ValueNote`; beneath, the points each race earned.", true, results),
             new("sleep", "hypnogram", "Last night's sleep stages", "A `ChartKind.Timeline`: one series per stage, each period a `ChartPoint.Span`, joined where the stage changes; the higher the HRV sits above its baseline, the more deep sleep.", true, hypnogram),

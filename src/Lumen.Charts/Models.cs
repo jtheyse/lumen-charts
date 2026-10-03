@@ -254,6 +254,12 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// alone. Marks named by more than one value, or by none, refuse it: candles, range bars, histograms, boxes, violins,
     /// timelines, calendars, gauges and rings.</summary>
     public string? ValueNote { get; init; }
+    /// <summary>A <c>#RRGGBB</c> colour that rings this point of a line or scatter series with an enlarged marker in it, outlined in
+    /// the background colour, whatever the series' markers, as a personal best is picked out of a run of results. It colours that
+    /// marker alone: the line keeps its colour, and the point keeps its name. A colour is never enough on its own, so give the point a
+    /// <see cref="ValueNote"/> that says why, such as <c>" · PB"</c>, which its tooltip and accessible name read after its value.
+    /// Areas and every other mark refuse it, as does a density scatter, which shades cells rather than points.</summary>
+    public string? Highlight { get; init; }
 
     /// <summary>A candle or OHLC bar, its Y the close. High must be the highest of the four prices and low the lowest.</summary>
     public static ChartPoint Candle(double x, double open, double high, double low, double close, string? label = null) =>
@@ -429,12 +435,24 @@ public sealed record ChartSpec
     public string YLabel { get; init; } = "";
     /// <summary>Names the main plot's right-hand axis, which appears when one of its series is marked secondary.</summary>
     public string Y2Label { get; init; } = "";
-    /// <summary>The drawing's width in SVG units, from 320 to 4096. The SVG scales to the width of its container, and its text
-    /// is 12 units high, so a chart shown at the width it is drawn shows its text at 12 pixels. The Blazor component's
-    /// <c>FitWidth</c> draws it at the width it is shown.</summary>
+    /// <summary>The drawing's width in SVG units, from 320 to 4096, or from 60 for a <see cref="Sparkline"/>. The SVG scales to the
+    /// width of its container, and its text is 12 units high, so a chart shown at the width it is drawn shows its text at 12 pixels.
+    /// The Blazor component's <c>FitWidth</c> draws it at the width it is shown.</summary>
     public int Width { get; init; } = 900;
-    /// <summary>The drawing's height in SVG units, from 240 to 2160. The SVG keeps this proportion to <see cref="Width"/> as it scales.</summary>
+    /// <summary>The drawing's height in SVG units, from 240 to 2160, or from 16 for a <see cref="Sparkline"/>. The SVG keeps this
+    /// proportion to <see cref="Width"/> as it scales.</summary>
     public int Height { get; init; } = 420;
+    /// <summary>
+    /// Draws the data alone, as a sparkline: a line, an area, scatter points or columns the size of a word, with no title, description
+    /// or source written, no axes, ticks, gridlines or legend, and zone bands and annotations drawn without their labels. The plot fills
+    /// the drawing but for a padding just wide enough for its largest marker or ring, so a point at an edge is drawn whole. The title
+    /// stays the drawing's accessible name and <c>&lt;title&gt;</c> and the description its <c>&lt;desc&gt;</c>, and every point keeps its
+    /// focusable, named mark and native tooltip, so the drawing reads point by point with no script. It may be as small as 60 by 16, and
+    /// is shown at its own width rather than its container's, never wider than the container. Other kinds, panes and value labels are
+    /// refused: a sparkline is read beside words that say its numbers. The component draws it without its legend, toolbar, zoom or data
+    /// table.
+    /// </summary>
+    public bool Sparkline { get; init; }
     /// <summary>Stretches the value axis to include zero. Kinds drawn from a zero baseline always include it.</summary>
     public bool IncludeZero { get; init; }
     /// <summary>The lowest value the X axis shows. Null fits the data.</summary>
@@ -446,6 +464,13 @@ public sealed record ChartSpec
     public double? YMin { get; init; }
     /// <summary>The top of the main plot's left-hand axis. Null fits the data.</summary>
     public double? YMax { get; init; }
+    /// <summary>The least the main plot's left-hand axis spans, centred on its data: where the data's range is smaller, the axis runs
+    /// from the middle of the data less half the span to the middle plus half, so a wobble of 0.3 in a span of 8 reads as small instead
+    /// of filling the plot; where the data's range is wider, the axis fits the data as it would without it. Null fits the data. It must
+    /// be positive, and is refused beside <see cref="YMin"/> or <see cref="YMax"/>, on a logarithmic axis, and on an axis that must
+    /// include zero: with <see cref="IncludeZero"/>, on the kinds drawn from zero and on an axis that carries columns or an area. Line,
+    /// scatter, bubble, band, range, candlestick, OHLC and blocks charts take it, reversed or not.</summary>
+    public double? YMinSpan { get; init; }
     /// <summary>The bottom of the main plot's right-hand axis. Null fits its series.</summary>
     public double? Y2Min { get; init; }
     /// <summary>The top of the main plot's right-hand axis. Null fits its series.</summary>
@@ -505,6 +530,9 @@ public sealed record ChartPane
     public double? YMin { get; init; }
     /// <summary>The top of the pane's left-hand axis. Null fits the pane's data.</summary>
     public double? YMax { get; init; }
+    /// <summary>The least the pane's left-hand axis spans, centred on the pane's data, as <see cref="ChartSpec.YMinSpan"/> sets the
+    /// main plot's, and refused where it is.</summary>
+    public double? YMinSpan { get; init; }
     /// <summary>How the pane's left-hand axis writes its values.</summary>
     public ValueFormat YFormat { get; init; }
     /// <summary>Puts the smallest value at the top of the pane's left-hand axis.</summary>

@@ -1,6 +1,6 @@
 # Race results recipes
 
-Recipes for a race-results app's charts: a rider's season of finishing places and points, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.33.0, together with the recipes in `sports.md`.
+Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.34.0, together with the recipes in `sports.md`.
 
 ```csharp
 using System.Globalization;
@@ -145,9 +145,73 @@ foreach (var (date, name, position) in rounds)
 
 A ▲ round is drawn in `Rising` on the chart and a ▼ round in `Falling`, so the strip can take the same two colours, `#34d399` and `#f87171`.
 
+## Getting faster? Personal-best sparklines
+
+One sparkline per distance raced at least twice: the finish times oldest to newest, placed by index, faster higher, each personal best ringed in race red. `Sparkline = true` (0.34.0) draws the data alone — no axes, gridlines, legend, title or any other text — in a plot that fills the 120 by 32 drawing but for the room its largest ring needs; the words go in the page beside it.
+
+```csharp
+// The app's results for one distance, oldest first. An invented run of six 5 km races:
+(DateOnly Day, string Race, double Seconds)[] fiveKm = [
+    (new(2026, 3, 14), "Harbour Parkway 5", 1450), (new(2026, 4, 18), "Quarry Loop 5", 1432), (new(2026, 5, 23), "River Mile 5", 1445),
+    (new(2026, 6, 27), "Hilltop 5", 1411), (new(2026, 8, 1), "Forest Run 5", 1420), (new(2026, 9, 12), "Final Ridge 5", 1367)];
+// Seconds written as the chart writes them, 24:10 or 1:02:05.
+static string Clock(double seconds) => new Axis(AxisKind.Linear, 0, 1) { ValueFormat = ValueFormat.Duration }.Format(seconds);
+ChartSpec PbSparkline(string distance, (DateOnly Day, string Race, double Seconds)[] times)
+{
+    // A personal best is faster than every time before it; the first race only sets the time to beat.
+    bool Best(int i) => i > 0 && times.Take(i).All(before => times[i].Seconds < before.Seconds);
+    return new ChartSpec {
+        // "5 km: 24:10 to 22:47 over 6 races", worked out here: the drawing writes no words of its own.
+        Title = $"{distance}: {Clock(times[0].Seconds)} to {Clock(times[^1].Seconds)} over {times.Length} races",
+        Description = "Each race's finish time, oldest first, faster higher, personal bests marked",
+        Kind = ChartKind.Line, Width = 120, Height = 32, Sparkline = true, Style = raceFace,
+        YReversed = true, YFormat = ValueFormat.Duration,
+        Series = [new(distance, times.Select((t, i) => new ChartPoint(i, t.Seconds, $"{t.Day.ToString("d MMM yyyy", CultureInfo.InvariantCulture)} · {t.Race}")
+            { Highlight = Best(i) ? "#E30613" : null, ValueNote = Best(i) ? " · PB" : null }).ToArray(), "#B7BCC4") { StrokeWidth = 2 }]
+    };
+}
+string pbSvg = ChartSvg.Render(PbSparkline("5 km", fiveKm));
+```
+
+- `X` is the race's index, so the races stand evenly however far apart they were run; the line runs from the first at the left edge of the plot to the last at the right.
+- `YReversed = true` puts the fastest time at the top, and `YFormat = ValueFormat.Duration` writes each time as `22:47` in its mark's name.
+- The line is `mid`, `#B7BCC4`, 9.47:1 on the card: neutral, so it says nothing good or bad by itself.
+- **Never colour alone.** `ChartPoint.Highlight` (0.34.0) rings a personal best with an enlarged marker in `effort` red, `#E30613`, outlined in the card colour, whatever the series' markers; the line keeps its colour. Red stands 3.70:1 on the card, which a mark needs. The ring is only for those who see it, so each best also carries `ValueNote = " · PB"`, which its tooltip and accessible name read after the time: `5 km: 18 Apr 2026 · Quarry Loop 5, 23:52 · PB`. Pair them always: a highlight says *look here*, the note says *why*.
+- The title is the drawing's accessible name and `<title>`, the description its `<desc>`; every race is a focusable mark named as above, with the same words as its native tooltip, so the static SVG reads race by race with no script.
+- The padding is just enough for a ring at any edge: here 6.5 units, the ring's 5.5 radius and half its outline, so the plot runs from 6.5 to 113.5 across and 6.5 to 25.5 down. `HighlightLast` would need 10.
+
+Beside it, the page writes the numbers in words, as the app's timeline does: `<p><b>5 km</b> 24:10 → 22:47 over 6 races · best 22:47</p>`. A sparkline is shown at its own width, 120 pixels, never wider than its box; give its box room, `display:flex; gap:12px; align-items:center`, and it sits on the line beside its words.
+
+## Growth log sparklines
+
+A child's logged weight (or height) in log order, on an axis that spans at least 8 kg, centred on the data, so a 0.3 kg wobble reads as the steady line it is rather than as a cliff. `ChartSpec.YMinSpan` (0.34.0) does it: when the data's range is less than the span, the axis runs from the data's middle less half the span to its middle plus half; when it is wider, the axis fits the data as before.
+
+```csharp
+// The app's log of one measure, in log order. An invented log of four weights in kilograms:
+double[] weights = [37.9, 37.8, 38.2, 38.1];
+// The lightest, 37.8, and the heaviest, 38.2, have their middle at (37.8 + 38.2) / 2 = 38.0 and a range of 0.4, less than 8,
+// so the axis runs from 38.0 − 8 / 2 = 34 to 38.0 + 8 / 2 = 42. The library works the same out; the caption says it in words.
+double lightest = weights.Min(), heaviest = weights.Max();
+double middle = (lightest + heaviest) / 2, span = Math.Max(8, heaviest - lightest);
+string scaleCaption = string.Create(CultureInfo.InvariantCulture, $"scale {middle - span / 2:0.#}–{middle + span / 2:0.#} kg");          // "scale 34–42 kg"
+string weightSummary = string.Create(CultureInfo.InvariantCulture, $"Weight: {weights.Length} measurements, from {weights[0]:0.0} to {weights[^1]:0.0} kg.");   // "Weight: 4 measurements, from 37.9 to 38.1 kg."
+var growth = new ChartSpec {
+    Title = weightSummary.TrimEnd('.'), Description = $"Logged weight in log order, {scaleCaption}",
+    Kind = ChartKind.Line, Width = 270, Height = 54, Sparkline = true, Style = raceFace, YMinSpan = 8,
+    Series = [new("Weight", weights.Select((kg, i) => new ChartPoint(i, kg, $"Measurement {i + 1}") { ValueNote = " kg" }).ToArray(), "#D7DDE5") { StrokeWidth = 2 }]
+};
+string growthSvg = ChartSvg.Render(growth);
+```
+
+- **Neutral colour only.** Weight and height are sensitive data about children's bodies. A good or bad colour, a target line or a healthy band would judge a child's body, so the line is the steel `data` colour, `#D7DDE5`, 13.22:1 on the card, no point is highlighted, and no zone or annotation is drawn. Do not add them.
+- `YMinSpan = 8` keeps the axis 8 kg tall about the weights; for height, a span in centimetres. It is refused beside `YMin` or `YMax`, on a logarithmic axis and on an axis that must include zero (`IncludeZero`, columns, areas).
+- The caption and the summary are the page's words, worked out above from the same numbers: write them in HTML beside the drawing, which carries no text, as `<figure>` `@((MarkupString)growthSvg)` `<figcaption>scale 34–42 kg</figcaption>` `</figure>` and `<p>Weight: 4 measurements, from 37.9 to 38.1 kg.</p>`. Each measurement stays a focusable mark named `Weight: Measurement 2, 37.8 kg`.
+- At 270 by 54 the plot stands 4 units in, room for a marker shown on hover, so the line runs 46 units tall: 34 kg at the bottom, 42 at the top, the weights a band of 2.3 units through the middle.
+
 ## Rendering notes
 
 - **Static:** `ChartSvg.Render(spec)` at `Width = 340` (or the card's own width) is the whole chart: labels, colours, tooltips and names, with no script. Write it into the page, or rasterise it on the server with an SVG library of your choice; Lumen ships no PNG or PDF renderer. Each line's value label stands on a copy of itself stroked in the background colour, not on SVG 2's `paint-order`, so rasterisers without it draw it the same.
 - **Interactive:** `<LumenChart Spec="recommended" FitWidth="true" />` measures its card and redraws at that width, never below 320 px; before it is interactive it is drawn at `Width` and scaled to fit. `Height` is kept, so choose one that reads at a phone's width.
 - **Gaps:** a race with no place or no points is `null`, never zero: the line breaks, no mark or label is drawn, and the next race's change still compares with the last race that had a place. A race with no field size draws its place without a note.
 - **CSV:** `ChartExport.Csv(spec)` adds a `Note` column whenever a point carries a note, so the export keeps each field size beside its place.
+- **Sparklines:** `ChartSvg.Render` draws a sparkline at its own size, `width:120px;max-width:100%`, rather than the width of its box. In the component, `<LumenChart Spec="pb" />` draws the drawing alone with its tooltips — no legend, toolbar, zoom or data table — and a tooltip stands just above the drawing, as wide as its words. A sparkline may be as small as 60 by 16; other kinds than line, area, scatter and column, panes and value labels are refused.

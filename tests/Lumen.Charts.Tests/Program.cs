@@ -3701,14 +3701,16 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: twenty charts in nineteen cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
-    Check(sports.Count==19&&sports.Select(card=>card.Id).Distinct().Count()==19&&sports.Count(card=>card.Beside is not null)==1,"the page should have twenty charts in nineteen cards");
+Test("Sports page: twenty-three charts in twenty cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+    // 0.34.0's Getting faster? card draws three sparklines in place of one chart; they are checked on their own below.
+    Check(sports.Count==20&&sports.Select(card=>card.Id).Distinct().Count()==20&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
+        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==23,"the page should have twenty-three charts in twenty cards");
     // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order; 0.33.0's Racing section stands
     // before it.
     Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
     foreach(var (theme,style,zones) in new[]{(ChartTheme.Light,(ChartStyle?)null,ChartStyle.Light.Zones),(ChartTheme.Dark,null,ChartStyle.Light.Zones),(ChartTheme.Dark,ChartStyle.Midnight,ChartStyle.Midnight.Zones)})
         foreach(var markers in new[]{true,false})
-            foreach(var card in SportsData.Cards(theme,zones,markers))
+            foreach(var card in SportsData.Cards(theme,zones,markers).Where(card=>card.Lines is null))
                 // A wide card with a second chart beside its first gives each half its width.
                 foreach(var chart in new[]{card.Spec,card.Beside}.OfType<ChartSpec>())
                 {
@@ -4210,16 +4212,17 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // 0.25.0 had no sweep: its hash of a spec is the JSON written today less the sweep and, since 0.27.0, the timeline's
     // connectors and, since 0.28.0, the calendar's layout, cell and week start, which are the last five properties written, and,
     // since 0.32.0, each series' trend fit, window and degree, written after its trend, and since 0.33.0 the chart's X ticks, written
-    // after its X label, and each series' change colours, written after its value labels.
+    // after its X label, and each series' change colours, written after its value labels, and since 0.34.0 the chart's sparkline,
+    // written after its height.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
     const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
-    const string ticked="\"XLabel\":\"\",\"XTicks\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";
-    Check(json.EndsWith(defaults)&&json.Contains(trended)&&json.Contains(ticked)&&json.Contains(changed),json[^120..]);
+    const string ticked="\"XLabel\":\"\",\"XTicks\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
+    Check(json.EndsWith(defaults)&&json.Contains(trended)&&json.Contains(ticked)&&json.Contains(changed)&&json.Contains(sparked),json[^120..]);
     var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(defaults,"}").Replace(trended,"\"Trend\":false,")
-        .Replace(ticked,"\"XLabel\":\"\",").Replace(changed,"\"ValueLabels\":false"))))[..12].ToLowerInvariant();
+        .Replace(ticked,"\"XLabel\":\"\",").Replace(changed,"\"ValueLabels\":false").Replace(sparked,"\"Height\":420,"))))[..12].ToLowerInvariant();
     Check(Prefix(ChartSvg.Render(faded))==before,$"{Prefix(ChartSvg.Render(faded))} is not 0.25.0's {before}");
     // Gauges and rings define no IDs: a gradient gauge draws its arc in pieces.
     var strain=Gauge(14) with{YMax=21,Series=[new("Strain",[new(0,14)]){Gradient=[new(0,"#3F87D9"),new(21,"#DD4B45")]}]};
@@ -6140,6 +6143,375 @@ Test("Change colours, value notes and tick sources round-trip through JSON as st
     Check(Id(faded with{XTicks=TickSource.Axis})!=id&&Id(faded with{Series=[faded.Series[0] with{Points=[new(0,1){ValueNote="/2"},new(1,3)]}]})!=id
         &&Id(Spec() with{Series=[new("S",[new(0,1),new(1,3)]){ChangeColors=ChangeColors.HigherIsBetter},new("F",[new(0,1),new(1,3)]){Kind=ChartKind.Area,Fill=AreaFill.Fade}]})
           !=Id(Spec() with{Series=[new("S",[new(0,1),new(1,3)]),new("F",[new(0,1),new(1,3)]){Kind=ChartKind.Area,Fill=AreaFill.Fade}]}),"a setting kept the gradient's name");
+});
+// 0.34.0: sparklines. A chart can draw its data alone at the size of a word, a point can be ringed by a highlight, and a Y axis can keep
+// a minimum span centred on its data. Every example is invented: a run of six 5 km times, oldest first, the second, fourth and sixth
+// faster than every time before them, on the dark style a race-results recipe builds from its design tokens.
+var raceFace=new ChartStyle{Background="#161618",Text="#F5F6F7",Muted="#80858E",Grid="#2D2D2F",Edge="#80858E",Series=["#FF5A54","#D7DDE5","#F5B642","#3FD17A","#C2C6D2","#CD7F46"],
+    Zones=["#80858E","#D7DDE5","#3FD17A","#F5B642","#F2545B"],Rising="#34d399",Falling="#f87171",HeatmapLow="#1E1F22",HeatmapHigh="#E30613",FontFamily="Inter, Segoe UI, Arial, sans-serif"};
+double[] fiveK=[1450,1432,1445,1411,1420,1367];
+ChartSpec Pb(ChartStyle? style=null)=>new(){Title="5 km: 24:10 to 22:47 over 6 races",Description="Each race's time, oldest first, faster higher",Kind=ChartKind.Line,Width=120,Height=32,
+    Sparkline=true,YReversed=true,YFormat=ValueFormat.Duration,Style=style??raceFace,
+    Series=[new("5 km",fiveK.Select((t,i)=>new ChartPoint(i,t,$"Race {i+1}"){Highlight=i%2==1?"#E30613":null,ValueNote=i%2==1?" · PB":null}).ToArray(),"#B7BCC4"){StrokeWidth=2}]};
+ChartSpec Spark(ChartKind kind=ChartKind.Line)=>new(){Title="Spark",Description="A few values",Kind=kind,Width=120,Height=32,Sparkline=true,
+    Series=[new("S",[new(0,3,"A"),new(1,5,"B"),new(2,null,"C"),new(3,4,"D")]),new("T",[new(0,1,"A"),new(1,2,"B"),new(2,3,"C"),new(3,2,"D")])]};
+string Refused(ChartSpec spec){try{ChartSvg.Render(spec);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
+// How far a drawing's circles reach: each one's radius and half its stroke, its own or its group's, a scatter dot's default stroke
+// being one unit and a filled marker having none.
+(double Left,double Top,double Right,double Bottom) Reach(XDocument doc)
+{
+    double l=double.MaxValue,t=double.MaxValue,r=double.MinValue,b=double.MinValue;
+    foreach(var c in doc.Descendants(ns+"circle"))
+    {
+        var width=(string?)c.Attribute("stroke-width")??(string?)c.Parent!.Attribute("stroke-width");
+        var half=width is not null?double.Parse(width,CultureInfo.InvariantCulture)/2:c.Attribute("stroke") is null&&c.Parent!.Attribute("stroke") is null?0:.5;
+        double x=Attr(c,"cx"),y=Attr(c,"cy"),reach=Attr(c,"r")+half;
+        (l,t,r,b)=(Math.Min(l,x-reach),Math.Min(t,y-reach),Math.Max(r,x+reach),Math.Max(b,y+reach));
+    }
+    return (l,t,r,b);
+}
+Test("A sparkline draws no text at all, only its title and desc, and every point keeps a focusable, named mark with its native tooltip",()=>{
+    var specs=new List<ChartSpec>{Pb(),Pb(ChartStyle.Midnight),Classic(Pb()),Pb() with{Style=null,Theme=ChartTheme.Dark}};
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Area,ChartKind.Scatter,ChartKind.Column}){specs.Add(Spark(kind) with{Source="Source: invented",XLabel="Race",YLabel="Time"});specs.Add(Classic(specs[^1]));}
+    // Zone bands, annotations, a trend, a series on the right and a density scatter keep their shapes and lose their words, and minor
+    // gridlines, which a sparkline does not draw, leave no rule behind.
+    var zoned=Spark() with{YZones=new([new("Low",2),new("High",double.PositiveInfinity)]),MinorGridlines=true,Annotations=[new(AnnotationAxis.Y,4){Label="Target"},new(AnnotationAxis.X,1){To=2,Label="Window"}]};
+    specs.AddRange([zoned,Classic(zoned),Spark(ChartKind.Scatter) with{DensityCells=10},Spark() with{Series=[Spark().Series[0] with{Trend=true},Spark().Series[1] with{Secondary=true}]}]);
+    foreach(var spec in specs)
+    {
+        var doc=Svg(spec);var root=doc.Root!;
+        Check(!doc.Descendants(ns+"text").Any()&&!doc.Descendants(ns+"tspan").Any(),$"{spec.Kind} wrote {string.Join(", ",doc.Descendants(ns+"text").Select(t=>t.Value))}");
+        Check(root.Elements(ns+"title").Single().Value==spec.Title&&root.Elements(ns+"desc").Single().Value==spec.Description&&root.Attribute("aria-label")!.Value==$"{spec.Title}. {spec.Description}"&&(string?)root.Attribute("role")=="group",$"{spec.Kind}: its name");
+        Check(root.Attribute("viewBox")!.Value=="0 0 120 32"&&root.Attribute("style")!.Value.Contains(";width:120px;max-width:100%;height:auto;display:block;"),root.Attribute("style")!.Value);
+        Check(!doc.Descendants().Any(e=>(string?)e.Attribute("class") is "lumen-grid" or "lumen-grid-minor")&&!doc.Descendants(ns+"style").Single().Value.Contains("lumen-grid-minor"),$"{spec.Kind} drew a gridline");
+        if(spec.DensityCells is not null){Check(doc.Descendants(ns+"g").Count(g=>(string?)g.Attribute("role")=="img")>0,"the density cells");continue;}
+        // Every point with a value is a focusable button named for it, its name its tooltip; a missing value draws none.
+        for(var si=0;si<spec.Series.Count;si++)
+        {
+            var marks=Datums(doc,si);
+            Check(marks.Length==spec.Series[si].Points.Count(p=>p.Y.HasValue),$"{spec.Kind}: {marks.Length} marks for series {si}");
+            Check(marks.All(m=>(string?)m.Attribute("tabindex")=="0"&&(string?)m.Attribute("role")=="button"&&m.Element(ns+"title")!.Value==m.Attribute("aria-label")!.Value
+                &&m.Attribute("aria-label")!.Value.StartsWith(spec.Series[si].Name+": ")),$"{spec.Kind}: a mark is not named");
+        }
+    }
+    // The bands and annotations keep their names for assistive technology.
+    Check(Svg(zoned).Descendants(ns+"g").Where(g=>(string?)g.Attribute("role")=="img").Select(g=>g.Attribute("aria-label")!.Value).Order().SequenceEqual(["High: above 2","Low: up to 2","Target: 4","Window: 1 to 2"]),"the references' names");
+    Check(Datums(Svg(Pb()),0).Select(m=>m.Attribute("aria-label")!.Value).SequenceEqual(["5 km: Race 1, 24:10","5 km: Race 2, 23:52 · PB","5 km: Race 3, 24:05","5 km: Race 4, 23:31 · PB","5 km: Race 5, 23:40","5 km: Race 6, 22:47 · PB"]),"the names");
+    // Without native tooltips the marks keep their names; an empty sparkline is an empty drawing named by its title.
+    Check(Datums(XDocument.Parse(ChartSvg.Render(Pb(),includeTitles:false)),0).All(m=>m.Element(ns+"title") is null&&m.Attribute("aria-label") is not null),"without native tooltips");
+    var empty=Svg(Pb() with{Series=[]});
+    Check(!empty.Descendants(ns+"text").Any()&&empty.Root!.Elements(ns+"title").Single().Value==Pb().Title&&!Datums(empty,0).Any(),"an empty sparkline");
+    // The same spec drawn as a chart has its title, axes and legend back.
+    var full=Svg(Pb() with{Sparkline=false,Width=320,Height=240});
+    Check(full.Descendants(ns+"text").Any(t=>t.Value==Pb().Title)&&full.Descendants(ns+"text").Any(t=>t.Value=="5 km")&&full.Root!.Attribute("style")!.Value.Contains(";width:100%;"),"a chart lost its words");
+});
+Test("A sparkline's plot fills its drawing but for a padding that holds its largest ring whole at all four edges",()=>{
+    // Rings on the lowest point at the left, the highest, and a point at the right: each touches its edge exactly, on either axis
+    // direction, whatever the other markers.
+    var corners=new ChartSeries("S",[new(0,0){Highlight="#E30613"},new(1,10){Highlight="#E30613"},new(2,5),new(3,5){Highlight="#E30613"}]);
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Scatter})
+        foreach(var reversed in new[]{false,true})
+            foreach(var markers in Enum.GetValues<MarkerStyle>().Where(m=>kind==ChartKind.Line||m!=MarkerStyle.None))
+                foreach(var classic in new[]{false,true})
+                {
+                    var spec=new ChartSpec{Title="S",Kind=kind,Width=120,Height=32,Sparkline=true,YReversed=reversed,Series=[corners with{Markers=markers}]};
+                    var reach=Reach(Svg(classic?Classic(spec):spec));
+                    Check(Near(reach.Left,0,1e-6)&&Near(reach.Top,0,1e-6)&&Near(reach.Right,120,1e-6)&&Near(reach.Bottom,32,1e-6),$"{kind} {markers} reversed {reversed} classic {classic}: {reach}");
+                }
+    // Without rings the padding is the largest marker: a filled or hovered one 4, a hollow one 5, a scatter dot 4.5 with its stroke, and
+    // a line or an area with no markers half its stroke.
+    var plain=corners with{Points=corners.Points.Select(p=>p with{Highlight=null}).ToArray()};
+    foreach(var (kind,markers,stroke,pad) in new (ChartKind,MarkerStyle,double?,double)[]{(ChartKind.Line,MarkerStyle.Filled,null,4),(ChartKind.Line,MarkerStyle.Hollow,null,5),(ChartKind.Line,MarkerStyle.Auto,null,4),
+        (ChartKind.Line,MarkerStyle.None,null,.8),(ChartKind.Line,MarkerStyle.None,3,1.5),(ChartKind.Area,MarkerStyle.None,null,.8),(ChartKind.Scatter,MarkerStyle.Auto,null,4.5),(ChartKind.Scatter,MarkerStyle.Filled,null,4),(ChartKind.Scatter,MarkerStyle.Hollow,null,5)})
+    {
+        var doc=Svg(new ChartSpec{Title="S",Kind=kind,Width=120,Height=32,Sparkline=true,Series=[plain with{Markers=markers,StrokeWidth=stroke}]});
+        var circles=Datums(doc,0).Select(m=>m.Element(ns+"circle")!).ToArray();
+        Check(Near(Attr(circles[0],"cx"),pad,1e-6)&&Near(Attr(circles[0],"cy"),32-pad,1e-6)&&Near(Attr(circles[1],"cy"),pad,1e-6)&&Near(Attr(circles[3],"cx"),120-pad,1e-6),$"{kind} {markers} {stroke}: the first point at {Attr(circles[0],"cx")}");
+        if(markers!=MarkerStyle.None){var reach=Reach(doc);Check(Near(reach.Left,0,1e-6)&&Near(reach.Right,120,1e-6)&&Near(reach.Top,0,1e-6)&&Near(reach.Bottom,32,1e-6),$"{kind} {markers}: {reach}");}
+    }
+    // The classic finish's thicker line needs half its 2.5.
+    Check(Near(Attr(Datums(Svg(Classic(new ChartSpec{Title="S",Kind=ChartKind.Line,Width=120,Height=32,Sparkline=true,Series=[plain with{Markers=MarkerStyle.None}]})),0)[0].Element(ns+"circle")!,"cx"),1.25,1e-6),"the classic stroke");
+    // The latest point's soft ring reaches 10, so the plot stands 10 in.
+    var last=Datums(Svg(new ChartSpec{Title="S",Kind=ChartKind.Line,Width=120,Height=32,Sparkline=true,Series=[plain with{HighlightLast=true}]}),0);
+    var halo=last[^1].Elements(ns+"circle").First();
+    Check(Attr(halo,"r")==10&&Near(Attr(halo,"cx")+10,120,1e-6)&&Near(Attr(last[0].Element(ns+"circle")!,"cx"),10,1e-6),"the latest point's ring");
+    // Columns need none: the tallest reaches the top, every one stands on the bottom, and the first and last slots meet the sides.
+    var bars=Datums(Svg(new ChartSpec{Title="S",Kind=ChartKind.Column,Width=120,Height=32,Sparkline=true,Series=[new("S",[new(0,2),new(1,8),new(2,4),new(3,6)])]}),0).Select(m=>m.Element(ns+"rect")!).ToArray();
+    Check(Near(Attr(bars[1],"y"),0,1e-6)&&bars.All(b=>Near(Attr(b,"y")+Attr(b,"height"),32,1e-6))&&Near(Attr(bars[0],"x"),4.2,1e-6)&&Near(Attr(bars[3],"x")+Attr(bars[3],"width"),115.8,1e-6),"the columns");
+    // A drawing too small to hold the ring on both sides keeps two units of plot: 60 by 16 stands it 7 in, from 7 to 9.
+    var tiny=Datums(Svg(new ChartSpec{Title="S",Kind=ChartKind.Line,Width=60,Height=16,Sparkline=true,Series=[plain with{HighlightLast=true}]}),0).Select(m=>m.Elements(ns+"circle").Last()).ToArray();
+    Check(Near(Attr(tiny[0],"cx"),7,1e-6)&&Near(Attr(tiny[0],"cy"),9,1e-6)&&Near(Attr(tiny[1],"cy"),7,1e-6)&&Near(Attr(tiny[3],"cx"),53,1e-6),"a drawing too small for its ring");
+});
+Test("A sparkline may be as small as 60 by 16, and only a sparkline; the largest drawing is the same for both",()=>{
+    foreach(var (w,h) in new[]{(60,16),(120,32),(4096,2160),(60,2160),(4096,16)}) Check(!Svg(Pb() with{Width=w,Height=h}).Descendants(ns+"text").Any(),$"{w} by {h}");
+    foreach(var (w,h) in new[]{(59,16),(60,15),(4097,32),(120,2161),(0,0),(-60,16)}) Check(Refused(Pb() with{Width=w,Height=h})=="A sparkline's dimensions must be 60–4096 by 16–2160.",$"{w} by {h}");
+    foreach(var (w,h) in new[]{(60,16),(319,240),(320,239),(120,32)}) Check(Refused(Pb() with{Sparkline=false,Width=w,Height=h})=="Dimensions must be 320–4096 by 240–2160.",$"a chart {w} by {h}");
+    Svg(Pb() with{Sparkline=false,Width=320,Height=240});
+    // A graph keeps its own limits.
+    Reject(()=>GraphEngine.Render(new GraphSpec{Width=120,Height=32}));
+});
+Test("A sparkline draws lines, areas, scatter points and columns, and refuses the other kinds, other marks, panes and value labels, each with its reason",()=>{
+    foreach(var kind in Enum.GetValues<ChartKind>())
+    {
+        var spark=Sample(kind) with{Sparkline=true,Width=120,Height=32};
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Column) Check(!Svg(spark).Descendants(ns+"text").Any(),$"{kind}");
+        else Check(Refused(spark).StartsWith("A sparkline draws a line, an area, scatter points or columns, whose shape reads without axes"),$"{kind}: {Refused(spark)}");
+    }
+    foreach(var (own,point) in new[]{(ChartKind.Band,ChartPoint.Interval(0,2,1,3)),(ChartKind.Range,ChartPoint.Interval(0,2,1,3)),(ChartKind.Blocks,ChartPoint.Block(0,1,2))})
+        Check(Refused(Spark() with{Series=[..Spark().Series,new("O",[point]){Kind=own}]}).StartsWith("A sparkline's series are drawn as lines, areas, scatter points or columns"),$"{own}");
+    // Lines, columns, areas and scatter points may share one.
+    Svg(Spark() with{Series=[..Spark().Series,new("C",[new(0,1),new(1,2),new(3,1)]){Kind=ChartKind.Column}]});
+    Svg(Spark(ChartKind.Column) with{Series=[new("C",[new(0,3),new(1,5),new(3,4)]),new("L",[new(0,1),new(1,2),new(3,1)]){Kind=ChartKind.Line}]});
+    Svg(Spark(ChartKind.Scatter) with{Series=[..Spark().Series,new("A",[new(0,1),new(1,2),new(3,1)]){Kind=ChartKind.Area}]});
+    Check(Refused(Spark() with{Panes=[new()],Series=[Spark().Series[0],Spark().Series[1] with{Pane=1}]}).StartsWith("A sparkline is one small plot, so it takes no panes")
+        &&Refused(Spark() with{Panes=[new()]}).StartsWith("A sparkline is one small plot"),"panes");
+    Check(Refused(Spark() with{Series=[Spark().Series[0] with{ValueLabels=true}]}).StartsWith("A sparkline draws its data alone, so it writes no value labels")
+        &&Refused(Spark(ChartKind.Column) with{Series=[Spark().Series[1] with{ValueLabels=true}]}).Contains("writes no value labels"),"value labels");
+});
+Test("A highlight rings its point in its colour whatever the markers, leaves the line its colour and course, and its note reaches the name and the tooltip",()=>{
+    var light=ChartStyle.Light;var ink=light.SeriesColor(0);
+    ChartPoint[] Ringed()=>[new(0,5,"R1"),new(1,3,"R2"){Highlight="#E30613",ValueNote=" · PB"},new(2,4,"R3"),new(3,2,"R4"){Highlight="#E30613",ValueNote=" · PB"},new(4,6,"R5")];
+    foreach(var markers in Enum.GetValues<MarkerStyle>())
+        foreach(var spark in new[]{false,true})
+        {
+            var spec=Raced(new("Time",Ringed()){Markers=markers});
+            if(spark) spec=spec with{Sparkline=true,Width=120,Height=32,XMin=null,XMax=null,YMin=null,YMax=null};
+            var doc=Svg(spec);var marks=Datums(doc,0);
+            foreach(var i in new[]{1,3})
+            {
+                var circle=marks[i].Elements(ns+"circle").Single();
+                Check((string?)circle.Attribute("fill")=="#E30613"&&circle.Attribute("r")!.Value=="5.5"&&circle.Attribute("class") is null&&circle.Attribute("fill-opacity") is null&&circle.Attribute("stroke") is null
+                    &&(string?)marks[i].Attribute("stroke")==light.Background&&(string?)marks[i].Attribute("stroke-width")=="2",$"{markers} sparkline {spark}: {marks[i]}");
+            }
+            // The other points keep the series' markers, and the line is one stroke in the series colour along the same course as without rings.
+            Check(marks.Where((_,i)=>i is 0 or 2 or 4).All(m=>(string?)m.Element(ns+"circle")!.Attribute("fill")!="#E30613"),$"{markers}: another point took the highlight");
+            var strokes=doc.Descendants(ns+"path").Where(p=>(string?)p.Attribute("fill")=="none").ToArray();
+            var plain=Svg(spec with{Series=[spec.Series[0] with{Points=Ringed().Select(p=>p with{Highlight=null}).ToArray()}]}).Descendants(ns+"path").Where(p=>(string?)p.Attribute("fill")=="none").ToArray();
+            // A ring widens a sparkline's padding, so only a chart keeps the very same course.
+            Check(strokes.Length==1&&(string?)strokes[0].Attribute("stroke")==ink&&(spark||strokes[0].ToString()==plain.Single().ToString()),$"{markers}: the line is {string.Join(",",strokes.Select(s=>s.Attribute("stroke")))}");
+            Check(marks.Select(m=>m.Attribute("aria-label")!.Value).SequenceEqual(["Time: R1, 5","Time: R2, 3 · PB","Time: R3, 4","Time: R4, 2 · PB","Time: R5, 6"])&&marks.All(m=>m.Element(ns+"title")!.Value==m.Attribute("aria-label")!.Value),"the names");
+        }
+    // On a full chart the plot's clip reaches 7 past the plot where a pane rings a point, so a ring at its edge, 6.5 from its centre,
+    // is drawn whole; without one it reaches 6, as before.
+    Check(Attr(Svg(Raced(new("Time",Ringed()))).Root!.Element(ns+"svg")!,"x")==76-7&&Attr(Svg(Raced(new("Time",Placings()))).Root!.Element(ns+"svg")!,"x")==76-6,"the clip round a ring");
+    // Scatter points are ringed the same; the latest point's ring takes the highlight; the classic finish rings with a stroke that scales.
+    var dots=Datums(Svg(Raced(new("Time",Ringed()){Kind=ChartKind.Scatter})),0);
+    Check(dots[1].Element(ns+"circle")!.Attribute("r")!.Value=="5.5"&&(string?)dots[1].Element(ns+"circle")!.Attribute("fill")=="#E30613"&&(string?)dots[0].Element(ns+"circle")!.Attribute("fill")==ink,"scatter points");
+    var lastRing=Datums(Svg(Raced(new("Time",[..Ringed()[..4],new(4,1,"R5"){Highlight="#E30613"}]){HighlightLast=true})),0)[4].Elements(ns+"circle").ToArray();
+    Check(lastRing.Length==2&&lastRing.All(c=>(string?)c.Attribute("fill")=="#E30613")&&lastRing[0].Attribute("r")!.Value=="10","the latest point's ring");
+    var classic=Datums(Svg(Classic(Raced(new("Time",Ringed())))),0)[1];
+    Check((string?)classic.Element(ns+"circle")!.Attribute("fill")=="#E30613"&&classic.Element(ns+"circle")!.Attribute("vector-effect") is null&&(string?)classic.Attribute("stroke")==light.Background,"the classic finish");
+    // Change colours keep the segment that arrives and the words; a point's own colour still colours the segment that leaves it.
+    var changed=Svg(Raced(new("Time",Ringed()){ChangeColors=ChangeColors.LowerIsBetter}));
+    Check((string?)Datums(changed,0)[1].Element(ns+"circle")!.Attribute("fill")=="#E30613"&&Arrivals(changed)[(Math.Round(RaceX(1),6),Math.Round(RaceY(3),6))]==light.Rising
+        &&Datums(changed,0)[1].Attribute("aria-label")!.Value=="Time: R2, 3 · PB, better than the previous","change colours");
+    var coloured=Arrivals(Svg(Raced(new("Time",Ringed().Select((p,i)=>i==1?p with{Color="#123456"}:p).ToArray()))));
+    Check(coloured[(Math.Round(RaceX(2),6),Math.Round(RaceY(4),6))]=="#123456","a point colour");
+    // Sampling keeps a ringed point however long the run, and a value label stands clear of the larger ring.
+    var run=Enumerable.Range(0,3000).Select(i=>new ChartPoint(i,Math.Round(Math.Sin(i/40d)*10+i%7,2)){Highlight=i==1501?"#E30613":null}).ToArray();
+    var sampled=Datums(Svg(Spec() with{MaxRenderedPoints=16,Series=[new("S",run)]}),0);
+    Check(sampled.Length<40&&sampled.Count(m=>m.Attribute("data-point")!.Value=="1501")==1&&(string?)sampled.Single(m=>m.Attribute("data-point")!.Value=="1501").Element(ns+"circle")!.Attribute("fill")=="#E30613",$"{sampled.Length} marks");
+    var labels=Svg(Raced(new("Time",Ringed()){ValueLabels=true})).Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-value").Select(g=>g.Elements(ns+"text").Last()).ToArray();
+    Check(Near(Attr(labels[1],"y"),RaceY(3)-9.5,1e-6)&&Near(Attr(labels[0],"y"),RaceY(5)-8,1e-6),"a ringed point's label");
+    // It is refused on every other mark, on a density scatter and in any colour but #RRGGBB.
+    foreach(var kind in new[]{ChartKind.Area,ChartKind.Column,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Bubble,ChartKind.Band,ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar})
+        Check(Refused(Spec(kind) with{Series=[new("S",[new(0,2,"A"),new(1,5,"B"){Highlight="#E30613"},new(2,3,"C")])]}).StartsWith("A highlight rings one point of a line or scatter series"),$"{kind}: {Refused(Spec(kind) with{Series=[new("S",[new(0,2,"A"),new(1,5,"B"){Highlight="#E30613"},new(2,3,"C")])]})}");
+    foreach(var kind in new[]{ChartKind.Range,ChartKind.Blocks,ChartKind.Candlestick,ChartKind.Ohlc,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Timeline,ChartKind.Calendar,ChartKind.Gauge,ChartKind.Ring})
+    {
+        var sample=Sample(kind);
+        Check(Refused(sample with{Series=sample.Series.Select((s,i)=>i>0?s:s with{Points=s.Points.Select((p,k)=>k>0?p:p with{Highlight="#E30613"}).ToArray()}).ToArray()}).StartsWith("A highlight rings"),$"{kind}");
+    }
+    Check(Refused(Spec() with{Series=[..Spec().Series,new("A",[new(0,1)]){Kind=ChartKind.Area,Points=[new(0,1){Highlight="#E30613"}]}]}).StartsWith("A highlight rings"),"an area series");
+    Check(Refused(Spec(ChartKind.Scatter) with{DensityCells=10,Series=[new("S",[new(0,1){Highlight="#E30613"},new(1,2)])]}).Contains("rings no point with a highlight"),"a density scatter");
+    Check(Refused(Spec() with{Series=[new("S",[new(0,1){Highlight="red"}])]})=="Colors must be #RRGGBB hex values."&&Refused(Spec() with{Series=[new("S",[new(0,1){Highlight="#E30613' onload='x"}])]})=="Colors must be #RRGGBB hex values.","a colour that is not #RRGGBB");
+});
+Test("YMinSpan centres a narrow axis on its data, leaves wider data alone, reverses, counts a band's edges, and sets a pane's axis apart from the main plot's",()=>{
+    // On a 900 by 420 chart of one pane the plot runs from y 78 to 344, so a value v on an axis from lo to hi stands at 344 - (v - lo) / (hi - lo) × 266.
+    double At(double v,double lo,double hi,bool reversed=false)=>reversed?78+(v-lo)/(hi-lo)*266:344-(v-lo)/(hi-lo)*266;
+    double[] Ys(XDocument doc,int series=0)=>Datums(doc,series).Select(m=>Attr(m.Elements(ns+"circle").Last(),"cy")).ToArray();
+    bool All(double[] ys,double[] values,double lo,double hi,bool reversed=false)=>ys.Length==values.Length&&ys.Zip(values).All(p=>Near(p.First,At(p.Second,lo,hi,reversed),1e-6));
+    ChartSpec Weighed(params double[] kg)=>new(){Title="Weight",Kind=ChartKind.Line,YMinSpan=8,Series=[new("Weight",kg.Select((v,i)=>new ChartPoint(i,v)).ToArray()){Markers=MarkerStyle.Filled}]};
+    // 37.8 to 38.2 is centred on 38: the axis runs from 38 - 4 = 34 to 38 + 4 = 42, and its end ticks say so.
+    double[] kg=[37.9,37.8,38.2,38.1];
+    var narrow=Svg(Weighed(kg));
+    Check(All(Ys(narrow),kg,34,42),string.Join(",",Ys(narrow)));
+    var ticks=narrow.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="end").Select(t=>t.Value).ToArray();
+    Check(ticks.First()=="34"&&ticks.Last()=="42",string.Join(",",ticks));
+    Check(All(Ys(Svg(Classic(Weighed(kg)))),kg,34,42),"the classic finish");
+    // One weight stands in the middle of 34 to 42, not on the 5 % a single value is otherwise padded by.
+    Check(All(Ys(Svg(Weighed(38))),[38],34,42)&&Near(Ys(Svg(Weighed(38)))[0],211,1e-6),"one weight");
+    // Data as wide as the span or wider is fitted as it would be without one, to the byte.
+    var wide=Weighed(30,45,38);
+    Check(ChartSvg.Render(wide)==ChartSvg.Render(wide with{YMinSpan=null})&&ChartSvg.Render(wide with{YMinSpan=15})==ChartSvg.Render(wide with{YMinSpan=null}),"wider data moved");
+    // Reversed, the lighter weights stand higher about the same middle.
+    Check(All(Ys(Svg(Weighed(kg) with{YReversed=true})),kg,34,42,true),string.Join(",",Ys(Svg(Weighed(kg) with{YReversed=true}))));
+    // A band's edges are the data too, and a series on the right-hand axis is not: 47 to 54 centres on 50.5, from 45.5 to 55.5.
+    var banded=Svg(new ChartSpec{Title="B",Kind=ChartKind.Line,YMinSpan=10,Series=[new("Mid",[new(0,50),new(1,51)]){Markers=MarkerStyle.Filled},
+        new("Band",[ChartPoint.Interval(0,50,47,53),ChartPoint.Interval(1,51,48,54)]){Kind=ChartKind.Band},new("Right",[new(0,1000),new(1,2000)]){Secondary=true}]});
+    Check(All(Ys(banded),[50,51],45.5,55.5),string.Join(",",Ys(banded)));
+    // A pane's span sets its own axis and leaves the main plot's alone. Two panes of weight 1 run from 78 to 199 and from 223 to 344.
+    var paned=Svg(new ChartSpec{Title="P",Kind=ChartKind.Line,Panes=[new(){Weight=1,YMinSpan=8}],Series=[new("Main",[new(0,37.8),new(1,38.2)]){Markers=MarkerStyle.Filled},new("Pane",[new(0,37.8),new(1,38.2)]){Pane=1,Markers=MarkerStyle.Filled}]});
+    Check(Near(Ys(paned,0)[0],199,1e-6)&&Near(Ys(paned,0)[1],78,1e-6)&&Near(Ys(paned,1)[0],344-3.8/8*121,1e-6)&&Near(Ys(paned,1)[1],344-4.2/8*121,1e-6),$"{string.Join(",",Ys(paned,0))} | {string.Join(",",Ys(paned,1))}");
+    var mainOnly=Svg(new ChartSpec{Title="P",Kind=ChartKind.Line,YMinSpan=8,Panes=[new(){Weight=1}],Series=[new("Main",[new(0,37.8),new(1,38.2)]){Markers=MarkerStyle.Filled},new("Pane",[new(0,37.8),new(1,38.2)]){Pane=1,Markers=MarkerStyle.Filled}]});
+    Check(Near(Ys(mainOnly,0)[0],199-3.8/8*121,1e-6)&&Near(Ys(mainOnly,1)[0],344,1e-6)&&Near(Ys(mainOnly,1)[1],223,1e-6),"the main plot's span reached the pane");
+    // Every kind with such an axis takes it, blocks on a reversed pace axis among them, and a sparkline's axis is centred the same.
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Scatter,ChartKind.Bubble,ChartKind.Band,ChartKind.Range,ChartKind.Candlestick,ChartKind.Ohlc,ChartKind.Blocks}) Svg(Sample(kind) with{YMinSpan=8});
+    Svg(new ChartSpec{Title="Laps",Kind=ChartKind.Blocks,YReversed=true,YFormat=ValueFormat.Duration,YMinSpan=60,Series=[new("Laps",[ChartPoint.Block(0,1,290),ChartPoint.Block(1,2,295)])]});
+    var spark=Datums(Svg(Weighed(kg) with{Sparkline=true,Width=270,Height=54}),0).Select(m=>Attr(m.Element(ns+"circle")!,"cy")).ToArray();
+    Check(spark.Zip(kg).All(p=>Near(p.First,50-(p.Second-34)/8*46,1e-6)),string.Join(",",spark));
+    // In the component, hiding the main plot's series moves the pane up into its place with the pane's own bounds and no span.
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    var moved=new ChartSpec{Title="P",Kind=ChartKind.Line,YMinSpan=8,Panes=[new(){YMin=0,YMax=100}],Series=[new("Main",[new(0,38),new(1,38.2)]),new("Pane",[new(0,10),new(1,20)]){Pane=1}]};
+    ChartSpec? shown=null;
+    Operate(moved,chart=>{typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[0]);shown=(ChartSpec)typeof(LumenChart).GetMethod("VisibleSpec",flags)!.Invoke(chart,[])!;return Task.CompletedTask;});
+    Check(shown is {YMinSpan:null,YMin:0,YMax:100,Panes.Count:0},"the pane took the main plot's span");
+});
+Test("YMinSpan is refused beside YMin or YMax, out of range, on a logarithmic axis, on an axis that must include zero and where there is no such axis, each with its reason",()=>{
+    var line=new ChartSpec{Title="W",Kind=ChartKind.Line,YMinSpan=8,Series=[new("W",[new(0,38),new(1,38.2)])]};
+    foreach(var span in new[]{0,-8,double.NaN,double.PositiveInfinity,1e101}) Check(Refused(line with{YMinSpan=span}).StartsWith("YMinSpan is the least a Y axis spans, so it must be positive and finite"),$"{span}");
+    Svg(line with{YMinSpan=1e100});Svg(line with{YMinSpan=1e-9});
+    Check(Refused(line with{YMin=30}).StartsWith("YMinSpan centres an axis fitted to the data, and YMin or YMax")&&Refused(line with{YMax=50}).StartsWith("YMinSpan centres an axis fitted to the data"),"bounds");
+    Check(Refused(line with{YAxis=AxisKind.Log}).StartsWith("YMinSpan centres a span of values on the data, and a logarithmic axis"),"a log axis");
+    Check(Refused(line with{IncludeZero=true}).StartsWith("YMinSpan centres an axis on its data, and an axis that must include zero"),"IncludeZero");
+    foreach(var kind in new[]{ChartKind.Area,ChartKind.Column,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Histogram})
+        Check(Refused(Spec(kind) with{YMinSpan=8}).StartsWith("YMinSpan centres an axis on its data, and an axis that must include zero"),$"{kind}: {Refused(Spec(kind) with{YMinSpan=8})}");
+    Check(Refused(line with{Series=[..line.Series,new("C",[new(0,1)]){Kind=ChartKind.Column}]}).Contains("must include zero")&&Refused(line with{Series=[..line.Series,new("A",[new(0,1),new(1,2)]){Kind=ChartKind.Area}]}).Contains("must include zero"),"a column or an area series");
+    // Columns on the right-hand axis leave the left one free.
+    Svg(line with{Series=[..line.Series,new("C",[new(0,1),new(1,2)]){Kind=ChartKind.Column,Secondary=true}]});
+    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Gauge,ChartKind.Ring,ChartKind.Timeline,ChartKind.Calendar,ChartKind.Box,ChartKind.Violin})
+        Check(Refused(Sample(kind) with{YMinSpan=8}).StartsWith("YMinSpan widens a Y axis fitted to the data, so it applies to line, scatter"),$"{kind}: {Refused(Sample(kind) with{YMinSpan=8})}");
+    // A pane meets the same rules on its own axis, and columns in another pane leave it alone.
+    var paned=line with{YMinSpan=null,Panes=[new(){YMinSpan=8}],Series=[..line.Series,new("P",[new(0,38),new(1,38.1)]){Pane=1}]};
+    Svg(paned);Svg(paned with{Series=[..paned.Series,new("C",[new(0,1),new(1,2)]){Kind=ChartKind.Column}]});
+    Check(Refused(paned with{Panes=[new(){YMinSpan=8,YMin=0}]}).Contains("YMin or YMax")&&Refused(paned with{Panes=[new(){YMinSpan=8,YMax=50}]}).Contains("YMin or YMax")
+        &&Refused(paned with{Panes=[new(){YMinSpan=8,YAxis=AxisKind.Log}]}).Contains("logarithmic")&&Refused(paned with{Panes=[new(){YMinSpan=-1}]}).Contains("positive")
+        &&Refused(paned with{IncludeZero=true}).Contains("must include zero")&&Refused(paned with{Series=[..paned.Series,new("C",[new(0,1)]){Kind=ChartKind.Column,Pane=1}]}).Contains("must include zero"),"a pane");
+});
+Test("The component draws a sparkline as its drawing alone: no legend, toolbar, zoom, data table or scrolling region, and fitted down to 60 pixels",()=>{
+    var html=Prerender(ChartElement(Pb()));
+    Check(html.StartsWith("<div class=\"lumen-chart lumen-spark\"><div class=\"lumen-viewport\"><svg ")&&html.EndsWith("</svg></div></div>"),html[..Math.Min(200,html.Length)]);
+    foreach(var chrome in new[]{"lumen-legend","lumen-tools","lumen-table","<button","role=\"region\"","tabindex=\"0\" role","Export","View data","lumen-status","Zoom"})
+        Check(!html.Contains(chrome),$"the sparkline carries {chrome}");
+    // Its drawing is the library's, without native tooltips, which the component draws itself.
+    Check(html.Contains(ChartSvg.Render(Pb(),includeLegend:false,includeTitles:false)),"the drawing differs from the library's");
+    Check(Prerender(ChartElement(Pb(),true)).StartsWith("<div class=\"lumen-chart lumen-spark lumen-fit\">"),"a fitted sparkline");
+    // A fitted sparkline is drawn as narrow as 60 pixels where a chart stops at 320, and as wide as its box otherwise.
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    string Box(LumenChart chart)=>XDocument.Parse((string)typeof(LumenChart).GetField("svg",flags)!.GetValue(chart)!).Root!.Attribute("viewBox")!.Value;
+    var boxes=new List<string>();
+    Operate(Pb(),async chart=>{await chart.Fit(40);boxes.Add(Box(chart));await chart.Fit(200);boxes.Add(Box(chart));},fit:true);
+    Operate(Spec(),async chart=>{await chart.Fit(40);boxes.Add(Box(chart));},fit:true);
+    Check(boxes.SequenceEqual(["0 0 60 32","0 0 200 32","0 0 320 420"]),string.Join(" | ",boxes));
+    // Selecting a mark still reads its point, with its note, though no status line shows it.
+    var status="";
+    Operate(Pb(),async chart=>{await chart.SelectPoint(0,5);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    Check(status=="5 km: Race 6 = 22:47 · PB",status);
+    var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
+    Check(css.Contains(".lumen-spark>.lumen-viewport>svg{min-width:0}")&&css.Contains(".lumen-spark>.lumen-tooltip{width:max-content}"),"the stylesheet's rules for a sparkline");
+    // A chart that is not a sparkline renders as before.
+    Check(!Prerender(ChartElement(Spec())).Contains("lumen-spark"),"a chart took the sparkline's class");
+});
+Test("Sparklines, highlights and minimum spans round-trip through JSON, a request that names none keeps the defaults, and only a set one renames gradients",()=>{
+    var json=System.Text.Json.JsonSerializer.Serialize(Pb(),finishJson);
+    Check(json.Contains("\"sparkline\":true")&&json.Contains("\"highlight\":\"#E30613\"")&&json.Contains("\"width\":120"),json);
+    var back=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,finishJson)!;
+    Check(back.Sparkline&&back.Series[0].Points[1].Highlight=="#E30613"&&ChartSvg.Render(back)==ChartSvg.Render(Pb()),"a sparkline changed in transit");
+    var spanned=new ChartSpec{Title="W",Kind=ChartKind.Line,YMinSpan=8,Panes=[new(){YMinSpan=4}],Series=[new("A",[new(0,38),new(1,38.2)]),new("B",[new(0,10),new(1,10.5)]){Pane=1}]};
+    var spanJson=System.Text.Json.JsonSerializer.Serialize(spanned,finishJson);
+    Check(spanJson.Contains("\"yMinSpan\":8")&&spanJson.Contains("\"yMinSpan\":4")&&ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(spanJson,finishJson)!)==ChartSvg.Render(spanned),spanJson);
+    // Written by hand, as the HTTP API takes it.
+    var written="{\"title\":\"5 km\",\"kind\":\"Line\",\"width\":120,\"height\":32,\"sparkline\":true,\"yReversed\":true,\"yFormat\":\"Duration\",\"series\":[{\"name\":\"5 km\",\"points\":[{\"x\":0,\"y\":1450},{\"x\":1,\"y\":1367,\"highlight\":\"#E30613\",\"valueNote\":\" PB\"}]}]}";
+    var svg=ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,finishJson)!);
+    Check(!svg.Contains("<text")&&svg.Contains("aria-label='5 km: 1, 22:47 PB'")&&svg.Contains("fill='#E30613'"),svg);
+    var weight=Svg(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"title\":\"W\",\"kind\":\"Line\",\"yMinSpan\":8,\"series\":[{\"name\":\"W\",\"points\":[{\"x\":0,\"y\":37.8},{\"x\":1,\"y\":38.2}]}]}",finishJson)!);
+    Check(weight.Descendants(ns+"text").Any(t=>t.Value=="34")&&weight.Descendants(ns+"text").Any(t=>t.Value=="42"),"a span written by hand");
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"panes\":[{}],\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]},{\"name\":\"T\",\"pane\":1,\"points\":[{\"x\":0,\"y\":1}]}]}",finishJson)!;
+    Check(!old.Sparkline&&old.YMinSpan is null&&old.Panes[0].YMinSpan is null&&old.Series[0].Points[0].Highlight is null,"the defaults");
+    // A gradient's ID is named after the spec: the defaults leave it alone, and a setting away from them names it afresh.
+    string Id(ChartSpec s)=>System.Text.RegularExpressions.Regex.Match(ChartSvg.Render(s),"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var graded=Spec() with{Series=[new("S",[new(0,1),new(1,3)]){Gradient=[new(0,"#000000"),new(5,"#FFFFFF")]}]};
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
+    Check(Id(graded).Length>0&&Id(faded).Length>0&&Id(faded with{Sparkline=false,YMinSpan=null})==Id(faded)
+        &&Id(graded with{Series=[graded.Series[0] with{Points=graded.Series[0].Points.Select(p=>p with{Highlight=null}).ToArray()}]})==Id(graded),"the defaults renamed a gradient");
+    // A sparkline draws its fade over a different plot, so two otherwise equal charts on one page must not share its ID.
+    Check(Id(faded with{Sparkline=true})!=Id(faded)&&Id(graded with{YMinSpan=8})!=Id(graded)
+        &&Id(graded with{Series=[graded.Series[0] with{Points=[new(0,1){Highlight="#E30613"},new(1,3)]}]})!=Id(graded),"a setting kept a gradient's name");
+});
+Test("0.33.0's renderings do not move: rows of its baseline rebuilt here match its hashes in both finishes, the latest point's ring and value labels on lines among them",()=>{
+    // Hashes of v0.33.0's tests/Lumen.Charts.Baseline/reference files, refined and classic, recorded on Windows.
+    if(!OperatingSystem.IsWindows())return;
+    var line=Baseline(ChartKind.Line,ChartTheme.Light);
+    (int? Position,int? Field,int? Points)[] races=[(31,50,40),(24,48,52),(27,51,47),(21,49,58),(19,52,61)];
+    string[] raced=["11-04-2026","16-05-2026","04-07-2026","08-08-2026","19-09-2026"];
+    DateOnly[] raceDays=[new(2026,4,11),new(2026,5,16),new(2026,7,4),new(2026,8,8),new(2026,9,19)];
+    string[] roundNames=["Round 1 · Hilltop Classic","Round 2 · River Valley","Round 3 · Quarry Loop","Round 4 · Forest Sprint","Round 5 · Final Ridge"];
+    ChartSeries Placed()=>new("Position",races.Select((r,i)=>new ChartPoint(i,r.Position,raced[i]){ValueNote=r.Field is int field?$"/{field}":null}).ToArray()){ChangeColors=ChangeColors.LowerIsBetter,ValueLabels=true,Markers=MarkerStyle.Filled};
+    ChartSeries Earned()=>new("Points",races.Select((r,i)=>new ChartPoint(i,r.Points,raced[i])).ToArray()){ValueLabels=true,Markers=MarkerStyle.Filled};
+    ChartPoint[] Zigzag()=>[new(0,5,"A"),new(1,3,"B"),new(2,3,"C"),new(3,4,"D"),new(4,null,"E"),new(5,2,"F"),new(6,6,"G"),new(7,1,"H")];
+    (string Row,string Refined,string Classic,ChartSpec Spec)[] rows=[
+        ("Line/Light/True","D991008D3106193D","CB7DF56598CE861F",line),
+        ("pace-reversed","2A0753C00E774BFF","779AEF9057093620",line with{YFormat=ValueFormat.Duration,YReversed=true,Annotations=[new(AnnotationAxis.Y,300){Label="Target"}],
+            Series=[new("Pace",Enumerable.Range(0,12).Select(i=>new ChartPoint(i,330-i*4+i%3*5)).ToArray()){Trend=true}]}),
+        ("guard/line-markers","6A03DBA7B8A29EB8","0AB8C0AE5E4BFCDC",line with{Series=[new("A",Twelve().Select((p,i)=>p with{Color=i==3?"#123456":null,Y=i==7?null:p.Y}).ToArray()),
+            new("B",Twelve()){Zones=new([new("Low",25),new("High",double.PositiveInfinity)]),ProjectedFrom=8}]}),
+        ("race/recommended-340-midnight","C6189E3AF7D67240","95A655DDB4E9D931",new ChartSpec{Kind=ChartKind.Line,Style=ChartStyle.Midnight,Title="Position & points by race",Description="Place over field size, first at the top, and points",
+            Width=340,Height=380,XMin=-.5,XMax=4.5,YReversed=true,YLabel="Position",Panes=[new(){Label="Points",Weight=1}],Series=[Placed(),Earned() with{Pane=1}]}),
+        ("race/season-340-midnight","D19CDFC27AE78F1A","FC505B592334AF49",new ChartSpec{Kind=ChartKind.Line,Style=ChartStyle.Midnight,XAxis=AxisKind.Time,TimeZone="Africa/Johannesburg",YReversed=true,
+            Title="Your season, round by round",Description="Your place in each round, first at the top",Width=340,Height=260,
+            Series=[new("Position",races.Select((r,i)=>new ChartPoint(TimeAxis.Value(new DateTimeOffset(raceDays[i].ToDateTime(new TimeOnly(12,0)),TimeSpan.FromHours(2))),r.Position,roundNames[i])).ToArray(),"#FF5A54"){Markers=MarkerStyle.Filled,HighlightLast=true}]}),
+        ("change/line/Light","EB08EBF8AB376732","D669DED1E5B7A8B5",line with{Title="Change colours",Series=[new("Position",Zigzag()){ChangeColors=ChangeColors.LowerIsBetter},
+            new("Points",Zigzag().Select(p=>p with{Y=10-p.Y}).ToArray()){ChangeColors=ChangeColors.HigherIsBetter,Curve=LineCurve.Step}]}),
+        ("labels/edges","56F1C0E042038E5A","A8935C09ECF85C13",line with{Title="Value labels at the edges",XMin=0,XMax=6,YMin=0,YMax=10,
+            Series=[new("A",[new(0,5){ValueNote="/48"},new(3,4),new(6,10){ValueNote="/52"}]){ValueLabels=true,Markers=MarkerStyle.Filled},new("B",[new(1,6),new(3,4.2),new(5,7)]){Kind=ChartKind.Scatter,ValueLabels=true}]})];
+    foreach(var (row,refined,classic,spec) in rows)
+    {
+        Check(Hash16(ChartSvg.Render(spec))==refined,$"{row} moved: {Hash16(ChartSvg.Render(spec))}");
+        Check(Hash16(ChartSvg.Render(Classic(spec)))==classic,$"{row} moved in the classic finish: {Hash16(ChartSvg.Render(Classic(spec)))}");
+        // Each new setting written out at its default draws the same chart.
+        var spelled=spec with{Sparkline=false,YMinSpan=null,Panes=spec.Panes.Select(p=>p with{YMinSpan=null}).ToArray(),Series=spec.Series.Select(s=>s with{Points=s.Points.Select(p=>p with{Highlight=null}).ToArray()}).ToArray()};
+        Check(ChartSvg.Render(spelled)==ChartSvg.Render(spec),$"{row}: the defaults written out moved it");
+    }
+});
+Test("Sports page: Getting faster? rings each time faster than all before it, from the runs the records chart draws, and holds the weigh-ins at an 8 kg scale in grey alone",()=>{
+    var card=sports.Single(c=>c.Id=="getting-faster");var lines=card.Lines!;
+    var order=sports.Select(c=>c.Id).ToList();
+    Check(card.Section=="fitness"&&card.Wide&&lines.Count==3&&card.Spec==lines[0].Spec&&order.IndexOf("getting-faster")==order.IndexOf("records")+1&&order.IndexOf("hrv")==order.IndexOf("getting-faster")+1,"the card or its place");
+    // The 5 km line is the records chart's weekly fastest 5 km in order, and the 1 km line the fastest kilometre of each session of repeats.
+    var five=lines[0].Spec.Series.Single().Points;var one=lines[1].Spec.Series.Single().Points;
+    var repeats=athlete.Sessions.Where(s=>s.Name.EndsWith("repeats")).ToArray();
+    Check(five.Select(p=>p.Y!.Value).SequenceEqual(Sports("records").Series[1].Points.Select(p=>p.Y!.Value))&&five.Select(p=>p.X).SequenceEqual(Enumerable.Range(0,five.Count).Select(i=>(double)i)),"the 5 km line");
+    Check(one.Count==repeats.Length&&repeats.Length>=10&&one.Select(p=>p.Y!.Value).SequenceEqual(repeats.Select(s=>SportsData.Fastest(s.Track!,s.Metres,1000)!.Value)),"the 1 km line");
+    foreach(var line in lines.Take(2))
+    {
+        var points=line.Spec.Series[0].Points;
+        // A best is faster than every time before it, the first only setting the mark; only a best is ringed, and its name says why.
+        for(var i=0;i<points.Count;i++)
+        {
+            var best=i>0&&points.Take(i).All(p=>points[i].Y<p.Y);
+            Check((points[i].Highlight is not null)==best&&(points[i].ValueNote==" · PB")==best,$"{line.Name} point {i}");
+        }
+        Check(line.Spec is {Sparkline:true,YReversed:true,YFormat:ValueFormat.Duration,Width:120,Height:32},$"{line.Name}: the sparkline");
+        var unit=line.Name=="5 km"?"weeks":"sessions";
+        Check(line.Spec.Title==$"{line.Name}: {SportsData.Clock(points[0].Y!.Value)} to {SportsData.Clock(points[^1].Y!.Value)} over {points.Count} {unit}","the title");
+        Check(line.Text.Contains($"best {SportsData.Clock(points.Min(p=>p.Y!.Value))}")&&line.Text.Contains($"{points.Count(p=>p.Highlight is not null)} personal bests"),line.Text);
+        Check(Datums(Svg(line.Spec),0).Where((_,i)=>points[i].Highlight is not null).All(m=>m.Attribute("aria-label")!.Value.EndsWith(" · PB")),"a best's name");
+    }
+    Check(five.Count(p=>p.Highlight is not null)==4&&one.Count(p=>p.Highlight is not null)==6,"the counts of bests");
+    // The weigh-ins: invented, in one colour, ringed nowhere, on an axis at least 8 kg tall centred on them. The lightest, 67.7, and the
+    // heaviest, 68.3, centre it on 68.0, so it runs from 64 to 72, and on a 270 by 54 drawing standing 4 in a weight w stands at 50 - (w - 64) / 8 × 46.
+    var mass=lines[2];var kg=mass.Spec.Series.Single().Points;
+    Check(mass.Spec is {YMinSpan:8,Width:270,Height:54,Sparkline:true}&&kg.Select(p=>p.Y!.Value).SequenceEqual(SportsData.WeighIns)&&kg.All(p=>p.Highlight is null&&p.Color is null)&&mass.Text.EndsWith("scale 64–72 kg"),mass.Text);
+    Check(Datums(Svg(mass.Spec),0).Select(m=>Attr(m.Element(ns+"circle")!,"cy")).Zip(SportsData.WeighIns).All(p=>Near(p.First,50-(p.Second-64)/8*46,1e-6)),"the weights' heights");
+    // Every brand's line and rings clear 3:1 on its background, and none writes a word.
+    foreach(var (style,zones) in new[]{(ChartStyle.Light,ChartStyle.Light.Zones),(ChartStyle.Dark,ChartStyle.Light.Zones),(Brand(),Brand().Zones),(ChartStyle.Midnight,ChartStyle.Midnight.Zones)})
+        foreach(var line in SportsData.Cards(ChartTheme.Light,zones).Single(c=>c.Id=="getting-faster").Lines!)
+        {
+            var inks=line.Spec.Series.Select(s=>s.Color!).Concat(line.Spec.Series.SelectMany(s=>s.Points).Select(p=>p.Highlight).OfType<string>()).Distinct().ToArray();
+            Check(inks.All(ink=>Contrast(ink,style.Background)>=3),$"{line.Name} on {style.Background}: {string.Join(", ",inks.Where(ink=>Contrast(ink,style.Background)<3))}");
+            Check(!Svg(line.Spec with{Style=style}).Descendants(ns+"text").Any(),$"{line.Name} wrote a word");
+        }
+    // The page draws each at its own size beside its words, and its sparklines and charts number twenty-three.
+    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==23,"the page's count");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

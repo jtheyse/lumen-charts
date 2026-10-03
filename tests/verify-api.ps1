@@ -316,6 +316,26 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('one or the other')) 'A gradient together with zones is rejected'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $finish.Replace('"strokeWidth":3','"strokeWidth":20') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('0.5 and 12')) 'A stroke width of 20 is rejected'
+$r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-spark"')).Count -eq 3 -and $r.Content.Contains('id="getting-faster"') -and ([regex]::Matches($r.Content,"viewBox='0 0 120 32'")).Count -eq 2 -and $r.Content.Contains("viewBox='0 0 270 54'") -and ([regex]::Matches($r.Content,"&#183; PB'")).Count -eq 10) 'The Sports & performance page prerenders its Getting faster? card: three sparklines at 120 by 32 and 270 by 54, its ten personal bests named so'
+$spark='{"title":"5 km: 24:10 to 22:47 over 4 races","description":"Faster higher","kind":"Line","width":120,"height":32,"sparkline":true,"yReversed":true,"yFormat":"Duration","series":[{"name":"5 km","color":"#B7BCC4","strokeWidth":2,"points":[{"x":0,"y":1450,"label":"Race 1"},{"x":1,"y":1432,"label":"Race 2","highlight":"#E30613","valueNote":" PB"},{"x":2,"y":1445,"label":"Race 3"},{"x":3,"y":1367,"label":"Race 4","highlight":"#E30613","valueNote":" PB"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $spark -SkipHttpErrorCheck
+$xml=[xml]$r.Content
+Verify ($r.StatusCode -eq 200 -and @($xml.SelectNodes('//*[local-name()="text"]')).Count -eq 0 -and $xml.DocumentElement.title -eq '5 km: 24:10 to 22:47 over 4 races' -and $xml.DocumentElement.viewBox -eq '0 0 120 32' -and @($xml.SelectNodes('//*[@data-point]')).Count -eq 4 -and $r.Content.Contains("aria-label='5 km: Race 4, 22:47 PB'") -and ([regex]::Matches($r.Content,"r='5.5' fill='#E30613'")).Count -eq 2) 'A sparkline posted as JSON draws its data alone: no text, its title its name, four named marks and its two bests ringed'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $spark.Replace('"width":120,"height":32','"width":60,"height":16') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains("viewBox='0 0 60 16'")) 'A sparkline may be as small as 60 by 16'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $spark.Replace('"sparkline":true','"sparkline":false') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('320')) 'A chart that is not a sparkline is refused at 120 by 32'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $spark.Replace('"kind":"Line"','"kind":"Bubble"') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('A sparkline draws a line, an area, scatter points or columns')) 'A sparkline of another kind is refused with its reason'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Area","series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2,"highlight":"#E30613"}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('A highlight rings one point of a line or scatter series')) 'A highlight on an area is refused with its reason'
+$span='{"title":"Weight","kind":"Line","yMinSpan":8,"series":[{"name":"Weight","points":[{"x":0,"y":37.9},{"x":1,"y":37.8},{"x":2,"y":38.2}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $span -SkipHttpErrorCheck
+$ticks=@(([xml]$r.Content).SelectNodes('//*[local-name()="text"][@text-anchor="end"]')|ForEach-Object{$_.InnerText})
+Verify ($r.StatusCode -eq 200 -and $ticks[0] -eq '34' -and $ticks[-1] -eq '42') 'A minimum span posted as JSON centres a narrow axis on its data, from 34 to 42'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $span.Replace('"yMinSpan":8','"yMinSpan":8,"yMin":30') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('one or the other')) 'A minimum span beside YMin is refused with its reason'
 $graph='{"nodes":[{"id":"a","label":"Start"},{"id":"b","label":"End"}],"edges":[{"source":"a","target":"b"}],"layout":"Layered"}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType application/json -Body $graph
 Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'Graph SVG'

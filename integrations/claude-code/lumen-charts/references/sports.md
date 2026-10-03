@@ -1,6 +1,6 @@
 # Sports and training charts
 
-Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.33.0. Recipes for a race-results app — finishing places coloured by their change, value labels on a line, a season on a time axis — are in `recipes-race-face.md`.
+Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.34.0. Recipes for a race-results app — finishing places coloured by their change, value labels on a line, a season on a time axis, personal-best and growth sparklines — are in `recipes-race-face.md`.
 
 ## Conventions the numbers follow
 
@@ -209,6 +209,25 @@ var best = new ChartSpec {
     }).ToArray()) { Curve = LineCurve.Step }]
 };
 ```
+
+As a sparkline (0.34.0): every effort by index, oldest first, faster higher, each new best ringed — a word-sized chart for a profile or a list of distances, with the numbers written beside it.
+
+```csharp
+var dated = efforts.OrderBy(e => e.Date).ToArray();
+var durations = new Axis(AxisKind.Linear, 0, 1) { ValueFormat = ValueFormat.Duration };   // writes seconds as the chart does, 22:47
+var pbSpark = new ChartSpec {
+    Title = $"5 km: {durations.Format(dated[0].Seconds)} to {durations.Format(dated[^1].Seconds)} over {dated.Length} efforts",
+    Description = "Each effort, oldest first, faster higher, new bests ringed",
+    Kind = ChartKind.Line, Width = 120, Height = 32, Sparkline = true, YReversed = true, YFormat = ValueFormat.Duration,
+    Series = [new("5 km", dated.Select((e, i) => {
+        var newBest = i > 0 && dated.Take(i).All(before => e.Seconds < before.Seconds);   // faster than every effort before it
+        return new ChartPoint(i, e.Seconds, e.Date.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture))
+            { Highlight = newBest ? "#DD4B45" : null, ValueNote = newBest ? " · PB" : null };
+    }).ToArray(), "#848484") { StrokeWidth = 2 }]
+};
+```
+
+`Sparkline = true` draws no axes, gridlines, legend or words, only the data, in a plot that fills the drawing but for the room its largest ring needs; the title and description stay its accessible name, and each effort a focusable mark named `5 km: 14 Jun 2026, 21:40 · PB`. `ChartPoint.Highlight` rings a point with an enlarged marker in its colour whatever the markers, and leaves the line its colour; the `ValueNote` says in words what the ring says in colour, so a best is never told by colour alone. The grey and red are `ChartStyle.Light.Zones[0]` and `[5]`, which clear 3:1 on the light and dark presets. A sparkline takes line, area, scatter and column charts, 60 by 16 at the smallest, and refuses panes and value labels. For a noisy reading that should look steady — a weight, a resting heart rate — `YMinSpan` holds the axis at least that tall, centred on the data (see `recipes-race-face.md`).
 
 ## Recovery or readiness gauge
 
