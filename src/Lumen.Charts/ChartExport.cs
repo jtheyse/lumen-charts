@@ -3,6 +3,7 @@ using System.Text;
 
 namespace Lumen.Charts;
 
+/// <summary>A chart's data in a form other programs read.</summary>
 public static class ChartExport
 {
     /// <summary>Original observations, not sampled display points. Text is protected against spreadsheet formulas.</summary>

@@ -162,6 +162,84 @@ await Test("Zooming narrows the axis and reset restores it", async () =>
     Check(await labels() == before, "reset did not restore the axis");
 });
 
+// FitWidth draws a chart at the width its container gives it. The checks run on a host's first fitted chart: the gallery has
+// its fitted charts on the Sports & performance page, where they run below, and a page without one says SKIP.
+async Task FitChecks(IPage target, ILocator fitted, string where)
+{
+    var handle = await fitted.ElementHandleAsync();
+    // The width it is drawn at, the width it is shown at, its box's width, its title's height on screen, and how far it scrolls.
+    async Task<double[]> Measure() => await fitted.EvaluateAsync<double[]>(@"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg');
+        return [Number(s.getAttribute('viewBox').split(' ')[2]), s.getBoundingClientRect().width, v.clientWidth, s.querySelector('text').getBoundingClientRect().height, v.scrollWidth - v.clientWidth]; }");
+    const string drawn = "Number(c.querySelector(':scope > .lumen-viewport > svg').getAttribute('viewBox').split(' ')[2])";
+    async Task Settle() => await target.WaitForFunctionAsync($"c => {drawn} === Math.max(320, c.querySelector(':scope > .lumen-viewport').clientWidth)", handle);
+    double[] desktop = [];
+
+    await Test($"A FitWidth chart is drawn at the width of its container, its text at its own size ({where})", async () =>
+    {
+        await Settle();
+        desktop = await Measure();
+        Check(Math.Abs(desktop[1] - desktop[0]) < 1.5, $"drawn {desktop[0]} wide and shown {desktop[1]:0.#} wide");
+        Check(desktop[4] <= 0, "the chart scrolls sideways");
+    });
+
+    await Test($"A FitWidth chart redraws when its container is resized, and its text keeps its size ({where})", async () =>
+    {
+        var before = (await Measure())[0];
+        await fitted.EvaluateAsync("c => c.parentElement.style.maxWidth = '480px'");
+        await target.WaitForFunctionAsync($"c => {drawn} < {before}", handle);
+        await Settle();
+        var narrow = await Measure();
+        Check(narrow[0] <= 480 && Math.Abs(narrow[1] - narrow[0]) < 1.5, $"in a 480-pixel container it is drawn {narrow[0]} wide and shown {narrow[1]:0.#} wide");
+        Check(Math.Abs(narrow[3] - desktop[3]) < .5, $"its title is {narrow[3]:0.#} pixels high, {desktop[3]:0.#} before");
+        await fitted.EvaluateAsync("c => c.parentElement.style.maxWidth = ''");
+        await target.WaitForFunctionAsync($"c => {drawn} === {before}", handle);
+    });
+
+    await Test($"On a 375-pixel phone a FitWidth chart fits the screen, its text the size it is on a desktop ({where})", async () =>
+    {
+        await target.SetViewportSizeAsync(375, 800);
+        await target.WaitForFunctionAsync($"c => {drawn} <= 375", handle);
+        await Settle();
+        // Anything else on the page that follows the width settles too, before the next check zooms.
+        await target.WaitForTimeoutAsync(600);
+        var phone = await Measure();
+        Check(phone[0] <= 375 && Math.Abs(phone[1] - phone[0]) < 1.5 && phone[4] <= 0, $"drawn {phone[0]} wide, shown {phone[1]:0.#} wide, scrolling {phone[4]}");
+        Check(Math.Abs(phone[3] - desktop[3]) < .5, $"its title is {phone[3]:0.#} pixels high on a phone and {desktop[3]:0.#} on a desktop");
+    });
+
+    await Test($"Zoom and the SVG and PNG exports work on a fitted chart, at the width it is drawn ({where})", async () =>
+    {
+        ILocator Button(string name) => fitted.Locator(".lumen-tools button", new() { HasTextString = name });
+        var width = (await Measure())[0];
+        var zoom = fitted.Locator(".lumen-tools button[aria-label='Zoom in']");
+        if (await zoom.CountAsync() > 0)
+        {
+            var labels = async () => string.Join("|", await fitted.Locator(".lumen-viewport > svg text").AllTextContentsAsync());
+            var before = await labels();
+            await zoom.ClickAsync();
+            await target.WaitForTimeoutAsync(500);
+            Check(await labels() != before, "zoom did not change the axis");
+            Check((await Measure())[0] == width, "zooming changed the width the chart is drawn at");
+            await Button("Reset view").ClickAsync();
+            await target.WaitForTimeoutAsync(500);
+            Check(await labels() == before, "reset did not restore the axis");
+        }
+        var svg = await target.RunAndWaitForDownloadAsync(async () => await Button("Export SVG").ClickAsync());
+        var exported = Regex.Match(await File.ReadAllTextAsync((await svg.PathAsync())!), "viewBox='0 0 ([0-9.]+) ").Groups[1].Value;
+        Check(exported == width.ToString(CultureInfo.InvariantCulture), $"the SVG export is {exported} wide and the chart {width}");
+        var png = await File.ReadAllBytesAsync((await (await target.RunAndWaitForDownloadAsync(async () => await Button("Export PNG").ClickAsync())).PathAsync())!);
+        var pixels = (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19];
+        Check(pixels == 2 * width, $"the PNG export is {pixels} pixels wide, not twice the chart's {width}");
+    });
+
+    await target.SetViewportSizeAsync(1400, 1000);
+    try { await Settle(); } catch (TimeoutException) { }
+}
+
+var firstFitted = page.Locator(".lumen-chart.lumen-fit").First;
+if (await firstFitted.CountAsync() > 0) await FitChecks(page, firstFitted, "first page");
+else Console.WriteLine("SKIP FitWidth checks on the first page: this host's first page has no FitWidth chart");
+
 var graph = page.Locator(".lumen-chart").Nth(1);
 if (await graph.CountAsync() > 0 && await graph.Locator("[data-node]").CountAsync() > 0)
 {
@@ -365,7 +443,7 @@ if (await sportsLink.CountAsync() > 0)
     await sports.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
     await sports.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });
     var charts = sports.Locator(".lumen-chart");
-    // The page measures its cards and draws each chart at the width it is shown, so the checks wait until it has.
+    // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
         return svgs.length === 10 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
@@ -407,6 +485,8 @@ if (await sportsLink.CountAsync() > 0)
         await sports.WaitForFunctionAsync("() => [...document.querySelectorAll('.lumen-viewport > svg')].every(s => s.getAttribute('style')?.includes('background:#0B0E14'))");
         await SweepOf(sports);
     });
+
+    await FitChecks(sports, sports.Locator("#stream .lumen-chart"), "Sports & performance page");
 
     await Test("On a 375-pixel phone the Sports & performance page and its charts fit the screen", async () =>
     {

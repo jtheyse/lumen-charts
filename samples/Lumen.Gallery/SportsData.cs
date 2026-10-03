@@ -307,10 +307,12 @@ public static class SportsData
     /// time-in-zone bars, the weekly zones, the HRV statuses and the grades, and the daily stress, the HRV baseline and the
     /// elevation fill in its first, neutral grey — take <paramref name="zones"/>, which should be the zone ramp of the brand they
     /// are drawn in, so they match the zone colours the library draws and clear contrast on its background. A wide chart is
-    /// <paramref name="wide"/> units across and the others <paramref name="half"/>.
+    /// drawn 1100 units across and the others 540, a desktop's widths, until the page fits each to its card. The activity
+    /// stream marks where the progression steps up when <paramref name="markers"/> is set.
     /// </summary>
-    public static IReadOnlyList<SportsCard> Cards(ChartTheme theme, IReadOnlyList<string> zones, int wide = 1100, int half = 540)
+    public static IReadOnlyList<SportsCard> Cards(ChartTheme theme, IReadOnlyList<string> zones, bool markers = true)
     {
+        const int wide = 1100, half = 540;
         var season = Season;
         var load = season.Load;
         var run = season.Sessions[^1];
@@ -363,8 +365,8 @@ public static class SportsData
                 Enumerable.Range(0, Weeks).Select(week => new ChartPoint(week, weeklyZones[week][z], WeekOf(week))).ToArray(), zones[z])).ToArray()
         };
 
-        // The last session, in three panes over its elapsed time, marked where the progression steps up while the chart is wide
-        // enough for the markers' labels to stand clear of the zones'.
+        // The last session, in three panes over its elapsed time, marked where the progression steps up unless the page finds the
+        // chart too narrow for the markers' labels to stand clear of the zones'.
         ChartPoint[] Over(IReadOnlyList<double> values) => values.Select((value, i) => new ChartPoint(i * RunSample, value)).ToArray();
         var stream = Chart(wide, 640) with
         {
@@ -372,7 +374,7 @@ public static class SportsData
             Title = $"{Text(run.Metres / 1000, "0.0")} km in {Clock(run.Seconds)}, {Text(track.HeartRate.Average())} bpm average",
             Description = $"{run.Day.ToString("dddd d MMMM", CultureInfo.InvariantCulture)} · {run.Name.ToLowerInvariant()}",
             XLabel = "Elapsed time", YLabel = "Heart rate (bpm)", YZones = HeartZones,
-            Annotations = wide < 600 ? [] : new[] { 4, 8, 11 }.Select(km => new ChartAnnotation(AnnotationAxis.X, Math.Round(TimeAt(track, run.Metres, km * 1000))) { Label = $"{km} km" }).ToArray(),
+            Annotations = !markers ? [] : new[] { 4, 8, 11 }.Select(km => new ChartAnnotation(AnnotationAxis.X, Math.Round(TimeAt(track, run.Metres, km * 1000))) { Label = $"{km} km" }).ToArray(),
             Panes = [new() { Label = "Pace (min/km)", Weight = .6, YFormat = ValueFormat.Duration, YReversed = true }, new() { Label = "Elevation (m)", Weight = .4 }],
             Series = [
                 new("Heart rate", Over(track.HeartRate)) { Zones = HeartZones, Markers = MarkerStyle.None },

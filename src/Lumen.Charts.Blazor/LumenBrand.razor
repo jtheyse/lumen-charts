@@ -9,11 +9,17 @@
     /// <summary>Custom property names for the series palette, comma separated and read in order, such as
     /// <c>--bs-primary, --bs-success</c>. Names the page does not define are skipped.</summary>
     [Parameter] public string? Series { get; set; }
+    /// <summary>The custom property for the chart background, such as <c>--bs-body-bg</c>.</summary>
     [Parameter] public string? Background { get; set; }
+    /// <summary>The custom property for titles, values and other primary text.</summary>
     [Parameter] public string? Text { get; set; }
+    /// <summary>The custom property for axis labels, captions and other secondary text.</summary>
     [Parameter] public string? Muted { get; set; }
+    /// <summary>The custom property for gridlines, which the component's control borders follow too.</summary>
     [Parameter] public string? Grid { get; set; }
+    /// <summary>The custom property for candles and OHLC bars that close at or above their open.</summary>
     [Parameter] public string? Rising { get; set; }
+    /// <summary>The custom property for candles and OHLC bars that close below their open.</summary>
     [Parameter] public string? Falling { get; set; }
     /// <summary>Use the font family in effect where this component sits in the page.</summary>
     [Parameter] public bool UseHostFont { get; set; } = true;
@@ -85,6 +91,7 @@
     private static string Signature(ChartStyle style) => string.Join("|", style.Series) + "|" +
         string.Join("|", style.Background, style.Text, style.Muted, style.Grid, style.Rising, style.Falling, style.FontFamily);
 
+    /// <summary>Releases the script that reads the page's colours.</summary>
     public async ValueTask DisposeAsync()
     {
         try { if (module is not null) await module.DisposeAsync(); }

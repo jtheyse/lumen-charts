@@ -1,6 +1,6 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
-<div class="lumen-chart" @ref="root">
+<div class="@(FitWidth ? "lumen-chart lumen-fit" : "lumen-chart")" @ref="root">
     <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart">@((MarkupString)svg)</div>
     <div class="lumen-legend" aria-label="Chart series">
         @for(var i=0;i<Spec.Series.Count;i++)
@@ -40,8 +40,21 @@
     }
 </div>
 @code {
+    /// <summary>The chart to draw. Set a new spec to update it. Whenever it is set, the zoom resets and the series the reader
+    /// has hidden stay hidden.</summary>
     [Parameter, EditorRequired] public ChartSpec Spec { get; set; } = new();
+    /// <summary>Raised when a mark is clicked, or chosen with Enter or Space, with the series and point it came from in the
+    /// original <see cref="Spec"/>, whatever is hidden or zoomed. Needs an interactive render mode.</summary>
     [Parameter] public EventCallback<PointSelection> PointSelected { get; set; }
+    /// <summary>
+    /// Draws the chart at the width its container gives it instead of at <see cref="ChartSpec.Width"/>, so that its text stays
+    /// at its own size on a phone or in a narrow card rather than being scaled down, and lifts the stylesheet's 640-pixel
+    /// minimum for this chart alone. The width is measured in the browser once the component is interactive, and again
+    /// whenever the container settles at a new width. Until then, and in static rendering, the chart is drawn at
+    /// <see cref="ChartSpec.Width"/> and scaled to fit. It is never drawn narrower than 320 pixels, the narrowest width a chart
+    /// accepts, and the SVG and PNG exports take the width it is drawn at.
+    /// </summary>
+    [Parameter] public bool FitWidth { get; set; }
     /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style on the spec itself wins.</summary>
     [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }
     private ChartStyle Style => Spec.Style ?? CascadingStyle ?? ChartSvg.ResolveStyle(Spec);
@@ -54,6 +67,12 @@
     private int[] visible=[];
     private Axis xAxis;
     private double? viewMin, viewMax;
+    // The width the container last reported while FitWidth is on, and whether the script is measuring it. A chart accepts
+    // widths from 320 to 4096 pixels.
+    private int? fitted;
+    private bool fitting;
+    private const int Narrowest=320, Widest=4096;
+    private int Width => FitWidth && fitted is { } width ? width : Spec.Width;
     private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band;
     private string Value(ChartSeries series,ChartPoint point)
     {
@@ -94,7 +113,7 @@
     protected override void OnParametersSet() { hidden.RemoveWhere(i=>i>=Spec.Series.Count);viewMin=null;viewMax=null;Render(); }
     private ChartSpec VisibleSpec()
     {
-        var spec=Spec with { Style=Style, XMin=CanZoom ? viewMin ?? Spec.XMin : Spec.XMin, XMax=CanZoom ? viewMax ?? Spec.XMax : Spec.XMax, Series=visible.Select(i=>Spec.Series[i] with {Color=ChartSvg.SeriesColor(Spec.Series[i],i,Style),Points=hidden.Contains(i)?[]:Spec.Series[i].Points}).ToArray() };
+        var spec=Spec with { Width=Width, Style=Style, XMin=CanZoom ? viewMin ?? Spec.XMin : Spec.XMin, XMax=CanZoom ? viewMax ?? Spec.XMax : Spec.XMax, Series=visible.Select(i=>Spec.Series[i] with {Color=ChartSvg.SeriesColor(Spec.Series[i],i,Style),Points=hidden.Contains(i)?[]:Spec.Series[i].Points}).ToArray() };
         if(Spec.Panes.Count==0||Spec.Series.Any(s=>s.Pane<0||s.Pane>Spec.Panes.Count))return spec;
         // A pane its hidden series leave empty closes and the panes under it move up, the first one left taking the main
         // plot's place and settings. Hidden candles whose pane closes move to the main plot.
@@ -113,7 +132,24 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if(firstRender) { module=await JS.InvokeAsync<IJSObjectReference>("import","./_content/Lumen.Charts.Blazor/lumen.js");reference=DotNetObjectReference.Create(this);await module.InvokeVoidAsync("attach",root,reference); }
+        // The script measures the chart's box only while the chart is asked to fit it.
+        if(module is not null&&FitWidth!=fitting)
+        {
+            fitting=FitWidth;
+            if(!fitting)fitted=null;
+            await module.InvokeVoidAsync(fitting?"fit":"unfit",root,reference);
+        }
     }
+    /// <summary>Called by the component's script, while <see cref="FitWidth"/> is on, with the width in whole pixels that the
+    /// chart's container gives it. The chart is redrawn at that width, keeping its zoom and hidden series.</summary>
+    [JSInvokable] public Task Fit(int width) => InvokeAsync(()=>
+    {
+        var next=Math.Clamp(width,Narrowest,Widest);
+        if(!FitWidth||next==fitted)return;
+        fitted=next;Render();StateHasChanged();
+    });
+    /// <summary>Called by the component's script when a mark is selected, with the index of its series among those drawn
+    /// and its point index. It reports the point in the status line and raises <see cref="PointSelected"/>.</summary>
     [JSInvokable] public async Task SelectPoint(int series,int point)
     {
         if(series<0||series>=visible.Length)return;
@@ -132,6 +168,7 @@
         }
         catch(JSException error) { status=$"Export failed: {error.Message}"; }
     }
+    /// <summary>Removes the chart's tooltip and event handlers from the page and stops measuring its box.</summary>
     public async ValueTask DisposeAsync()
     {
         try { if(module is not null) { await module.InvokeVoidAsync("detach",root);await module.DisposeAsync(); } }

@@ -1,6 +1,6 @@
 # Lumen.Charts API reference
 
-Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All specs are immutable records: build with an object initializer, change with `with { … }`.
+Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All specs are immutable records: build with an object initializer, change with `with { … }`. From 0.25.0 each package also ships its XML documentation beside the DLL (in the NuGet cache, `~/.nuget/packages/<package id>/<version>/lib/net8.0/<assembly>.xml`), so IntelliSense shows member docs and you can read them there.
 
 ## Contents
 - ChartSpec
@@ -28,7 +28,7 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 | `Style` | `ChartStyle?` | Colours, font and finish; wins over `Theme` and a cascaded style. |
 | `Series` | `IReadOnlyList<ChartSeries>` | The data. At most 32 series, 100,000 points. |
 | `XLabel`, `YLabel`, `Y2Label` | string | Axis titles. `Y2Label` names the right axis. |
-| `Width`, `Height` | int, 900 × 420 | The SVG's viewBox; the component scales it to its container. |
+| `Width`, `Height` | int, 900 × 420 | The SVG's viewBox, 320–4096 by 240–2160; the component scales it to its container, or with `FitWidth` draws it at the container's width. |
 | `XAxis`, `YAxis`, `Y2Axis` | `AxisKind`, `Linear` | `Linear`, `Log`, or (X only) `Time` in Unix milliseconds. |
 | `XFormat`, `YFormat`, `Y2Format` | `ValueFormat`, `Number` | `Duration` reads seconds; `Compact` writes 1.2k. Not on a time axis. |
 | `YReversed`, `Y2Reversed` | bool | Smaller values higher (pace). Refused for kinds that draw from zero. |
@@ -142,6 +142,7 @@ Static class `Training`; power in watts, time in seconds, samples uniformly spac
 ## Blazor components (`Lumen.Charts.Blazor`)
 
 - `<LumenChart Spec="…" PointSelected="(PointSelection p) => …" />` — `PointSelection(SeriesIndex, PointIndex)`.
+- `<LumenChart Spec="…" FitWidth="true" />` (0.25.0 and later) draws the chart at the width of its container instead of `Spec.Width`: measured once the component is interactive and again when the container settles at a new width, in whole pixels, never below 320. It lifts the stylesheet's 640 px minimum for that chart alone (a `lumen-fit` class on its root), keeps zoom, hidden series and point selection across a redraw, and exports SVG and PNG at the fitted width. Prerendered and static charts are drawn at `Spec.Width` and scaled until then. Default `false`, which renders as before. `LumenGraph` has no `FitWidth`.
 - `<LumenGraph Spec="…" NodeSelected="(string id) => …" />` — draggable nodes in an interactive render mode.
 - `<LumenBrand Series="--bs-primary, --bs-success" Background="--bs-body-bg" Text="--bs-body-color" Muted="--bs-secondary-color" Grid="--bs-border-color">…</LumenBrand>` reads the host page's CSS custom properties and cascades a `ChartStyle` to every chart inside. Or cascade one yourself: `<CascadingValue Value="Brand">…</CascadingValue>`.
 - Stylesheet: `_content/Lumen.Charts.Blazor/lumen.css`. Chrome colours via `--lumen-accent`, `--lumen-control-border`, `--lumen-tooltip-bg`, `--lumen-tooltip-fg`.

@@ -1,6 +1,6 @@
 # Downloads the Lumen.Charts packages from a GitHub release into ./local-packages and registers that
 # folder as a NuGet source, because the packages are published as release assets rather than on nuget.org.
-# Usage: install.ps1 [-Tag v0.24.0]   — the latest release when no tag is given.
+# Usage: install.ps1 [-Tag v0.25.0]   — the latest release when no tag is given.
 param([string]$Tag = "")
 $ErrorActionPreference = "Stop"
 
@@ -10,7 +10,7 @@ $dir = "local-packages"
 if (-not $Tag) {
     $Tag = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest").tag_name
 }
-if (-not $Tag) { throw "Could not find the latest release of $repo; pass -Tag v0.24.0." }
+if (-not $Tag) { throw "Could not find the latest release of $repo; pass -Tag v0.25.0." }
 $version = $Tag.TrimStart("v")
 
 if (Get-ChildItem -Filter *.csproj -ErrorAction SilentlyContinue | Select-String -Pattern 'Sdk="Microsoft\.NET\.Sdk\.(Web|BlazorWebAssembly|Razor)"' -Quiet) {

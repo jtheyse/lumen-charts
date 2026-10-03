@@ -44,7 +44,7 @@
                                 <h3>@card.Title</h3>
                                 <p>@foreach (var (part, i) in card.Note.Split('`').Select((part, i) => (part, i))) { if (i % 2 == 1) { <code>@part</code> } else { @part } }</p>
                             </header>
-                            @Branded(@<LumenChart Spec="Spec(card)"/>)
+                            @Branded(@<LumenChart Spec="Spec(card)" FitWidth="true"/>)
                         </article>
                     }
                 </div>
@@ -66,10 +66,11 @@
     private ElementReference main;
     private IJSObjectReference? module;
     private DotNetObjectReference<Sports>? reference;
-    // Until the page has been measured the charts are drawn at a desktop's widths, and the browser scales them to fit.
-    private int wide = 1100, half = 540;
+    // Each chart fits its card: FitWidth draws it at the width it is shown, so its text stays at its own size on a phone. The
+    // page itself decides only whether the activity stream's card is too narrow for its kilometre markers, as on a phone.
+    private bool narrow;
     private IReadOnlyList<SportsCard>? cards;
-    private IReadOnlyList<SportsCard> Cards => cards ??= SportsData.Cards(Look.Dark ? ChartTheme.Dark : ChartTheme.Light, Zones, wide, half);
+    private IReadOnlyList<SportsCard> Cards => cards ??= SportsData.Cards(Look.Dark ? ChartTheme.Dark : ChartTheme.Light, Zones, markers: !narrow);
     // The marks this page colours itself take the zone ramp of the brand they draw in, so they match the zones the library draws:
     // Midnight has a ramp of its own, and Harbour and the page's CSS keep the library's.
     private IReadOnlyList<string> Zones => Look.Brand switch
@@ -104,12 +105,11 @@
         catch (JSDisconnectedException) { }
     }
 
-    /// <summary>The widths the page gives a full-width chart and a half-width one, which the charts are then drawn at.</summary>
-    [JSInvokable] public Task Measured(int wideWidth, int halfWidth)
+    /// <summary>Whether the activity stream's card is narrower than 600 pixels, too narrow for its markers' labels.</summary>
+    [JSInvokable] public Task Narrow(bool value)
     {
-        var next = (Math.Clamp(wideWidth, 320, 1800), Math.Clamp(halfWidth, 320, 1800));
-        if (next == (wide, half)) return Task.CompletedTask;
-        (wide, half) = next;
+        if (value == narrow) return Task.CompletedTask;
+        narrow = value;
         cards = null;
         return InvokeAsync(StateHasChanged);
     }

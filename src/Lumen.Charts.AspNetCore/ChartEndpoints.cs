@@ -4,8 +4,15 @@ using Microsoft.AspNetCore.Routing;
 
 namespace Lumen.Charts.AspNetCore;
 
+/// <summary>The chart HTTP API.</summary>
 public static class ChartEndpoints
 {
+    /// <summary>
+    /// Maps the chart API under <paramref name="prefix"/>: <c>GET types</c> lists the chart kinds; <c>POST svg</c> and
+    /// <c>POST csv</c> take a <see cref="ChartSpec"/> as JSON and answer with its SVG or its data; <c>POST graph/svg</c>,
+    /// <c>graph/layout</c> and <c>graph/routes</c> take a <see cref="GraphSpec"/>. A spec that breaks a rule is answered with
+    /// 400 and the rule's message. Returns the group, so the host can add authorization or rate limiting to it.
+    /// </summary>
     public static RouteGroupBuilder MapLumenCharts(this IEndpointRouteBuilder endpoints, string prefix = "/api/charts")
     {
         var group=endpoints.MapGroup(prefix);

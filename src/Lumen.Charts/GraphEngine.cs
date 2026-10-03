@@ -1,5 +1,6 @@
 namespace Lumen.Charts;
 
+/// <summary>Lays out and draws network graphs. The layout is deterministic: one graph always lays out the same way.</summary>
 public static class GraphEngine
 {
     private const double Radius = 23, Trim = 25;
@@ -43,6 +44,8 @@ public static class GraphEngine
         static bool Inside(int value, int from, int to) => from < to ? value > from && value < to : value > from || value < to;
     }
 
+    /// <summary>Draws a graph as SVG. <paramref name="positions"/> moves nodes, by id, to centres of their own, such as where a
+    /// reader dragged them; their edges follow, and the other nodes keep the layout's places.</summary>
     public static string Render(GraphSpec graph, IReadOnlyDictionary<string, GraphPoint>? positions = null)
     {
         var layout = Layout(graph).ToDictionary(p => p.Id, p => positions is not null && positions.TryGetValue(p.Id, out var moved) ? moved : new GraphPoint(p.X, p.Y), StringComparer.Ordinal);

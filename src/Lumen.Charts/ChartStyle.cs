@@ -4,7 +4,17 @@ namespace Lumen.Charts;
 
 /// <summary>How the gridlines of a chart drawn on X and Y axes are stroked. <see cref="Hidden"/> leaves them out and keeps
 /// the tick labels.</summary>
-public enum GridLine { Solid, Dotted, Dashed, Hidden }
+public enum GridLine
+{
+    /// <summary>Unbroken lines, which the classic finish draws by default.</summary>
+    Solid,
+    /// <summary>Dotted hairlines, which the refined finish draws by default.</summary>
+    Dotted,
+    /// <summary>Dashed lines.</summary>
+    Dashed,
+    /// <summary>No gridlines.</summary>
+    Hidden
+}
 
 /// <summary>
 /// How a chart is drawn beyond its colours. <see cref="Refined"/> is the default: thin strokes that keep their width at any
@@ -12,7 +22,13 @@ public enum GridLine { Solid, Dotted, Dashed, Hidden }
 /// like their marks, ticks spaced to the room they have, and reference labels kept legible and inside the plot.
 /// <see cref="Classic"/> draws exactly as 0.23.0 did, byte for byte.
 /// </summary>
-public enum ChartFinish { Refined, Classic }
+public enum ChartFinish
+{
+    /// <summary>The default finish.</summary>
+    Refined,
+    /// <summary>The finish of 0.23.0 and earlier.</summary>
+    Classic
+}
 
 /// <summary>
 /// Every colour and the typeface a chart draws with. Set it on a <see cref="ChartSpec"/> or
@@ -28,10 +44,13 @@ public sealed record ChartStyle
     private static readonly IReadOnlyList<string> DefaultZones =
         Array.AsReadOnly(new[] { "#848484", "#3F87D9", "#2E9B58", "#A88200", "#DB6A1F", "#DD4B45", "#9E63D3" });
 
+    /// <summary>The chart's background, drawn into the SVG so that exports keep it.</summary>
     public string Background { get; init; } = "#FFFFFF";
+    /// <summary>Titles, values and other primary text.</summary>
     public string Text { get; init; } = "#26324B";
     /// <summary>Axis labels, captions and other secondary text.</summary>
     public string Muted { get; init; } = "#63718A";
+    /// <summary>Gridlines, and a radar's rings and spokes.</summary>
     public string Grid { get; init; } = "#E8EDF5";
     /// <summary>Graph edges and their arrowheads.</summary>
     public string Edge { get; init; } = "#8090AD";
@@ -40,7 +59,9 @@ public sealed record ChartStyle
     /// <summary>Zone colours from low intensity to high. A zone without its own colour takes the entry at its
     /// position in its scale, so Coggan's seven power levels use all seven and his five heart-rate levels the first five.</summary>
     public IReadOnlyList<string> Zones { get; init; } = DefaultZones;
+    /// <summary>Candles and OHLC bars that close at or above their open.</summary>
     public string Rising { get; init; } = "#169B8D";
+    /// <summary>Candles and OHLC bars that close below their open.</summary>
     public string Falling { get; init; } = "#D36B84";
     /// <summary>Heatmap cells are interpolated from this colour at the lowest value…</summary>
     public string HeatmapLow { get; init; } = "#E4EDFC";
@@ -78,6 +99,8 @@ public sealed record ChartStyle
         Gridlines = GridLine.Dotted, BarRadius = 9999
     };
 
+    /// <summary>The palette colour for the series at <paramref name="index"/>, the palette repeating when there are more
+    /// series than colours.</summary>
     public string SeriesColor(int index) => Series[index % Series.Count];
 
     /// <summary>
@@ -119,11 +142,18 @@ public sealed record ChartStyle
     }
 }
 
+/// <summary>A colour pair below the WCAG 2.1 minimum, as <see cref="ChartStyle.ContrastIssues"/> reports it.</summary>
+/// <param name="Element">What the colour is used for, such as <c>Series 3</c> or <c>Muted text</c>.</param>
+/// <param name="Foreground">The colour that falls short.</param>
+/// <param name="Background">The background it falls short against.</param>
+/// <param name="Ratio">The contrast the pair reaches, rounded to two decimals.</param>
+/// <param name="Required">The contrast it needs: 4.5 for text, 3 for marks, zones and edges.</param>
 public sealed record ContrastIssue(string Element, string Foreground, string Background, double Ratio, double Required);
 
 /// <summary>WCAG 2.1 relative-luminance contrast.</summary>
 public static class Contrast
 {
+    /// <summary>The contrast ratio of two <c>#RRGGBB</c> colours, from 1 to 21, whichever order they come in.</summary>
     public static double Ratio(string first, string second)
     {
         double a = Luminance(first), b = Luminance(second);

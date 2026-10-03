@@ -1873,13 +1873,13 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
     Reject(()=>ChartSvg.Render(Spec() with{YFormat=(ValueFormat)9}));
     Reject(()=>ChartSvg.Render(Spec() with{Y2Format=(ValueFormat)(-1)}));
 });
-string Operate(ChartSpec spec,Func<LumenChart,Task> act)
+string Operate(ChartSpec spec,Func<LumenChart,Task> act,bool fit=false)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
     var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
     try {
         LumenChart? chart=null;
-        RenderFragment content=b=>{b.OpenComponent<LumenChart>(0);b.AddAttribute(1,"Spec",spec);b.AddComponentReferenceCapture(2,c=>chart=(LumenChart)c);b.CloseComponent();};
+        RenderFragment content=b=>{b.OpenComponent<LumenChart>(0);b.AddAttribute(1,"Spec",spec);if(fit)b.AddAttribute(2,"FitWidth",true);b.AddComponentReferenceCapture(3,c=>chart=(LumenChart)c);b.CloseComponent();};
         return renderer.Dispatcher.InvokeAsync(async()=>{
             var root=await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",ChartStyle.Light},{"ChildContent",content}}));
             await act(chart!);
@@ -3673,13 +3673,15 @@ DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
 Test("Sports page: ten charts, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
     Check(sports.Count==10&&sports.Select(card=>card.Id).Distinct().Count()==10,"the page should have ten charts");
     foreach(var (theme,style,zones) in new[]{(ChartTheme.Light,(ChartStyle?)null,ChartStyle.Light.Zones),(ChartTheme.Dark,null,ChartStyle.Light.Zones),(ChartTheme.Dark,ChartStyle.Midnight,ChartStyle.Midnight.Zones)})
-        foreach(var (wide,half) in new[]{(1100,540),(337,337)})
-            foreach(var card in SportsData.Cards(theme,zones,wide,half))
+        foreach(var markers in new[]{true,false})
+            foreach(var card in SportsData.Cards(theme,zones,markers))
             {
-                var doc=XDocument.Parse(ChartSvg.Render(card.Spec with{Style=style}));
-                Check(doc.Descendants().Any(e=>e.Attribute("data-point") is not null),$"{card.Id} drew no marks");
-                Check(card.Spec.Width==(card.Wide?wide:half)&&card.Spec.Source.Contains("simulated"),$"{card.Id} is not drawn at its card's width or does not say it is simulated");
+                Check(card.Spec.Width==(card.Wide?1100:540)&&card.Spec.Source.Contains("simulated"),$"{card.Id} is not drawn at a desktop's width before it is fitted, or does not say it is simulated");
+                // The page's charts set FitWidth, which draws each at the width its card gives it, as here.
+                foreach(var width in new[]{card.Spec.Width,337})
+                    Check(XDocument.Parse(ChartSvg.Render(card.Spec with{Width=width,Style=style})).Descendants().Any(e=>e.Attribute("data-point") is not null),$"{card.Id} drew no marks {width} wide");
             }
+    Check(Sports("stream").Annotations.Count==3&&SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones,markers:false).Single(card=>card.Id=="stream").Spec.Annotations.Count==0,"the stream's markers do not follow the page");
 });
 Test("Sports page: the stream's run is a day of the performance chart, at the stress it scored, and every day is its sessions",()=>{
     var daily=Sports("performance").Series.Single(s=>s.Name=="Daily stress").Points;
@@ -3764,6 +3766,100 @@ Test("Sports page: the headline numbers are the charts' own, and the season is t
     var again=SportsData.Simulate();
     Check(again.Sessions.Select(s=>(s.Day,s.Name,s.Stress,s.Seconds,s.Best5k)).SequenceEqual(athlete.Sessions.Select(s=>(s.Day,s.Name,s.Stress,s.Seconds,s.Best5k)))
         &&again.Load.SequenceEqual(athlete.Load)&&again.Hrv.SequenceEqual(athlete.Hrv)&&again.Planned.SequenceEqual(athlete.Planned),"two simulations differ");
+});
+// 0.25.0: FitWidth draws a chart at the width its box gives it. A chart that leaves it off must render exactly as 0.24.0
+// did, and one that sets it is marked for the stylesheet and redrawn at the width its script reports.
+RenderFragment ChartElement(ChartSpec spec,bool? fit=null)=>b=>{b.OpenComponent<LumenChart>(0);b.AddAttribute(1,"Spec",spec);if(fit is {} f)b.AddAttribute(2,"FitWidth",f);b.CloseComponent();};
+string Prerender(RenderFragment content,ChartStyle? cascaded=null)
+{
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try {
+        return renderer.Dispatcher.InvokeAsync(async()=>{
+            var root=await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",cascaded},{"ChildContent",content}}));
+            return root.ToHtmlString();
+        }).GetAwaiter().GetResult();
+    } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
+}
+Test("Without FitWidth the component renders exactly as 0.24.0 did",()=>{
+    // Hashes of the prerendered markup taken from 0.24.0's component before FitWidth was added. Razor keeps the whitespace
+    // between elements, line breaks included, so a checkout's line endings reach the markup: it is hashed with LF endings.
+    (string Row,string Hash,ChartSpec Spec,ChartStyle? Cascaded)[] rows=[
+        ("line","90DEC01423FBCF0A",Spec(),null),
+        ("columns","4B0BC9F6E5BB0562",Spec(ChartKind.Column) with{Series=[new("A",[new(0,2,"A"),new(1,5,"B")]),new("B",[new(0,3,"A"),new(1,4,"B")])]},null),
+        ("stream","32658617237228CB",Sports("stream"),null),
+        ("Midnight","295A098ED64C73D8",Spec(),ChartStyle.Midnight)];
+    var changed=rows.Select(r=>(r.Row,r.Hash,Now:Hash16(Prerender(ChartElement(r.Spec),r.Cascaded).Replace("\r\n","\n")))).Where(r=>r.Now!=r.Hash).ToArray();
+    Check(changed.Length==0,"renders differently: "+string.Join(", ",changed.Select(r=>$"{r.Row} {r.Now}")));
+    Check(rows.All(r=>Prerender(ChartElement(r.Spec,false),r.Cascaded)==Prerender(ChartElement(r.Spec),r.Cascaded)),"FitWidth=\"false\" renders differently from leaving it out");
+});
+Test("FitWidth marks its own chart, and the stylesheet lifts the 640-pixel minimum for that chart alone",()=>{
+    RenderFragment both=b=>{b.AddContent(0,ChartElement(Spec(),true));b.AddContent(1,ChartElement(Spec()));};
+    var html=Prerender(both);
+    Check(html.Split("class=\"lumen-chart lumen-fit\"").Length==2&&html.Split("class=\"lumen-chart\"").Length==2,"the fitted chart and the other one are not told apart");
+    // Until the browser measures it, a fitted chart is drawn at its spec's own width: prerendered, only its class differs.
+    var fitted=Prerender(ChartElement(Sports("stream"),true));
+    Check(fitted.Contains("viewBox='0 0 1100 640'")&&fitted.Replace(" lumen-fit","")==Prerender(ChartElement(Sports("stream"))),"the prerendered fitted chart differs by more than its class");
+    var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
+    Check(css.Contains(".lumen-viewport>svg{min-width:640px}"),"the minimum is gone for every chart");
+    // The only rule naming the class reaches the drawing of the chart that carries it, and nothing else.
+    Check(css.Split(".lumen-fit").Length==2&&css.Contains(".lumen-fit>.lumen-viewport>svg{min-width:0}"),"the fitted chart's rule is missing or reaches further");
+});
+Test("A fitted chart redraws at the width its box reports, keeps its zoom and hidden series, and exports at that width",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    string Drawn(LumenChart chart)=>(string)typeof(LumenChart).GetField("svg",flags)!.GetValue(chart)!;
+    string Box(string svg)=>XDocument.Parse(svg).Root!.Attribute("viewBox")!.Value;
+    var spec=Spec() with{Series=[new("A",[new(0,2),new(1,5),new(2,3),new(3,4)]),new("B",[new(0,1),new(1,2),new(2,4),new(3,3)])]};
+    var boxes=new List<string>();string exported="",refitted="";
+    var html=Operate(spec,async chart=>{
+        typeof(LumenChart).GetMethod("Zoom",flags)!.Invoke(chart,[.5]);typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[1]);
+        boxes.Add(Box(Drawn(chart)));
+        await chart.Fit(375);boxes.Add(Box(Drawn(chart)));
+        Check(typeof(LumenChart).GetField("viewMin",flags)!.GetValue(chart) is double,"fitting reset the zoom");
+        Check(!Drawn(chart).Contains("aria-label='B: ")&&Drawn(chart).Contains("aria-label='A: "),"fitting brought back the hidden series");
+        // The SVG and PNG exports render the spec the chart draws.
+        exported=ChartSvg.Render((ChartSpec)typeof(LumenChart).GetMethod("VisibleSpec",flags)!.Invoke(chart,[])!);
+        await chart.Fit(200);boxes.Add(Box(Drawn(chart)));
+        await chart.Fit(5000);boxes.Add(Box(Drawn(chart)));
+        // A new spec from the page is drawn at the width already measured.
+        await chart.Fit(412);
+        await chart.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",spec with{Title="Again"}},{"FitWidth",true}}));
+        refitted=Drawn(chart);
+    },fit:true);
+    Check(boxes.SequenceEqual(["0 0 900 420","0 0 375 420","0 0 320 420","0 0 4096 420"]),"drawn at "+string.Join(", ",boxes));
+    // An export adds its legend below the chart, so only its width is the chart's.
+    Check(Box(exported).StartsWith("0 0 375 ")&&exported.Contains("aria-label='A: ")&&!exported.Contains("aria-label='B: "),"the export is not the fitted chart");
+    Check(Box(refitted)=="0 0 412 420"&&refitted.Contains("Again"),"a new spec lost the measured width");
+    Check(html.Contains("class=\"lumen-chart lumen-fit\"")&&html.Contains("viewBox='0 0 412 420'"),"the page does not show the fitted chart");
+    // A chart that is not asked to fit ignores a width.
+    var ignored="";
+    Operate(spec,async chart=>{await chart.Fit(375);ignored=Drawn(chart);});
+    Check(Box(ignored)=="0 0 900 420","a chart without FitWidth took a measured width");
+});
+Test("The packages carry their XML documentation beside each assembly, and it covers what a consumer uses most",()=>{
+    var documented=new HashSet<string>();
+    foreach(var assembly in new[]{typeof(ChartSpec).Assembly,typeof(LumenChart).Assembly,typeof(Lumen.Charts.AspNetCore.ChartEndpoints).Assembly})
+    {
+        var path=Path.ChangeExtension(assembly.Location,".xml");
+        Check(File.Exists(path),$"{Path.GetFileName(path)} is not beside {Path.GetFileName(assembly.Location)}");
+        documented.UnionWith(XDocument.Load(path).Descendants("member").Where(m=>!string.IsNullOrWhiteSpace(m.Value)).Select(m=>(string)m.Attribute("name")!));
+    }
+    Check(documented.Contains("T:Lumen.Charts.ChartSpec")&&documented.Contains("P:Lumen.Charts.ChartSpec.Width")&&documented.Contains("P:Lumen.Charts.Blazor.LumenChart.FitWidth")
+        &&documented.Any(m=>m.StartsWith("M:Lumen.Charts.AspNetCore.ChartEndpoints.MapLumenCharts(")),"a headline member is undocumented");
+    const System.Reflection.BindingFlags declared=System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.DeclaredOnly;
+    bool Generated(System.Reflection.MemberInfo member)=>member.IsDefined(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute),false);
+    // Every property of the records a chart is built from and of the results the training and statistics classes return,
+    // every component parameter, and every method of those classes, of the style and of the series and point factories.
+    var properties=new[]{typeof(ChartSpec),typeof(ChartSeries),typeof(ChartPoint),typeof(ChartPane),typeof(ChartAnnotation),typeof(ChartStyle),typeof(ZoneScale),typeof(Zone),
+            typeof(LoadDay),typeof(CriticalPowerFit),typeof(BoxSummary),typeof(LinearFit),typeof(RollingWindow),typeof(HistogramBin),typeof(PointSelection)}
+        .SelectMany(t=>t.GetProperties(declared).Select(p=>$"P:{t.FullName}.{p.Name}"))
+        .Concat(new[]{typeof(LumenChart),typeof(LumenGraph),typeof(LumenBrand)}.SelectMany(t=>t.GetProperties(declared)
+            .Where(p=>p.IsDefined(typeof(ParameterAttribute),false)||p.IsDefined(typeof(CascadingParameterAttribute),false)).Select(p=>$"P:{t.FullName}.{p.Name}")));
+    var methods=new[]{typeof(Training),typeof(Statistics),typeof(ZoneScale),typeof(ChartStyle),typeof(ChartSeries),typeof(ChartPoint)}
+        .SelectMany(t=>t.GetMethods(declared).Where(m=>!m.IsSpecialName&&!Generated(m)).Select(m=>$"M:{t.FullName}.{m.Name}"));
+    var missing=properties.Where(id=>!documented.Contains(id))
+        .Concat(methods.Where(id=>!documented.Any(d=>d==id||d.StartsWith(id+"(")||d.StartsWith(id+"``")))).Distinct().ToArray();
+    Check(missing.Length==0,"undocumented: "+string.Join(", ",missing));
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

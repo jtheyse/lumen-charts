@@ -2,22 +2,43 @@ namespace Lumen.Charts;
 
 /// <summary>Quartiles, whiskers and outliers. <see cref="Statistics.Summarize"/> uses Tukey whiskers, with outliers
 /// beyond 1.5 interquartile ranges from the box; a summary supplied on <see cref="ChartSeries.Summary"/> may use any rule.</summary>
+/// <param name="Q1">The first quartile, the bottom of the box.</param>
+/// <param name="Median">The median, the line across the box.</param>
+/// <param name="Q3">The third quartile, the top of the box.</param>
+/// <param name="LowerWhisker">Where the lower whisker ends.</param>
+/// <param name="UpperWhisker">Where the upper whisker ends.</param>
+/// <param name="Outliers">The values drawn beyond the whiskers.</param>
 public sealed record BoxSummary(double Q1, double Median, double Q3, double LowerWhisker, double UpperWhisker, IReadOnlyList<double> Outliers)
 {
+    /// <summary>The height of the box: <see cref="Q3"/> minus <see cref="Q1"/>.</summary>
     public double InterquartileRange => Q3 - Q1;
 }
 
+/// <summary>One histogram bin: the observations from <paramref name="Start"/> up to <paramref name="End"/>, and how many there
+/// are. A value on the edge between two bins counts in the upper one, and the last bin also counts its upper edge.</summary>
+/// <param name="Start">The bin's lower edge.</param>
+/// <param name="End">The bin's upper edge.</param>
+/// <param name="Count">How many observations fall in it.</param>
 public sealed record HistogramBin(double Start, double End, int Count);
 
 /// <summary>A least-squares line and the share of the variance in Y it accounts for.</summary>
+/// <param name="Slope">How much Y rises for each unit of X.</param>
+/// <param name="Intercept">The fitted Y where X is zero.</param>
+/// <param name="R2">The share of the variance in Y the line accounts for, from 0 to 1.</param>
+/// <param name="Count">How many observations it was fitted to.</param>
 public sealed record LinearFit(double Slope, double Intercept, double R2, int Count)
 {
+    /// <summary>The fitted Y at <paramref name="x"/>.</summary>
     public double Predict(double x) => Intercept + Slope * x;
 }
 
 /// <summary>The mean and sample standard deviation of the values present in one trailing window, and how many there were.</summary>
+/// <param name="Mean">The mean of the values present.</param>
+/// <param name="Deviation">Their sample standard deviation, dividing by n − 1; zero for a single value.</param>
+/// <param name="Count">How many values were present.</param>
 public sealed record RollingWindow(double Mean, double Deviation, int Count);
 
+/// <summary>The numbers behind the statistical charts and trend lines, for a host that wants them without the drawing.</summary>
 public static class Statistics
 {
     /// <summary>
@@ -76,6 +97,7 @@ public static class Statistics
         return result;
     }
 
+    /// <summary>The most bins a histogram takes.</summary>
     public const int MaxBins = 100;
 
     /// <summary>Linear interpolation between order statistics, matching NumPy's default and Excel's PERCENTILE.INC.</summary>
@@ -89,6 +111,11 @@ public static class Statistics
         return lower + 1 < sorted.Count ? sorted[lower] + fraction * (sorted[lower + 1] - sorted[lower]) : sorted[lower];
     }
 
+    /// <summary>
+    /// The box a box chart draws: quartiles by <see cref="Quantile"/>, whiskers at the most extreme observations within 1.5
+    /// interquartile ranges of the box, which is Tukey's rule, and every observation beyond them as an outlier. Throws
+    /// <see cref="ArgumentException"/> when there are no values.
+    /// </summary>
     public static BoxSummary Summarize(IEnumerable<double> values)
     {
         var sorted = values.OrderBy(v => v).ToArray();

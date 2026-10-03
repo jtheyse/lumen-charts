@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Downloads the Lumen.Charts packages from a GitHub release into ./local-packages and registers that
 # folder as a NuGet source, because the packages are published as release assets rather than on nuget.org.
-# Usage: install.sh [tag]   e.g. install.sh v0.24.0 — the latest release when no tag is given.
+# Usage: install.sh [tag]   e.g. install.sh v0.25.0 — the latest release when no tag is given.
 set -euo pipefail
 
 repo="jtheyse/lumen-charts"
@@ -15,7 +15,7 @@ if [ -z "$tag" ]; then
     tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
   fi
 fi
-[ -n "$tag" ] || { echo "Could not find the latest release of $repo; pass a tag such as v0.24.0." >&2; exit 1; }
+[ -n "$tag" ] || { echo "Could not find the latest release of $repo; pass a tag such as v0.25.0." >&2; exit 1; }
 version="${tag#v}"
 
 if grep -qsE 'Sdk="Microsoft\.NET\.Sdk\.(Web|BlazorWebAssembly|Razor)"' ./*.csproj 2>/dev/null; then

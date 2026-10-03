@@ -7,6 +7,9 @@ namespace Lumen.Charts;
 /// zone's upper bound up to and including its own. The top zone of a scale is unbounded, so its upper bound is
 /// <see cref="double.PositiveInfinity"/>, which JSON writes as the string <c>"Infinity"</c>. A zone without a
 /// <paramref name="Color"/> draws in the style's <see cref="ChartStyle.Zones"/> ramp at its position in the scale.</summary>
+/// <param name="Name">What the zone is called in labels, tooltips and band names.</param>
+/// <param name="Upper">The highest value the zone holds.</param>
+/// <param name="Color">A <c>#RRGGBB</c> colour, or null for the style's ramp.</param>
 public sealed record Zone(string Name, [property: JsonNumberHandling(JsonNumberHandling.AllowNamedFloatingPointLiterals)] double Upper, string? Color = null);
 
 /// <summary>
@@ -20,6 +23,8 @@ public sealed record Zone(string Name, [property: JsonNumberHandling(JsonNumberH
 [JsonConverter(typeof(ZoneScaleJson))]
 public sealed record ZoneScale(IReadOnlyList<Zone> Zones)
 {
+    /// <summary>The zones from lowest to highest, checked as the scale is made: at least one, each named, upper bounds rising
+    /// strictly, and only the last unbounded.</summary>
     public IReadOnlyList<Zone> Zones { get; } = Checked(Zones);
 
     /// <summary>The first zone whose upper bound is at least <paramref name="value"/>, or -1 for NaN, which no zone holds.</summary>
@@ -78,10 +83,19 @@ internal sealed class ZoneScaleJson : JsonConverter<ZoneScale>
 }
 
 /// <summary>Fitness, fatigue and form for one day. Form is yesterday's fitness minus yesterday's fatigue.</summary>
+/// <param name="Day">The day.</param>
+/// <param name="Stress">The training stress scored that day.</param>
+/// <param name="Fitness">Chronic training load: the long, by default 42-day, exponentially weighted average of stress.</param>
+/// <param name="Fatigue">Acute training load: the short, by default 7-day, average.</param>
+/// <param name="Form">Training stress balance: yesterday's fitness minus yesterday's fatigue.</param>
 public sealed record LoadDay(DateOnly Day, double Stress, double Fitness, double Fatigue, double Form);
 
 /// <summary>Monod's critical-power model fitted to maximal efforts: <see cref="CriticalPower"/> in watts and
 /// <see cref="WPrime"/>, the work available above it, in joules.</summary>
+/// <param name="CriticalPower">The power that can be held for a long time, in watts.</param>
+/// <param name="WPrime">The work available above critical power, in joules.</param>
+/// <param name="R2">How well the line through work against duration fits the efforts, from 0 to 1.</param>
+/// <param name="Count">How many efforts between three and twenty minutes it was fitted to.</param>
 public sealed record CriticalPowerFit(double CriticalPower, double WPrime, double R2, int Count);
 
 /// <summary>

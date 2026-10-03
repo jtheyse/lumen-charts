@@ -2,21 +2,43 @@ using System.Globalization;
 
 namespace Lumen.Charts;
 
-public enum AxisKind { Linear, Log, Time }
+/// <summary>How an axis spaces its values.</summary>
+public enum AxisKind
+{
+    /// <summary>Equal steps for equal differences.</summary>
+    Linear,
+    /// <summary>Equal steps for equal ratios, base 10. Positive values only.</summary>
+    Log,
+    /// <summary>Moments in Unix milliseconds, ticked and labelled by the calendar. X only.</summary>
+    Time
+}
 
 /// <summary>
 /// How an axis writes its values. <see cref="Duration"/> reads them as seconds: m:ss and h:mm:ss on a linear
 /// axis, 1s, 5m and 1h on a logarithmic one. <see cref="Compact"/> writes 1.2k, 3.4M and 1.5B. A time axis
 /// writes its calendar and takes neither.
 /// </summary>
-public enum ValueFormat { Number, Duration, Compact }
+public enum ValueFormat
+{
+    /// <summary>Plain numbers, the default.</summary>
+    Number,
+    /// <summary>Seconds, written as a clock or a span.</summary>
+    Duration,
+    /// <summary>Thousands, millions, billions and trillions with a suffix.</summary>
+    Compact
+}
 
-/// <summary>Time axis values are Unix milliseconds. Ticks and labels are UTC; local time zones are not applied.</summary>
+/// <summary>Time axis values are Unix milliseconds. Ticks and labels read in UTC unless <see cref="ChartSpec.TimeZone"/> names a zone,
+/// whose calendar the axis then follows.</summary>
 public static class TimeAxis
 {
+    /// <summary>The earliest value a time axis takes: the start of 1 January in the year 1, UTC.</summary>
     public const double MinValue = -62135596800000d;
+    /// <summary>The latest value a time axis takes: the last millisecond of 31 December 9999, UTC.</summary>
     public const double MaxValue = 253402300799999d;
+    /// <summary>A moment in Unix milliseconds, the units a time axis reads.</summary>
     public static double Value(DateTimeOffset moment) => moment.ToUnixTimeMilliseconds();
+    /// <summary>A time axis value back as a moment in UTC, rounded to the millisecond.</summary>
     public static DateTimeOffset Moment(double value) => DateTimeOffset.FromUnixTimeMilliseconds((long)Math.Round(value));
     internal static double Value(DateTime utc) => Value(new DateTimeOffset(utc, TimeSpan.Zero));
     internal static bool InRange(double value) => value >= MinValue && value <= MaxValue;
@@ -81,6 +103,8 @@ public static class TimeAxis
 }
 
 /// <summary>A span of time an axis leaves out, so the data either side of it sits together.</summary>
+/// <param name="From">Where the span starts, in Unix milliseconds.</param>
+/// <param name="To">Where it ends and the axis resumes.</param>
 public sealed record TimeSkip(double From, double To);
 
 /// <summary>Linear, base-10 logarithmic or time domain mapped onto a pixel interval.</summary>
@@ -115,6 +139,12 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     private static readonly double[] LogDurations = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 7200, 10800, 14400, 18000];
     private static readonly (double Size, string Suffix)[] Magnitudes = [(1e3, "k"), (1e6, "M"), (1e9, "B"), (1e12, "T")];
 
+    /// <summary>
+    /// An axis fitted to <paramref name="values"/>, as a chart fits one. <paramref name="zero"/> stretches a linear axis to
+    /// include zero; <paramref name="min"/> and <paramref name="max"/> replace the data's extent; <paramref name="zone"/>,
+    /// <paramref name="weekends"/> and <paramref name="skips"/> set a time axis's calendar and the spans it leaves out. Throws
+    /// <see cref="ArgumentException"/> when the bounds leave no range, or a logarithmic axis would reach zero or below.
+    /// </summary>
     public static Axis Create(AxisKind kind, IEnumerable<double> values, bool zero = false, double? min = null, double? max = null,
         TimeZoneInfo? zone = null, bool weekends = false, IEnumerable<TimeSkip>? skips = null)
     {
@@ -141,6 +171,9 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         return axis with { Skips = TimeAxis.Normalise(skips is null ? wanted : wanted.Concat(skips), lo, hi) };
     }
 
+    /// <summary>Where <paramref name="value"/> falls between <paramref name="start"/> and <paramref name="end"/>, the positions
+    /// of the axis's minimum and maximum, measured in the axis's own space: logarithmic on a log axis, and with the skipped
+    /// spans closed up on a time axis. A reversed axis swaps the two ends.</summary>
     public double Map(double value, double start, double end)
     {
         if (Reversed) (start, end) = (end, start);

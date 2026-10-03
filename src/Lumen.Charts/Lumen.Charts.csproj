@@ -3,6 +3,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Description>Dependency-free SVG charts and deterministic graph layouts for .NET.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup><None Include="../../README.md" Pack="true" PackagePath="/" /></ItemGroup>
 </Project>

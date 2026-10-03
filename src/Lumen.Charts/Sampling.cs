@@ -1,6 +1,9 @@
 namespace Lumen.Charts;
 
+// The class has no comment of its own yet; its one method does.
+#pragma warning disable CS1591
 public static class Sampling
+#pragma warning restore CS1591
 {
     /// <summary>Min/max buckets preserve extrema, endpoints and their original point indices. Use on a contiguous segment.</summary>
     public static IReadOnlyList<int> MinMax(IReadOnlyList<ChartPoint> points, int budget)

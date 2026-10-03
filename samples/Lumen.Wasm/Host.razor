@@ -11,7 +11,7 @@
             <button type="button" aria-pressed="@(selected==kind ? "true" : "false")" @onclick="()=>Select(choice)">@kind</button>
         }
     </div>
-    <div class="card"><LumenChart @key="selected" Spec="Current" PointSelected="OnPoint"/></div>
+    <div class="card"><LumenChart @key="selected" Spec="Current" PointSelected="OnPoint" FitWidth="true"/></div>
     <p class="state" role="status">@(point ?? "Select a mark to report its original series and point index.")</p>
 
     <h2 id="graph">Network</h2>

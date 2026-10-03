@@ -1,4 +1,5 @@
 const handlers = new WeakMap();
+const fits = new WeakMap();
 
 export function attach(root, dotnet) {
     const tooltip = document.createElement('div');
@@ -99,7 +100,34 @@ export function attachGraph(root, dotnet) {
     handlers.set(root, { bindings });
 }
 
+/// Reports the width of a chart's box in whole pixels, at once and again whenever the box settles at a new width, so that
+/// the chart can be drawn at the width it is shown and its text keeps its own size. A hidden box measures nothing.
+export function fit(root, dotnet) {
+    unfit(root);
+    let timer = 0, last = 0;
+    const measure = () => {
+        const box = root.querySelector(':scope > .lumen-viewport') || root;
+        const width = box.clientWidth;
+        if (!width || width === last) return;
+        last = width;
+        dotnet.invokeMethodAsync('Fit', width);
+    };
+    const observer = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(measure, 150); });
+    observer.observe(root);
+    fits.set(root, { observer, stop: () => clearTimeout(timer) });
+    measure();
+}
+
+export function unfit(root) {
+    const state = fits.get(root);
+    if (!state) return;
+    state.observer.disconnect();
+    state.stop();
+    fits.delete(root);
+}
+
 export function detach(root) {
+    unfit(root);
     const state = handlers.get(root);
     if (!state) return;
     for (const [type, handler] of state.bindings) root.removeEventListener(type, handler);

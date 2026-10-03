@@ -53,13 +53,17 @@ internal sealed class SvgWriter
         definitions.Length == 0 ? output.ToString() : output.ToString().Insert(definitionsAt, $"<defs>{definitions}</defs>");
 }
 
+/// <summary>Draws a <see cref="ChartSpec"/> as a self-contained, accessible SVG document, anywhere .NET runs: no browser, no
+/// fonts and no other package needed.</summary>
 public static class ChartSvg
 {
     /// <summary>Every entry keeps at least a 3:1 contrast against both the light and the dark chart background.</summary>
     public static readonly IReadOnlyList<string> Palette = ChartStyle.Light.Series;
     /// <summary>Candlestick bodies and OHLC bars are colored by direction rather than by series.</summary>
     public const string RisingColor = "#169B8D", FallingColor = "#D36B84";
+    /// <summary>The colour series <paramref name="index"/> draws in on the light and dark presets: its own, or the palette's.</summary>
     public static string SeriesColor(ChartSeries series, int index) => series.Color ?? Palette[index % Palette.Count];
+    /// <summary>The colour series <paramref name="index"/> draws in with <paramref name="style"/>: its own, or the style's.</summary>
     public static string SeriesColor(ChartSeries series, int index, ChartStyle style) => series.Color ?? style.SeriesColor(index);
     /// <summary>The style a spec draws with: its own, or the preset for its theme.</summary>
     public static ChartStyle ResolveStyle(ChartSpec spec) => spec.Style ?? Preset(spec.Theme);

@@ -2,6 +2,9 @@ using System.Globalization;
 
 namespace Lumen.Charts;
 
+// The linear scale the renderer builds its axes on. It is public, but its members are not documented yet, so the
+// missing-comment warning is suppressed for this type alone.
+#pragma warning disable CS1591
 public readonly record struct LinearScale(double Min, double Max)
 {
     public double Map(double value, double start, double end) => start + (value - Min) / (Max - Min) * (end - start);
@@ -38,3 +41,4 @@ public readonly record struct LinearScale(double Min, double Max)
         Math.Abs(value) is >= 1e6 or < 0.01 ? value.ToString("0.##E+0", CultureInfo.InvariantCulture) :
         value.ToString("0.##", CultureInfo.InvariantCulture);
 }
+#pragma warning restore CS1591

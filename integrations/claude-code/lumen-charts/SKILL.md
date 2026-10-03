@@ -24,7 +24,7 @@ bash <skill-dir>/scripts/install.sh            # Git Bash, macOS, Linux
 pwsh <skill-dir>/scripts/install.ps1           # Windows PowerShell 7
 ```
 
-Both take an optional version tag (`v0.24.0`) to pin one. If the project already has a `nuget.config`, the scripts leave it alone and print the source line to add instead. Then:
+Both take an optional version tag (`v0.25.0`) to pin one. If the project already has a `nuget.config`, the scripts leave it alone and print the source line to add instead. Then:
 
 ```bash
 dotnet add package Lumen.Charts.Blazor        # or Lumen.Charts / Lumen.Charts.AspNetCore
@@ -54,13 +54,13 @@ string csv = ChartExport.Csv(spec);          // the original observations
 
 Don't name a page or component `Training` (`Training.razor`): its generated class hides `Lumen.Charts.Training`, and `Training.Load(...)` then fails with CS0117. Call it `TrainingPage.razor` (keep `@page "/training"`), or write `Lumen.Charts.Training.Load(...)`.
 
-Charts are drawn at `ChartSpec.Width` (900 by default) and scale down to their container, but the stylesheet keeps them at least 640 px wide and scrolls them sideways inside their own box below that, so text stays legible. For a phone layout or a narrow card, set `Width` to the width the chart is shown at (about 360 on a phone) and lift the minimum for that container: `.my-card .lumen-viewport > svg { min-width: 0 }`.
+Charts are drawn at `ChartSpec.Width` (900 by default) and scale down to their container, but the stylesheet keeps them at least 640 px wide and scrolls them sideways inside their own box below that, so text stays legible. For a phone layout or a narrow card, write `<LumenChart Spec="spec" FitWidth="true" />` (0.25.0 and later): once the component is interactive it measures its container, redraws at that width whenever it settles at a new one (never below 320 px), and lifts the 640 px minimum for that chart alone, so the chart fills its box with its text at its own size; zoom, hidden series and the exports keep working, at the fitted width. Before that, in the prerender or in static rendering, it is drawn at `Width` and scaled to fit. `Height` is kept, so choose one that reads well on a phone too. Only for SVG rendered on the server with `ChartSvg.Render`, which nothing measures, set `Width` to the width it will be shown at (about 360 on a phone) yourself.
 
 **HTTP API:** see `references/http-api.md`.
 
 ## 3. How a chart is described
 
-Everything is one immutable `ChartSpec` record; change one with `with { … }`. The full member list is in `references/api.md` — read it before using anything not shown here.
+Everything is one immutable `ChartSpec` record; change one with `with { … }`. The full member list is in `references/api.md` — read it before using anything not shown here. From 0.25.0 the packages also carry XML documentation beside each DLL, so IntelliSense shows what a member does, and you can read it in the NuGet cache (`~/.nuget/packages/lumen.charts/<version>/lib/net8.0/Lumen.Charts.xml`, and likewise for `lumen.charts.blazor` and `lumen.charts.aspnetcore`).
 
 - `Kind` picks the chart: `Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Ohlc, Band, Histogram, Box, Violin`.
 - `Series` is a list of `ChartSeries(name, points, color?)`; a point is `ChartPoint(x, y, label?, size)`. A null `y` is a missing observation, drawn as a gap, never as zero. `ChartSeries.From(name, items, x, y, label)` maps your own objects.

@@ -1,25 +1,29 @@
-// Reports how wide a full-width card and a half-width card are on the Sports & performance page, so the page can draw each
-// chart at the width it is shown and its text stays at its own size, on a phone as on a desktop. It reports again whenever
-// the layout settles at new widths.
+// Every chart on the Sports & performance page sets FitWidth, which draws it at the width its card gives it. One choice is
+// left to the page: the activity stream marks where the progression steps up only while its card is wide enough for the
+// markers' labels to stand clear of the zones', so this reports whether that card is narrower than 600 pixels, and again
+// whenever that changes.
 const observers = new WeakMap();
 
 export function watch(page, dotnet) {
-    let timer = 0, last = '';
+    const card = page.querySelector('#stream');
+    if (!card) return;
+    let timer = 0, last = null;
     const measure = () => {
-        const wide = page.querySelector('.sports-card.wide')?.clientWidth ?? 0;
-        const half = page.querySelector('.sports-card.half')?.clientWidth ?? 0;
-        const key = `${wide},${half}`;
-        if (key === last || !wide || !half) return;
-        last = key;
-        dotnet.invokeMethodAsync('Measured', wide, half);
+        if (!card.clientWidth) return;
+        const narrow = card.clientWidth < 600;
+        if (narrow === last) return;
+        last = narrow;
+        dotnet.invokeMethodAsync('Narrow', narrow);
     };
     const observer = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(measure, 150); });
-    observer.observe(page);
-    observers.set(page, observer);
+    observer.observe(card);
+    observers.set(page, { observer, stop: () => clearTimeout(timer) });
     measure();
 }
 
 export function unwatch(page) {
-    observers.get(page)?.disconnect();
+    const state = observers.get(page);
+    state?.observer.disconnect();
+    state?.stop();
     observers.delete(page);
 }

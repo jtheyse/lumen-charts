@@ -2,9 +2,14 @@ using System.Text.RegularExpressions;
 
 namespace Lumen.Charts;
 
+/// <summary>The rules a chart must meet before it is drawn or exported. <see cref="ChartSvg.Render"/> and
+/// <see cref="ChartExport.Csv"/> check them first.</summary>
 public static partial class ChartValidation
 {
+    /// <summary>The most points a chart takes, across all its series.</summary>
     public const int MaxPoints = 100_000;
+    /// <summary>Checks a spec without drawing it, and throws <see cref="ArgumentException"/> with a plain message naming the
+    /// first rule it breaks.</summary>
     public static void Validate(ChartSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
