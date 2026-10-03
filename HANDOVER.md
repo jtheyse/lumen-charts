@@ -40,7 +40,7 @@ Where it stands (3 October 2026):
 | #1 position & points, #2 season by round | 0.33.0 | live |
 | #3 season strip | stays HTML (its ▲/▼ rule is in the recipe) | — |
 | #4 PB sparklines, #6 growth sparklines | 0.34.0 | committed in RaceSenseNet, not yet deployed (the owner deploys) |
-| #5 finish-time histogram | 0.35.0 | released 3 October 2026; Race Face told to swap it |
+| #5 finish-time histogram | 0.35.0 | committed in RaceSenseNet (5f69ee7d), not yet deployed |
 | #7–#14 (P2) | 0.36.0–0.40.0, planned in the brain (task "Race Face P2 plan") | — |
 | #15–#20 (P3) | after P2 | — |
 
@@ -55,9 +55,17 @@ Where it stands (3 October 2026):
 
 That session replies with what changed and where the recipes missed real data. Record its findings in the brain and fold them into the next release.
 
-Race Face feedback still open after 0.34.0:
-- a way to leave a sparkline's (or chart's) background unpainted, for cards on another surface colour; contrast is still checked against `Background`;
-- recipe notes: use the app's own PB flag where it has one (its first race counts); a sparkline's root is `role='group'` named by title and description, not `role='img'`; Lumen writes single-quoted attributes.
+Race Face feedback still open (the brain's two "Race Face feedback" tasks hold the detail):
+- **features**:
+  - a way to leave a chart's background unpainted, for cards on another surface colour (contrast is still checked against `Background`);
+  - a way to keep the title, and perhaps the description, as the accessible name without drawing it, for pages that own their heading (and docs saying exactly what `Render`'s `includeTitles` covers);
+- **legend**: long series names are truncated ("…MTB Le…"); consider wrapping them;
+- **recipe and doc notes**:
+  - use the app's own PB flag and bins where it has them;
+  - a sparkline's root is `role='group'` named by title and description;
+  - Lumen writes single-quoted attributes;
+  - put a description's key fact first, since the two-line cut can hide its end;
+  - the 1080×1350 card needs an SVG rasteriser on the server, which Lumen does not ship (Race Face's API draws its PNGs with ImageSharp).
 
 ## How a release is done
 
