@@ -1,6 +1,6 @@
 # Race results recipes
 
-Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, and how a race's whole field finished, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.35.0, together with the recipes in `sports.md`.
+Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, and how a race's whole field finished, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.36.0, together with the recipes in `sports.md`.
 
 ```csharp
 using System.Globalization;
@@ -15,6 +15,7 @@ using Lumen.Charts;
 - **Accessible.** `Title` and `Description` are the drawing's accessible name; each mark is focusable and named, `Position: 16-05-2026, 24/48, better than the previous`, and the same words are its tooltip.
 - **Missing data is a gap, never a zero.** A race without a position or without points is a `null` Y: its line breaks there and no mark is drawn. A race without a field size writes its place alone.
 - **Never colour alone.** A place coloured by its change also says the change in words, in its tooltip and its accessible name.
+- **Keys.** From 0.36.0 each `<LumenChart>` is one tab stop: Tab reaches one point, and the arrow keys move from it — Left and Right along a series, skipping its gaps, Up and Down to the series before or after it, Home and End to its ends, Page Up and Page Down ten points — with the keys named in the chart's description. The static SVG keeps every mark focusable on its own.
 
 ## A dark brand style from design tokens
 
@@ -271,6 +272,57 @@ string fieldCardSvg = ChartSvg.Render(fieldCard, includeLegend: false);
 ```
 
 Its words keep their sizes, 11 to 17 units, so on a 1080-pixel card they read small: set the card's headline in its own display type round the chart, or draw the card at 360 × 450 and rasterise it at three times.
+
+## Fitness & form
+
+A rider's fitness (CTL), fatigue (ATL) and form (TSB) from each day's training stress, read day by day: the stress as muted columns under fitness and fatigue, and form beneath in a pane of its own, on an axis held symmetric about zero and written with its sign, so fresh (+) and tired (−) stand either side of its middle. Race days are dashed lines through both panes. On an interactive page the shared readout (0.36.0) reads all four at the day under a finger, the pointer or the focused point, and the arrow keys step it a day at a time. The app offers the range — 7, 28, 90 or 365 days — and gives Lumen only those days.
+
+```csharp
+// The app's daily training stress (TSS), oldest first, a day without training as 0. An invented year: a rest day each week, two hard
+// days, and blocks of heavier and lighter weeks.
+var stressLog = Enumerable.Range(0, 365).Select(i => (Day: new DateOnly(2025, 9, 20).AddDays(i),
+    Stress: Math.Round((0.8 + 0.3 * Math.Sin(i / 30.0)) * ((i % 7) switch { 0 => 0, 2 => 95 + i % 5 * 8, 5 => 140 + i % 3 * 15, _ => 45 + i % 4 * 9 })))).ToArray();
+// Race days, the app's own records. Invented:
+DateOnly[] raceDays = [new(2026, 4, 11), new(2026, 5, 16), new(2026, 7, 4), new(2026, 8, 8), new(2026, 9, 19)];
+static double UtcDay(DateOnly day) => TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+// The model runs over the whole log, so the first day of a short range starts from the fitness the days before it built. It is seeded
+// with the rider's typical daily stress.
+var fitnessLoad = Training.Load(stressLog, fitness: 50, fatigue: 50);
+var formWords = new Axis(AxisKind.Linear, 0, 1) { ValueFormat = ValueFormat.Signed };   // writes +5, −5 and 0, as the form axis does
+ChartSpec FitnessAndForm(int rangeDays)
+{
+    // The range buttons are the app's: each takes the last 7, 28, 90 or 365 days of the model and draws the same chart.
+    var shown = fitnessLoad.TakeLast(rangeDays).ToArray();
+    var today = shown[^1];
+    return new ChartSpec {
+        Title = string.Create(CultureInfo.InvariantCulture, $"Fitness {Math.Round(today.Fitness)} · form {formWords.Format(Math.Round(today.Form))}"),
+        Description = $"Last {rangeDays} days · fitness, fatigue and daily stress above, form below",
+        Kind = ChartKind.Line, XAxis = AxisKind.Time, Width = 340, Height = 420, Style = raceFace, SharedReadout = true, YLabel = "TSS",
+        Panes = [new ChartPane { Label = "Form", Weight = .6, YSymmetric = 10, YFormat = ValueFormat.Signed }],
+        Annotations = raceDays.Where(d => d >= shown[0].Day && d <= today.Day)
+            .Select(d => new ChartAnnotation(AnnotationAxis.X, UtcDay(d)) { Label = "Race", ShowValue = false, Color = "#a78bfa" }).ToArray(),
+        Series = [
+            ChartSeries.From("Fitness", shown, d => UtcDay(d.Day), d => Math.Round(d.Fitness, 1)) with { Color = "#38bdf8" },
+            ChartSeries.From("Fatigue", shown, d => UtcDay(d.Day), d => Math.Round(d.Fatigue, 1)) with { Color = "#f87171" },
+            ChartSeries.From("Form", shown, d => UtcDay(d.Day), d => Math.Round(d.Form, 1)) with { Color = "#f59e0b", Pane = 1 },
+            ChartSeries.From("TSS", shown, d => UtcDay(d.Day), d => d.Stress) with { Kind = ChartKind.Column, Color = "#80858E" }]
+    };
+}
+var fitnessWeek = FitnessAndForm(7);
+var fitnessMonth = FitnessAndForm(28);
+var fitnessQuarter = FitnessAndForm(90);
+var fitnessYear = FitnessAndForm(365);
+string fitnessSvg = ChartSvg.Render(fitnessMonth);
+// Interactive: <LumenChart Spec="fitnessMonth" FitWidth="true" />, with the app's own 7 / 28 / 90 / 365 buttons above it.
+```
+
+- **Two panes.** The main plot holds TSS, fitness and fatigue, all in training stress per day, so they share one axis; form, the difference of fitness and fatigue, gets the pane below and its own axis. `Weight = .6` makes the form pane 0.6 of the main plot's height. Every pane shares the X axis, and an X annotation runs through each.
+- **Symmetric form.** `ChartPane.YSymmetric = 10` (0.36.0) holds the form axis symmetric about zero, at least −10 to +10, and as far as the data reaches either way, so a form of −24 runs it from −24 to +24 and zero stays in the middle: +4 and −4 stand equally far from it, and a quiet stretch near zero still reads as near zero. It is refused beside `YMin`, `YMax` or `YMinSpan` and on a logarithmic axis. `ChartSpec.YSymmetric` does the same for the main plot.
+- **Signs.** `ValueFormat.Signed` (0.36.0) writes the form axis's ticks, its points' names and the readout as `+12`, `−8` (a true minus, U+2212) and `0`. `formWords` above writes the title's form the same way.
+- **Colours.** Every colour here is checked against the card, `#161618`: fitness `#38bdf8` 8.44:1, fatigue `#f87171` 6.53:1, form `#f59e0b` 8.41:1, the race lines `#a78bfa` 6.64:1, so each clears 4.5:1 and the race label keeps its colour; TSS is the token `low`, `#80858E`, 4.87:1, neutral, since a day's stress is not good or bad. These are colours for a dark card: on a white one they stand only 2.14, 2.77, 2.15 and 2.72 to 1, short even of the 3:1 a line needs. A light theme takes darker ones, `ChartStyle.Light`'s series for instance; and a colour that carries text, as an annotation's label does, should clear 4.5:1 — test it with `Contrast.Ratio(color, style.Background) >= 4.5` and pass `Color = null`, the muted colour, where it falls short, as value labels fall back to the text colour on their own.
+- **Never colour alone.** The series are told apart by colour in the drawing, and by name everywhere else: each point's tooltip and accessible name, `Form: 14 Sep 2026, −8.6`, and the readout, which names every series. A race line's name reads `Race: 4 Jul 2026`. At 340 units a year's races stand about 25 units apart, so their labels step down a row where they would touch, and one with no room left is left out, its name kept.
+- **The shared readout.** `SharedReadout = true` changes nothing in the SVG: `ChartSvg.Render` draws the same chart with it or without it. In `<LumenChart>` a guide runs through both panes at the day nearest the pointer, a tap or the focused point, each series' point there is ringed, and one tooltip reads the day and then each series in legend order: `4 Jul 2026`, `Fitness 61.2`, `Fatigue 70.4`, `Form −9.1`, `TSS 0`. Left and Right step a day, Up and Down move between the series, Home and End go to the first and last day, Page Up and Page Down ten days, and Escape hides it; the status line reads the same words for a screen reader. `ChartSvg.Readout(spec)` gives the same table to a host that draws its own.
+- **Ranges.** Slice the model's days, not the stress before the model, so a 7-day chart's first fitness is the one the whole year built. Fitness takes about six weeks to build, so seed `Training.Load` with the rider's typical daily stress, or start the log six weeks before the first day shown.
 
 ## Rendering notes
 

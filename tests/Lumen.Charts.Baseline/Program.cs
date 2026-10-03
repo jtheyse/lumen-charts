@@ -602,6 +602,39 @@ ChartSpec Narrow(string description, string source, string title = "How the fiel
 lines.Add($"text/description-340 {Hash(Render(Narrow("Every finisher's time in five-minute bins from the 1st to the 99th percentile, the reader's own in red and the median a dashed line over the bins", "Source: invented")))}");
 lines.Add($"text/source-340 {Hash(Render(Narrow("312 finishers · median 47:12", "Off the chart: 3 faster and 12 slower · counted from the race's 312 finishers")))}");
 lines.Add($"text/title-340 {Hash(Render(Narrow("312 finishers · median 47:12", "Source: invented", "Nineteenth of fifty-two riders in the final round, eleven places better than the first")))}");
+// 0.36.0: reading a chart day by day. A Y axis held symmetric about zero and written with its sign, the data inside it, past it and on a
+// reversed axis; signed value labels and a signed annotation; columns on a symmetric axis; and an invented fitness and form chart in two
+// panes at 340 by 420, fitness and fatigue over daily stress and form beneath, in the light palette and in Midnight in the race-results
+// recipe's colours, which are for a dark background.
+// A shared readout never changes the drawing, so it has no row of its own: the fitness rows set it.
+double[] formValues = [-3, 4, 2, -6, 1, 7, -2, 0, 5, -4, 3, 6];
+ChartSpec Symmetric(params double[] values) => line with { Title = "Form", YSymmetric = 10, YFormat = ValueFormat.Signed, Series = [new("Form", values.Select((v, i) => new ChartPoint(i, v)).ToArray()) { Markers = MarkerStyle.Filled }] };
+lines.Add($"symmetric/inside {Hash(Render(Symmetric(formValues)))}");
+lines.Add($"symmetric/past {Hash(Render(Symmetric(formValues.Select(v => v * 2.5).ToArray())))}");
+lines.Add($"symmetric/reversed {Hash(Render(Symmetric(formValues) with { YReversed = true }))}");
+lines.Add($"signed/labels {Hash(Render(Symmetric(formValues.Take(6).ToArray()) with { YSymmetric = null, Annotations = [new(AnnotationAxis.Y, 2) { Label = "Fresh" }],
+    Series = [new("Form", formValues.Take(6).Select((v, i) => new ChartPoint(i, v)).ToArray()) { ValueLabels = true, Markers = MarkerStyle.Filled }] }))}");
+lines.Add($"symmetric/columns {Hash(Render(Spec(ChartKind.Column, ChartTheme.Light) with { Title = "Change", YSymmetric = 20, YFormat = ValueFormat.Signed,
+    Series = [new("Change", formValues.Select((v, i) => new ChartPoint(i, v * 3, $"W{i + 1}")).ToArray())] }))}");
+ChartSpec Fitness(ChartStyle style)
+{
+    var start = new DateOnly(2026, 6, 1);
+    var dark = style == ChartStyle.Midnight;
+    var load = Training.Load(Enumerable.Range(0, 56).Select(i => (start.AddDays(i), (double)((i % 7) switch { 0 => 0, 2 => 120, 5 => 150, _ => 60 }))), 40, 40);
+    double When(DateOnly day) => TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+    return new()
+    {
+        Kind = ChartKind.Line, Style = style, XAxis = AxisKind.Time, Width = 340, Height = 420, Title = "Fitness & form", Description = "Fitness, fatigue and stress above, form below",
+        SharedReadout = true, YLabel = "Stress", Panes = [new() { Label = "Form", Weight = .6, YSymmetric = 10, YFormat = ValueFormat.Signed }],
+        Annotations = [new(AnnotationAxis.X, When(start.AddDays(20))) { Label = "Race", ShowValue = false, Color = dark ? "#a78bfa" : null }],
+        Series = [ChartSeries.From("Fitness", load, d => When(d.Day), d => Math.Round(d.Fitness, 1)) with { Color = dark ? "#38bdf8" : null },
+            ChartSeries.From("Fatigue", load, d => When(d.Day), d => Math.Round(d.Fatigue, 1)) with { Color = dark ? "#f87171" : null },
+            ChartSeries.From("Form", load, d => When(d.Day), d => Math.Round(d.Form, 1)) with { Color = dark ? "#f59e0b" : null, Pane = 1 },
+            ChartSeries.From("Stress", load, d => When(d.Day), d => d.Stress) with { Kind = ChartKind.Column, Color = style.Zones[0] }]
+    };
+}
+lines.Add($"fitness/340-light {Hash(Render(Fitness(ChartStyle.Light)))}");
+lines.Add($"fitness/340-midnight {Hash(Render(Fitness(ChartStyle.Midnight)))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

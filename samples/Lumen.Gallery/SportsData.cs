@@ -573,20 +573,23 @@ public static class SportsData
             Series = activity.Select((a, i) => new ChartSeries(a.Name, [new(0, a.Value, a.Unit)], zones[new[] { 5, 2, 1 }[i]]) { Goal = a.Goal }).ToArray()
         };
 
-        // Performance management, the planned weeks shaded and dashed from the first planned day, and the daily stress in the
-        // ramp's neutral grey so that the lines read over it.
+        // Performance management in two panes: fitness and fatigue over the daily stress, in the ramp's neutral grey so that the lines
+        // read over it, and form beneath on an axis held symmetric about zero and written with its sign, so fresh and tired stand either
+        // side of its middle. The planned weeks are shaded through both panes and dashed from the first planned day, ending on race day, their
+        // band labelled without its dates, which are too wide for it, and the shared readout reads every series at the day under the pointer or the focused point.
         var planned = When(Today.AddDays(1));
         var end = load[^1];
-        var performance = Chart(wide, 460) with
+        var performance = Chart(wide, 500) with
         {
-            Kind = ChartKind.Line, XAxis = AxisKind.Time,
-            Title = $"Fitness {Text(end.Fitness)} on race day, form {Signed(end.Form)}", Description = "Sixteen weeks trained and two planned, shaded",
-            XLabel = "Day (UTC)", YLabel = "Training stress per day", Y2Label = "Form",
+            Kind = ChartKind.Line, XAxis = AxisKind.Time, SharedReadout = true,
+            Title = $"Fitness {Text(end.Fitness)} on race day, form {Signed(end.Form)}", Description = "Fitness, fatigue and daily stress above, form below · two planned weeks shaded",
+            XLabel = "Day (UTC)", YLabel = "Training stress per day",
+            Panes = [new() { Label = "Form", Weight = .5, YSymmetric = 10, YFormat = ValueFormat.Signed }],
             Annotations = [new(AnnotationAxis.X, planned) { To = When(end.Day), Label = "Planned" }],
             Series = [
                 ChartSeries.From("Fitness", load, d => When(d.Day), d => Math.Round(d.Fitness, 1)) with { ProjectedFrom = planned, HighlightLast = true },
                 ChartSeries.From("Fatigue", load, d => When(d.Day), d => Math.Round(d.Fatigue, 1)) with { ProjectedFrom = planned },
-                ChartSeries.From("Form", load, d => When(d.Day), d => Math.Round(d.Form, 1)) with { Kind = ChartKind.Area, Secondary = true, ProjectedFrom = planned },
+                ChartSeries.From("Form", load, d => When(d.Day), d => Math.Round(d.Form, 1)) with { Pane = 1, ProjectedFrom = planned },
                 ChartSeries.From("Daily stress", load, d => When(d.Day), d => d.Stress) with { Kind = ChartKind.Column, Color = zones[0] }]
         };
 
@@ -894,7 +897,7 @@ public static class SportsData
         return [
             new("today", "readiness", "Readiness", "An illustrative score, no vendor's: 60, plus 10 for each standard deviation last night's HRV sits above its 28-night baseline, plus half of today's form, on a `Gauge` whose `YZones` tint the track; the tick is the 28-day average.", false, readiness),
             new("today", "activity", "Today's activity", "The run's active calories at 1 kcal per kg per km, its minutes and its training stress, each a `Ring` series against its `Goal` — stress against fitness, the athlete's average day. Past 100 % a ring runs on over itself.", false, rings),
-            new("load", "performance", "Performance management", "Daily stress as columns, fitness and fatigue as lines and form as an area on the right axis, all from `Training.Load`; `ProjectedFrom` dashes the planned weeks and `HighlightLast` rings race-day fitness.", true, performance),
+            new("load", "performance", "Performance management", "Daily stress as columns under fitness and fatigue, all from `Training.Load`, and form in a pane of its own beneath, its axis held symmetric about zero by `YSymmetric` and written +5 and −5 by `ValueFormat.Signed`; `ProjectedFrom` dashes the planned weeks, `HighlightLast` rings race-day fitness, and the planned weeks are shaded through both panes. `SharedReadout` reads every series at the day under the pointer or the focused point; the arrow keys step day by day.", true, performance),
             new("load", "next-session", "Next session, as planned", "The first planned session as a `ChartKind.Blocks` workout: each step a `ChartPoint.Block` as long as it should take and as high as its target power, coloured by `ZoneScale.CogganPower` at the threshold it is planned against; its stress is the performance chart's projected column for its day.", true, workout),
             new("load", "weekly-load", "Weekly load against a target", "Each week's stress in capsule columns over a `Band` series from 80 to 130 % of the four weeks before, whose centre line is their average.", false, weeklyLoad),
             new("load", "weekly-zones", "Weekly zone distribution", "Every session's `Training.TimeInZone` added up by week and stacked in the zone colours.", false, distribution),

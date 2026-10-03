@@ -351,6 +351,30 @@ $long='{"title":"Field","description":"Every finisher''s time in five-minute bin
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $long -SkipHttpErrorCheck
 $lines=@(([xml]$r.Content).SelectNodes('//*[local-name()="text"][@x="24"][@font-size="11"]')|Where-Object{[double]$_.GetAttribute('y') -lt 70})
 Verify ($r.StatusCode -eq 200 -and $lines.Count -eq 2 -and $lines[1].GetAttribute('y') -eq '63' -and ([xml]$r.Content).DocumentElement.desc.Contains('the reader''s own in red')) 'A description too wide for a 340-pixel chart posted as JSON goes on over a second line, its whole kept in its desc'
+# 0.36.0: a Y axis held symmetric about zero, values written with their sign, and a shared readout that never changes the drawing.
+$form='{"title":"Form","kind":"Line","ySymmetric":10,"yFormat":"Signed","series":[{"name":"Form","valueLabels":true,"points":[{"x":0,"y":-3,"label":"Mon"},{"x":1,"y":4,"label":"Tue"},{"x":2,"y":0,"label":"Wed"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $form -SkipHttpErrorCheck
+$doc=[xml]$r.Content
+$ticks=@($doc.SelectNodes('//*[local-name()="text"][@text-anchor="end"][@class="lumen-muted"]')|ForEach-Object{$_.InnerText})
+$names=@($doc.SelectNodes('//*[local-name()="g"][@data-point]')|ForEach-Object{$_.GetAttribute('aria-label')})
+$minus=[string][char]0x2212
+Verify ($r.StatusCode -eq 200 -and $ticks[0] -eq "${minus}10" -and $ticks[-1] -eq '+10' -and $ticks -contains '0' -and $names -contains "Form: Mon, ${minus}3" -and $names -contains 'Form: Tue, +4' -and $names -contains 'Form: Wed, 0') 'A symmetric, signed axis posted as JSON runs from -10 to +10 about zero, its values written with a plus or a true minus'
+$paned='{"title":"Fitness and form","kind":"Line","sharedReadout":true,"panes":[{"label":"Form","ySymmetric":10,"yFormat":"Signed"}],"series":[{"name":"Fitness","points":[{"x":0,"y":50},{"x":1,"y":52}]},{"name":"Form","pane":1,"points":[{"x":0,"y":-25},{"x":1,"y":4}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $paned -SkipHttpErrorCheck
+$texts=@(([xml]$r.Content).SelectNodes('//*[local-name()="text"]')|ForEach-Object{$_.InnerText})
+Verify ($r.StatusCode -eq 200 -and $texts -contains "${minus}20" -and $texts -contains '+20' -and $r.Content.Contains("aria-label='Form: 0, ${minus}25'")) 'A pane''s symmetric axis posted as JSON reaches as far as its data either way, here 25'
+$without=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $paned.Replace('"sharedReadout":true,','') -SkipHttpErrorCheck
+Verify ($without.StatusCode -eq 200 -and $without.Content -eq $r.Content -and -not $r.Content.Contains('readout')) 'A shared readout posted as JSON draws the same SVG as a chart without it'
+foreach($bad in @(@{body=$form.Replace('"ySymmetric":10','"ySymmetric":10,"yMin":-20');reason='one or the other';name='A symmetric axis beside YMin'},
+  @{body=$form.Replace('"ySymmetric":10','"ySymmetric":-1');reason='positive and finite';name='A symmetric axis of -1'},
+  @{body=$form.Replace('"ySymmetric":10','"ySymmetric":10,"yAxis":"Log"').Replace('"y":-3,','"y":3,').Replace('"y":0,','"y":1,');reason='logarithmic axis';name='A symmetric logarithmic axis'},
+  @{body=$paned.Replace('"ySymmetric":10','"ySymmetric":10,"yMinSpan":8');reason='one or the other';name='A pane''s symmetric axis beside YMinSpan'},
+  @{body='{"kind":"Donut","sharedReadout":true,"series":[{"name":"D","points":[{"x":0,"y":1}]}]}';reason='SharedReadout reads every series at one X';name='A shared readout on a donut'},
+  @{body='{"kind":"Line","width":120,"height":32,"sparkline":true,"sharedReadout":true,"series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}';reason='takes no shared readout';name='A shared readout on a sparkline'},
+  @{body=$form.Replace('"yFormat":"Signed"','"yFormat":"Signs"');reason='';name='An unknown value format'})){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
+}
 $graph='{"nodes":[{"id":"a","label":"Start"},{"id":"b","label":"End"}],"edges":[{"source":"a","target":"b"}],"layout":"Layered"}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType application/json -Body $graph
 Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'Graph SVG'

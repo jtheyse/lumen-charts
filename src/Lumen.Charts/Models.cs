@@ -495,6 +495,14 @@ public sealed record ChartSpec
     /// include zero: with <see cref="IncludeZero"/>, on the kinds drawn from zero and on an axis that carries columns or an area. Line,
     /// scatter, bubble, band, range, candlestick, OHLC and blocks charts take it, reversed or not.</summary>
     public double? YMinSpan { get; init; }
+    /// <summary>Holds the main plot's left-hand axis symmetric about zero, so zero stands in the middle of the plot: the axis runs
+    /// from −m to +m, where m is the largest of this value and the data's distance from zero either way, so it is at least ±this value
+    /// tall and every value fits. For values read above and below a balance, such as training form, whose sign is the point: +4 and −4
+    /// stand equally far from the middle, and a quiet stretch near zero still reads as near zero. Null fits the data. It must be
+    /// positive, and is refused beside <see cref="YMin"/>, <see cref="YMax"/> or <see cref="YMinSpan"/>, which set the axis another
+    /// way, and on a logarithmic axis, which has no zero; it reverses with the axis. Line, area, scatter, bubble, column, bar, stacked
+    /// column, band, range, candlestick, OHLC and blocks charts take it. <see cref="ValueFormat.Signed"/> writes its ticks +5 and −5.</summary>
+    public double? YSymmetric { get; init; }
     /// <summary>The bottom of the main plot's right-hand axis. Null fits its series.</summary>
     public double? Y2Min { get; init; }
     /// <summary>The top of the main plot's right-hand axis. Null fits its series.</summary>
@@ -536,6 +544,18 @@ public sealed record ChartSpec
     /// <summary>Calendar charts only: the day each week starts on, Monday by default, as ISO 8601 has it. Every other kind refuses
     /// it set.</summary>
     public DayOfWeek WeekStart { get; init; } = DayOfWeek.Monday;
+    /// <summary>
+    /// In the Blazor component, reads every series at once at one X: a vertical guide through every pane at the X nearest the
+    /// pointer or the focused point, a ring round each shown series' point there, and one tooltip that reads the X first and then
+    /// each series' name and value in legend order, its <see cref="ChartPoint.ValueNote"/>, zone and change words included, as
+    /// <c>3 Jun 2026</c>, <c>Fitness 52.3</c>, <c>Fatigue 61</c>, <c>Form −8.7</c>. The arrow keys then step from one X to the next,
+    /// Up and Down moving between the series there, and the component's status line reads the same words. A series is read where it
+    /// has a point within half the closest spacing of the chart's X values; a missing value reads <c>missing</c>. It never changes the
+    /// static drawing: <see cref="ChartSvg.Render"/> draws the same SVG with it or without it, and <see cref="ChartSvg.Readout"/> gives
+    /// what it reads to any other host. Line, area, scatter, bubble, band, range, candlestick, OHLC and blocks charts take it; a
+    /// sparkline, read beside words, and the kinds without a continuous X axis refuse it.
+    /// </summary>
+    public bool SharedReadout { get; init; }
 }
 
 /// <summary>
@@ -558,6 +578,9 @@ public sealed record ChartPane
     /// <summary>The least the pane's left-hand axis spans, centred on the pane's data, as <see cref="ChartSpec.YMinSpan"/> sets the
     /// main plot's, and refused where it is.</summary>
     public double? YMinSpan { get; init; }
+    /// <summary>Holds the pane's left-hand axis symmetric about zero, at least ±this value tall, as <see cref="ChartSpec.YSymmetric"/>
+    /// holds the main plot's, and refused where it is.</summary>
+    public double? YSymmetric { get; init; }
     /// <summary>How the pane's left-hand axis writes its values.</summary>
     public ValueFormat YFormat { get; init; }
     /// <summary>Puts the smallest value at the top of the pane's left-hand axis.</summary>

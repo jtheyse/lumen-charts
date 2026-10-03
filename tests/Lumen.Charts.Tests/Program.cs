@@ -3896,7 +3896,10 @@ Test("Without FitWidth the component renders exactly as 0.24.0 did",()=>{
         ("columns","4B0BC9F6E5BB0562",Spec(ChartKind.Column) with{Series=[new("A",[new(0,2,"A"),new(1,5,"B")]),new("B",[new(0,3,"A"),new(1,4,"B")])]},null),
         ("stream","32658617237228CB",Sports("stream"),null),
         ("Midnight","295A098ED64C73D8",Spec(),ChartStyle.Midnight)];
-    var changed=rows.Select(r=>(r.Row,r.Hash,Now:Hash16(Prerender(ChartElement(r.Spec),r.Cascaded).Replace("\r\n","\n")))).Where(r=>r.Now!=r.Hash).ToArray();
+    // 0.36.0 adds one hidden element, the words that name the arrow keys, which the script makes the viewport's description; taken out,
+    // the markup is 0.24.0's.
+    string Unkeyed(string html)=>System.Text.RegularExpressions.Regex.Replace(html,"\n *<span class=\"lumen-keys\" hidden>[^<]*</span>","");
+    var changed=rows.Select(r=>(r.Row,r.Hash,Now:Hash16(Unkeyed(Prerender(ChartElement(r.Spec),r.Cascaded).Replace("\r\n","\n"))))).Where(r=>r.Now!=r.Hash).ToArray();
     Check(changed.Length==0,"renders differently: "+string.Join(", ",changed.Select(r=>$"{r.Row} {r.Now}")));
     Check(rows.All(r=>Prerender(ChartElement(r.Spec,false),r.Cascaded)==Prerender(ChartElement(r.Spec),r.Cascaded)),"FitWidth=\"false\" renders differently from leaving it out");
 });
@@ -4215,11 +4218,12 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // connectors and, since 0.28.0, the calendar's layout, cell and week start, which are the last five properties written, and,
     // since 0.32.0, each series' trend fit, window and degree, written after its trend, and since 0.33.0 the chart's X ticks, written
     // after its X label, and each series' change colours, written after its value labels, and since 0.34.0 the chart's sparkline,
-    // written after its height, and since 0.35.0 the chart's X tick labels, written after its X ticks.
+    // written after its height, and since 0.35.0 the chart's X tick labels, written after its X ticks, and since 0.36.0 the chart's shared
+    // readout, written last, which is never hashed.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1}";
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"SharedReadout\":false}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     Check(json.EndsWith(defaults)&&json.Contains(trended)&&json.Contains(ticked)&&json.Contains(changed)&&json.Contains(sparked),json[^120..]);
@@ -6391,8 +6395,9 @@ Test("YMinSpan is refused beside YMin or YMax, out of range, on a logarithmic ax
         &&Refused(paned with{IncludeZero=true}).Contains("must include zero")&&Refused(paned with{Series=[..paned.Series,new("C",[new(0,1)]){Kind=ChartKind.Column,Pane=1}]}).Contains("must include zero"),"a pane");
 });
 Test("The component draws a sparkline as its drawing alone: no legend, toolbar, zoom, data table or scrolling region, and fitted down to 60 pixels",()=>{
+    // From 0.36.0 the drawing is followed by the hidden words that name the arrow keys, which the script makes the drawing's description.
     var html=Prerender(ChartElement(Pb()));
-    Check(html.StartsWith("<div class=\"lumen-chart lumen-spark\"><div class=\"lumen-viewport\"><svg ")&&html.EndsWith("</svg></div></div>"),html[..Math.Min(200,html.Length)]);
+    Check(html.StartsWith("<div class=\"lumen-chart lumen-spark\"><div class=\"lumen-viewport\"><svg ")&&System.Text.RegularExpressions.Regex.IsMatch(html,"</svg></div><span class=\"lumen-keys\" hidden>Arrow keys move between points[^<]*</span></div>$"),html[..Math.Min(200,html.Length)]);
     foreach(var chrome in new[]{"lumen-legend","lumen-tools","lumen-table","<button","role=\"region\"","tabindex=\"0\" role","Export","View data","lumen-status","Zoom"})
         Check(!html.Contains(chrome),$"the sparkline carries {chrome}");
     // Its drawing is the library's, without native tooltips, which the component draws itself.
@@ -6817,6 +6822,196 @@ Test("Sports page: How the field finished draws the last race's invented field i
         Check(words.All(t=>Wide11(t.Value)*double.Parse((string?)t.Attribute("font-size")??"12",CultureInfo.InvariantCulture)/11<=width-48),$"{width}: {string.Join(" | ",words.Select(t=>t.Value))}");
         Check(words.Count(t=>t.Value.StartsWith("Off the chart"))==1&&(width>400||words.Any(t=>t.Value=="an invented field")),$"{width}: the source");
     }
+});
+// 0.36.0: reading a chart day by day. ValueFormat.Signed writes +5 and −5; YSymmetric holds a Y axis symmetric about zero; and SharedReadout,
+// which the component alone draws, reads every series at one X, from ChartSvg.Readout. A 900 by 420 chart's plot runs from x 76 to 870
+// and y 78 to 344, and two panes of equal weight split it, after a 24-pixel gap, into 78 to 199 and 223 to 344. Every example is invented.
+ChartSpec Form36(params double[] values)=>new(){Title="Form",Kind=ChartKind.Line,YSymmetric=10,YFormat=ValueFormat.Signed,
+    Series=[new("Form",values.Select((v,i)=>new ChartPoint(i,v)).ToArray()){Markers=MarkerStyle.Filled}]};
+double[] Heights36(XDocument doc,int series=0)=>Datums(doc,series).Select(m=>Attr(m.Element(ns+"circle")!,"cy")).ToArray();
+// Three series over three days, the fatigue of the second day missing, form in a pane of its own.
+ChartSpec Read36()=>new(){Title="Read",Kind=ChartKind.Line,SharedReadout=true,Panes=[new(){Weight=1,YSymmetric=10,YFormat=ValueFormat.Signed}],
+    Series=[new("Fitness",[new(0,50),new(1,52),new(2,51)]){Markers=MarkerStyle.Filled,ChangeColors=ChangeColors.HigherIsBetter},
+        new("Fatigue",[new(0,60),new(1,null),new(2,58)]){Markers=MarkerStyle.Filled},
+        new("Form",[new(0,-10),new(1,-4.5),new(2,-7){ValueNote=" tired"}]){Pane=1,Markers=MarkerStyle.Filled}]};
+Test("ValueFormat.Signed writes a plus for a positive value, a true minus for a negative one and 0 for zero, as Number writes the digits, in ticks, names, value labels, annotations and the component",()=>{
+    var signed=new Axis(AxisKind.Linear,0,1){ValueFormat=ValueFormat.Signed};
+    (double Value,string Text)[] cases=[(5,"+5"),(-5,"−5"),(0,"0"),(-0.0,"0"),(1.25,"+1.25"),(-0.5,"−0.5"),(-2.25,"−2.25"),(1234.5,"+1234.5"),(2e6,"+2E+6"),(-0.004,"−4E-3")];
+    foreach(var (value,text) in cases) Check(signed.Format(value)==text,$"{value}: {signed.Format(value)}");
+    // It is Number's digits with a sign: every value Number writes reads the same with its sign taken off.
+    foreach(var value in new[]{3.0,47.25,0.75,99999.5}) Check(signed.Format(-value)=="−"+new Axis(AxisKind.Linear,0,1).Format(value)&&signed.Format(value)=="+"+new Axis(AxisKind.Linear,0,1).Format(value),$"{value}");
+    // At the end of the enum, so the values before it keep their numbers.
+    Check((int)ValueFormat.Number==0&&(int)ValueFormat.Duration==1&&(int)ValueFormat.Compact==2&&(int)ValueFormat.TimeOfDay==3&&(int)ValueFormat.Signed==4,"the enum's values moved");
+    Reject(()=>ChartSvg.Render(Spec() with{YFormat=(ValueFormat)5}));
+    var spec=new ChartSpec{Title="Change",Kind=ChartKind.Line,YFormat=ValueFormat.Signed,Annotations=[new(AnnotationAxis.Y,2){Label="Target"}],
+        Series=[new("Change",[new(0,-3,"Mon"),new(1,0,"Tue"),new(2,4,"Wed")]){ValueLabels=true,Markers=MarkerStyle.Filled}]};
+    var doc=Svg(spec);
+    Check(Datums(doc,0).Select(m=>m.Attribute("aria-label")!.Value).SequenceEqual(["Change: Mon, −3","Change: Tue, 0","Change: Wed, +4"]),string.Join(" | ",Datums(doc,0).Select(m=>m.Attribute("aria-label")!.Value)));
+    var texts=doc.Descendants(ns+"text").Select(t=>t.Value).ToArray();
+    Check(texts.Contains("+4")&&texts.Contains("−3")&&texts.Contains("Target: +2")&&Upward(doc).Any(t=>t.Text=="+4")&&Upward(doc).Any(t=>t.Text=="−2"),string.Join(" | ",texts));
+    // Up the right-hand axis, along X and in a pane, and through the component's status line and data table.
+    Svg(spec with{XFormat=ValueFormat.Signed,Y2Format=ValueFormat.Signed,Panes=[new(){YFormat=ValueFormat.Signed,Y2Format=ValueFormat.Signed}],Series=[..spec.Series,new("Pane",[new(0,-1),new(1,2)]){Pane=1}]});
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    var status="";
+    var html=Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,0);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    Check(status=="Change: Mon = −3"&&System.Net.WebUtility.HtmlDecode(html).Contains("<td>+4</td>"),status);
+    // A time axis writes its calendar, and the kinds without a Y axis or with a count on it refuse it, as they refuse every other format.
+    Check(Refused(Spec() with{XAxis=AxisKind.Time,XFormat=ValueFormat.Signed}).StartsWith("A time axis writes its own calendar"),"a signed time axis");
+    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Histogram}) Check(Refused(Sample(kind) with{YFormat=ValueFormat.Signed}).StartsWith("A Y format applies"),$"{kind}");
+    // Gauges, rings and calendars write their values in it.
+    Check(ChartSvg.Render(Sample(ChartKind.Gauge) with{YFormat=ValueFormat.Signed}).Contains("+72"),"a gauge");
+});
+Test("YSymmetric holds the Y axis symmetric about zero, at least its value either way and as far as the data reaches, reversed or not, in the main plot or a pane",()=>{
+    double Y(double v,double reach,double top=78,double bottom=344,bool reversed=false)=>reversed?top+(v+reach)/(2*reach)*(bottom-top):bottom-(v+reach)/(2*reach)*(bottom-top);
+    foreach(var classic in new[]{false,true})
+    {
+        XDocument Draw(ChartSpec s)=>Svg(classic?Classic(s):s);
+        // Data within ±10 stands on an axis from −10 to +10, zero in the middle.
+        var inside=Draw(Form36(-3,4,2));
+        Check(Heights36(inside).Zip(new[]{-3d,4,2}).All(p=>Close(p.First,Y(p.Second,10))),$"classic {classic}: {string.Join(", ",Heights36(inside))}");
+        Check(Upward(inside).SequenceEqual([("−10",348d),("−5",281.5),("0",215d),("+5",148.5),("+10",82d)]),$"classic {classic}: {string.Join(" | ",Upward(inside))}");
+        // Data past it widens the axis to the farther of its two ends, both ways.
+        var past=Draw(Form36(-3,14,2));
+        Check(Heights36(past).Zip(new[]{-3d,14,2}).All(p=>Close(p.First,Y(p.Second,14))),$"classic {classic}: {string.Join(", ",Heights36(past))}");
+        var below=Draw(Form36(-22,1));
+        Check(Heights36(below).Zip(new[]{-22d,1}).All(p=>Close(p.First,Y(p.Second,22))),$"classic {classic}: {string.Join(", ",Heights36(below))}");
+        // Reversed, the smallest value is at the top and zero stays in the middle.
+        var reversed=Draw(Form36(5,-2) with{YReversed=true});
+        Check(Heights36(reversed).Zip(new[]{5d,-2}).All(p=>Close(p.First,Y(p.Second,10,reversed:true)))&&Upward(reversed).First()==("−10",82d)&&Upward(reversed).Last()==("+10",348d),$"classic {classic}: {string.Join(", ",Heights36(reversed))}");
+        // A pane's own: the main plot keeps its fitted axis, from 1 to 3.
+        var paned=Draw(new ChartSpec{Title="P",Kind=ChartKind.Line,Panes=[new(){Weight=1,YSymmetric=10,YFormat=ValueFormat.Signed}],
+            Series=[new("Fitness",[new(0,1),new(1,2),new(2,3)]){Markers=MarkerStyle.Filled},new("Form",[new(0,-4),new(1,6),new(2,0)]){Pane=1,Markers=MarkerStyle.Filled}]});
+        Check(Heights36(paned,1).Zip(new[]{-4d,6,0}).All(p=>Close(p.First,Y(p.Second,10,223,344)))&&Close(Heights36(paned,0)[0],199)&&Close(Heights36(paned,0)[2],78),
+            $"classic {classic}: {string.Join(", ",Heights36(paned,1))} | {string.Join(", ",Heights36(paned,0))}");
+    }
+    // A series on the right-hand axis is not measured on it; an empty chart still draws its axis.
+    var right=Svg(Form36(1,2) with{Series=[..Form36(1,2).Series,new("Right",[new(0,500),new(1,900)]){Secondary=true}]});
+    Check(Heights36(right).Zip(new[]{1d,2}).All(p=>Close(p.First,Y(p.Second,10,78,344))),string.Join(", ",Heights36(right)));
+    // Columns and areas, which stand on zero, blocks, which stand on its bottom, and bars, which run along the bottom, take it.
+    var columns=Svg(new ChartSpec{Title="C",Kind=ChartKind.Column,YSymmetric=50,Series=[new("Change",[new(0,-20,"A"),new(1,30,"B")])]});
+    Check(Upward(columns).First().Text=="-50"&&Upward(columns).Last().Text=="50","the columns' axis");
+    foreach(var kind in new[]{ChartKind.Area,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Scatter,ChartKind.Bubble,ChartKind.Band,ChartKind.Range,ChartKind.Candlestick,ChartKind.Ohlc,ChartKind.Blocks})
+        Svg(Sample(kind) with{YSymmetric=500});
+    Svg(Form36(1,2) with{IncludeZero=true});
+    // Hidden in the component, the first pane closes and the pane under it takes the main plot's place with its symmetric axis.
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    var moved=new ChartSpec{Title="P",Kind=ChartKind.Line,Panes=[new(){YSymmetric=10,YFormat=ValueFormat.Signed}],Series=[new("Main",[new(0,38),new(1,38.2)]),new("Form",[new(0,-1),new(1,2)]){Pane=1}]};
+    ChartSpec shown=moved;
+    Operate(moved,chart=>{typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[0]);shown=(ChartSpec)typeof(LumenChart).GetMethod("VisibleSpec",flags)!.Invoke(chart,[])!;return Task.CompletedTask;});
+    Check(shown is {YSymmetric:10,YFormat:ValueFormat.Signed,Panes.Count:0},"the pane took the main plot's place without its symmetric axis");
+});
+Test("YSymmetric is refused out of range, beside YMin, YMax or YMinSpan, on a logarithmic axis and where there is no such axis, each with its reason, in the main plot and a pane",()=>{
+    var line=Form36(1,2);
+    foreach(var least in new[]{0,-10,double.NaN,double.PositiveInfinity,1e101}) Check(Refused(line with{YSymmetric=least}).StartsWith("YSymmetric is the least a Y axis reaches either side of zero, so it must be positive and finite"),$"{least}");
+    Svg(line with{YSymmetric=1e100});Svg(line with{YSymmetric=1e-9});
+    foreach(var other in new[]{line with{YMin=-20},line with{YMax=20},line with{YMinSpan=8}})
+        Check(Refused(other).StartsWith("YSymmetric sets both ends of a Y axis about zero, and YMin, YMax or YMinSpan sets them another way"),Refused(other));
+    Check(Refused(line with{YAxis=AxisKind.Log,Series=[new("S",[new(0,1),new(1,2)])]}).StartsWith("YSymmetric holds a Y axis symmetric about zero, and a logarithmic axis"),"a log axis");
+    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Gauge,ChartKind.Ring,ChartKind.Timeline,ChartKind.Calendar})
+        Check(Refused(Sample(kind) with{YSymmetric=10}).StartsWith("YSymmetric holds a Y axis symmetric about zero, so it applies to line, area"),$"{kind}: {Refused(Sample(kind) with{YSymmetric=10})}");
+    var paned=new ChartSpec{Title="P",Kind=ChartKind.Line,Panes=[new(){YSymmetric=10}],Series=[new("A",[new(0,1)]),new("B",[new(0,1)]){Pane=1}]};
+    Svg(paned);Svg(paned with{Panes=[new(){YSymmetric=10,YReversed=true}]});
+    Check(Refused(paned with{Panes=[new(){YSymmetric=10,YMin=0}]}).Contains("one or the other")&&Refused(paned with{Panes=[new(){YSymmetric=10,YMinSpan=4}]}).Contains("one or the other")
+        &&Refused(paned with{Panes=[new(){YSymmetric=10,YAxis=AxisKind.Log}]}).Contains("logarithmic")&&Refused(paned with{Panes=[new(){YSymmetric=0}]}).Contains("positive"),"a pane's refusals");
+});
+Test("SharedReadout never changes the drawing: the SVG is byte for byte the same with it and without it in both finishes, and it is refused on a sparkline and on the kinds without a continuous X axis",()=>{
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Area,ChartKind.Scatter,ChartKind.Bubble,ChartKind.Band,ChartKind.Range,ChartKind.Candlestick,ChartKind.Ohlc,ChartKind.Blocks})
+        foreach(var classic in new[]{false,true})
+        {
+            var spec=classic?Classic(Sample(kind)):Sample(kind);
+            Check(ChartSvg.Render(spec with{SharedReadout=true})==ChartSvg.Render(spec)&&ChartSvg.Render(spec with{SharedReadout=true},includeLegend:false,includeTitles:false)==ChartSvg.Render(spec,includeLegend:false,includeTitles:false),$"{kind} classic {classic}");
+        }
+    var card=Sports("performance");
+    Check(card.SharedReadout&&ChartSvg.Render(card)==ChartSvg.Render(card with{SharedReadout=false}),"the gallery's chart");
+    Check(ChartSvg.Render(Read36())==ChartSvg.Render(Read36() with{SharedReadout=false}),"panes");
+    foreach(var kind in new[]{ChartKind.Column,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Gauge,ChartKind.Ring,ChartKind.Timeline,ChartKind.Calendar})
+        Check(Refused(Sample(kind) with{SharedReadout=true}).StartsWith("SharedReadout reads every series at one X of a continuous X axis"),$"{kind}: {Refused(Sample(kind) with{SharedReadout=true})}");
+    Check(Refused(Pb() with{SharedReadout=true}).StartsWith("A sparkline is read beside the words that give its numbers"),"a sparkline");
+});
+Test("ChartSvg.Readout reads every series at each X in legend order, where its marks stand, a missing value as missing, and a pane's axis as its own",()=>{
+    var spec=Read36();var readout=ChartSvg.Readout(spec);var doc=Svg(spec);
+    Check(readout.Top==78&&readout.Bottom==344&&readout.Left==76&&readout.Right==870,$"{readout.Top} {readout.Bottom} {readout.Left} {readout.Right}");
+    Check(readout.Columns.Select(c=>c.Text).SequenceEqual(["0 · Fitness 50 · Fatigue 60 · Form −10","1 · Fitness 52, better than the previous · Fatigue missing · Form −4.5","2 · Fitness 51, worse than the previous · Fatigue 58 · Form −7 tired"]),
+        string.Join(" | ",readout.Columns.Select(c=>c.Text)));
+    // Each entry stands where its mark does, and the missing one has no place and no mark.
+    foreach(var column in readout.Columns)
+        foreach(var entry in column.Entries)
+        {
+            var found=doc.Descendants(ns+"g").SingleOrDefault(g=>(string?)g.Attribute("data-series")==entry.Series.ToString(CultureInfo.InvariantCulture)&&(string?)g.Attribute("data-point")==entry.Point.ToString(CultureInfo.InvariantCulture));
+            if(entry.Position is null){Check(found is null&&entry.Text=="Fatigue missing","the missing value");continue;}
+            var circle=found!.Element(ns+"circle")!;
+            Check(Close(Attr(circle,"cx"),column.Position)&&Close(Attr(circle,"cy"),entry.Position.Value)&&entry.Color==ChartStyle.Light.Series[entry.Series],$"{entry.Text}: {Attr(circle,"cx")},{Attr(circle,"cy")} against {column.Position},{entry.Position}");
+        }
+    // A description on two lines moves the plot, and the readout with it.
+    Check(ChartSvg.Readout(spec with{Width=340,Description="Fitness, fatigue and daily stress above, form below · two planned weeks shaded"}).Top==92,"a description on two lines");
+    // A point is read only within half the closest spacing of the X values: weekly points at noon stand half a day from the daily ones
+    // either side, a quarter day being the most, so they are read at X values of their own.
+    var day=86_400_000d;
+    var mixed=new ChartSpec{Title="M",Kind=ChartKind.Line,XAxis=AxisKind.Time,Series=[new("Daily",Enumerable.Range(0,14).Select(i=>new ChartPoint(Utc(2026,6,1)+i*day,i)).ToArray()),
+        new("Weekly",[new(Utc(2026,6,1,12),100),new(Utc(2026,6,8,12),110)])]};
+    var read=ChartSvg.Readout(mixed);
+    Check(read.Columns.Count==16&&read.Columns.Count(c=>c.Entries.Count==2)==0&&read.Columns.Single(c=>c.X==Utc(2026,6,1,12)).Label=="1 Jun 2026"&&read.Columns[0].Text=="1 Jun 2026 · Daily 0",
+        string.Join(" | ",read.Columns.Take(3).Select(c=>c.Text)));
+    // Blocks are read across the X they cover, candles by their prices and range bars by their ends; a chart without a continuous X axis
+    // reads nothing.
+    var blocks=new ChartSpec{Title="B",Kind=ChartKind.Blocks,Series=[new("Plan",[ChartPoint.Block(0,2,5,"Warm-up"),ChartPoint.Block(2,6,9)]),new("Power",[new(1,4),new(3,8),new(5,7)]){Kind=ChartKind.Line}]};
+    Check(ChartSvg.Readout(blocks).Columns.Select(c=>c.Text).SequenceEqual(["1 · Plan 5 · Power 4","3 · Plan 9 · Power 8","5 · Plan 9 · Power 7"]),string.Join(" | ",ChartSvg.Readout(blocks).Columns.Select(c=>c.Text)));
+    Check(ChartSvg.Readout(Sample(ChartKind.Candlestick)).Columns[0].Text=="0 · Price open 10, high 12, low 9, close 11"&&ChartSvg.Readout(Sample(ChartKind.Range)).Columns[1].Text=="B · Heart rate 55 to 130",
+        $"{ChartSvg.Readout(Sample(ChartKind.Candlestick)).Columns[0].Text} | {ChartSvg.Readout(Sample(ChartKind.Range)).Columns[1].Text}");
+    Check(ChartSvg.Readout(Sample(ChartKind.Donut))==ChartReadout.Empty&&ChartSvg.Readout(Sample(ChartKind.Column))==ChartReadout.Empty&&ChartSvg.Readout(new ChartSpec())==ChartReadout.Empty,"a chart without a continuous X axis");
+    // A zoomed view reads only the X it shows.
+    Check(ChartSvg.Readout(spec with{XMin=.5,XMax=2}).Columns.Select(c=>c.X).SequenceEqual([1d,2]),"a zoomed view");
+    Reject(()=>ChartSvg.Readout(spec with{Width=10}));
+});
+Test("The component reads the shared readout once a drawing, reads a selected point and a keyboard stop as the readout does, and names the keys in hidden words",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    ChartReadout? held=null;var status="";var later="";
+    Operate(Read36(),async chart=>{held=(ChartReadout?)typeof(LumenChart).GetField("readout",flags)!.GetValue(chart);await chart.SelectPoint(2,1);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;
+        await chart.Readout(2);later=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    Check(held is {Columns.Count:3}&&status==held.Columns[1].Text&&later==held.Columns[2].Text,$"{status} | {later}");
+    // Hiding a series reads the others alone; without the setting there is nothing to read.
+    Operate(Read36(),chart=>{typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[1]);held=(ChartReadout?)typeof(LumenChart).GetField("readout",flags)!.GetValue(chart);return Task.CompletedTask;});
+    Check(held!.Columns[1].Text=="1 · Fitness 52, better than the previous · Form −4.5",held.Columns[1].Text);
+    Operate(Read36() with{SharedReadout=false},chart=>{held=(ChartReadout?)typeof(LumenChart).GetField("readout",flags)!.GetValue(chart);return Task.CompletedTask;});
+    Check(held is null,"a readout without the setting");
+    var html=Prerender(ChartElement(Read36()));var plain=Prerender(ChartElement(Spec()));var spark=Prerender(ChartElement(Pb()));
+    Check(html.Contains("<span class=\"lumen-keys\" hidden>Arrow keys read the chart: Left and Right move the readout from one X to the next")
+        &&plain.Contains("<span class=\"lumen-keys\" hidden>Arrow keys move between points: Left and Right along a series")&&spark.Contains("class=\"lumen-keys\" hidden"),html);
+    // The drawing keeps every mark a tab stop of its own, so a page without the script stays readable; the script makes them one.
+    Check(Datums(Svg(Read36()),0).All(m=>(string?)m.Attribute("tabindex")=="0"),"a static mark lost its tab stop");
+    var script=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.js"));
+    Check(script.Contains("export function drawn(")&&script.Contains("'tabindex', element === current ? '0' : '-1'")&&script.Contains("ArrowLeft: -1, ArrowRight: 1, PageUp: -10, PageDown: 10, Home: -Infinity, End: Infinity"),"the script's keys");
+});
+Test("YSymmetric, Signed and SharedReadout round-trip through the HTTP API's JSON, a request that names none keeps the defaults, and only a symmetric axis renames gradients",()=>{
+    var spec=Read36() with{YFormat=ValueFormat.Signed};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,finishJson);
+    Check(json.Contains("\"sharedReadout\":true")&&json.Contains("\"ySymmetric\":10")&&json.Contains("\"yFormat\":\"Signed\""),json);
+    var back=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,finishJson)!;
+    Check(back is {SharedReadout:true,YFormat:ValueFormat.Signed}&&back.Panes[0].YSymmetric==10&&ChartSvg.Render(back)==ChartSvg.Render(spec),"the spec changed in transit");
+    var written="{\"title\":\"Form\",\"kind\":\"Line\",\"ySymmetric\":10,\"yFormat\":\"Signed\",\"sharedReadout\":true,\"series\":[{\"name\":\"Form\",\"points\":[{\"x\":0,\"y\":-3},{\"x\":1,\"y\":4}]}]}";
+    var drawn=Svg(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,finishJson)!);
+    Check(Upward(drawn).First().Text=="−10"&&Upward(drawn).Last().Text=="+10"&&Datums(drawn,0)[0].Attribute("aria-label")!.Value=="Form: 0, −3","a spec written by hand");
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"panes\":[{}],\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]},{\"name\":\"T\",\"pane\":1,\"points\":[{\"x\":0,\"y\":1}]}]}",finishJson)!;
+    Check(!old.SharedReadout&&old.YSymmetric is null&&old.Panes[0].YSymmetric is null,"the defaults");
+    // 0.34.0 named this gradient lumen-4bce89394b87; the defaults and a shared readout, set or not, leave it so, and a symmetric axis names it afresh.
+    string GradientId(ChartSpec s)=>System.Text.RegularExpressions.Regex.Match(ChartSvg.Render(s),"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}],Annotations=[new(AnnotationAxis.Y,2){Label="T"}]};
+    Check(GradientId(faded)=="lumen-4bce89394b87"&&GradientId(faded with{SharedReadout=true})=="lumen-4bce89394b87"&&GradientId(faded with{YSymmetric=null})=="lumen-4bce89394b87"&&GradientId(faded with{YFormat=ValueFormat.Number})=="lumen-4bce89394b87",GradientId(faded with{SharedReadout=true}));
+    Check(GradientId(faded with{YSymmetric=5})!="lumen-4bce89394b87"&&GradientId(faded with{YFormat=ValueFormat.Signed})!="lumen-4bce89394b87","a setting kept a gradient's name");
+});
+Test("Sports page: Performance management stands in two panes, fitness and fatigue over the daily stress and form beneath on a signed axis held symmetric about zero, its shared readout reading the four in legend order",()=>{
+    var spec=Sports("performance");
+    Check(spec is {Kind:ChartKind.Line,XAxis:AxisKind.Time,SharedReadout:true,Panes.Count:1}&&spec.Panes[0] is {YSymmetric:10,YFormat:ValueFormat.Signed,Label:"Form"},"the panes");
+    Check(spec.Series.Select(s=>(s.Name,s.Pane)).SequenceEqual([("Fitness",0),("Fatigue",0),("Form",1),("Daily stress",0)])&&spec.Series.All(s=>!s.Secondary)&&spec.Series[2].Kind is null&&spec.Series[3].Kind==ChartKind.Column,"the series");
+    Check(spec.Description.Contains("form below")&&spec.Title.StartsWith("Fitness ")&&spec.Title.Contains(", form "),spec.Description);
+    // Form stands on an axis at least ±10 tall, written with its sign.
+    var doc=Svg(spec);var form=spec.Series[2].Points.Select(p=>Math.Abs(p.Y!.Value)).Max();
+    Check(doc.Descendants(ns+"text").Any(t=>t.Value=="0")&&doc.Descendants(ns+"text").Any(t=>t.Value.StartsWith('−'))&&doc.Descendants(ns+"text").Any(t=>t.Value.StartsWith('+')),"the signed ticks");
+    var readout=ChartSvg.Readout(spec);var today=SportsData.When(SportsData.Today);
+    var column=readout.Columns.Single(c=>c.X==today);
+    Check(readout.Columns.Count==spec.Series[0].Points.Count&&column.Entries.Select(e=>e.Text.Split(' ')[0]).SequenceEqual(["Fitness","Fatigue","Form","Daily"])&&column.Label==TimeAxis.Moment(today).ToString("d MMM yyyy",CultureInfo.InvariantCulture),column.Text);
+    // The upper pane's clip reaches 12 past its plot for the ring round race-day fitness, and the lower one's 6.
+    Check(form>0&&readout.Top==Attr(doc.Root!.Elements(ns+"svg").First(),"y")+12&&Close(readout.Bottom,Attr(doc.Root!.Elements(ns+"svg").Last(),"y")+Attr(doc.Root!.Elements(ns+"svg").Last(),"height")-6),"the guide's ends");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

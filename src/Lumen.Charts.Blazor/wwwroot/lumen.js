@@ -1,5 +1,9 @@
 const handlers = new WeakMap();
 const fits = new WeakMap();
+const NS = 'http://www.w3.org/2000/svg';
+let described = 0;
+// How far each key moves along a series, or along the readout's X values: one, ten, or to either end.
+const steps = { ArrowLeft: -1, ArrowRight: 1, PageUp: -10, PageDown: 10, Home: -Infinity, End: Infinity };
 
 export function attach(root, dotnet) {
     const tooltip = document.createElement('div');
@@ -7,12 +11,22 @@ export function attach(root, dotnet) {
     tooltip.setAttribute('aria-hidden', 'true');
     tooltip.hidden = true;
     root.appendChild(tooltip);
+    // The readout the component worked out for the drawing shown, the X it stands at, its guide and rings, the mark that is the chart's
+    // one tab stop, the series the keyboard keeps to, and the drawing they belong to.
+    const state = { readout: null, index: new Map(), column: -1, overlay: null, current: null, series: null, keep: false, svg: null, timer: 0 };
 
     const mark = target => {
         const found = target instanceof Element ? target.closest('.lumen-datum') : null;
         return found && root.contains(found) ? found : null;
     };
-    const hide = () => { tooltip.hidden = true; };
+    const drawing = () => root.querySelector(':scope > .lumen-viewport > svg');
+    const marks = () => [...root.querySelectorAll(':scope > .lumen-viewport .lumen-datum')];
+    // A mark is known by its series and point, or, for an aggregate such as a reference or a box, by its place among the aggregates.
+    const key = element => element.dataset.series !== undefined ? `${element.dataset.series}:${element.dataset.point}`
+        : 'a' + marks().filter(m => m.dataset.series === undefined).indexOf(element);
+    const clear = () => { state.column = -1; state.overlay?.replaceChildren(); };
+    const hide = () => { tooltip.hidden = true; clear(); };
+    const plain = () => { tooltip.classList.remove('lumen-readout-tip'); };
     const place = (element, event) => {
         const bounds = root.getBoundingClientRect();
         const box = element.getBoundingClientRect();
@@ -32,27 +46,201 @@ export function attach(root, dotnet) {
     const show = event => {
         const element = mark(event.target);
         if (!element) { hide(); return; }
+        clear();
+        plain();
         tooltip.textContent = element.getAttribute('aria-label') || '';
         tooltip.hidden = false;
         place(element, event.clientX ? event : null);
     };
-    const move = event => { if (!tooltip.hidden) show(event); };
-    const leave = event => { if (!mark(event.relatedTarget)) hide(); };
-    const select = event => {
-        if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) {
-            if (event.key === 'Escape') hide();
-            return;
+
+    // The shared readout at one X: a guide through every pane, a ring round each series' point there, and one tooltip beside the guide
+    // that reads the X and then each series, in legend order. The guide is the muted text colour and each ring is outlined in the text
+    // colour, both of which clear contrast on the chart's background, round a dot in the series' colour.
+    const draw = (name, attributes) => {
+        const element = document.createElementNS(NS, name);
+        for (const [attribute, value] of Object.entries(attributes)) element.setAttribute(attribute, value);
+        return element;
+    };
+    const showReadout = column => {
+        const readout = state.readout, svg = drawing();
+        if (!readout || !svg || column < 0 || column >= readout.columns.length) return;
+        state.column = column;
+        const [x, label, entries] = readout.columns[column];
+        if (!state.overlay || state.overlay.ownerSVGElement !== svg) {
+            state.overlay = draw('g', { class: 'lumen-readout', 'aria-hidden': 'true', 'pointer-events': 'none' });
+            svg.appendChild(state.overlay);
         }
+        const ground = getComputedStyle(svg).backgroundColor;
+        const parts = [draw('line', { x1: x, x2: x, y1: readout.top, y2: readout.bottom, 'stroke-width': 1, 'vector-effect': 'non-scaling-stroke', style: 'stroke:var(--lumen-muted)' })];
+        for (const [, , y, , color] of entries) {
+            if (y === null) continue;
+            parts.push(draw('circle', { cx: x, cy: y, r: 7, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'vector-effect': 'non-scaling-stroke' }),
+                draw('circle', { cx: x, cy: y, r: 4, fill: color, stroke: ground, 'stroke-width': 1.5, 'vector-effect': 'non-scaling-stroke' }));
+        }
+        state.overlay.replaceChildren(...parts);
+        tooltip.textContent = [label, ...entries.map(entry => entry[3])].join('\n');
+        tooltip.classList.add('lumen-readout-tip');
+        tooltip.hidden = false;
+        // Beside the guide at the top of the plot, on whichever side has room, and never past the chart's sides.
+        const bounds = root.getBoundingClientRect(), matrix = svg.getScreenCTM();
+        if (!matrix) return;
+        const at = new DOMPoint(x, readout.top).matrixTransform(matrix);
+        const width = tooltip.offsetWidth, from = at.x - bounds.left;
+        let left = from + 12;
+        if (left + width > bounds.width - 4) left = from - 12 - width;
+        tooltip.style.left = Math.max(4, Math.min(left, bounds.width - width - 4)) + 'px';
+        tooltip.style.top = at.y - bounds.top + 'px';
+    };
+    // The X nearest a position across the drawing.
+    const nearest = position => {
+        const columns = state.readout.columns;
+        let low = 0, high = columns.length - 1;
+        while (low < high) { const middle = (low + high) >> 1; if (columns[middle][0] < position) low = middle + 1; else high = middle; }
+        return low > 0 && position - columns[low - 1][0] <= columns[low][0] - position ? low - 1 : low;
+    };
+    const pointed = event => {
+        const readout = state.readout, svg = drawing(), matrix = svg?.getScreenCTM();
+        if (!readout.columns.length || !matrix) return;
+        const at = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+        if (at.x < readout.left - 8 || at.x > readout.right + 8 || at.y < readout.top - 8 || at.y > readout.bottom + 8) { hide(); return; }
+        const column = nearest(at.x);
+        if (column !== state.column || tooltip.hidden) showReadout(column);
+    };
+    // The status line reads the readout too, a moment after the keyboard stops on an X, so holding a key down does not flood it.
+    const announce = column => {
+        clearTimeout(state.timer);
+        state.timer = setTimeout(() => dotnet.invokeMethodAsync('Readout', column), 150);
+    };
+
+    // One tab stop for every chart: the mark last focused, or else the first point of the first series, takes Tab; the others are reached
+    // with the arrow keys. The drawing itself keeps every mark at tabindex 0, so a static page stays readable without this script.
+    const rove = current => {
+        for (const element of marks()) element.setAttribute('tabindex', element === current ? '0' : '-1');
+        state.current = key(current);
+    };
+    const settle = () => {
+        const all = marks();
+        if (!all.length) return;
+        const points = all.filter(m => m.dataset.series !== undefined);
+        const first = points.length ? points.reduce((best, m) => Number(m.dataset.series) < Number(best.dataset.series)
+            || m.dataset.series === best.dataset.series && Number(m.dataset.point) < Number(best.dataset.point) ? m : best) : all[0];
+        rove(all.find(m => key(m) === state.current) || first);
+    };
+    // The chart's marks in the rows the arrow keys move along: each series' points in order, then the aggregates — references, bins,
+    // boxes — in the order they are drawn.
+    const rows = () => {
+        const series = new Map(), aggregates = [];
+        for (const element of marks()) {
+            if (element.dataset.series === undefined) { aggregates.push(element); continue; }
+            const s = Number(element.dataset.series);
+            if (!series.has(s)) series.set(s, []);
+            series.get(s).push(element);
+        }
+        const result = [...series.keys()].sort((a, b) => a - b).map(s => series.get(s).sort((a, b) => a.dataset.point - b.dataset.point));
+        if (aggregates.length) result.push(aggregates);
+        return result;
+    };
+    const centre = element => { const box = element.getBoundingClientRect(); return box.left + box.width / 2; };
+    const along = (length, from, step) => step === -Infinity ? 0 : step === Infinity ? length - 1 : Math.max(0, Math.min(length - 1, from + step));
+    // Left and Right step along the series, skipping its gaps, which have no mark; Up and Down go to the point nearest the same X in
+    // the series before or after.
+    const move = (element, keyName) => {
+        const all = rows(), row = all.findIndex(r => r.includes(element));
+        if (row < 0) return element;
+        if (keyName in steps) return all[row][along(all[row].length, all[row].indexOf(element), steps[keyName])];
+        const next = all[row + (keyName === 'ArrowUp' ? -1 : 1)];
+        if (!next) return element;
+        const x = centre(element);
+        return next.reduce((best, m) => Math.abs(centre(m) - x) < Math.abs(centre(best) - x) ? m : best);
+    };
+    const markOf = entry => root.querySelector(`:scope > .lumen-viewport .lumen-datum[data-series="${entry[0]}"][data-point="${entry[1]}"]`);
+    // With a shared readout, Left and Right move from one X to the next, staying with the series the reader chose where it has a point
+    // there, and Up and Down move between the series at that X.
+    const step = (element, keyName) => {
+        const columns = state.readout.columns, column = state.index.get(key(element));
+        if (!(keyName in steps)) {
+            const here = columns[column][2].map(markOf).filter(Boolean), at = here.indexOf(element);
+            return here[Math.max(0, Math.min(here.length - 1, at + (keyName === 'ArrowUp' ? -1 : 1)))] ?? element;
+        }
+        const by = steps[keyName], direction = by === -Infinity ? 1 : by === Infinity ? -1 : Math.sign(by);
+        // An X whose points are all thinned out of the drawing has no mark to focus, so the move goes on past it.
+        for (let c = along(columns.length, column, by); c >= 0 && c < columns.length; c += direction) {
+            const there = columns[c][2].map(markOf).filter(Boolean);
+            if (there.length) return there.find(m => Number(m.dataset.series) === state.series) ?? there[0];
+        }
+        return element;
+    };
+
+    const select = event => {
         const point = event.target.closest('[data-point]');
         if (!point || !root.contains(point)) return;
         if (event.type === 'keydown') event.preventDefault();
         dotnet.invokeMethodAsync('SelectPoint', Number(point.dataset.series), Number(point.dataset.point));
     };
+    const keydown = event => {
+        if (event.key === 'Escape') { hide(); return; }
+        const element = mark(event.target);
+        if (!element) return;
+        if (['Enter', ' '].includes(event.key)) { select(event); return; }
+        if (!(event.key in steps) && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+        event.preventDefault();
+        const reading = state.readout && state.index.has(key(element));
+        const next = reading ? step(element, event.key) : move(element, event.key);
+        if (!next || next === element) return;
+        // Left and Right keep to the series chosen, even through an X where it has no point.
+        state.keep = reading && event.key in steps;
+        next.focus();
+        state.keep = false;
+    };
+    const focused = event => {
+        const element = mark(event.target);
+        if (!element) return;
+        rove(element);
+        const column = state.readout ? state.index.get(key(element)) : undefined;
+        if (column === undefined) { show(event); return; }
+        if (!state.keep) state.series = Number(element.dataset.series);
+        showReadout(column);
+        announce(column);
+    };
+    const over = event => { if (state.readout) pointed(event); else show(event); };
+    const moved = event => { if (state.readout) pointed(event); else if (!tooltip.hidden) show(event); };
+    const out = event => { if (!state.readout && !mark(event.relatedTarget)) hide(); };
+    // A readout stays while the pointer is anywhere on the chart, and after a tap, so a reader on a phone can read it.
+    const left = event => { if (state.readout && event.pointerType !== 'touch') hide(); };
+    const blurred = event => { if (!mark(event.relatedTarget)) hide(); };
 
-    const bindings = [['click', select], ['keydown', select], ['pointerover', show], ['pointermove', move],
-        ['pointerout', leave], ['focusin', show], ['focusout', leave]];
+    // The words that name the keys describe the chart's scrolling viewport, which Tab reaches first, or a sparkline's drawing. They are
+    // given an ID here, so the server's drawing stays the same for every chart and every render.
+    const words = root.querySelector(':scope > .lumen-keys');
+    const keys = words ? words.id || (words.id = 'lumen-keys-' + ++described) : null;
+    if (keys && !root.classList.contains('lumen-spark')) root.querySelector(':scope > .lumen-viewport')?.setAttribute('aria-describedby', keys);
+
+    // Each new drawing: the readout it reads, its one tab stop, and, on a sparkline, the keys named in its drawing's description. A
+    // drawing replaced takes its guide and tooltip with it.
+    state.drawn = data => {
+        state.readout = data ? { top: data[0], bottom: data[1], left: data[2], right: data[3], columns: data[4] } : null;
+        state.index = new Map();
+        if (state.readout)
+            state.readout.columns.forEach((column, c) => { for (const entry of column[2]) if (!state.index.has(`${entry[0]}:${entry[1]}`)) state.index.set(`${entry[0]}:${entry[1]}`, c); });
+        const svg = drawing();
+        if (svg !== state.svg) {
+            state.svg = svg;
+            state.overlay = null;
+            hide();
+        }
+        settle();
+        if (svg && keys && root.classList.contains('lumen-spark')) svg.setAttribute('aria-describedby', keys);
+    };
+
+    const bindings = [['click', select], ['keydown', keydown], ['pointerover', over], ['pointermove', moved],
+        ['pointerout', out], ['pointerleave', left], ['focusin', focused], ['focusout', blurred]];
     for (const [type, handler] of bindings) root.addEventListener(type, handler);
-    handlers.set(root, { bindings, tooltip });
+    handlers.set(root, { bindings, tooltip, state });
+}
+
+/// Tells the script of a chart's new drawing and the shared readout it reads, or null.
+export function drawn(root, readout) {
+    handlers.get(root)?.state?.drawn(readout);
 }
 
 /// Node dragging and selection for a graph. Dragging previews with a transform and commits on release.
@@ -141,6 +329,8 @@ export function detach(root) {
     if (!state) return;
     for (const [type, handler] of state.bindings) root.removeEventListener(type, handler);
     state.tooltip?.remove();
+    clearTimeout(state.state?.timer);
+    state.state?.overlay?.remove();
     handlers.delete(root);
 }
 

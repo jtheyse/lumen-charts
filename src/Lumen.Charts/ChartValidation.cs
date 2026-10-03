@@ -61,6 +61,8 @@ public static partial class ChartValidation
             throw new ArgumentException("XTickLabels chooses which labels a continuous X axis writes along the bottom, so it applies to line, area, scatter, bubble, candlestick, OHLC, band, range, blocks and timeline charts; column, bar and stacked column charts label each category, a histogram the edges of its bins and a calendar its own dates, and the other kinds have no X axis.");
         if (spec.XTickLabels == TickLabels.Bounds && spec.XTicks == TickSource.PointLabels)
             throw new ArgumentException("XTickLabels = Bounds labels the X axis's own two ends, and XTicks = PointLabels asks for the points' labels instead, so a chart takes one or the other.");
+        if (spec.SharedReadout && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Blocks))
+            throw new ArgumentException("SharedReadout reads every series at one X of a continuous X axis, so it applies to line, area, scatter, bubble, band, range, candlestick, OHLC and blocks charts; column, bar and stacked column charts place their series by category, and the other kinds have no X axis their series share.");
         if (secondary)
         {
             if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Band or ChartKind.Range or ChartKind.Blocks))
@@ -324,7 +326,7 @@ public static partial class ChartValidation
             if (reversed) throw new ArgumentException("Column and area series draw from a zero baseline, which a reversed axis would hang from the top.");
             if (min > 0 || max < 0) throw new ArgumentException("Column and area series draw from a zero baseline, so the bounds of their axis must include zero.");
         }
-        for (var pane = 0; pane <= spec.Panes.Count; pane++) Spanned(spec, pane);
+        for (var pane = 0; pane <= spec.Panes.Count; pane++) { Spanned(spec, pane); Symmetric(spec, pane); }
         // A calendar draws a cell for every day it spans, so the span is bounded; it is read in the chart's zone, checked above.
         if (spec.Kind == ChartKind.Calendar && spec.Series.Any(series => series.Points.Count > 0))
         {
@@ -372,6 +374,8 @@ public static partial class ChartValidation
             throw new ArgumentException("A sparkline is one small plot, so it takes no panes; draw each measure as a sparkline of its own.");
         if (spec.Series?.Any(series => series?.ValueLabels == true) == true)
             throw new ArgumentException("A sparkline draws its data alone, so it writes no value labels; write the numbers in the words beside it, and each point's value stays in its tooltip and accessible name.");
+        if (spec.SharedReadout)
+            throw new ArgumentException("A sparkline is read beside the words that give its numbers, a point at a time, so it takes no shared readout; draw the series as a full chart to read them together.");
     }
 
     /// <summary>A minimum span widens an axis fitted to the data about the data's middle, so it needs an axis that is fitted to the
@@ -391,6 +395,22 @@ public static partial class ChartValidation
         if (spec.IncludeZero || spec.Kind is ChartKind.Area or ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Histogram
             || spec.Series.Any(series => series.Pane == index && !series.Secondary && ChartSvg.Mark(spec, series) is ChartKind.Column or ChartKind.Area))
             throw new ArgumentException("YMinSpan centres an axis on its data, and an axis that must include zero is held at zero instead: one set to IncludeZero, a kind drawn from zero, or one that carries columns or an area.");
+    }
+
+    /// <summary>A symmetric axis runs as far below zero as above it, so it needs a linear axis whose ends nothing else sets. Pane 0 is the
+    /// main plot.</summary>
+    private static void Symmetric(ChartSpec spec, int index)
+    {
+        var pane = ChartSvg.Pane(spec, index);
+        if (pane.YSymmetric is not { } least) return;
+        if (!Finite(least) || least <= 0) throw new ArgumentException("YSymmetric is the least a Y axis reaches either side of zero, so it must be positive and finite, magnitude <= 1e100.");
+        if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn
+            or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Blocks))
+            throw new ArgumentException("YSymmetric holds a Y axis symmetric about zero, so it applies to line, area, scatter, bubble, column, bar, stacked column, band, range, candlestick, OHLC and blocks charts; donut, heatmap, radar, gauge, ring, timeline and calendar charts have no such axis, a histogram counts up from zero, and box and violin charts fit theirs to their distributions.");
+        if (pane.YMin is not null || pane.YMax is not null || pane.YMinSpan is not null)
+            throw new ArgumentException("YSymmetric sets both ends of a Y axis about zero, and YMin, YMax or YMinSpan sets them another way, so an axis takes one or the other.");
+        if (pane.YAxis == AxisKind.Log)
+            throw new ArgumentException("YSymmetric holds a Y axis symmetric about zero, and a logarithmic axis has no zero or negative values; use a linear axis.");
     }
 
     /// <summary>A pane's settings meet the rules the spec's own Y properties meet for the main plot, on the kinds that take panes.</summary>

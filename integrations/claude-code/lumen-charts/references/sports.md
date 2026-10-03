@@ -1,6 +1,6 @@
 # Sports and training charts
 
-Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.34.0. Recipes for a race-results app — finishing places coloured by their change, value labels on a line, a season on a time axis, personal-best and growth sparklines — are in `recipes-race-face.md`.
+Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.36.0. Recipes for a race-results app — finishing places coloured by their change, value labels on a line, a season on a time axis, personal-best and growth sparklines — are in `recipes-race-face.md`.
 
 ## Conventions the numbers follow
 
@@ -38,7 +38,7 @@ var pmc = new ChartSpec {
 };
 ```
 
-`Training.Load` returns every calendar day from the first entry to the last (missing days count as zero), sums several workouts on one day, and computes form from yesterday's fitness and fatigue, as TrainingPeaks does. Tune fatigue with `fatigueDays` (4–12).
+`Training.Load` returns every calendar day from the first entry to the last (missing days count as zero), sums several workouts on one day, and computes form from yesterday's fitness and fatigue, as TrainingPeaks does. Tune fatigue with `fatigueDays` (4–12). From 0.36.0 form reads better in a pane of its own on an axis held symmetric about zero, `ChartPane.YSymmetric` with `ValueFormat.Signed`, and `SharedReadout` reads all four series at one day; `recipes-race-face.md` (Fitness & form) draws it so, with range presets.
 
 ## Activity stream in panes
 

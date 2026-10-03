@@ -17,7 +17,9 @@ race = [b for b in race if not all(l.startswith('using ') or not l.strip() for l
 
 inputs = io.open(os.path.join(here, 'Inputs.txt'), encoding='utf-8').read()
 recipes = ''.join(b + '\n' for b in sports + race)
-specs = sorted(set(re.findall(r"\bvar (\w+) = new ChartSpec\b", recipes)))
+# Each chart a recipe declares, and each a recipe's own ChartSpec function makes, such as one range of a chart the app slices.
+makers = set(re.findall(r"\bChartSpec (\w+)\(", recipes))
+specs = sorted(set(re.findall(r"\bvar (\w+) = new ChartSpec\b", recipes)) | {name for name, maker in re.findall(r"\bvar (\w+) = (\w+)\(", recipes) if maker in makers})
 
 program = '\n'.join(usings) + '\n' + inputs + recipes
 program += 'var specs = new (string, ChartSpec)[] {' + ','.join(f'("{n}", {n})' for n in specs) + '};\n'

@@ -28,6 +28,8 @@ public static class DemoData
         var random=new Random(42+revision);
         Lumen.Charts.ChartSeries Make(string name,double baseline) => new(name,Enumerable.Range(0,12).Select(i=>new Lumen.Charts.ChartPoint(i,Math.Round(baseline+i*2+random.NextDouble()*18,1),Months[i],10+random.Next(80))).ToArray());
         var series=new[]{Make("Workspace",35),Make("Enterprise",20),Make("Community",10)};
+        // A line or an area breaks where an observation is missing, and the arrow keys step over the gap, so one plan misses a month.
+        if(kind is Lumen.Charts.ChartKind.Line or Lumen.Charts.ChartKind.Area) series[2]=series[2] with{Points=series[2].Points.Select((p,i)=>i==6?p with{Y=null}:p).ToArray()};
         var xKind=Lumen.Charts.AxisKind.Linear; var weekends=false; IReadOnlyList<Lumen.Charts.TimeSkip> holidays=[];
         IReadOnlyList<Lumen.Charts.ChartPane> panes=[]; var height=420;
         var title="A clearer view of growth"; var desc="Monthly activity across three product plans";var x="Month index";var y="Active accounts (thousands)";

@@ -16,8 +16,8 @@ public enum AxisKind
 /// <summary>
 /// How an axis writes its values. <see cref="Duration"/> reads them as seconds: m:ss and h:mm:ss on a linear
 /// axis, 1s, 5m and 1h on a logarithmic one. <see cref="Compact"/> writes 1.2k, 3.4M and 1.5B.
-/// <see cref="TimeOfDay"/> reads seconds since a midnight and writes the clock, HH:mm. A time axis writes its calendar
-/// and takes none of them.
+/// <see cref="TimeOfDay"/> reads seconds since a midnight and writes the clock, HH:mm. <see cref="Signed"/> writes a number with
+/// its sign, +5 and −5. A time axis writes its calendar and takes none of them.
 /// </summary>
 public enum ValueFormat
 {
@@ -30,7 +30,12 @@ public enum ValueFormat
     /// <summary>Seconds since a midnight, written as the time of day, HH:mm, rounded to the minute and wrapping at 24 hours:
     /// 84600 reads 23:30 and 110400, the next morning, 06:40, so a night is one unbroken span that never crosses zero. Ticks
     /// land on whole hours, or on half and quarter hours over a short range. Linear axes only.</summary>
-    TimeOfDay
+    TimeOfDay,
+    /// <summary>Plain numbers, as <see cref="Number"/> writes them, with their sign written out: a plus for a positive value, +5, a
+    /// true minus sign (U+2212) for a negative one, −5, and zero, negative zero included, as 0. For values that read above and below
+    /// a balance, such as training form or a change from the day before. Taken wherever another format is: axes, value labels,
+    /// tooltips, the data table and annotations.</summary>
+    Signed
 }
 
 /// <summary>Time axis values are Unix milliseconds. Ticks and labels read in UTC unless <see cref="ChartSpec.TimeZone"/> names a zone,
@@ -242,8 +247,13 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         ValueFormat.Duration => Kind == AxisKind.Log ? Span(value) : Clock(value),
         ValueFormat.Compact => Compact(value),
         ValueFormat.TimeOfDay => TimeOfDay(value),
+        ValueFormat.Signed => Signed(value),
         _ => LinearScale.Label(value)
     };
+
+    /// <summary>A number as <see cref="ValueFormat.Number"/> writes it, after a plus for a positive value and a true minus sign, U+2212,
+    /// for a negative one; zero, negative zero included, is 0.</summary>
+    private static string Signed(double value) => value == 0 ? "0" : (value > 0 ? "+" : "−") + LinearScale.Label(Math.Abs(value));
 
     /// <summary>Seconds since a midnight as the time of day, HH:mm: rounded half up to the minute and wrapped into one day, so
     /// a value past 24 hours, or below zero, reads as the clock it stands at.</summary>

@@ -61,7 +61,7 @@ internal sealed class SvgWriter
 
 /// <summary>Draws a <see cref="ChartSpec"/> as a self-contained, accessible SVG document, anywhere .NET runs: no browser, no
 /// fonts and no other package needed.</summary>
-public static class ChartSvg
+public static partial class ChartSvg
 {
     /// <summary>Every entry keeps at least a 3:1 contrast against both the light and the dark chart background.</summary>
     public static readonly IReadOnlyList<string> Palette = ChartStyle.Light.Series;
@@ -79,7 +79,7 @@ public static class ChartSvg
     /// <summary>What pane <paramref name="index"/> draws with: the spec's own Y properties for the main plot, and
     /// <c>Panes[index - 1]</c> below it.</summary>
     internal static ChartPane Pane(ChartSpec spec, int index) => index == 0
-        ? new() { Label = spec.YLabel, Weight = 1, YAxis = spec.YAxis, YMin = spec.YMin, YMax = spec.YMax, YMinSpan = spec.YMinSpan, YFormat = spec.YFormat, YReversed = spec.YReversed, YZones = spec.YZones,
+        ? new() { Label = spec.YLabel, Weight = 1, YAxis = spec.YAxis, YMin = spec.YMin, YMax = spec.YMax, YMinSpan = spec.YMinSpan, YSymmetric = spec.YSymmetric, YFormat = spec.YFormat, YReversed = spec.YReversed, YZones = spec.YZones,
             Y2Label = spec.Y2Label, Y2Axis = spec.Y2Axis, Y2Min = spec.Y2Min, Y2Max = spec.Y2Max, Y2Format = spec.Y2Format, Y2Reversed = spec.Y2Reversed }
         : spec.Panes[index - 1];
 
@@ -87,7 +87,7 @@ public static class ChartSvg
     // every record, so leaving out the nulls loses nothing, and it halves the text a long series makes.
     private static readonly JsonSerializerOptions Hashing = new()
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended, Unchanged, Unsparked, Unmarked } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended, Unchanged, Unsparked, Unmarked, Unread } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
     /// <summary>A classic style is serialized for hashing as 0.23.0 serialized it, without its finish.</summary>
     private static void Unfinished(JsonTypeInfo info)
@@ -163,6 +163,14 @@ public static class ChartSvg
         if (info.Type == typeof(ChartSpec))
             foreach (var property in info.Properties)
                 if (property.Name == nameof(ChartSpec.XTickLabels)) property.ShouldSerialize = (_, labels) => labels is not TickLabels.All;
+    }
+    /// <summary>A shared readout is the component's alone and never changes the drawing, so it is never part of the hash, set or not, and
+    /// a chart names its gradients as 0.35.0 did with it either way. A symmetric axis is null unless set, and nulls are left out already.</summary>
+    private static void Unread(JsonTypeInfo info)
+    {
+        if (info.Type != typeof(ChartSpec)) return;
+        foreach (var property in info.Properties)
+            if (property.Name == nameof(ChartSpec.SharedReadout)) property.ShouldSerialize = (_, _) => false;
     }
     private static byte[] Hashed<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, Hashing);
     /// <summary>
@@ -467,24 +475,31 @@ public static class ChartSvg
     /// <summary>Counts are grouped invariantly, so a host's culture cannot change what the chart reads.</summary>
     private static string Count(int value) => value.ToString("N0", CultureInfo.InvariantCulture);
 
-    private static void Cartesian(SvgWriter w, ChartSpec s)
+    /// <summary>Where a chart drawn on X and Y axes stands in its drawing: its plots' left and right edges, the inset range bars take
+    /// at each side, its X axis and its categories, and each pane's top, bottom and Y axes. <see cref="X"/> places an X value as the
+    /// marks are placed. The drawing and <see cref="Readout"/> both read it, so a readout stands where the marks do.</summary>
+    private sealed record Placement(bool Horizontal, bool Category, double Left, double Right, double Inset, ChartPoint[] Points, double[] Cats, Axis Xs,
+        (ChartPane Pane, double Top, double Bottom, Axis Ys, Axis Ys2, bool Paired)[] Plots)
+    {
+        public double X(double x) => Category ? Left + (Array.IndexOf(Cats, x) + .5) / Cats.Length * (Right - Left) : Xs.Map(x, Left + Inset, Right - Inset);
+    }
+
+    /// <summary>The <see cref="Placement"/> of a chart drawn on X and Y axes, its body moved down by <paramref name="head"/> and up from its
+    /// foot by <paramref name="foot"/>, a sparkline's plot standing <paramref name="pad"/> in from its edges.</summary>
+    private static Placement Framed(ChartSpec s, double pad, int head, int foot)
     {
         var horizontal = s.Kind == ChartKind.Bar;
         var category = s.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn;
         var secondary = s.Series.Any(series => series.Secondary);
         // A Y axis on the right takes the margin a secondary axis would, and gives the left one back.
         var flipped = s.YAxisSide == AxisSide.Right;
-        // A sparkline has no axes to make room for: its plot fills the drawing but for the padding its largest mark needs.
-        var pad = s.Sparkline ? Padding(s, w.Refined) : 0;
         var left = s.Sparkline ? pad : horizontal ? 160d : flipped ? 30d : 76d; var right = s.Width - (s.Sparkline ? pad : secondary || flipped ? 76d : 30d);
         var points = s.Series.SelectMany(x => x.Points).ToArray();
-        var bubbles = s.Series.Where(x => Mark(s, x) == ChartKind.Bubble).SelectMany(x => x.Points).ToArray();
-        var maxSize = bubbles.Length == 0 ? 0 : bubbles.Max(point => point.Size);
         var cats = points.Select(p => p.X).Distinct().Order().ToArray();
         // A block reaches to its XEnd, and only a block has one here.
         var xs = Axis.Create(s.XAxis, points.Select(p => p.X).Concat(points.Where(p => p.XEnd.HasValue).Select(p => p.XEnd!.Value)), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone),
             weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null) with { ValueFormat = s.XFormat };
-        var plots = Plots(s, cats, points, pad, w.Head, w.Foot);
+        var plots = Plots(s, cats, points, pad, head, foot);
         // A range bar stands centred on its X, so a continuous chart that draws range bars insets its X axis by half the slot
         // they take, and the first and last bars stand whole inside the plot. The slot follows the closest gap on screen, which
         // the inset narrows, so the two are settled together.
@@ -493,7 +508,18 @@ public static class ChartSvg
         if (ranged.Length > 0)
             for (var pass = 0; pass < 3; pass++)
                 inset = Math.Clamp((ranged.Length > 1 ? Enumerable.Range(1, ranged.Length - 1).Min(i => ranged[i] - ranged[i - 1]) * (right - left - 2 * inset) : 30) * .7, 1, 34) / 2;
-        double X(double x) => category ? left + (Array.IndexOf(cats, x) + .5) / cats.Length * (right - left) : xs.Map(x, left + inset, right - inset);
+        return new(horizontal, category, left, right, inset, points, cats, xs, plots);
+    }
+
+    private static void Cartesian(SvgWriter w, ChartSpec s)
+    {
+        // A sparkline has no axes to make room for: its plot fills the drawing but for the padding its largest mark needs.
+        var pad = s.Sparkline ? Padding(s, w.Refined) : 0;
+        var frame = Framed(s, pad, w.Head, w.Foot);
+        var (horizontal, category, left, right, inset, points, cats, xs, plots) = (frame.Horizontal, frame.Category, frame.Left, frame.Right, frame.Inset, frame.Points, frame.Cats, frame.Xs, frame.Plots);
+        var bubbles = s.Series.Where(x => Mark(s, x) == ChartKind.Bubble).SelectMany(x => x.Points).ToArray();
+        var maxSize = bubbles.Length == 0 ? 0 : bubbles.Max(point => point.Size);
+        double X(double x) => frame.X(x);
         var (xCount, xTicks) = category ? (5, []) : Spaced(w, xs, right - left - 2 * inset, across: true, count: s.XAxis == AxisKind.Time ? 6 : 5);
         // A sparkline draws no axes: no gridlines, ticks or axis titles.
         for (var k = 0; k < plots.Length && !s.Sparkline; k++)
@@ -1205,8 +1231,16 @@ public static class ChartSvg
             // beside set bounds, so it stands in their place; blocks still reach below the lowest block, as on any fitted axis.
             var (low, high) = pane.YMinSpan is { } span && values.Count > 0 && values.Max() - values.Min() < span
                 ? ((values.Max() + values.Min()) / 2 - span / 2, (values.Max() + values.Min()) / 2 + span / 2) : (pane.YMin, pane.YMax);
+            // A symmetric axis runs as far below zero as above it: at least its value each way, and as far as the data reaches either way.
+            // It too is refused beside set bounds and a minimum span, so it stands in their place, and it sets both ends, so blocks stand on
+            // its bottom as on any bounded axis.
+            if (pane.YSymmetric is { } least)
+            {
+                var reach = Math.Max(least, values.Count > 0 ? values.Max(v => Math.Abs(v)) : 0);
+                (low, high) = (-reach, reach);
+            }
             var ys = Footed(Axis.Create(pane.YAxis, values, zero || Filled(false), low, high) with { ValueFormat = pane.YFormat, Reversed = pane.YReversed },
-                false, zero || Filled(false), pane.YReversed ? pane.YMax : pane.YMin);
+                false, zero || Filled(false) || pane.YSymmetric is not null, pane.YReversed ? pane.YMax : pane.YMin);
             var paired = mine.Any(x => x.Secondary);
             var secondValues = mine.Where(x => x.Secondary).SelectMany(x => x.Points).Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
             foreach (var p in Bounded(true)) { secondValues.Add(p.Low!.Value); secondValues.Add(p.High!.Value); }

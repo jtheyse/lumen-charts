@@ -316,3 +316,10 @@ front/columns 23F5CD76F44340F5
 text/description-340 5B3E6719B96D2979
 text/source-340 7A0D96EEBF7C6FE6
 text/title-340 69AB7660A55910BD
+symmetric/inside D748440BADA7B9F0
+symmetric/past 00670F040FDDF5F1
+symmetric/reversed 86D1DC133AAC74FF
+signed/labels BF872ECEC823E157
+symmetric/columns 0DBD03E29D5F2783
+fitness/340-light 3256183D5E233B6C
+fitness/340-midnight C8555204AFB2F67A

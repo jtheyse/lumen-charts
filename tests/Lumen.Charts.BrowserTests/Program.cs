@@ -43,7 +43,8 @@ Task Settled() => page.WaitForFunctionAsync(@"() => { const c = document.querySe
 await Test("Chart renders focusable marks", async () =>
 {
     Check(await Marks().CountAsync() > 0, "no marks rendered");
-    Check(await Marks().First.GetAttributeAsync("tabindex") == "0");
+    // The first point of the first series is the chart's one tab stop until another is focused.
+    Check(await Marks().First.GetAttributeAsync("tabindex") == "0" && await chart.Locator(".lumen-datum[tabindex='0']").CountAsync() == 1);
     Check(!string.IsNullOrWhiteSpace(await Marks().First.GetAttributeAsync("aria-label")));
 });
 
@@ -98,6 +99,170 @@ if (await concealed.CountAsync() > 0)
 }
 else Console.WriteLine("SKIP hidden-marker check: this host's first chart shows its markers");
 
+// 0.36.0: every chart is one tab stop, and the arrow keys move between its marks. The drawing itself keeps every mark at tabindex 0, so
+// the script is what makes them one; the words that name the keys are the viewport's description.
+const string active = "() => { const a = document.activeElement; return a?.dataset?.series + ':' + a?.dataset?.point; }";
+await Test("Every chart on the page is one tab stop, its keys named in its viewport's description, and Tab leaves it after one mark", async () =>
+{
+    var stops = await page.EvaluateAsync<int[][]>(@"() => [...document.querySelectorAll('.lumen-chart')].filter(c => c.querySelector('.lumen-datum')).map(c => {
+        const marks = [...c.querySelectorAll('.lumen-datum')], v = c.querySelector(':scope > .lumen-viewport');
+        const id = v.getAttribute('aria-describedby') || v.querySelector('svg')?.getAttribute('aria-describedby');
+        return [marks.filter(m => m.getAttribute('tabindex') === '0').length, marks.filter(m => m.getAttribute('tabindex') === '-1').length, marks.length,
+            (document.getElementById(id)?.textContent || '').startsWith('Arrow keys') && document.getElementById(id).hidden ? 1 : 0]; })");
+    Check(stops.Length > 0 && stops.All(s => s[0] == 1 && s[1] == s[2] - 1 && s[3] == 1), string.Join(" | ", stops.Select(s => string.Join(",", s))));
+    await chart.Locator(".lumen-viewport").FocusAsync();
+    await page.Keyboard.PressAsync("Tab");
+    Check(await page.EvaluateAsync<bool>("() => !!document.activeElement?.matches('.lumen-chart .lumen-datum[tabindex=\"0\"]')"), "Tab from the viewport did not reach the chart's tab stop");
+    await page.Keyboard.PressAsync("Tab");
+    Check(await chart.EvaluateAsync<bool>("c => !c.querySelector(':scope > .lumen-viewport').contains(document.activeElement)"), "a second Tab stayed among the chart's marks");
+    await page.Keyboard.PressAsync("Shift+Tab");
+});
+
+// The first chart's first series has no gaps, so its points are its marks in order.
+await Test("The arrow keys move along a series and to the series beside it, Home and End to its ends and Page Up and Page Down ten points, the tab stop following", async () =>
+{
+    var last = await chart.EvaluateAsync<int>("c => Math.max(...[...c.querySelectorAll('.lumen-datum[data-series=\"0\"]')].map(m => Number(m.dataset.point)))");
+    await chart.Locator(".lumen-datum[data-series='0'][data-point='0']").FocusAsync();
+    (string Key, string Expected)[] moves = [("ArrowRight", "0:1"), ("ArrowRight", "0:2"), ("ArrowLeft", "0:1"), ("End", $"0:{last}"), ("Home", "0:0"), ("ArrowLeft", "0:0"),
+        ("PageDown", $"0:{Math.Min(10, last)}"), ("PageUp", "0:0"), ("ArrowUp", "0:0"), ("ArrowDown", "1:0"), ("ArrowRight", "1:1"), ("ArrowUp", "0:1")];
+    foreach (var (key, expected) in moves)
+    {
+        await page.Keyboard.PressAsync(key);
+        var now = await page.EvaluateAsync<string>(active);
+        Check(now == expected, $"{key} reached {now}, not {expected}");
+    }
+    Check(await chart.Locator(".lumen-datum[tabindex='0']").CountAsync() == 1 && await chart.Locator(".lumen-datum[data-series='0'][data-point='1']").GetAttributeAsync("tabindex") == "0", "the tab stop did not follow the focus");
+    await tooltip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+    Check(await tooltip.TextContentAsync() == await chart.Locator(".lumen-datum[data-series='0'][data-point='1']").GetAttributeAsync("aria-label"), "the tooltip does not read the point the keys reached");
+    await page.Keyboard.PressAsync("Escape");
+    await tooltip.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+    await chart.Locator(".lumen-datum[data-series='0'][data-point='0']").FocusAsync();
+});
+
+// A missing value has no mark, so Left and Right step over it. A host whose first chart has no gap says SKIP.
+var gap = await chart.EvaluateAsync<int[]?>(@"c => { for (const s of new Set([...c.querySelectorAll('.lumen-datum[data-series]')].map(m => m.dataset.series))) {
+    const points = [...c.querySelectorAll(`.lumen-datum[data-series=""${s}""]`)].map(m => Number(m.dataset.point)).sort((a, b) => a - b);
+    for (let i = 1; i < points.length; i++) if (points[i] > points[i - 1] + 1) return [Number(s), points[i - 1], points[i]]; } return null; }");
+if (gap is { } hole)
+    await Test("Left and Right step over a missing value, which has no mark", async () =>
+    {
+        await chart.Locator($".lumen-datum[data-series='{hole[0]}'][data-point='{hole[1]}']").FocusAsync();
+        await page.Keyboard.PressAsync("ArrowRight");
+        Check(await page.EvaluateAsync<string>(active) == $"{hole[0]}:{hole[2]}", $"Right from {hole[0]}:{hole[1]} reached {await page.EvaluateAsync<string>(active)}");
+        await page.Keyboard.PressAsync("ArrowLeft");
+        Check(await page.EvaluateAsync<string>(active) == $"{hole[0]}:{hole[1]}", $"Left reached {await page.EvaluateAsync<string>(active)}");
+        await page.Keyboard.PressAsync("Escape");
+        await chart.Locator(".lumen-datum[data-series='0'][data-point='0']").FocusAsync();
+        await page.Keyboard.PressAsync("Escape");
+    });
+else Console.WriteLine("SKIP gap check: this host's first chart has no missing value");
+
+// The shared readout belongs to a chart a host chooses to set it on, so the suite finds one by the words that name its keys, and a page
+// without one says SKIP. It reads every series in legend order at one X, draws a guide through every pane and a ring round each point
+// there, moves by X with the keyboard, reads the same words in the status line, and hides on Escape.
+const string readoutIndex = "() => [...document.querySelectorAll('.lumen-chart')].findIndex(c => (c.querySelector(':scope > .lumen-keys')?.textContent || '').startsWith('Arrow keys read'))";
+async Task ReadoutChecks(IPage target, string where)
+{
+    var index = await target.EvaluateAsync<int>(readoutIndex);
+    if (index < 0) { Console.WriteLine($"SKIP shared readout checks: no chart on the {where} sets SharedReadout"); return; }
+    var card = target.Locator(".lumen-chart").Nth(index);
+    var tip = card.Locator(".lumen-tooltip");
+    async Task<string[]> Lines() => ((await tip.TextContentAsync()) ?? "").Split('\n');
+    await card.ScrollIntoViewIfNeededAsync();
+    await target.WaitForFunctionAsync("c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'); return !c.classList.contains('lumen-fit') || Number(s.getAttribute('viewBox').split(' ')[2]) === Math.max(320, v.clientWidth); }", await card.ElementHandleAsync());
+    const string drawnReadout = @"c => { const s = c.querySelector(':scope > .lumen-viewport > svg'), g = s.querySelector(':scope > g.lumen-readout'), line = g?.querySelector('line');
+        const clips = [...s.querySelectorAll(':scope > svg')], first = clips[0], last = clips[clips.length - 1];
+        return line ? [Number(line.getAttribute('y1')), Number(line.getAttribute('y2')), Number(first.getAttribute('y')), Number(last.getAttribute('y')) + Number(last.getAttribute('height')),
+            clips.length, g.querySelectorAll('circle').length, Number(line.getAttribute('x1'))] : [0, 0, 0, 0, clips.length, g ? g.querySelectorAll('circle').length : 0, 0]; }";
+
+    await Test($"The shared readout reads every series in legend order at the X under the pointer, a guide through every pane and a ring round each point ({where})", async () =>
+    {
+        var box = (await card.Locator(".lumen-viewport > svg").BoundingBoxAsync())!;
+        await target.Mouse.MoveAsync(box.X + box.Width * .45f, box.Y + box.Height * .5f);
+        await tip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        var legend = (await card.Locator(".lumen-legend button").AllTextContentsAsync()).Select(t => t.Trim()).ToArray();
+        var lines = await Lines();
+        Check(lines.Length == legend.Length + 1 && lines.Skip(1).Select((line, i) => line.StartsWith(legend[i] + " ")).All(b => b), $"the readout reads {string.Join(" / ", lines)} for {string.Join(", ", legend)}");
+        var drawn = await card.EvaluateAsync<double[]>(drawnReadout);
+        var placed = lines.Skip(1).Count(line => !line.EndsWith(" missing"));
+        Check(drawn[0] >= drawn[2] && drawn[0] <= drawn[2] + 12 && drawn[1] <= drawn[3] && drawn[1] >= drawn[3] - 12, $"the guide runs from {drawn[0]} to {drawn[1]}, the plots from {drawn[2]} to {drawn[3]}");
+        Check(drawn[5] == 2 * placed, $"{drawn[5]} circles for {placed} points");
+        // The guide stands at the X nearest the pointer, within half the spacing of the X values.
+        var pointer = await card.EvaluateAsync<double>("(c, x) => { const s = c.querySelector(':scope > .lumen-viewport > svg'); return new DOMPoint(x, 0).matrixTransform(s.getScreenCTM().inverse()).x; }", (double)(box.X + box.Width * .45f));
+        var spacing = await card.EvaluateAsync<double>("c => { const xs = [...new Set([...c.querySelectorAll('.lumen-datum[data-series=\"0\"] circle')].map(e => Number(e.getAttribute('cx'))))].sort((a, b) => a - b); return Math.min(...xs.slice(1).map((x, i) => x - xs[i])); }");
+        Check(Math.Abs(drawn[6] - pointer) <= spacing / 2 + .01, $"the guide stands at {drawn[6]}, the pointer at {pointer}, the spacing {spacing}");
+        // The guide is the muted text colour and each ring is outlined in the text colour, so both clear 3:1 on the chart's background, and
+        // the tooltip's words clear 4.5:1 on its own.
+        var contrast = await card.EvaluateAsync<double[]>(@"c => {
+            const rgb = s => s.match(/[\d.]+/g).slice(0, 3).map(Number), lum = s => { const [r, g, b] = rgb(s).map(v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * g + .0722 * b; };
+            const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+            const s = c.querySelector(':scope > .lumen-viewport > svg'), g = s.querySelector('g.lumen-readout'), ground = getComputedStyle(s).backgroundColor, t = getComputedStyle(c.querySelector('.lumen-tooltip'));
+            return [ratio(getComputedStyle(g.querySelector('line')).stroke, ground), ratio(getComputedStyle(g.querySelector('circle')).stroke, ground), ratio(t.color, t.backgroundColor)]; }");
+        Check(contrast[0] >= 3 && contrast[1] >= 3 && contrast[2] >= 4.5, $"the guide {contrast[0]:0.00}:1, a ring {contrast[1]:0.00}:1, the tooltip {contrast[2]:0.00}:1");
+        await target.Mouse.MoveAsync(1, 1);
+        await tip.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+        Check(await card.EvaluateAsync<int>("c => c.querySelectorAll('g.lumen-readout > *').length") == 0, "the guide stayed when the pointer left");
+    });
+
+    await Test($"With a shared readout the keys step from one X to the next, Up and Down move between its series, the status line reads it, and Escape hides it ({where})", async () =>
+    {
+        await card.Locator(".lumen-viewport").FocusAsync();
+        await target.Keyboard.PressAsync("Tab");
+        await target.Keyboard.PressAsync("Home");
+        await tip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        var first = await Lines();
+        await target.Keyboard.PressAsync("ArrowRight");
+        var second = await Lines();
+        Check(second[0] != first[0] && await target.EvaluateAsync<string>(active) == "0:1", $"Right read {second[0]} after {first[0]}, at {await target.EvaluateAsync<string>(active)}");
+        await target.WaitForFunctionAsync("([c, text]) => c.querySelector('.lumen-status')?.textContent === text", new object[] { await card.ElementHandleAsync(), string.Join(" · ", second) });
+        await target.Keyboard.PressAsync("ArrowDown");
+        Check(await target.EvaluateAsync<string>(active) == "1:1" && (await Lines())[0] == second[0], $"Down reached {await target.EvaluateAsync<string>(active)}");
+        await target.Keyboard.PressAsync("End");
+        var end = await Lines();
+        await target.Keyboard.PressAsync("PageUp");
+        var back = await Lines();
+        await target.Keyboard.PressAsync("Home");
+        Check(end[0] != second[0] && back[0] != end[0] && (await Lines())[0] == first[0] && (await target.EvaluateAsync<string>(active)).StartsWith("1:"), $"End read {end[0]}, Page Up {back[0]}, and Home kept to the second series at {await target.EvaluateAsync<string>(active)}");
+        Check(await card.EvaluateAsync<int>("c => c.querySelectorAll('g.lumen-readout line').length") == 1, "no guide while the keys read the chart");
+        await target.Keyboard.PressAsync("Escape");
+        await tip.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+        Check(await card.EvaluateAsync<int>("c => c.querySelectorAll('g.lumen-readout > *').length") == 0, "Escape left the guide");
+    });
+
+    // At a phone's width, with touch, and at a 1280-pixel desktop: a tap or a pointer brings the readout up inside the screen, and the keys
+    // still step it.
+    foreach (var (width, phone) in new[] { (375, true), (1280, false) })
+        await Test($"At {width} pixels{(phone ? " on a phone, a tap" : ", the pointer")} brings the readout up inside the screen, and the keys step it ({where})", async () =>
+        {
+            await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = phone ? 812 : 900 }, IsMobile = phone, HasTouch = phone, DeviceScaleFactor = phone ? 2 : 1 });
+            var tab = await context.NewPageAsync();
+            tab.SetDefaultTimeout(15_000);
+            await tab.GotoAsync(target.Url, new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+            await tab.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });
+            var shown = tab.Locator(".lumen-chart").Nth(await tab.EvaluateAsync<int>(readoutIndex));
+            await shown.ScrollIntoViewIfNeededAsync();
+            await tab.WaitForFunctionAsync("c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'); return Number(s.getAttribute('viewBox').split(' ')[2]) === Math.max(320, v.clientWidth); }", await shown.ElementHandleAsync(), new() { Timeout = 60_000 });
+            await tab.WaitForTimeoutAsync(400);
+            var box = (await shown.Locator(".lumen-viewport > svg").BoundingBoxAsync())!;
+            if (phone) await tab.Touchscreen.TapAsync(box.X + box.Width * .7f, box.Y + box.Height * .45f);
+            else await tab.Mouse.MoveAsync(box.X + box.Width * .7f, box.Y + box.Height * .45f);
+            var tipped = shown.Locator(".lumen-tooltip");
+            await tipped.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            var placed = await tipped.EvaluateAsync<double[]>("t => { const b = t.getBoundingClientRect(); return [b.left, b.right, document.documentElement.clientWidth, document.documentElement.scrollWidth]; }");
+            Check(placed[0] >= 0 && placed[1] <= placed[2] && placed[3] <= width, $"the tooltip stands from {placed[0]:0.#} to {placed[1]:0.#} on a {placed[2]}-pixel screen, the page {placed[3]} wide");
+            Check(await shown.EvaluateAsync<int>("c => c.querySelectorAll('g.lumen-readout line').length") == 1, "no guide");
+            var before = ((await tipped.TextContentAsync()) ?? "").Split('\n')[0];
+            await shown.Locator(".lumen-datum[tabindex='0']").FocusAsync();
+            await tab.Keyboard.PressAsync("End");
+            await tab.Keyboard.PressAsync("ArrowLeft");
+            var after = ((await tipped.TextContentAsync()) ?? "").Split('\n')[0];
+            Check(after.Length > 0 && after != before, $"the keys read {after} after {before}");
+            await tab.Keyboard.PressAsync("Escape");
+            await tipped.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+        });
+}
+await ReadoutChecks(page, "first page");
+
 await Test("Selecting a mark reports the original observation", async () =>
 {
     await Marks().Nth(1).ClickAsync();
@@ -135,11 +300,12 @@ await Test("Hiding a series removes its marks", async () =>
     var legend = chart.Locator(".lumen-legend button");
     if (await legend.CountAsync() < 2) return;
     var before = await Marks().CountAsync();
+    // The first chart's own marks are counted, since the page may show other charts.
     await legend.First.ClickAsync();
-    await page.WaitForFunctionAsync($"() => document.querySelectorAll('.lumen-chart .lumen-datum[data-point]').length < {before}");
+    await page.WaitForFunctionAsync($"() => document.querySelector('.lumen-chart').querySelectorAll('.lumen-datum[data-point]').length < {before}");
     Check(await legend.First.GetAttributeAsync("aria-pressed") == "false");
     await legend.First.ClickAsync();
-    await page.WaitForFunctionAsync($"() => document.querySelectorAll('.lumen-chart .lumen-datum[data-point]').length === {before}");
+    await page.WaitForFunctionAsync($"() => document.querySelector('.lumen-chart').querySelectorAll('.lumen-datum[data-point]').length === {before}");
 });
 
 await Test("The data table lists observations with scoped headers", async () =>
@@ -794,13 +960,26 @@ if (await sportsLink.CountAsync() > 0)
     }
     else Console.WriteLine("SKIP sparkline checks: this host's Sports & performance page has no Getting faster? card");
 
-    await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page", () => SweepOf(sports));
+    await ReadoutChecks(sports, "Sports & performance page");
+
+    // Each sweep runs with the performance chart's shared readout showing, its guide, rings and tooltip included.
+    async Task Hovered(IPage target)
+    {
+        var shown = target.Locator("#performance .lumen-chart");
+        if (await shown.CountAsync() == 0) return;
+        await shown.ScrollIntoViewIfNeededAsync();
+        var box = (await shown.Locator(".lumen-viewport > svg").BoundingBoxAsync())!;
+        await target.Mouse.MoveAsync(box.X + box.Width * .5f, box.Y + box.Height * .5f);
+        await shown.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Visible });
+    }
+    await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page", async () => { await Hovered(sports); await SweepOf(sports); });
 
     await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page in the dark theme", async () =>
     {
         var before = await charts.First.Locator(".lumen-viewport > svg").GetAttributeAsync("style");
         await sports.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) }).First.ClickAsync();
         await sports.WaitForFunctionAsync("before => document.querySelector('.lumen-viewport > svg')?.getAttribute('style') !== before", before);
+        await Hovered(sports);
         await SweepOf(sports);
     });
 
@@ -808,6 +987,7 @@ if (await sportsLink.CountAsync() > 0)
     {
         await sports.GetByRole(AriaRole.Button, new() { Name = "Midnight", Exact = true }).ClickAsync();
         await sports.WaitForFunctionAsync("() => [...document.querySelectorAll('.lumen-viewport > svg')].every(s => s.getAttribute('style')?.includes('background:#0B0E14'))");
+        await Hovered(sports);
         await SweepOf(sports);
     });
 

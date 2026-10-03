@@ -17,6 +17,9 @@
     <h2 id="graph">Network</h2>
     <div class="card"><LumenGraph Spec="graph" NodeSelected="OnNode"/></div>
     <p class="state" role="status">@(node ?? "Drag a node, or focus one and press Enter to select it.")</p>
+
+    <h2 id="form">Every series at once</h2>
+    <div class="card"><LumenChart Spec="form" FitWidth="true"/></div>
 </LumenBrand>
 </main>
 @code {
@@ -43,9 +46,27 @@
                     new("Americas",samples.Skip(120).Select(v=>ChartPoint.Observation(v*.8)).ToArray())],Source="Source: generated sample data"},
         ChartKind.Donut=>new(){Kind=selected,Title="Acquisition mix",Description="Share of 100 sample accounts",
             Series=[new("Acquisition",[new(0,42,"Organic"),new(1,28,"Direct"),new(2,18,"Referral"),new(3,12,"Campaigns")])],Source="Source: generated sample data"},
+        // One plan misses a month, which its line breaks for and the arrow keys step over.
         _=>new(){Kind=selected,Title="Monthly activity",Description="Three product plans across one year",XLabel="Month",YLabel="Active accounts (thousands)",
-            Series=[Plan("Workspace",34),Plan("Enterprise",21),Plan("Community",11)],Source="Source: generated sample data"}
+            Series=[Plan("Workspace",34),Plan("Enterprise",21),selected==ChartKind.Line?Missing(Plan("Community",11),6):Plan("Community",11)],Source="Source: generated sample data"}
     };
+
+    // Eight invented weeks of training: fitness and fatigue over each day's stress, and form beneath on an axis held symmetric about zero
+    // and written with its sign. The shared readout reads all four at the day under the pointer or the focused point.
+    private static readonly ChartSpec form=Form();
+    private static ChartSpec Form()
+    {
+        var start=new DateOnly(2026,6,1);
+        var load=Training.Load(Enumerable.Range(0,56).Select(i=>(start.AddDays(i),(double)((i%7) switch{0=>0,2=>120,5=>150,_=>60}))),40,40);
+        double When(DateOnly day)=>TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue),TimeSpan.Zero));
+        return new(){Kind=ChartKind.Line,XAxis=AxisKind.Time,Height=460,SharedReadout=true,Title="Fitness and form",Description="Eight invented weeks · fitness, fatigue and stress above, form below",
+            YLabel="Training stress",Panes=[new(){Label="Form",Weight=.6,YSymmetric=10,YFormat=ValueFormat.Signed}],Source="Source: generated sample data",
+            Series=[ChartSeries.From("Fitness",load,d=>When(d.Day),d=>Math.Round(d.Fitness,1)),ChartSeries.From("Fatigue",load,d=>When(d.Day),d=>Math.Round(d.Fatigue,1)),
+                ChartSeries.From("Form",load,d=>When(d.Day),d=>Math.Round(d.Form,1)) with{Pane=1},
+                ChartSeries.From("Stress",load,d=>When(d.Day),d=>d.Stress) with{Kind=ChartKind.Column,Color="#848484"}]};
+    }
+
+    private static ChartSeries Missing(ChartSeries series,int month)=>series with{Points=series.Points.Select((p,i)=>i==month?p with{Y=null}:p).ToArray()};
 
     private static ChartSeries Plan(string name,double baseline)=>
         new(name,Enumerable.Range(0,12).Select(i=>new ChartPoint(i,Math.Round(baseline+i*1.8+Math.Sin(i+baseline)*6,1),months[i])).ToArray());

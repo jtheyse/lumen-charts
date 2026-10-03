@@ -3,12 +3,15 @@
 @if(Spec.Sparkline)
 {
     @* A sparkline is its drawing alone, read through its marks' tooltips: no legend, toolbar, zoom or data table, and no scrolling region. *@
-    <div class="@(FitWidth ? "lumen-chart lumen-spark lumen-fit" : "lumen-chart lumen-spark")" @ref="root"><div class="lumen-viewport">@((MarkupString)svg)</div></div>
+    <div class="@(FitWidth ? "lumen-chart lumen-spark lumen-fit" : "lumen-chart lumen-spark")" @ref="root"><div class="lumen-viewport">@((MarkupString)svg)</div><span class="lumen-keys" hidden>@Keys</span></div>
 }
 else
 {
 <div class="@(FitWidth ? "lumen-chart lumen-fit" : "lumen-chart")" @ref="root">
     <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart">@((MarkupString)svg)</div>
+    @* The keys a reader moves with, hidden from view and from reading in place: the script, which makes them work, names them as the
+       viewport's description, or a sparkline's drawing's. *@
+    <span class="lumen-keys" hidden>@Keys</span>
     <div class="lumen-legend" aria-label="Chart series">
         @for(var i=0;i<Spec.Series.Count;i++)
         {
@@ -68,6 +71,13 @@ else
     private ChartStyle Style => Spec.Style ?? CascadingStyle ?? ChartSvg.ResolveStyle(Spec);
     private readonly HashSet<int> hidden=[];
     private string svg="",status="";
+    // What the shared readout reads in the drawing shown, and the drawing the script was last told of, so it is told once per drawing.
+    private ChartReadout? readout;
+    private string? told;
+    // The keys a reader moves with, said once for the chart through its viewport's description, or its drawing's on a sparkline.
+    private string Keys => Spec.SharedReadout
+        ? "Arrow keys read the chart: Left and Right move the readout from one X to the next, Up and Down between the series there, Home and End to the first and the last, Page Up and Page Down ten at a time. Enter selects the point; Escape hides the readout."
+        : "Arrow keys move between points: Left and Right along a series, Up and Down to the series before or after it, Home and End to its first and last point, Page Up and Page Down ten points at a time. Enter selects the point; Escape hides its tooltip.";
     private bool showData;
     private ElementReference root;
     private IJSObjectReference? module;
@@ -138,18 +148,35 @@ else
         spec=spec with { Panes=used.Skip(1).Select(p=>Spec.Panes[p-1]).ToArray(), Series=spec.Series.Select(s=>s with {Pane=Math.Max(0,Array.IndexOf(used,s.Pane))}).ToArray() };
         if(used[0]==0)return spec;
         var main=Spec.Panes[used[0]-1];
-        return spec with { YLabel=main.Label, YAxis=main.YAxis, YMin=main.YMin, YMax=main.YMax, YMinSpan=main.YMinSpan, YFormat=main.YFormat, YReversed=main.YReversed, YZones=main.YZones,
+        return spec with { YLabel=main.Label, YAxis=main.YAxis, YMin=main.YMin, YMax=main.YMax, YMinSpan=main.YMinSpan, YSymmetric=main.YSymmetric, YFormat=main.YFormat, YReversed=main.YReversed, YZones=main.YZones,
             Y2Label=main.Y2Label, Y2Axis=main.Y2Axis, Y2Min=main.Y2Min, Y2Max=main.Y2Max, Y2Format=main.Y2Format, Y2Reversed=main.Y2Reversed, Annotations=Spec.Annotations.Where(a=>a?.Axis!=AnnotationAxis.Y).ToArray() };
     }
     // Hidden candles stay without their points, because a candlestick or OHLC chart draws its other series beside them; and a
     // hidden state keeps its lane, so the timeline's lanes stand where they did.
     private bool Candles(int index) => Spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc && Spec.Series[index].Kind is null || Spec.Kind == ChartKind.Timeline;
-    // The component draws its own tooltips, so marks render without the native SVG title.
-    private void Render() { xAxis=FullRange;visible=Enumerable.Range(0,Spec.Series.Count).Where(i=>!hidden.Contains(i)||Candles(i)).ToArray();svg=ChartSvg.Render(VisibleSpec(), includeLegend:false, includeTitles:false); }
+    // The component draws its own tooltips, so marks render without the native SVG title. A shared readout is worked out once for each
+    // drawing, so the script reads it as the pointer moves without asking the server.
+    private void Render()
+    {
+        xAxis=FullRange;visible=Enumerable.Range(0,Spec.Series.Count).Where(i=>!hidden.Contains(i)||Candles(i)).ToArray();
+        var shown=VisibleSpec();
+        svg=ChartSvg.Render(shown, includeLegend:false, includeTitles:false);
+        readout=Spec.SharedReadout ? ChartSvg.Readout(shown) : null;
+    }
+    // The readout as the script takes it, in arrays of plain values: the guide's top and bottom, the plot's left and right, and each X's
+    // position, its label and its entries, each the series drawn, its point, its height or null, its words and its colour.
+    private object? Told => readout is not { } r ? null : new object[] { r.Top, r.Bottom, r.Left, r.Right,
+        r.Columns.Select(c => new object[] { c.Position, c.Label, c.Entries.Select(e => new object?[] { e.Series, e.Point, e.Position, e.Text, e.Color }).ToArray() }).ToArray() };
     private void Toggle(int index) { if(!hidden.Add(index))hidden.Remove(index);Render(); }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if(firstRender) { module=await JS.InvokeAsync<IJSObjectReference>("import","./_content/Lumen.Charts.Blazor/lumen.js");reference=DotNetObjectReference.Create(this);await module.InvokeVoidAsync("attach",root,reference); }
+        // Each new drawing gets one tab stop for its marks, and the readout it reads.
+        if(module is not null&&!ReferenceEquals(told,svg))
+        {
+            told=svg;
+            await module.InvokeVoidAsync("drawn",root,Told);
+        }
         // The script measures the chart's box only while the chart is asked to fit it.
         if(module is not null&&FitWidth!=fitting)
         {
@@ -173,6 +200,13 @@ else
         if(series<0||series>=visible.Length)return;
         var index=visible[series];if(point<0||point>=Spec.Series[index].Points.Count)return;
         var p=Spec.Series[index].Points[point];
+        // With a shared readout, a point reads as the readout does at its X, every series together.
+        if(readout?.Columns.FirstOrDefault(c=>c.Entries.Any(e=>e.Series==series&&e.Point==point)) is { } column)
+        {
+            status=column.Text;
+            await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
+            return;
+        }
         // A gauge's or a ring's one point reads as its legend does, with its unit and a ring's goal.
         // A span reads from its start to its end, a block its label, its span and its height, and a range bar from its low to its
         // high and its typical value.
@@ -184,6 +218,13 @@ else
             : $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y)+p.ValueNote : "missing")}";
         await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
     }
+    /// <summary>Called by the component's script, while <see cref="ChartSpec.SharedReadout"/> is on, when the keyboard brings the
+    /// readout to another X: the status line reads that X and every series there, as the readout's tooltip does.</summary>
+    [JSInvokable] public Task Readout(int column) => InvokeAsync(()=>
+    {
+        if(readout is null||column<0||column>=readout.Columns.Count)return;
+        status=readout.Columns[column].Text;StateHasChanged();
+    });
     // A calendar's mark is a day, which reports its first point: it reads the day, in the chart's zone, and the total of every
     // point on it.
     private string Day(int index,ChartPoint point)
