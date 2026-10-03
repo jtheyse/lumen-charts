@@ -22,7 +22,8 @@ public static class ChartExport
         var result=new StringBuilder($"Series,X,{(time?"XTime,":"")}Y,Label,Size{columns}\r\n");
         foreach(var s in spec.Series)
             foreach(var p in s.Points)
-                result.AppendLine($"{Cell(s.Name)},{Number(p.X)},{(time?TimeAxis.Moment(p.X).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ",CultureInfo.InvariantCulture)+",":"")}{Number(p.Y)},{Cell(p.Label ?? "")},{Number(p.Size)}{(prices?$",{Number(p.Open)},{Number(p.High)},{Number(p.Low)},{Number(p.Close)}":band?$",{Number(p.Low)},{Number(p.High)}":rings?$",{Number(s.Goal ?? 100)}":"")}{(spans?$",{Number(p.XEnd)}":"")}");
+                // CSV ends every record with CRLF (RFC 4180), on every platform, as the header does.
+                result.Append($"{Cell(s.Name)},{Number(p.X)},{(time?TimeAxis.Moment(p.X).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ",CultureInfo.InvariantCulture)+",":"")}{Number(p.Y)},{Cell(p.Label ?? "")},{Number(p.Size)}{(prices?$",{Number(p.Open)},{Number(p.High)},{Number(p.Low)},{Number(p.Close)}":band?$",{Number(p.Low)},{Number(p.High)}":rings?$",{Number(s.Goal ?? 100)}":"")}{(spans?$",{Number(p.XEnd)}":"")}").Append("\r\n");
         return result.ToString();
     }
     private static string Number(double? value)=>value?.ToString("R",CultureInfo.InvariantCulture) ?? "";
