@@ -41,7 +41,7 @@ Where it stands (3 October 2026):
 | #3 season strip | stays HTML (its ▲/▼ rule is in the recipe) | — |
 | #4 PB sparklines, #6 growth sparklines | 0.34.0 | committed in RaceSenseNet, not yet deployed (the owner deploys) |
 | #5 finish-time histogram | 0.35.0 | committed in RaceSenseNet (5f69ee7d), not yet deployed |
-| #8 fitness & form | 0.36.0 | Race Face told to upgrade and swap it (3 Oct 2026, night); awaiting its report |
+| #8 fitness & form | 0.36.0 | committed in RaceSenseNet (e24e7d1d), not yet deployed |
 | #7, #9–#14 (P2) | 0.37.0–0.40.0, planned in the brain (task "Race Face P2 plan") | — |
 | #15–#20 (P3) | after P2 | — |
 
@@ -56,16 +56,21 @@ Where it stands (3 October 2026):
 
 That session replies with what changed and where the recipes missed real data. Record its findings in the brain and fold them into the next release.
 
-Race Face feedback still open (the brain's two "Race Face feedback" tasks hold the detail):
+Race Face feedback still open (the brain's "Race Face feedback" tasks hold the detail):
 - **features**:
   - a way to leave a chart's background unpainted, for cards on another surface colour (contrast is still checked against `Background`);
   - a way to keep the title, and perhaps the description, as the accessible name without drawing it, for pages that own their heading (and docs saying exactly what `Render`'s `includeTitles` covers);
+  - a `<LumenChart>` parameter to hide the toolbar (and perhaps the status line) on small phone cards (0.36.0 feedback);
+- **keys (0.36.0)**: an interactive chart has two tab stops, the scrolling viewport and the roving point, while the docs say one; fix the wording or drop the viewport's stop when nothing scrolls. Static `Render` output keeps one stop per mark (363 for a 90-day chart);
+- **race lines** carry each race's own name, and the longest names get the least room when labels step down or drop;
 - **legend**: long series names are truncated ("…MTB Le…"); consider wrapping them;
 - **recipe and doc notes**:
   - use the app's own PB flag and bins where it has them;
   - a sparkline's root is `role='group'` named by title and description;
   - Lumen writes single-quoted attributes;
   - put a description's key fact first, since the two-line cut can hide its end;
+  - when the app already computes the training load (Race Face's API does, with custom from–to windows), draw its values rather than run `Training.Load`;
+  - synthetic `KeyboardEvent`s move focus but do not fill the readout: test with real input, such as Playwright's `keyboard.press`;
   - the 1080×1350 card needs an SVG rasteriser on the server, which Lumen does not ship (Race Face's API draws its PNGs with ImageSharp).
 
 ## How a release is done
