@@ -1,12 +1,12 @@
 # Handover
 
-The state of Lumen.Charts and how work on it is done, for whoever picks it up next — a person or a new Claude Code session. Updated 3 October 2026, evening. The THEBRAIN brain `@LumenCharts` holds the same state plus every design in detail: recall it first (`brain_recall`, intent `current_state`).
+The state of Lumen.Charts and how work on it is done, for whoever picks it up next — a person or a new Claude Code session. Updated 3 October 2026, night. The THEBRAIN brain `@LumenCharts` holds the same state plus every design in detail: recall it first (`brain_recall`, intent `current_state`).
 
 ## Where things stand
 
-- **Released:** v0.35.0, *how the field finished, and text that fits* (Race Face chart #5, and Race Face's feedback on 0.33.0): blocks keep at least 2 px; `ChartAnnotation.ShowValue` and `InFront`; `ChartSpec.XTickLabels` and `TickLabels.Bounds`; descriptions and sources wrap to two lines, titles are cut with "…". Before it, v0.34.0 brought sparklines and v0.33.0 race results on a line. With 0.35.0, Race Face's P1 charts are all covered. GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
-- **Next:** **0.36.0, reading a chart day by day** (Race Face #8: arrow keys in every chart, `SharedReadout`, `YSymmetric`, `ValueFormat.Signed`). It is fully designed in the brain (the procedure "0.36.0 design in full"). Start with `git status`: uncommitted changes to `src/`, `samples/`, `tests/`, the docs or the skill are a delegated agent's unreleased work.
-- **Counts at v0.35.0:** 482 unit assertions, 203 HTTP checks, 48 browser checks on the gallery (20 on the WebAssembly host), 318 hashed renderings, 24 recipe charts. Release build at 0 warnings.
+- **Released:** v0.36.0, *reading a chart day by day* (Race Face chart #8): every `<LumenChart>` is one tab stop whose arrow keys walk the points; `ChartSpec.SharedReadout` reads every series at one X through all panes (component only; `ChartSvg.Readout` gives hosts the table); `YSymmetric` on a chart or pane; `ValueFormat.Signed`. Before it, v0.35.0 brought how the field finished and text that fits, v0.34.0 sparklines and v0.33.0 race results on a line. GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
+- **Next:** **0.37.0, ride channels** (Race Face #7), from the brain's task "Race Face P2 plan (charts #7–#14)". The cross-pane readout it planned already shipped in 0.36.0, so what is left is: per-pane auto scale without labels, bucket-average sampling beside MinMax, `XFormat` Duration for time into a ride, and perhaps a readout shared across a group of charts. Run an Explore pass first, since that plan has not been checked against the code. Start with `git status`: uncommitted changes to `src/`, `samples/`, `tests/`, the docs or the skill are a delegated agent's unreleased work. Also open: the library's range-annotation labels fall under 4.5:1 on their band (the brain task "Range-annotation labels fail 4.5:1 on their band").
+- **Counts at v0.36.0:** 490 unit assertions, 213 HTTP checks, 55 browser checks on the gallery (27 on the WebAssembly host), 325 hashed renderings, 28 recipe charts. Release build at 0 warnings.
 - **NuGet:** not published. The owner chose "skip nuget for now"; packages ship as GitHub release assets, and the Claude Code skill's install scripts download them into a local feed.
 
 ## The map
@@ -21,7 +21,7 @@ The state of Lumen.Charts and how work on it is done, for whoever picks it up ne
 | `tests/Lumen.Charts.Tests` | Executable assertion suite (`Test`/`Check`/`Reject`), `dotnet run`. |
 | `tests/verify-api.ps1` | HTTP checks against a running gallery on port 5188. |
 | `tests/Lumen.Charts.BrowserTests` | Playwright suite (gallery on 5188, WebAssembly host on 5199), with axe sweeps in light, dark and Midnight. |
-| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.35.0 reference hashes (318 rows). See its README. |
+| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.36.0 reference hashes (325 rows). See its README. |
 | `tests/Lumen.Charts.Recipes` | Compiles every recipe in the skill's `sports.md` and `recipes-race-face.md` together, as written, and renders each chart (`python check.py`, then `dotnet run -c Release`). See its README. |
 | `integrations/claude-code/lumen-charts` | The Claude Code skill: `SKILL.md`, `references/` (API, sports recipes, HTTP), `scripts/install.sh` and `install.ps1`. |
 | `docs/FITNESS.md` | The sports-charts research and the eight-step build order this work has followed. |
@@ -41,7 +41,8 @@ Where it stands (3 October 2026):
 | #3 season strip | stays HTML (its ▲/▼ rule is in the recipe) | — |
 | #4 PB sparklines, #6 growth sparklines | 0.34.0 | committed in RaceSenseNet, not yet deployed (the owner deploys) |
 | #5 finish-time histogram | 0.35.0 | committed in RaceSenseNet (5f69ee7d), not yet deployed |
-| #7–#14 (P2) | 0.36.0–0.40.0, planned in the brain (task "Race Face P2 plan") | — |
+| #8 fitness & form | 0.36.0 | Race Face told to upgrade and swap it (3 Oct 2026, night); awaiting its report |
+| #7, #9–#14 (P2) | 0.37.0–0.40.0, planned in the brain (task "Race Face P2 plan") | — |
 | #15–#20 (P3) | after P2 | — |
 
 **After each release** the owner wants the Claude session **"RACEFACE RUNNING EXPANSION 2"** told to upgrade: `SendMessage` to that name (check `ListAgents` first). The message gives the release URL, what it adds for which charts, and steps:
@@ -114,6 +115,7 @@ If an agent stops on an API rate limit, resume it with `SendMessage` (it keeps i
 - `tests/Lumen.Charts.BrowserTests` and `samples/Lumen.Wasm` are outside the solution: building `Lumen.Charts.slnx` does not rebuild them, and `dotnet run --no-build` then runs a stale binary. Build both explicitly before running them.
 - `sed -i` in Git Bash rewrites CRLF files as LF; `.gitattributes` is `eol=lf`, so commits are unaffected, but edit with the Edit tool or a Python script where line endings matter.
 - `git add -u` stages tracked files only: a release's **new** files (a new recipe file, a new test folder) must be added by explicit path, and the untracked Race Face brief must never be.
+- `brain_recall` cuts every item to about 100–160 characters, so a long procedure such as a release design cannot be read back whole. To read one in full, pull the `brain_remember` call out of the session transcript that wrote it (`~/.claude/projects/D--CHATGPT--NET-GRAPH-API/<session>.jsonl`), with a short Python script that matches its title.
 - Axe sweeps do not check SVG text contrast: a value label at 4.12:1 passed them. Check drawn text against 4.5:1 yourself.
 - A fitted drawing's `viewBox` is not what the reader sees: compare it with the SVG's rendered width (`getBoundingClientRect().width`) and the box's `scrollWidth`, which caught a graph scaled down where it should scroll. Resizing the Playwright MCP page to 375 keeps a desktop scrollbar (a 360-pixel page, a 322-pixel card); for a phone, open a context with `isMobile` and `hasTouch` through `browser_run_code_unsafe`.
 
@@ -137,6 +139,8 @@ If an agent stops on an API rate limit, resume it with `SendMessage` (it keeps i
 - Screen-reader conformance (NVDA, JAWS, VoiceOver) — needs a person with the hardware; never run.
 - On the default Light and Dark presets `Rising` and `Falling` are the same colours as palette series 2 and 5, so a chart using `ChangeColors` should pick its other series' colours to avoid them (the gallery's race points are grey). X-axis tick labels are not moved in from the plot's edges, as value labels are: index charts set `XMin = -0.5` and `XMax = count - 0.5`. The component's status line shows a point's note but not its change words (the mark's name and tooltip carry them). Lumen keeps a fixed bottom margin, which leaves empty space under a short chart's axis at phone sizes.
 - Sparklines (0.34.0) refuse panes, value labels, bands, ranges and blocks; at 60×16 a `HighlightLast` ring is clipped at the edge. `YMinSpan` applies to the left-hand axis only.
+- Range-annotation labels (an X annotation with `To`, drawn as a band) are written in the muted colour over the band fill, 4.24:1 in Light. This predates 0.36.0. The gallery's *Planned* band keeps its label undrawn until the library is fixed; the fix moves hash rows, and Classic's byte-for-byte promise needs a decision first.
+- The shared readout (0.36.0) covers continuous-X kinds only. Close values' rings overlap; on a phone the tooltip can cover the guide; static SVG keeps one tab stop per mark.
 - Charts keep a 240 px height floor (60×16 for sparklines); the docs say so from 0.35.0.
 - From the original roadmap: irregular tick placement; graph work (orthogonal routing, force layout, overlap removal, edge bundling).
 - NuGet publication, when the owner wants it (Trusted Publishing was explored and set aside).
