@@ -160,14 +160,30 @@ public static class DemoData
             title="Read a day's heart rate at a glance";desc="Lowest to highest heart rate each day for a fortnight · the dot is the day's average";x="Day";y="Heart rate (bpm)";
             xKind=Lumen.Charts.AxisKind.Time;
         }
+        if(kind==Lumen.Charts.ChartKind.Calendar)
+        {
+            // Sixteen weeks of simulated training from a Monday: a rest day, a run, a ride, an easy run, a short spin or another rest,
+            // a long ride and a long run, building each week except every fourth, which eases, and now and then a day missed.
+            var first=new DateOnly(2026,6,8);
+            series=[new("Training stress",Enumerable.Range(0,16*7).Select(d=>{
+                var week=d/7;var scale=week%4==3?.6:1+week*.03;
+                var day=(d%7) switch{0=>0d,1=>45+random.Next(45),2=>60+random.Next(70),3=>30+random.Next(30),4=>random.NextDouble()<.5?0:30+random.Next(20),5=>150+random.Next(80),_=>70+random.Next(50)};
+                var stress=day>0&&random.NextDouble()<.06?0:Math.Round(day*scale);
+                return new Lumen.Charts.ChartPoint(Lumen.Charts.TimeAxis.Value(new DateTimeOffset(first.AddDays(d).ToDateTime(TimeOnly.MinValue),TimeSpan.Zero)),stress);}).ToArray())];
+            title="See a season at a glance";desc="Simulated daily training stress, in tiers";x="";y="";
+            xKind=Lumen.Charts.AxisKind.Time;
+        }
         if(kind==Lumen.Charts.ChartKind.Bar) {title="Compare plans without the clutter";x="Month";}
         if(kind==Lumen.Charts.ChartKind.Scatter || kind==Lumen.Charts.ChartKind.Bubble)
         {
             title="Explore the relationship";desc="Account engagement and retention · illustrative observations"+(kind==Lumen.Charts.ChartKind.Scatter?" with a least-squares trend per series":"");x="Engagement score";y="Retention score";
             series=series.Select(s=>s with {Points=s.Points.Select(p=>p with {X=p.X*8+random.Next(6)}).ToArray(),Trend=kind==Lumen.Charts.ChartKind.Scatter}).ToArray();
         }
-        var spec=new Lumen.Charts.ChartSpec{Kind=kind,Theme=theme,XAxis=xKind,SkipWeekends=weekends,TimeSkips=holidays,Title=title,Description=desc,Series=series,XLabel=x,YLabel=y,Source="Source: deterministic demonstration data · not business results",Height=height,Panes=panes};
+        var spec=new Lumen.Charts.ChartSpec{Kind=kind,Theme=theme,XAxis=xKind,SkipWeekends=weekends,TimeSkips=holidays,Title=title,Description=desc,Series=series,XLabel=x,YLabel=y,Source="Source: deterministic demo data · not real results",Height=height,Panes=panes};
         if(kind==Lumen.Charts.ChartKind.Timeline) spec=spec with{TimeZone="Africa/Johannesburg"};
+        // The tiers are the Sports & performance page's, in the zone ramp's blue, green, gold and red, and today is the last day.
+        if(kind==Lumen.Charts.ChartKind.Calendar)
+            spec=spec with{YZones=SportsData.StressTiers(palette),Annotations=[new(Lumen.Charts.AnnotationAxis.X,series[0].Points[^1].X){Label="Today"}]};
         if(kind==Lumen.Charts.ChartKind.Gauge)
             spec=spec with{YZones=new([new("Low",33,palette[5]),new("Moderate",66,palette[3]),new("Good",double.PositiveInfinity,palette[2])]),
                 Annotations=[new(Lumen.Charts.AnnotationAxis.Y,Math.Round(52+random.NextDouble()*16)){Label="7-day average"}]};

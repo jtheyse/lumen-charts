@@ -4,7 +4,7 @@ namespace Lumen.Charts;
 /// Line, area, scatter, bubble, band, range, candlestick and OHLC charts place points along a continuous X axis by their X;
 /// column, bar, stacked column, donut, heatmap and radar charts place them by category and show their labels; gauge and
 /// ring charts draw one value a series round an arc and have no X axis; a timeline draws spans along a continuous X axis,
-/// one lane a series.</summary>
+/// one lane a series; a calendar draws one series as a grid of days, each coloured by its value.</summary>
 public enum ChartKind
 {
     /// <summary>Each series as a line through its points in X order.</summary>
@@ -65,7 +65,37 @@ public enum ChartKind
     /// heart-rate ranges and bedtime-to-wake sleep timing are drawn. It has no zero baseline, so it takes reversed and
     /// logarithmic axes. As a series' own <see cref="ChartSeries.Kind"/> it draws beside lines on a continuous chart, or in its
     /// category's slot on a column chart.</summary>
-    Range
+    Range,
+    /// <summary>A training calendar: one series of days on a time X axis, each point's X a moment on the day it counts for, in
+    /// <see cref="ChartSpec.TimeZone"/>, and its Y the day's value; several points on one day are added together, and a day whose
+    /// total is zero or missing is a day without activity, drawn as an empty cell in the grid colour and not focusable. The days
+    /// are laid out by <see cref="ChartSpec.CalendarLayout"/> from the first day of the data to the last, weeks starting on
+    /// <see cref="ChartSpec.WeekStart"/>, and drawn as <see cref="ChartSpec.CalendarCell"/>. Each day takes the colour of its
+    /// value's zone in <see cref="ChartSpec.YZones"/>, or else a colour on the style's ramp from
+    /// <see cref="ChartStyle.HeatmapLow"/> to <see cref="ChartStyle.HeatmapHigh"/> across the days' values, and the key under the
+    /// grid shows the zones or the ramp. An X annotation outlines its day's cell.</summary>
+    Calendar
+}
+/// <summary>How a calendar lays out its days.</summary>
+public enum CalendarLayout
+{
+    /// <summary>The contribution grid: one column per week and one row per weekday, the months named above the first week of
+    /// each and Mon, Wed and Fri named beside their rows.</summary>
+    Weeks,
+    /// <summary>One small grid per calendar month, seven columns and a row per week, named above, set left to right and
+    /// wrapping to fit the width.</summary>
+    Months
+}
+/// <summary>How a calendar draws each day.</summary>
+public enum CalendarCell
+{
+    /// <summary>A rounded square filling its cell, rounded by the style's <see cref="ChartStyle.BarRadius"/> or 3 pixels.</summary>
+    Square,
+    /// <summary>A filled circle filling its cell.</summary>
+    Dot,
+    /// <summary>A circle whose area is proportional to the day's value, the largest filling its cell, over a track the size of
+    /// the cell, as a training log sizes each day by its distance.</summary>
+    Bubble
 }
 /// <summary>The preset a chart draws with when it sets no <see cref="ChartSpec.Style"/>.</summary>
 public enum ChartTheme
@@ -329,7 +359,7 @@ public sealed record ChartSpec
     public IReadOnlyList<ChartAnnotation> Annotations { get; init; } = [];
     /// <summary>Shades each zone as a band on the main plot's primary value axis, behind the data and any annotations, named
     /// with its range. The open bottom zone and the unbounded top one stop at the plot edge, and the bands never
-    /// widen the axis. Applies wherever Y annotations do.</summary>
+    /// widen the axis. Applies wherever Y annotations do. On a calendar it colours each day in its value's zone instead.</summary>
     public ZoneScale? YZones { get; init; }
     /// <summary>Plots stacked under the main one, sharing its X axis, each with Y axes of its own, such as volume under
     /// prices. The main plot is pane 0 and takes this spec's Y properties; <c>Panes[k - 1]</c> sets up pane k, which holds
@@ -342,6 +372,15 @@ public sealed record ChartSpec
     /// <summary>Timeline charts only: joins a span to the span in another lane that starts where it ends with a thin vertical
     /// connector, as a hypnogram does. On by default; off draws a plain state chart. Every other kind refuses it off.</summary>
     public bool TimelineConnectors { get; init; } = true;
+    /// <summary>Calendar charts only: the contribution grid of weeks, the default, or a small grid for each month. Every other
+    /// kind refuses it set.</summary>
+    public CalendarLayout CalendarLayout { get; init; }
+    /// <summary>Calendar charts only: how each day is drawn, a rounded square by default, a dot, or a bubble sized by its value.
+    /// Every other kind refuses it set.</summary>
+    public CalendarCell CalendarCell { get; init; }
+    /// <summary>Calendar charts only: the day each week starts on, Monday by default, as ISO 8601 has it. Every other kind refuses
+    /// it set.</summary>
+    public DayOfWeek WeekStart { get; init; } = DayOfWeek.Monday;
 }
 
 /// <summary>

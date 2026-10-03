@@ -29,6 +29,7 @@ ChartSpec Sample(ChartKind kind)=>kind switch{
     ChartKind.Ring=>Spec(kind) with{Series=[new("Move",[new(0,540,"kcal")]){Goal=600},new("Exercise",[new(0,47,"min")]){Goal=30},new("Stand",[new(0,9,"h")]){Goal=12}]},
     ChartKind.Timeline=>Spec(kind) with{Series=[new("Awake",[ChartPoint.Span(0,10),ChartPoint.Span(60,65)]),new("Light",[ChartPoint.Span(10,40),ChartPoint.Span(50,60)]),new("Deep",[ChartPoint.Span(40,50)])]},
     ChartKind.Range=>Spec(kind) with{Series=[new("Heart rate",[ChartPoint.Interval(0,70,50,150,"A"),ChartPoint.Interval(1,null,55,130,"B"),ChartPoint.Interval(2,64,48,170,"C")])]},
+    ChartKind.Calendar=>Spec(kind) with{XAxis=AxisKind.Time,Series=[new("Stress",[new(Utc(2026,9,14,12),40,"Easy run"),new(Utc(2026,9,15,12),0),new(Utc(2026,9,16,12),120)])]},
     _=>Spec(kind)};
 foreach(var kind in Enum.GetValues<ChartKind>())
 {
@@ -1859,7 +1860,7 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
         var spec=Sample(kind);
         if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline)
             ChartSvg.Render(spec with{XFormat=ValueFormat.Duration});
-        else Check(Refusal(spec with{XFormat=ValueFormat.Duration}).Contains("X format"),$"{kind}: X format");
+        else Check(Refusal(spec with{XFormat=ValueFormat.Duration}).Contains(kind==ChartKind.Calendar?"writes its own calendar":"X format"),$"{kind}: X format");
         if(kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Histogram)
         {
             Check(Refusal(spec with{YFormat=ValueFormat.Compact}).Contains("Y format"),$"{kind}: Y format");
@@ -1868,6 +1869,12 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
         // A timeline's lanes are states, not values on a Y axis.
         else if(kind==ChartKind.Timeline)
             Check(Refusal(spec with{YFormat=ValueFormat.Compact}).Contains("lanes")&&Refusal(spec with{Y2Format=ValueFormat.Duration}).Contains("lanes"),$"{kind}: Y format");
+        // A calendar's Y format writes its days' values, and it has no secondary axis.
+        else if(kind==ChartKind.Calendar)
+        {
+            ChartSvg.Render(spec with{YFormat=ValueFormat.Duration});
+            Check(Refusal(spec with{Y2Format=ValueFormat.Duration}).Contains("no secondary axis"),$"{kind}: Y2 format");
+        }
         else ChartSvg.Render(spec with{YFormat=ValueFormat.Duration,Y2Format=ValueFormat.Compact});
         if(kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Area or ChartKind.Histogram)
         {
@@ -1876,6 +1883,7 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
         }
         else if(kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Gauge or ChartKind.Ring) Check(Refusal(spec with{YReversed=true}).Contains("no Y axis"),$"{kind}: reversed Y");
         else if(kind==ChartKind.Timeline) Check(Refusal(spec with{YReversed=true}).Contains("lanes"),$"{kind}: reversed Y");
+        else if(kind==ChartKind.Calendar) Check(Refusal(spec with{YReversed=true}).Contains("rather than measuring it on a Y axis")&&Refusal(spec with{Y2Reversed=true}).Contains("no secondary axis"),$"{kind}: reversed Y");
         else ChartSvg.Render(spec with{YReversed=true,Y2Reversed=true});
     }
     Reject(()=>ChartSvg.Render(Spec() with{YFormat=(ValueFormat)9}));
@@ -2146,8 +2154,9 @@ Test("Zones and point colours are refused where colour already means something e
         var coloured=sample with{Series=sample.Series.Select(s=>s with{Points=s.Points.Select(p=>p with{Color="#ABCDEF"}).ToArray()}).ToArray()};
         Check(Accepts(zoned)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar),$"zones on {kind}");
         Check(Accepts(coloured)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Range or ChartKind.Donut),$"point colours on {kind}");
-        // Zone bands go wherever a Y annotation goes, and nowhere else.
-        Check(Accepts(sample with{YZones=Effort()})==Accepts(sample with{Annotations=[new(AnnotationAxis.Y,1)]}),$"zone bands on {kind}");
+        // Zone bands go wherever a Y annotation goes, and nowhere else; a calendar's zones colour its days, and it has no Y axis
+        // for a Y annotation.
+        Check(Accepts(sample with{YZones=Effort()})==(kind==ChartKind.Calendar||Accepts(sample with{Annotations=[new(AnnotationAxis.Y,1)]})),$"zone bands on {kind}");
     }
     Check(!Accepts(Sample(ChartKind.Donut) with{YZones=Effort()})&&Accepts(Sample(ChartKind.StackedColumn) with{YZones=Effort()}));
     Reject(()=>ChartSvg.Render(Spec() with{Series=[new("S",[new(0,1){Color="red"}])]}));
@@ -2716,8 +2725,8 @@ Test("Panes are refused where they cannot be drawn, each with its reason",()=>{
             ChartSvg.Render(below);
             Check(Refusal(pointed).Contains("pane is 0"),$"{kind}: {Refusal(pointed)}");
         }
-        // A timeline's lanes are its one plot.
-        else if(kind==ChartKind.Timeline)
+        // A timeline's lanes are its one plot, and a calendar's days its one grid.
+        else if(kind is ChartKind.Timeline or ChartKind.Calendar)
             Check(Refusal(below).Contains("no panes")&&Refusal(pointed).Contains("no panes")&&Refusal(Sample(kind) with{Panes=[new()]}).Contains("no panes"),$"{kind}: {Refusal(below)}");
         else Check(Refusal(below).Contains("Panes share")&&Refusal(pointed).Contains("Panes share")&&Refusal(Sample(kind) with{Panes=[new()]}).Contains("Panes share"),$"{kind}: {Refusal(below)}");
     }
@@ -3683,19 +3692,21 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: fifteen charts, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
-    Check(sports.Count==15&&sports.Select(card=>card.Id).Distinct().Count()==15,"the page should have fifteen charts");
+Test("Sports page: seventeen charts in sixteen cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+    Check(sports.Count==16&&sports.Select(card=>card.Id).Distinct().Count()==16&&sports.Count(card=>card.Beside is not null)==1,"the page should have seventeen charts in sixteen cards");
     // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order.
     Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
     foreach(var (theme,style,zones) in new[]{(ChartTheme.Light,(ChartStyle?)null,ChartStyle.Light.Zones),(ChartTheme.Dark,null,ChartStyle.Light.Zones),(ChartTheme.Dark,ChartStyle.Midnight,ChartStyle.Midnight.Zones)})
         foreach(var markers in new[]{true,false})
             foreach(var card in SportsData.Cards(theme,zones,markers))
-            {
-                Check(card.Spec.Width==(card.Wide?1100:540)&&card.Spec.Source.Contains("simulated"),$"{card.Id} is not drawn at a desktop's width before it is fitted, or does not say it is simulated");
-                // The page's charts set FitWidth, which draws each at the width its card gives it, as here.
-                foreach(var width in new[]{card.Spec.Width,337})
-                    Check(XDocument.Parse(ChartSvg.Render(card.Spec with{Width=width,Style=style})).Descendants().Any(e=>e.Attribute("data-point") is not null),$"{card.Id} drew no marks {width} wide");
-            }
+                // A wide card with a second chart beside its first gives each half its width.
+                foreach(var chart in new[]{card.Spec,card.Beside}.OfType<ChartSpec>())
+                {
+                    Check(chart.Width==(card.Wide&&card.Beside is null?1100:540)&&chart.Source.Contains("simulated"),$"{card.Id} is not drawn at a desktop's width before it is fitted, or does not say it is simulated");
+                    // The page's charts set FitWidth, which draws each at the width its card gives it, as here.
+                    foreach(var width in new[]{chart.Width,337})
+                        Check(XDocument.Parse(ChartSvg.Render(chart with{Width=width,Style=style})).Descendants().Any(e=>e.Attribute("data-point") is not null),$"{card.Id} drew no marks {width} wide");
+                }
     Check(Sports("stream").Annotations.Count==3&&SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones,markers:false).Single(card=>card.Id=="stream").Spec.Annotations.Count==0,"the stream's markers do not follow the page");
 });
 Test("Sports page: this morning's readiness reads the HRV and form the other charts draw, and the day's rings are the last run",()=>{
@@ -4149,12 +4160,13 @@ Test("Gauge and ring: specs survive JSON, a request that names no sweep draws 27
 });
 Test("A gauge's sweep left at its default is left out of the hash that names gradients, so every other chart keeps its IDs",()=>{
     // 0.25.0 had no sweep: its hash of a spec is the JSON written today less the sweep and, since 0.27.0, the timeline's
-    // connectors, which are the last two properties written.
+    // connectors and, since 0.28.0, the calendar's layout, cell and week start, which are the last five properties written.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    Check(json.EndsWith(",\"GaugeSweep\":270,\"TimelineConnectors\":true}"),json[^60..]);
-    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(",\"GaugeSweep\":270,\"TimelineConnectors\":true}","}"))))[..12].ToLowerInvariant();
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1}";
+    Check(json.EndsWith(defaults),json[^120..]);
+    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(defaults,"}"))))[..12].ToLowerInvariant();
     Check(Prefix(ChartSvg.Render(faded))==before,$"{Prefix(ChartSvg.Render(faded))} is not 0.25.0's {before}");
     // Gauges and rings define no IDs: a gradient gauge draws its arc in pieces.
     var strain=Gauge(14) with{YMax=21,Series=[new("Strain",[new(0,14)]){Gradient=[new(0,"#3F87D9"),new(21,"#DD4B45")]}]};
@@ -4531,6 +4543,283 @@ Test("Sports page: each day's heart rate runs from the night's lowest to the day
     }
     Check(bars[^1].High==Sports("stream").Series.Single(s=>s.Name=="Heart rate").Points.Max(p=>p.Y)&&latest.PeakHeartRate==latest.Track!.HeartRate.Max(),"today's highest is not the run's");
     Check(athlete.Sessions.Where(s=>s.Track is not null).All(s=>s.PeakHeartRate==s.Track!.HeartRate.Max()),"a run's peak is not its highest sample");
+});
+// 0.28.0: calendars. A day's points stand at noon UTC unless a test says otherwise, so each falls on its own date in UTC and in
+// New York alike. A day's mark is found by the date its name starts with, and its cell by the shape the mark colours.
+double Noon(DateOnly day,double hours=12)=>TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue),TimeSpan.Zero))+hours*3600e3;
+ChartSpec Days(DateOnly from,int count,Func<int,double?> value)=>new(){Kind=ChartKind.Calendar,XAxis=AxisKind.Time,Title="Days",
+    Series=[new("Stress",Enumerable.Range(0,count).Select(i=>new ChartPoint(Noon(from.AddDays(i)),value(i))).ToArray())]};
+string Dated(DateOnly day)=>day.ToString("ddd d MMM yyyy",CultureInfo.InvariantCulture);
+XElement DayGroup(XDocument doc,DateOnly day)=>doc.Descendants(ns+"g").Single(g=>g.Attribute("data-point") is not null&&((string)g.Attribute("aria-label")!).StartsWith(Dated(day)));
+XElement DayShape(XDocument doc,DateOnly day)=>DayGroup(doc,day).Elements().Single(e=>(string?)e.Attribute("class")=="lumen-day");
+(double X,double Y) DayAt(XDocument doc,DateOnly day){var shape=DayShape(doc,day);return shape.Name==ns+"rect"?(Attr(shape,"x"),Attr(shape,"y")):(Attr(shape,"cx"),Attr(shape,"cy"));}
+XElement[] DayTracks(XDocument doc)=>doc.Descendants().Where(e=>(string?)e.Attribute("class")=="lumen-track").ToArray();
+string[] KeyText(XDocument doc)=>doc.Root!.Elements(ns+"text").Where(t=>(string?)t.Attribute("font-size")=="11"&&t.Attribute("class") is null).Select(t=>t.Value).ToArray();
+Test("Calendar: four weeks at 900 by 420 fill the height on a 41-pixel pitch, 35-pixel cells 6 apart, centred across, each day in its week's column and its weekday's row",()=>{
+    // Across, 822 pixels are left beside the weekday names, so four weeks could take 207 each; down, 281 between the month names
+    // and the key, so seven rows take 41 each, 6 of them the gap. The grid is 158 wide, centred from 54 + 332 = 386, and 82 is
+    // the top of its rows, under the 18 of the month names.
+    var from=new DateOnly(2026,9,28);
+    var doc=Svg(Days(from,28,i=>i%7==0?0:10+i) with{YZones=Effort()});
+    for(var i=0;i<28;i++)
+    {
+        var day=from.AddDays(i);
+        if(i%7==0){Check(!doc.Descendants(ns+"g").Any(g=>((string?)g.Attribute("aria-label"))?.StartsWith(Dated(day))==true),$"{day}, a rest day, takes focus");continue;}
+        var shape=DayShape(doc,day);
+        Check(Attr(shape,"x")==386+i/7*41&&Attr(shape,"y")==82+i%7*41&&Attr(shape,"width")==35&&Attr(shape,"height")==35&&Attr(shape,"rx")==3,$"{day}: {shape}");
+    }
+    // The rest days are empty cells in the grid colour on the Monday row.
+    var tracks=DayTracks(doc);
+    Check(tracks.Length==4&&tracks.All(t=>(string?)t.Attribute("fill")==ChartStyle.Light.Grid&&Attr(t,"y")==82&&Attr(t,"width")==35)&&tracks.Select(t=>Attr(t,"x")).SequenceEqual([386d,427,468,509]),"the rest days are not empty cells on the Monday row");
+    // The grid starts on the last days of September, so the first week is named for October, whose first day it holds.
+    var texts=doc.Root!.Elements(ns+"text").ToArray();
+    Check(!texts.Any(t=>t.Value=="Sep")&&texts.Single(t=>t.Value=="Oct") is var october&&Attr(october,"x")==386&&Attr(october,"y")==76,"October is not named above the first week");
+    foreach(var (name,row) in new[]{("Mon",0),("Wed",2),("Fri",4)})
+        Check(texts.Single(t=>t.Value==name) is var label&&Attr(label,"x")==380&&Attr(label,"y")==82+row*41+21.5&&(string?)label.Attribute("text-anchor")=="end",$"{name} is not beside its row");
+    Check(!texts.Any(t=>t.Value is "Tue" or "Thu" or "Sat" or "Sun"),"a weekday other than Mon, Wed and Fri is named");
+    // The key stands 24 under the grid, at its left edge.
+    Check(doc.Root!.Elements(ns+"text").Single(t=>t.Value=="Easy") is var easy&&Attr(easy,"x")==400&&Attr(easy,"y")==387,"the key is not under the grid");
+});
+Test("Calendar: a day's column and row follow its week and the week start, across a month's end, and each month is named above the week of its first day",()=>{
+    var from=new DateOnly(2026,9,7);
+    foreach(var start in new[]{DayOfWeek.Monday,DayOfWeek.Sunday})
+    {
+        var doc=Svg(Days(from,56,_=>5) with{WeekStart=start});
+        var origin=DayAt(doc,from);var pitch=DayAt(doc,from.AddDays(1)).Y-origin.Y;
+        // Monday 7 September is the first day, in the first column, on the first row from Monday and the second from Sunday.
+        var top=origin.Y-(start==DayOfWeek.Monday?0:1)*pitch;
+        (int Column,int Row) Place(DateOnly day){var (x,y)=DayAt(doc,day);return ((int)Math.Round((x-origin.X)/pitch),(int)Math.Round((y-top)/pitch));}
+        (DateOnly Day,int Column,int Row)[] expected=start==DayOfWeek.Monday
+            ? [(new(2026,9,7),0,0),(new(2026,9,13),0,6),(new(2026,9,14),1,0),(new(2026,9,30),3,2),(new(2026,10,1),3,3),(new(2026,10,4),3,6),(new(2026,10,5),4,0),(new(2026,11,1),7,6)]
+            : [(new(2026,9,7),0,1),(new(2026,9,12),0,6),(new(2026,9,13),1,0),(new(2026,9,30),3,3),(new(2026,10,1),3,4),(new(2026,10,3),3,6),(new(2026,10,4),4,0),(new(2026,11,1),8,0)];
+        foreach(var (day,column,row) in expected)
+            Check(Place(day)==(column,row),$"{start}: {day} stands at {Place(day)}, not ({column}, {row})");
+        // September is named over the first week, October over the week of its first day and November over the week of its own.
+        var months=doc.Root!.Elements(ns+"text").Where(t=>t.Value is "Sep" or "Oct" or "Nov").Select(t=>(t.Value,(int)Math.Round((Attr(t,"x")-origin.X)/pitch))).ToArray();
+        Check(months.SequenceEqual(start==DayOfWeek.Monday?[("Sep",0),("Oct",3),("Nov",7)]:[("Sep",0),("Oct",3),("Nov",8)]),$"{start}: {string.Join(", ",months)}");
+        // Mon, Wed and Fri name the rows those days stand on.
+        var cell=Attr(DayShape(doc,from),"width");
+        foreach(var (name,row) in new[]{("Mon",0),("Wed",2),("Fri",4)})
+            Check(Close(Attr(doc.Root!.Elements(ns+"text").Single(t=>t.Value==name),"y"),top+(row+(start==DayOfWeek.Sunday?1:0))*pitch+cell/2+4),$"{start}: {name} is not beside its row");
+    }
+});
+Test("Calendar: across New Year a weeks grid keeps counting weeks and names both months, and a months grid names each month with its year",()=>{
+    var from=new DateOnly(2026,12,21);
+    var weeks=Svg(Days(from,21,_=>5));
+    var origin=DayAt(weeks,from);var pitch=DayAt(weeks,from.AddDays(1)).Y-origin.Y;
+    var newYear=DayAt(weeks,new DateOnly(2027,1,1));
+    Check(Math.Round((newYear.X-origin.X)/pitch)==1&&Math.Round((newYear.Y-origin.Y)/pitch)==4,"1 January 2027 is not on the second week's Friday");
+    var texts=weeks.Root!.Elements(ns+"text").ToArray();
+    Check(Attr(texts.Single(t=>t.Value=="Dec"),"x")==origin.X&&Attr(texts.Single(t=>t.Value=="Jan"),"x")==origin.X+pitch,"December and January are not named above their weeks");
+    // December 2026 begins on a Tuesday, so the 21st is the fourth row's Monday; January 2027 begins on a Friday, in the fifth
+    // column, and its grid stands eight columns on from December's, on the same line.
+    var months=Svg(Days(from,21,_=>5) with{CalendarLayout=CalendarLayout.Months});
+    var (decX,decY)=DayAt(months,from);var (janX,janY)=DayAt(months,new DateOnly(2027,1,1));
+    var step=DayAt(months,new DateOnly(2027,1,2)).X-janX;
+    Check(Close(DayAt(months,from.AddDays(1)).X-decX,step)&&Close(janX-4*step-decX,8*step)&&Close(decY-3*step,janY),$"the months stand at ({decX}, {decY}) and ({janX}, {janY}), {step} apart");
+    var titles=months.Root!.Elements(ns+"text").Where(t=>t.Value.EndsWith(" 2026")||t.Value.EndsWith(" 2027")).ToArray();
+    Check(titles.Select(t=>t.Value).SequenceEqual(["December 2026","January 2027"])&&Close(Attr(titles[0],"x"),decX)&&Close(Attr(titles[1],"x"),janX-4*step),string.Join(", ",titles.Select(t=>t.Value)));
+    // Within one year the months are named without it, and a weekday's initial stands over each column from the week start.
+    var autumn=Svg(Days(new DateOnly(2026,9,1),61,_=>5) with{CalendarLayout=CalendarLayout.Months,WeekStart=DayOfWeek.Sunday});
+    Check(autumn.Root!.Elements(ns+"text").Any(t=>t.Value=="September")&&autumn.Root!.Elements(ns+"text").Any(t=>t.Value=="October"),"a month in one year is not named alone");
+    Check(autumn.Root!.Elements(ns+"text").Where(t=>(string?)t.Attribute("font-size")=="10").Take(7).Select(t=>t.Value).SequenceEqual(["S","M","T","W","T","F","S"]),"the weekdays are not named from Sunday");
+});
+Test("Calendar: a day is counted in the chart's time zone, so a moment near midnight falls on that zone's date, and one day's points add up",()=>{
+    // 00:30 on Thursday 1 October in New York is 04:30 UTC on the 1st, and 23:30 there is 03:30 UTC on Friday the 2nd.
+    var spec=new ChartSpec{Kind=ChartKind.Calendar,XAxis=AxisKind.Time,Series=[new("Stress",[new(Utc(2026,10,1,4)+30*60_000,10),new(Utc(2026,10,2,3)+30*60_000,20)])]};
+    string[] Names(XDocument doc)=>doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).Select(g=>(string)g.Attribute("aria-label")!).ToArray();
+    var local=Svg(spec with{TimeZone="America/New_York"});var utc=Svg(spec);
+    Check(Names(local).SequenceEqual(["Thu 1 Oct 2026: 30"]),string.Join("|",Names(local)));
+    Check(Names(utc).SequenceEqual(["Thu 1 Oct 2026: 10","Fri 2 Oct 2026: 20"]),string.Join("|",Names(utc)));
+    // The day reports its first point, and in UTC Friday stands a row under Thursday.
+    Check((string?)local.Descendants(ns+"g").Single(g=>g.Attribute("data-point") is not null).Attribute("data-point")=="0");
+    Check(DayAt(utc,new DateOnly(2026,10,2)).Y>DayAt(utc,new DateOnly(2026,10,1)).Y&&DayAt(utc,new DateOnly(2026,10,2)).X==DayAt(utc,new DateOnly(2026,10,1)).X,"Friday is not under Thursday");
+});
+Test("Calendar: each day with activity is one focusable mark naming its date, its points' labels, its total and its zone; days without are empty cells that take no focus",()=>{
+    var from=new DateOnly(2026,9,14);
+    var spec=new ChartSpec{Kind=ChartKind.Calendar,XAxis=AxisKind.Time,YZones=Effort(),Series=[new("Stress",[
+        new(Noon(from),40),new(Noon(from.AddDays(1),9),30,"Ride"),new(Noon(from.AddDays(1),18),24,"Run"),new(Noon(from.AddDays(1),20),null),
+        new(Noon(from.AddDays(2)),0),new(Noon(from.AddDays(3)),null),new(Noon(from.AddDays(6)),150,"Long ride")])]};
+    var doc=Svg(spec);
+    var marks=doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).ToArray();
+    Check(marks.Select(g=>((string?)g.Attribute("aria-label"),(string?)g.Attribute("data-point"))).SequenceEqual([("Mon 14 Sep 2026: 40, Easy","0"),("Tue 15 Sep 2026, Ride, Run: 54, Easy","1"),("Sun 20 Sep 2026, Long ride: 150, Hard","6")]),
+        string.Join("|",marks.Select(g=>(string?)g.Attribute("aria-label"))));
+    Check(marks.All(g=>(string?)g.Attribute("tabindex")=="0"&&(string?)g.Attribute("role")=="button"&&(string?)g.Attribute("data-series")=="0"&&(string?)g.Attribute("class")=="lumen-datum"),"a day is not a focusable mark");
+    // Wednesday's zero, Thursday's missing value, and Friday and Saturday without points are empty cells outside any mark.
+    var tracks=DayTracks(doc);
+    Check(tracks.Length==4&&tracks.All(t=>t.Parent==doc.Root&&(string?)t.Attribute("fill")==ChartStyle.Light.Grid),"the days without activity are not four empty cells");
+    // A duration format writes the totals as a clock; the chart's legend is the series' name.
+    Check(Svg(spec with{YFormat=ValueFormat.Duration,YZones=null}).Descendants(ns+"g").Any(g=>(string?)g.Attribute("aria-label")=="Tue 15 Sep 2026, Ride, Run: 0:54"),"a duration format does not reach a day's name");
+    Check(ChartSvg.LegendLabel(spec,0)=="Stress"&&doc.Root!.Attribute("aria-label")!.Value=="Untitled chart","the legend or the accessible name changed");
+});
+Test("Calendar: without zones a day takes the heatmap ramp across the active days, exact at its ends and middle, with the heatmap's hairline, and the key reads the ends",()=>{
+    var from=new DateOnly(2026,9,14);
+    var spec=Days(from,4,i=>new double?[]{10,30,50,0}[i]);
+    var doc=Svg(spec);
+    Check(Enumerable.Range(0,3).Select(i=>(string?)DayShape(doc,from.AddDays(i)).Attribute("fill")).SequenceEqual(["#E4EDFC","#92ABE6","#4069D0"]),"the ramp's ends and middle moved");
+    // The hairline is the shape's own stroke, so a second shape that draws nothing carries the focus ring.
+    foreach(var i in Enumerable.Range(0,3))
+    {
+        var parts=DayGroup(doc,from.AddDays(i)).Elements().Where(e=>e.Name!=ns+"title").ToArray();
+        Check(parts.Length==2&&(string?)parts[0].Attribute("stroke")=="var(--lumen-muted)"&&(string?)parts[0].Attribute("stroke-opacity")==".4"&&(string?)parts[1].Attribute("fill")=="none"&&parts[1].Attribute("stroke") is null,"a ramp day has no hairline or no focus shape");
+    }
+    var swatches=doc.Root!.Elements(ns+"rect").Where(r=>r.Attribute("class") is null&&Attr(r,"width")==10).Select(r=>(string?)r.Attribute("fill")).ToArray();
+    Check(swatches.SequenceEqual(["#E4EDFC","#BBCCF1","#92ABE6","#698ADB","#4069D0"]),string.Join(",",swatches));
+    Check(KeyText(doc).SequenceEqual(["10","50"]),string.Join(",",KeyText(doc)));
+    // The ramp is the style's: Midnight's low end, and a brand's high end.
+    Check((string?)DayShape(Svg(spec with{Style=ChartStyle.Midnight}),from).Attribute("fill")==ChartStyle.Midnight.HeatmapLow&&(string?)DayShape(Svg(spec with{Style=Brand()}),from.AddDays(2)).Attribute("fill")==Brand().HeatmapHigh,"the ramp is not the style's");
+    // A day with no activity anywhere leaves the key without a ramp.
+    Check(KeyText(Svg(Days(from,3,_=>0))).Length==0&&DayTracks(Svg(Days(from,3,_=>0))).Length==3);
+});
+Test("Calendar: with zones a day takes its value's zone colour, a zone's own colour first, without a hairline, and the key names the zones in order",()=>{
+    var from=new DateOnly(2026,9,14);
+    var zones=new ZoneScale([new("Easy",120),new("Steady",140,"#123456"),new("Hard",160),new("Max",double.PositiveInfinity)]);
+    var doc=Svg(Days(from,4,i=>new double[]{100,130,150,170}[i]) with{YZones=zones});
+    Check(Enumerable.Range(0,4).Select(i=>(string?)DayShape(doc,from.AddDays(i)).Attribute("fill")).SequenceEqual([ChartStyle.Light.Zones[0],"#123456",ChartStyle.Light.Zones[2],ChartStyle.Light.Zones[3]]),"a day is not in its zone's colour");
+    Check(Enumerable.Range(0,4).All(i=>DayShape(doc,from.AddDays(i)).Attribute("stroke") is null&&DayGroup(doc,from.AddDays(i)).Elements().Count(e=>e.Name!=ns+"title")==1),"a zoned day carries a hairline or a second shape");
+    Check(new[]{"Easy","Steady","Hard","Max"}.Select((name,i)=>DayGroup(doc,from.AddDays(i)).Attribute("aria-label")!.Value.EndsWith(", "+name)).All(named=>named),"a day does not name its zone");
+    Check(KeyText(doc).SequenceEqual(["Easy","Steady","Hard","Max"]),string.Join(",",KeyText(doc)));
+    var swatches=doc.Root!.Elements(ns+"rect").Where(r=>r.Attribute("class") is null&&Attr(r,"width")==10).Select(r=>(string?)r.Attribute("fill")).ToArray();
+    Check(swatches.SequenceEqual([ChartStyle.Light.Zones[0],"#123456",ChartStyle.Light.Zones[2],ChartStyle.Light.Zones[3]]),string.Join(",",swatches));
+});
+Test("Calendar: a bubble's area is proportional to its day's total, the largest filling its cell over its track, and a dot fills its cell",()=>{
+    var from=new DateOnly(2026,9,14);
+    var spec=Days(from,3,i=>new double[]{4,9,16}[i]) with{CalendarCell=CalendarCell.Bubble};
+    var doc=Svg(spec);
+    double R(int i)=>Attr(DayShape(doc,from.AddDays(i)),"r");
+    XElement Track(int i)=>DayGroup(doc,from.AddDays(i)).Elements(ns+"circle").First();
+    Check(Close(R(0)*R(0)/(R(2)*R(2)),4/16d)&&Close(R(1)*R(1)/(R(2)*R(2)),9/16d)&&Close(R(2),Attr(Track(2),"r")),$"radii {R(0)}, {R(1)}, {R(2)} over a track of {Attr(Track(2),"r")}");
+    Check(Enumerable.Range(0,3).All(i=>(string?)Track(i).Attribute("class")=="lumen-track"&&Attr(Track(i),"cx")==Attr(DayShape(doc,from.AddDays(i)),"cx")&&Attr(Track(i),"cy")==Attr(DayShape(doc,from.AddDays(i)),"cy")),"a bubble is not centred on its track");
+    var dots=Svg(spec with{CalendarCell=CalendarCell.Dot});
+    var radii=Enumerable.Range(0,3).Select(i=>Attr(DayShape(dots,from.AddDays(i)),"r")).Distinct().ToArray();
+    Check(radii.Length==1&&DayShape(dots,from).Name==ns+"circle"&&!DayTracks(dots).Any(),"dots are not one size, or a day with activity drew a track");
+    // A track is a circle on a round calendar, empty days included.
+    Check(DayTracks(Svg(Days(from,3,i=>i==1?0:5) with{CalendarCell=CalendarCell.Dot})).Single().Name==ns+"circle");
+});
+Test("Calendar: an X annotation outlines its day's cell in the gap round it, names it, and adds it to the key; one outside the days draws nothing",()=>{
+    var from=new DateOnly(2026,9,28);
+    var spec=Days(from,28,i=>i%7==0?0:10+i) with{YZones=Effort(),Annotations=[new(AnnotationAxis.X,Noon(new(2026,10,11),9)){Label="Race",Color="#DD4B45"},
+        new(AnnotationAxis.X,Noon(new(2026,10,18))),new(AnnotationAxis.X,Noon(new(2026,11,30))){Label="Later"}]};
+    var doc=Svg(spec);
+    var outlines=doc.Descendants().Where(e=>(string?)e.Attribute("class")=="lumen-outline").ToArray();
+    // Sunday 11 October is the second week's Sunday, its cell at (427, 328) and 35 square, so its outline runs 3 out into the gap.
+    Check(outlines.Length==2&&Attr(outlines[0],"x")==424&&Attr(outlines[0],"y")==325&&Attr(outlines[0],"width")==41&&Attr(outlines[0],"height")==41&&Attr(outlines[0],"rx")==6
+        &&(string?)outlines[0].Attribute("stroke")=="#DD4B45"&&(string?)outlines[0].Attribute("fill")=="none"&&Attr(outlines[1],"x")==465&&(string?)outlines[1].Attribute("stroke")==ChartStyle.Light.Muted,
+        string.Join("|",outlines.Select(o=>o.ToString())));
+    Check((string?)outlines[0].Parent!.Attribute("aria-label")=="Race: Sun 11 Oct 2026"&&(string?)outlines[1].Parent!.Attribute("aria-label")=="Sun 18 Oct 2026"&&(string?)outlines[0].Parent!.Attribute("role")=="img","an outline is not named");
+    Check(KeyText(doc).SequenceEqual(["Easy","Steady","Hard","Max","Race","18 Oct"])&&!doc.ToString().Contains("Later"),string.Join(",",KeyText(doc)));
+    var swatch=doc.Root!.Elements(ns+"rect").Single(r=>(string?)r.Attribute("stroke")=="#DD4B45");
+    Check((string?)swatch.Attribute("fill")=="none"&&Attr(swatch,"width")==10,"the key's outlined swatch is missing");
+    // The outline is drawn over the days, after every one of them.
+    Check(doc.Root!.Elements().ToList().IndexOf(outlines[0].Parent!)>doc.Root!.Elements().ToList().IndexOf(DayGroup(doc,new(2026,10,25))),"an outline is drawn under a day");
+    // On round cells it is a circle in the gap.
+    Check(Attr(Svg(spec with{CalendarCell=CalendarCell.Dot}).Descendants(ns+"circle").First(c=>(string?)c.Attribute("class")=="lumen-outline"),"r")==20.5,"a dot's outline is not in the gap");
+});
+Test("Calendar: what has no meaning on a calendar is refused, each with its reason",()=>{
+    string Refusal(ChartSpec spec){try{ChartSvg.Render(spec);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
+    var spec=Days(new DateOnly(2026,9,14),7,i=>i*10);
+    ChartSpec With(Func<ChartSeries,ChartSeries> change)=>spec with{Series=[change(spec.Series[0])]};
+    var start=new DateOnly(2016,1,1);
+    foreach(var (bad,reason) in new (ChartSpec,string)[]{
+        (spec with{XAxis=AxisKind.Linear},"needs a time X axis"),(spec with{XAxis=AxisKind.Log},"needs a time X axis"),
+        (spec with{YAxis=AxisKind.Log},"rather than measuring it on a Y axis"),(spec with{YReversed=true},"rather than measuring"),(spec with{YMin=0},"rather than measuring"),(spec with{YMax=100},"rather than measuring"),
+        (spec with{YAxisSide=AxisSide.Right},"rather than measuring"),(spec with{YTickLabels=TickLabels.Ends},"rather than measuring"),
+        (spec with{Y2Axis=AxisKind.Log},"no secondary axis"),(spec with{Y2Reversed=true},"no secondary axis"),(spec with{Y2Format=ValueFormat.Duration},"no secondary axis"),(spec with{Y2Min=0},"no secondary axis"),
+        (With(s=>s with{Secondary=true}),"no secondary axis"),(spec with{Panes=[new()]},"no panes"),(With(s=>s with{Pane=1}),"no panes"),
+        (spec with{Series=[spec.Series[0],spec.Series[0] with{Name="Again"}]},"one series of days"),(With(s=>s with{Kind=ChartKind.Column}),"own kind"),
+        (With(s=>s with{Trend=true}),"no trend line"),(With(s=>s with{Zones=Effort()}),"takes its zones from YZones"),
+        (spec with{Annotations=[new(AnnotationAxis.Y,10)]},"takes X annotations"),(spec with{Annotations=[new(AnnotationAxis.X,spec.Series[0].Points[0].X){To=spec.Series[0].Points[2].X}]},"lines, not bands"),
+        (With(s=>s with{Points=[s.Points[0] with{XEnd=s.Points[1].X}]}),"XEnd ends the spans of a timeline"),
+        (With(s=>s with{Points=[s.Points[0] with{Color="#123456"}]}),"take no colours of their own"),(With(s=>s with{Points=[s.Points[0] with{Y=-1}]}),"none can be negative"),
+        (spec with{SkipWeekends=true},"skips none"),(spec with{TimeSkips=[TimeAxis.Day(new DateTime(2026,9,15))]},"skips none"),
+        (spec with{XFormat=ValueFormat.Duration},"writes its own calendar"),
+        (With(s=>s with{Gradient=[new(0,"#3F87D9"),new(1,"#DD4B45")]}),"gradient"),(With(s=>s with{Markers=MarkerStyle.Filled}),"Marker styles"),(With(s=>s with{ProjectedFrom=0}),"lines or areas"),
+        (With(s=>s with{StrokeWidth=3}),"stroke width"),(With(s=>s with{Goal=10}),"ring charts only"),(spec with{GaugeSweep=180},"gauge charts only"),(spec with{TimelineConnectors=false},"only a timeline"),
+        (spec with{XMin=Noon(start),XMax=Noon(start.AddDays(3660))},"at most 3,660 days"),(With(s=>s with{Points=[new(Noon(start),1),new(Noon(start.AddDays(3700)),1)]}),"at most 3,660 days"),
+        (spec with{TimeZone="Mars/Olympus"},"Unknown time zone"),
+        (spec with{CalendarLayout=(CalendarLayout)7},"Unknown calendar"),(spec with{CalendarCell=(CalendarCell)(-1)},"Unknown calendar"),(spec with{WeekStart=(DayOfWeek)7},"Unknown calendar"),
+        (Spec() with{CalendarLayout=CalendarLayout.Months},"calendar charts only"),(Spec() with{CalendarCell=CalendarCell.Dot},"calendar charts only"),(Spec(ChartKind.Heatmap) with{WeekStart=DayOfWeek.Sunday},"calendar charts only"),
+        (Spec(ChartKind.Column) with{XAxis=AxisKind.Time},"and calendars")})
+        Check(Refusal(bad).Contains(reason),$"\"{Refusal(bad)}\" does not say \"{reason}\"");
+    // Within the rules: 3,659 days, a zone, a labelled X annotation, a duration format, an empty series, days that are all missing,
+    // and the smallest drawing in every layout and cell.
+    foreach(var good in new[]{spec with{XMin=Noon(start),XMax=Noon(start.AddDays(3659))},spec with{TimeZone="Asia/Tokyo",YFormat=ValueFormat.Duration,Annotations=[new(AnnotationAxis.X,spec.Series[0].Points[3].X){Label="Race"}]},
+        spec with{Series=[new("Empty",[])]},With(s=>s with{Points=s.Points.Select(p=>p with{Y=null}).ToArray()}),
+        spec with{Width=320,Height=240,CalendarLayout=CalendarLayout.Months,CalendarCell=CalendarCell.Bubble},spec with{Width=320,Height=240,CalendarCell=CalendarCell.Dot,XMin=Noon(start),XMax=Noon(start.AddDays(3659))}})
+        Check(XDocument.Parse(ChartSvg.Render(good)).Root!.Name==ns+"svg");
+    Check(ChartSvg.Render(new ChartSpec{Kind=ChartKind.Calendar}).Contains("No data to display")&&ChartSvg.Render(spec with{Series=[new("Empty",[])]}).Contains("No data to display"),"an empty calendar does not draw its empty state");
+});
+Test("Calendar: a spec survives JSON, a request that names no layout draws weeks of squares from Monday, and CSV carries each point as other time charts do",()=>{
+    var options=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web){Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}};
+    var spec=Days(new DateOnly(2026,9,14),10,i=>i) with{CalendarLayout=CalendarLayout.Months,CalendarCell=CalendarCell.Bubble,WeekStart=DayOfWeek.Sunday,YZones=Effort(),TimeZone="Africa/Johannesburg",
+        Annotations=[new(AnnotationAxis.X,Noon(new(2026,9,20))){Label="Race"}]};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,options);
+    Check(json.Contains("\"kind\":\"Calendar\"")&&json.Contains("\"calendarLayout\":\"Months\"")&&json.Contains("\"calendarCell\":\"Bubble\"")&&json.Contains("\"weekStart\":\"Sunday\""),json);
+    Check(ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,options)!)==ChartSvg.Render(spec),"the calendar changed in transit");
+    var request=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Calendar\",\"xAxis\":\"Time\",\"series\":[{\"name\":\"Stress\",\"points\":[{\"x\":1789387200000,\"y\":40},{\"x\":1789473600000,\"y\":60}]}]}",options)!;
+    Check(request.CalendarLayout==CalendarLayout.Weeks&&request.CalendarCell==CalendarCell.Square&&request.WeekStart==DayOfWeek.Monday
+        &&ChartSvg.Render(request)==ChartSvg.Render(new ChartSpec{Kind=ChartKind.Calendar,XAxis=AxisKind.Time,Series=[new("Stress",[new(1789387200000,40),new(1789473600000,60)])]}),"a request without a layout is not weeks of squares from Monday");
+    // The file carries each original point, two on one day as two rows, with its moment in UTC.
+    var csv=ChartExport.Csv(new ChartSpec{Kind=ChartKind.Calendar,XAxis=AxisKind.Time,TimeZone="America/New_York",Series=[new("Stress",[new(1789387200000,40,"Ride"),new(1789387200000+3600e3,15),new(1789473600000,null)])]});
+    Check(csv.StartsWith("Series,X,XTime,Y,Label,Size\r\n")&&csv.Contains("\"Stress\",1789387200000,2026-09-14T12:00:00.000Z,40,\"Ride\",1")&&csv.Contains("\"Stress\",1789390800000,2026-09-14T13:00:00.000Z,15,\"\",1")
+        &&csv.Contains("\"Stress\",1789473600000,2026-09-15T12:00:00.000Z,,\"\",1")&&csv.Split('\n',StringSplitOptions.RemoveEmptyEntries).Length==4,csv);
+});
+Test("Calendar: the new properties at their defaults change no other chart, its gradient IDs included, and a calendar defines no IDs",()=>{
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
+    foreach(var spec in new[]{faded,Classic(faded),Sample(ChartKind.Line),Sample(ChartKind.Gauge),Sample(ChartKind.Timeline),Sample(ChartKind.Heatmap) with{Theme=ChartTheme.Dark}})
+        foreach(var titles in new[]{true,false})
+            Check(ChartSvg.Render(spec with{CalendarLayout=CalendarLayout.Weeks,CalendarCell=CalendarCell.Square,WeekStart=DayOfWeek.Monday},includeTitles:titles)==ChartSvg.Render(spec,includeTitles:titles),$"{spec.Kind} changes when the calendar's defaults are spelled out");
+    foreach(var layout in Enum.GetValues<CalendarLayout>())
+        foreach(var cell in Enum.GetValues<CalendarCell>())
+            foreach(var style in new[]{ChartStyle.Light,ChartStyle.Midnight,ChartStyle.Light with{Finish=ChartFinish.Classic}})
+            {
+                var svg=ChartSvg.Render(Sample(ChartKind.Calendar) with{CalendarLayout=layout,CalendarCell=cell,Style=style,YZones=cell==CalendarCell.Dot?Effort():null});
+                Check(!svg.Contains(" id=")&&!svg.Contains("<defs")&&!svg.Contains("url("),$"{layout} {cell} defines an ID");
+                Check(style.Finish==ChartFinish.Refined||!svg.Contains("vector-effect"),$"{layout} {cell}: a classic calendar carries the effect");
+            }
+    // Midnight's capsules round a square day into a circle's outline, and the sample draws at a phone's width.
+    var midnight=Svg(Sample(ChartKind.Calendar) with{Style=ChartStyle.Midnight});
+    Check(Close(Attr(DayShape(midnight,new(2026,9,14)),"rx"),Attr(DayShape(midnight,new(2026,9,14)),"width")/2),"Midnight's day is not round");
+    Check(Svg(Sample(ChartKind.Calendar) with{Width=337}).Descendants(ns+"g").Count(g=>g.Attribute("data-point") is not null)==2);
+});
+Test("Calendar: the component offers no zoom, keys the zones or the ramp, and reads a selected day's date and total in its status line",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    // 00:30 and 16:00 on Tuesday 15 September in New York are one day of 54.
+    var spec=new ChartSpec{Kind=ChartKind.Calendar,XAxis=AxisKind.Time,TimeZone="America/New_York",YZones=Effort(),Series=[new("Stress",[new(Utc(2026,9,15,4)+30*60_000,30),new(Utc(2026,9,15,20),24),new(Utc(2026,9,17,12),100)])]};
+    var html=RenderInside(null,spec);
+    Check(!html.Contains("aria-label=\"Zoom in\"")&&!html.Contains("Reset view")&&html.Contains("Export CSV")&&html.Contains(ChartSvg.LegendKey(spec,0))&&html.Contains("Tue 15 Sep 2026: 54, Easy"),"the component offers zoom, or lost the key or the day");
+    Check(XDocument.Parse(ChartSvg.LegendKey(spec,0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual(ChartStyle.Light.Zones.Take(4)),"the key is not the zones");
+    Check(XDocument.Parse(ChartSvg.LegendKey(spec with{YZones=null},0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual([ChartStyle.Light.HeatmapLow,ChartStyle.Light.HeatmapHigh]),"the key is not the ramp");
+    var shown=Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,0);});
+    Check(shown.Contains("Stress: Tue 15 Sep 2026 = 54</span>")&&shown.Contains("<tr><td>Stress</td>"),"the status line does not read the day's total");
+    // Hiding the series leaves the chart's empty state rather than a refused spec.
+    var hidden="";
+    Operate(spec,chart=>{typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[0]);hidden=(string)typeof(LumenChart).GetField("svg",flags)!.GetValue(chart)!;return Task.CompletedTask;});
+    Check(hidden.Contains("No data to display"),"hiding the calendar's series broke the chart");
+});
+Test("Sports page: the training calendar's days are the performance chart's daily stress, in tiers, and its month's bubbles the month's runs",()=>{
+    var card=sports.Single(c=>c.Id=="training-calendar");var grid=card.Spec;var month=card.Beside!;
+    var daily=Sports("performance").Series.Single(s=>s.Name=="Daily stress").Points;
+    Check(card.Section=="load"&&card.Wide&&grid.Kind==ChartKind.Calendar&&grid.CalendarLayout==CalendarLayout.Weeks&&month.Kind==ChartKind.Calendar&&month.CalendarLayout==CalendarLayout.Months&&month.CalendarCell==CalendarCell.Bubble);
+    var days=grid.Series.Single().Points;
+    Check(days.SequenceEqual(daily.Take(SportsData.Weeks*7))&&DayOf(days[0].X)==SportsData.Start&&DayOf(days[^1].X)==SportsData.Today,"the grid's days are not the season's daily stress");
+    Check(grid.YZones!.Zones.Select(z=>z.Upper).SequenceEqual([50,100,150,double.PositiveInfinity])&&grid.Annotations.Single().From==SportsData.When(SportsData.Today),"the tiers or today moved");
+    Check(grid.Title==$"{days.Count(p=>p.Y>0)} days trained, {days.Count(p=>p.Y>100)} of them hard","the title miscounts");
+    var doc=Svg(grid);
+    Check(doc.Descendants(ns+"g").Count(g=>g.Attribute("data-point") is not null)==days.Count(p=>p.Y>0)&&DayTracks(doc).Length==days.Count(p=>p.Y==0),"the grid does not draw every day");
+    // The month is every run so far this month, each its distance in km on its day, on a grid of the whole month.
+    var runs=athlete.Sessions.Where(s=>s.Sport==Sport.Run&&s.Day.Year==SportsData.Today.Year&&s.Day.Month==SportsData.Today.Month).ToArray();
+    Check(month.Series.Single().Points.Select(p=>(DayOf(p.X),p.Y,p.Label)).SequenceEqual(runs.Select(r=>(r.Day,(double?)Math.Round(r.Metres/1000,1),(string?)r.Name))),"the bubbles are not the month's runs");
+    Check(DayOf(month.XMin!.Value)==new DateOnly(2026,9,1)&&DayOf(month.XMax!.Value)==new DateOnly(2026,9,30)&&month.Title==$"{(runs.Sum(r=>r.Metres)/1000).ToString("0",CultureInfo.InvariantCulture)} km run in September, {runs.Length} runs",month.Title);
+    var bubbles=Svg(month);
+    Check(DayTracks(bubbles).Length==30&&bubbles.Descendants(ns+"g").Count(g=>g.Attribute("data-point") is not null)==runs.Select(r=>r.Day).Distinct().Count(),"the month does not draw its thirty days");
+    // The tiers and the bubbles take the brand's zone ramp, whose colours clear 3:1 on its background.
+    foreach(var (style,zones) in new[]{(ChartStyle.Light,ChartStyle.Light.Zones),(ChartStyle.Dark,ChartStyle.Light.Zones),(ChartStyle.Midnight,ChartStyle.Midnight.Zones)})
+    {
+        var both=SportsData.Cards(ChartTheme.Light,zones).Single(c=>c.Id=="training-calendar");
+        var inks=both.Spec.YZones!.Zones.Concat(both.Beside!.YZones!.Zones).Select(z=>z.Color!).ToArray();
+        Check(inks.All(ink=>zones.Contains(ink)&&Contrast(ink,style.Background)>=3),$"{style.Background}: {string.Join(", ",inks)}");
+    }
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

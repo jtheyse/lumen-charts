@@ -164,10 +164,20 @@
         // A gauge's or a ring's one point reads as its legend does, with its unit and a ring's goal.
         // A span reads from its start to its end, and a range bar from its low to its high and its typical value.
         status=Spec.Kind is ChartKind.Gauge or ChartKind.Ring ? ChartSvg.LegendLabel(Spec,index)
+            : Spec.Kind==ChartKind.Calendar ? Day(index,p)
             : p.XEnd is {} end ? $"{Spec.Series[index].Name}: {xAxis.Format(p.X)} to {xAxis.Format(end)}"
             : (Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Range&&p.Low is {} low&&p.High is {} high ? $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {Measure(Spec.Series[index]).Format(low)} to {Measure(Spec.Series[index]).Format(high)}{(p.Y is {} typical ? $", average {Measure(Spec.Series[index]).Format(typical)}" : "")}"
             : $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y) : "missing")}";
         await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
+    }
+    // A calendar's mark is a day, which reports its first point: it reads the day, in the chart's zone, and the total of every
+    // point on it.
+    private string Day(int index,ChartPoint point)
+    {
+        var zone=TimeAxis.Zone(Spec.TimeZone);var series=Spec.Series[index];
+        DateOnly On(double x){var utc=TimeAxis.Moment(x).UtcDateTime;return DateOnly.FromDateTime(zone is null?utc:TimeZoneInfo.ConvertTimeFromUtc(utc,zone));}
+        var day=On(point.X);
+        return $"{series.Name}: {day.ToString("ddd d MMM yyyy",System.Globalization.CultureInfo.InvariantCulture)} = {Measure(series).Format(series.Points.Where(p=>On(p.X)==day).Sum(p=>p.Y ?? 0))}";
     }
     private async Task Download(string format)
     {

@@ -81,7 +81,7 @@ public static class ChartSvg
     // every record, so leaving out the nulls loses nothing, and it halves the text a long series makes.
     private static readonly JsonSerializerOptions Hashing = new()
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
     /// <summary>A classic style is serialized for hashing as 0.23.0 serialized it, without its finish.</summary>
     private static void Unfinished(JsonTypeInfo info)
@@ -105,6 +105,16 @@ public static class ChartSvg
         if (info.Type != typeof(ChartSpec)) return;
         foreach (var property in info.Properties)
             if (property.Name == nameof(ChartSpec.TimelineConnectors)) property.ShouldSerialize = (_, connected) => connected is false;
+    }
+    /// <summary>A spec that leaves a calendar's layout, cell and week start at their defaults is serialized for hashing as 0.27.0,
+    /// which had no calendars, serialized it, so every chart drawn before them keeps its IDs.</summary>
+    private static void Uncalendared(JsonTypeInfo info)
+    {
+        if (info.Type != typeof(ChartSpec)) return;
+        foreach (var property in info.Properties)
+            if (property.Name == nameof(ChartSpec.CalendarLayout)) property.ShouldSerialize = (_, layout) => layout is not CalendarLayout.Weeks;
+            else if (property.Name == nameof(ChartSpec.CalendarCell)) property.ShouldSerialize = (_, cell) => cell is not CalendarCell.Square;
+            else if (property.Name == nameof(ChartSpec.WeekStart)) property.ShouldSerialize = (_, start) => start is not DayOfWeek.Monday;
     }
     private static byte[] Hashed<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, Hashing);
     /// <summary>
@@ -132,8 +142,8 @@ public static class ChartSvg
         var ring = spec.Kind == ChartKind.Ring;
         var legendColumns = Math.Max(1, (spec.Width - 48) / (ring ? 220 : 180));
         // A histogram of one distribution needs no key; of several, its colours are the only way to tell them apart.
-        // A gauge's one score is written in its centre, so it needs no key either.
-        var legendRows = includeLegend && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Box and not ChartKind.Violin and not ChartKind.Gauge
+        // A gauge's one score is written in its centre, so it needs no key either, and a calendar draws its colour scale under its days.
+        var legendRows = includeLegend && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Box and not ChartKind.Violin and not ChartKind.Gauge and not ChartKind.Calendar
             && (spec.Kind != ChartKind.Histogram || spec.Series.Count > 1) ? (int)Math.Ceiling(spec.Series.Count / (double)legendColumns) : 0;
         Begin(w, spec.Width, spec.Height + legendRows * 22, spec.Title, spec.Description);
         if (!HasData(spec))
@@ -147,6 +157,7 @@ public static class ChartSvg
         else if (spec.Kind == ChartKind.Violin) Violin(w, spec);
         else if (spec.Kind == ChartKind.Box) Box(w, spec);
         else if (spec.Kind == ChartKind.Timeline) Timeline(w, spec);
+        else if (spec.Kind == ChartKind.Calendar) Calendar(w, spec);
         else Cartesian(w, spec);
         if (spec.Kind == ChartKind.Scatter && spec.DensityCells is not null)
             w.Text(spec.Width - 30, 64, $"{Count(spec.Series.Where(series => Mark(spec, series) == ChartKind.Scatter).Sum(series => series.Points.Count(p => p.Y.HasValue)))} observations aggregated into {spec.DensityCells} cells across",
@@ -213,8 +224,8 @@ public static class ChartSvg
     /// a rounded bar for a timeline's lane and an upright capsule for range bars; and a square for columns, bars, areas and
     /// the rest. A key whose series draws in colours other than its own is split
     /// into them, left to right: up to four of the point colours when every drawn point has one, as time-in-zone bars do, a
-    /// donut's slice colours, a gauge's zone or gradient colours, a heatmap row's low and high colours, and the rising and
-    /// falling colours of candles and OHLC bars.
+    /// donut's slice colours, a gauge's zone or gradient colours, a heatmap row's low and high colours, a calendar's zone colours
+    /// or its ramp's low and high colours, and the rising and falling colours of candles and OHLC bars.
     /// </summary>
     internal static string Key(ChartSpec spec, int index, ChartStyle style, double x, double y)
     {
@@ -224,6 +235,7 @@ public static class ChartSvg
         var drawn = series.Points.Where(p => p.Y.HasValue || mark == ChartKind.Range && p.Low.HasValue).ToArray();
         IReadOnlyList<string> inks = mark is ChartKind.Candlestick or ChartKind.Ohlc ? [style.Rising, style.Falling]
             : spec.Kind == ChartKind.Heatmap ? [style.HeatmapLow, style.HeatmapHigh]
+            : spec.Kind == ChartKind.Calendar ? spec.YZones is { } tiers ? tiers.Zones.Select((zone, i) => zone.Color ?? style.Zones[i]).Distinct().Take(4).ToArray() : [style.HeatmapLow, style.HeatmapHigh]
             : spec.Kind == ChartKind.Donut ? series.Points.Select((p, i) => (p, i)).Where(t => t.p.Y > 0).Select(t => t.p.Color ?? style.SeriesColor(t.i)).Distinct().Take(4).ToArray()
             : spec.Kind == ChartKind.Gauge && spec.YZones is { } zones ? zones.Zones.Select((zone, i) => zone.Color ?? style.Zones[i]).Distinct().Take(4).ToArray()
             : spec.Kind == ChartKind.Gauge && series.Gradient is { } stops ? stops.Select(stop => stop.Color).Distinct().Take(4).ToArray()
@@ -275,8 +287,8 @@ public static class ChartSvg
         (s.ProjectedFrom is { } from && p.X >= from ? ", projected" : "") +
         (p.Low.HasValue && p.High.HasValue ? $" (band {y.Format(p.Low.Value)} to {y.Format(p.High.Value)})" : "");
     private static string ZoneColor(ChartStyle style, ZoneScale zones, int index) => zones.Zones[index].Color ?? style.Zones[index];
-    // A timeline's spans and a range's bars have no Y of their own to be missing.
-    private static bool HasData(ChartSpec spec) => spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Timeline
+    // A timeline's spans and a range's bars have no Y of their own to be missing, and a calendar draws every day it spans.
+    private static bool HasData(ChartSpec spec) => spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Timeline or ChartKind.Calendar
         ? spec.Series.Any(s => s.Points.Count > 0)
         : spec.Series.Any(s => s.Summary is not null || s.Points.Any(p => p.Y.HasValue || p.Low.HasValue && Mark(spec, s) == ChartKind.Range));
     private static string N(double n) => SvgWriter.N(n);
@@ -1294,6 +1306,214 @@ public static class ChartSvg
         }
         else text = LinearScale.Label(total);
         return string.Create(CultureInfo.InvariantCulture, $"{name} {text}, {share} %");
+    }
+
+    /// <summary>The day a moment falls on in <paramref name="zone"/>, or in UTC when it is null.</summary>
+    internal static DateOnly CalendarDay(double x, TimeZoneInfo? zone)
+    {
+        var utc = TimeAxis.Moment(x).UtcDateTime;
+        return DateOnly.FromDateTime(zone is null ? utc : TimeZoneInfo.ConvertTimeFromUtc(utc, zone));
+    }
+
+    /// <summary>The first and last day a calendar draws: those of <see cref="ChartSpec.XMin"/> and <see cref="ChartSpec.XMax"/>
+    /// when set, and otherwise of its earliest and latest points, in its zone. A first day after the last draws that day alone.</summary>
+    internal static (DateOnly First, DateOnly Last) CalendarSpan(ChartSpec s)
+    {
+        var zone = TimeAxis.Zone(s.TimeZone);
+        var points = s.Series.SelectMany(series => series.Points).ToArray();
+        var first = s.XMin is { } from ? CalendarDay(from, zone) : points.Min(p => CalendarDay(p.X, zone));
+        var last = s.XMax is { } to ? CalendarDay(to, zone) : points.Max(p => CalendarDay(p.X, zone));
+        return (first, last < first ? first : last);
+    }
+
+    /// <summary>
+    /// A calendar of the days from the first to the last, in a grid of weeks or of months. Each day is a cell on a pitch that fills
+    /// the width, or the height when that is the tighter: a fifth of the pitch, up to 6 pixels, is the gap between cells, across
+    /// and down alike, and the grid is centred in the room it leaves. A day with activity is a focusable mark in its zone's colour,
+    /// or on the ramp from the style's heatmap low to its high across the active days' totals, where it takes the heatmap's
+    /// hairline so that the palest stays apart from an empty day; a day without activity is an empty cell in the grid colour.
+    /// An X annotation outlines its day in the gap round it. The key under the grid names the zones or reads the ramp's ends,
+    /// and names each outlined day.
+    /// </summary>
+    private static void Calendar(SvgWriter w, ChartSpec s)
+    {
+        const double margin = 24, top = 64;
+        var bottom = s.Height - 30d;
+        var series = s.Series[0];
+        var zone = TimeAxis.Zone(s.TimeZone);
+        var (first, last) = CalendarSpan(s);
+        // Each day's total, the first point on it, which its mark reports, and the labels of its points.
+        var days = new Dictionary<DateOnly, (double Total, int Point, List<string> Labels)>();
+        for (var i = 0; i < series.Points.Count; i++)
+        {
+            var p = series.Points[i]; var day = CalendarDay(p.X, zone);
+            if (day < first || day > last) continue;
+            var (total, point, labels) = days.TryGetValue(day, out var entry) ? entry : (0d, i, new List<string>());
+            if (p.Label is not null) labels.Add(p.Label);
+            days[day] = (total + (p.Y ?? 0), point, labels);
+        }
+        var active = days.Where(d => d.Value.Total > 0).ToDictionary(d => d.Key, d => d.Value);
+        var values = new Axis(AxisKind.Linear, 0, 1) { ValueFormat = s.YFormat };
+        var zones = s.YZones;
+        var ramp = LinearScale.Create(active.Values.Select(d => d.Total));
+        var largest = active.Count == 0 ? 1 : active.Values.Max(d => d.Total);
+        string Ink(double value) => zones is not null ? ZoneColor(w.Style, zones, zones.IndexOf(value))
+            : Mix(w.Style.HeatmapLow, w.Style.HeatmapHigh, Math.Clamp(ramp.Map(value, 0, 1), 0, 1));
+        string Date(DateOnly day) => day.ToString("ddd d MMM yyyy", CultureInfo.InvariantCulture);
+        var round = s.CalendarCell != CalendarCell.Square;
+        var outlined = s.Annotations.Select(annotation => (Annotation: annotation, Day: CalendarDay(annotation.From, zone)))
+            .Where(a => a.Day >= first && a.Day <= last).ToArray();
+
+        // The key: the zones by name, or the ramp's lowest total, five steps along it and its highest; then each outlined day.
+        // An item is never split across lines; the lines run as wide as the drawing allows.
+        string Swatch(double x, double y, string paint) => round
+            ? $"<circle cx='{N(x + 5)}' cy='{N(y - 4)}' r='5' {paint}/>" : $"<rect x='{N(x)}' y='{N(y - 9)}' width='10' height='10' rx='2' {paint}/>";
+        string Words(double x, double y, string text) => $"<text x='{N(x)}' y='{N(y)}' font-size='11'>{SvgWriter.E(text)}</text>";
+        var key = new List<(double Width, Func<double, double, string> Draw)>();
+        if (zones is not null)
+            for (var i = 0; i < zones.Zones.Count; i++)
+            {
+                var (name, ink) = (zones.Zones[i].Name, ZoneColor(w.Style, zones, i));
+                key.Add((14 + Wide(name), (x, y) => Swatch(x, y, $"fill='{ink}'") + Words(x + 14, y, name)));
+            }
+        else if (active.Count > 0)
+        {
+            string low = values.Format(ramp.Min), high = values.Format(ramp.Max);
+            key.Add((Wide(low) + 66 + Wide(high), (x, y) => Words(x, y, low)
+                + string.Concat(Enumerable.Range(0, 5).Select(k => Swatch(x + Wide(low) + 4 + k * 12, y, $"fill='{Mix(w.Style.HeatmapLow, w.Style.HeatmapHigh, k / 4d)}'")))
+                + Words(x + Wide(low) + 66, y, high)));
+        }
+        foreach (var (annotation, day) in outlined)
+        {
+            var text = annotation.Label ?? day.ToString("d MMM", CultureInfo.InvariantCulture);
+            var colour = annotation.Color ?? w.Style.Muted;
+            key.Add((14 + Wide(text), (x, y) => Swatch(x, y, $"fill='none' stroke='{colour}' stroke-width='1.5'{w.Fixed}") + Words(x + 14, y, text)));
+        }
+        var lines = new List<List<(double Width, Func<double, double, string> Draw)>>();
+        var used = 0d;
+        foreach (var item in key)
+        {
+            if (lines.Count == 0 || used + 14 + item.Width > s.Width - 2 * margin) { lines.Add([]); used = -14; }
+            lines[^1].Add(item); used += 14 + item.Width;
+        }
+        var widest = lines.Count == 0 ? 0 : lines.Max(line => line.Sum(item => item.Width) + 14 * (line.Count - 1));
+        var keyHeight = lines.Count == 0 ? 0 : 27 + (lines.Count - 1) * 18;
+
+        // The pitch that fits count cells into room, a fifth of it the gap after each but the last, the gap at most 6 pixels.
+        static double Fit(double room, double count, double gaps) => room / (count - .2 * gaps) is var pitch && pitch * .2 > 6 ? (room + 6 * gaps) / count : pitch;
+        double pitch, gridLeft, gridBottom;
+        var placed = new Dictionary<DateOnly, (double X, double Y)>();
+        int Offset(DateOnly day) => ((int)day.DayOfWeek - (int)s.WeekStart + 7) % 7;
+        if (s.CalendarLayout == CalendarLayout.Weeks)
+        {
+            // One column per week and a row per weekday; the months are named above and Mon, Wed and Fri beside their rows.
+            const double head = 18, side = 30;
+            var start = first.AddDays(-Offset(first));
+            var weeks = (last.DayNumber - start.DayNumber) / 7 + 1;
+            double across = s.Width - 2 * margin - side, down = bottom - top - head - keyHeight;
+            pitch = Math.Max(.25, Math.Min(Fit(across, weeks, 1), Fit(down, 7, 1)));
+            var gap = Math.Min(pitch * .2, 6);
+            double width = weeks * pitch - gap, height = 7 * pitch - gap;
+            gridLeft = margin + side + Math.Max(0, (across - width) / 2);
+            var gridTop = top + Math.Max(0, (bottom - top - head - height - keyHeight) / 2) + head;
+            gridBottom = gridTop + height;
+            for (var day = first; day <= last; day = day.AddDays(1))
+                placed[day] = (gridLeft + (day.DayNumber - start.DayNumber) / 7 * pitch, gridTop + Offset(day) * pitch);
+            // A month is named above the week its first day falls in, or above the first week for a month already begun. Where two
+            // names would touch, the later is kept: the earlier is a month the calendar shows only the end of, or too little of.
+            var months = new List<(double X, string Text)>();
+            for (var month = new DateOnly(first.Year, first.Month, 1); month <= last; month = month.AddMonths(1))
+            {
+                var text = month.ToString("MMM", CultureInfo.InvariantCulture);
+                months.Add((Math.Min(placed[month < first ? first : month].X, s.Width - 4 - Wide(text)), text));
+            }
+            for (var k = months.Count - 2; k >= 0; k--)
+                if (months[k].X + Wide(months[k].Text) + 6 > months[k + 1].X) months.RemoveAt(k);
+            foreach (var (x, text) in months) w.Text(x, gridTop - 6, text, "class='lumen-muted' font-size='11'");
+            if (pitch * 2 >= 12)
+                for (var row = 0; row < 7; row++)
+                    if ((DayOfWeek)(((int)s.WeekStart + row) % 7) is (DayOfWeek.Monday or DayOfWeek.Wednesday or DayOfWeek.Friday) and var named)
+                        w.Text(gridLeft - 6, gridTop + row * pitch + (pitch - gap) / 2 + 4, named.ToString()[..3], "text-anchor='end' class='lumen-muted' font-size='11'");
+        }
+        else
+        {
+            // A small grid for each month, seven columns and a row per week under its name and the weekdays' initials, set left
+            // to right a column apart and wrapping; as many months to a row as give the largest cells. Every month takes the rows
+            // of the longest, so the months in a row line up.
+            const double name = 18, initials = 14, between = 16, head = name + initials;
+            var months = Enumerable.Range(0, (last.Year - first.Year) * 12 + last.Month - first.Month + 1)
+                .Select(k => new DateOnly(first.Year, first.Month, 1).AddMonths(k)).ToArray();
+            var depth = months.Max(month => (Offset(month) + DateTime.DaysInMonth(month.Year, month.Month) + 6) / 7);
+            double across = s.Width - 2 * margin, down = bottom - top - keyHeight;
+            var (best, perRow) = (0d, 1);
+            for (var k = 1; k <= months.Length; k++)
+            {
+                var rows = (months.Length + k - 1) / k;
+                var fit = Math.Min(Fit(across, 8 * k - 1, 1), Fit(down - rows * head - (rows - 1) * between, depth * rows, rows));
+                if (fit > best) (best, perRow) = (fit, k);
+            }
+            pitch = Math.Max(.25, best);
+            var gap = Math.Min(pitch * .2, 6);
+            var block = 7 * pitch - gap;
+            var bands = (months.Length + perRow - 1) / perRow;
+            double width = (perRow - 1) * 8 * pitch + block, height = bands * (head + depth * pitch - gap) + (bands - 1) * between;
+            gridLeft = margin + Math.Max(0, (across - width) / 2);
+            var gridTop = top + Math.Max(0, (bottom - top - height - keyHeight) / 2);
+            gridBottom = gridTop + height;
+            var years = first.Year != last.Year;
+            for (var i = 0; i < months.Length; i++)
+            {
+                var month = months[i];
+                double bx = gridLeft + i % perRow * 8 * pitch, by = gridTop + i / perRow * (head + depth * pitch - gap + between);
+                var title = month.ToString(years ? "MMMM yyyy" : "MMMM", CultureInfo.InvariantCulture);
+                if (Wide(title) * 12 / 11 > block + pitch) title = month.ToString(years ? "MMM yyyy" : "MMM", CultureInfo.InvariantCulture);
+                w.Text(bx, by + 13, title, "font-weight='600'");
+                if (pitch >= 9)
+                    for (var c = 0; c < 7; c++)
+                        w.Text(bx + c * pitch + (pitch - gap) / 2, by + name + 10, ((DayOfWeek)(((int)s.WeekStart + c) % 7)).ToString()[..1], "text-anchor='middle' class='lumen-muted' font-size='10'");
+                var offset = Offset(month);
+                for (var day = month; day.Month == month.Month; day = day.AddDays(1))
+                    if (day >= first && day <= last)
+                        placed[day] = (bx + (offset + day.Day - 1) % 7 * pitch, by + head + (offset + day.Day - 1) / 7 * pitch);
+            }
+        }
+        var spacing = Math.Min(pitch * .2, 6);
+        var cell = pitch - spacing;
+        var radius = Math.Min(w.Style.BarRadius ?? 3, cell / 2);
+        string Square(double x, double y, double size, double corner, string paint) =>
+            $"<rect x='{N(x)}' y='{N(y)}' width='{N(size)}' height='{N(size)}' rx='{N(corner)}' {paint}/>";
+        string Circle(double x, double y, double r, string paint) => $"<circle cx='{N(x + cell / 2)}' cy='{N(y + cell / 2)}' r='{N(r)}' {paint}/>";
+        string Track(double x, double y) => round ? Circle(x, y, cell / 2, $"class='lumen-track' fill='{w.Style.Grid}'") : Square(x, y, cell, radius, $"class='lumen-track' fill='{w.Style.Grid}'");
+        // A ramp's days take the heatmap's hairline, which is their own stroke, so a shape that draws nothing carries the focus ring.
+        var hairline = zones is null ? $" stroke='var(--lumen-muted)' stroke-opacity='.4'{w.Fixed}" : "";
+        foreach (var (day, (x, y)) in placed.OrderBy(d => d.Key))
+        {
+            if (!active.TryGetValue(day, out var entry)) { w.Add(Track(x, y)); continue; }
+            var ink = Ink(entry.Total);
+            var shape = s.CalendarCell switch
+            {
+                CalendarCell.Square => Square(x, y, cell, radius, $"class='lumen-day' fill='{ink}'{hairline}") + (zones is null ? Square(x, y, cell, radius, $"fill='none'{w.Fixed}") : ""),
+                CalendarCell.Dot => Circle(x, y, cell / 2, $"class='lumen-day' fill='{ink}'{hairline}") + (zones is null ? Circle(x, y, cell / 2, $"fill='none'{w.Fixed}") : ""),
+                _ => Track(x, y) + Circle(x, y, cell / 2 * Math.Sqrt(entry.Total / largest), $"class='lumen-day' fill='{ink}'{(zones is null ? hairline : " stroke='none'")}")
+            };
+            var label = $"{Date(day)}{(entry.Labels.Count > 0 ? ", " + string.Join(", ", entry.Labels) : "")}: {values.Format(entry.Total)}"
+                + (zones is null ? "" : $", {zones.Zones[zones.IndexOf(entry.Total)].Name}");
+            Datum(w, 0, entry.Point, label, shape);
+        }
+        // An outline round each annotated day, in the gap between it and its neighbours.
+        foreach (var (annotation, day) in outlined)
+        {
+            var (x, y) = placed[day];
+            var paint = $"class='lumen-outline' fill='none' stroke='{annotation.Color ?? w.Style.Muted}' stroke-width='2'{w.Fixed}";
+            Aggregate(w, annotation.Label is null ? Date(day) : $"{annotation.Label}: {Date(day)}",
+                round ? Circle(x, y, (cell + spacing) / 2, paint) : Square(x - spacing / 2, y - spacing / 2, cell + spacing, radius + spacing / 2, paint));
+        }
+        var left = Math.Max(margin, Math.Min(gridLeft, s.Width - margin - widest));
+        for (var j = 0; j < lines.Count; j++)
+        {
+            var x = left;
+            foreach (var (width, draw) in lines[j]) { w.Add(draw(x, gridBottom + 24 + j * 18)); x += width + 14; }
+        }
     }
 
     private static void Bands(SvgWriter w, ChartSeries series, string color, Func<double, double> X, Func<double, double> Y, int budget)

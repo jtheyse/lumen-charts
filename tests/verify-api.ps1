@@ -7,9 +7,11 @@ foreach($path in @('/health','/_framework/blazor.web.js','/_content/Lumen.Charts
  Verify ($r.StatusCode -eq 200) "Asset/health $path"
 }
 $r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 15 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'")) 'The Sports & performance page answers 200 and prerenders its fifteen simulated charts, each set to fit its card, last night''s sleep stages among them'
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 17 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'")) 'The Sports & performance page answers 200 and prerenders its seventeen simulated charts, each set to fit its card, last night''s sleep stages and the training calendar among them'
+$r=Invoke-WebRequest "$BaseUrl/" -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('class="lumen-chart lumen-fit"') -and $r.Content.Contains('<b>21</b><span>Chart types</span>') -and $r.Content.Contains('>Calendar</button>')) 'The home page answers 200, its chart explorer set to fit its card, with twenty-one chart types and a calendar among them'
 $types=Invoke-RestMethod "$BaseUrl/api/charts/types"
-Verify ($types.Count -eq 20 -and $types -contains 'Gauge' -and $types -contains 'Ring' -and $types -contains 'Timeline' -and $types -contains 'Range') 'Twenty chart types, gauge, ring, timeline and range among them'
+Verify ($types.Count -eq 21 -and $types -contains 'Gauge' -and $types -contains 'Ring' -and $types -contains 'Timeline' -and $types -contains 'Range' -and $types -contains 'Calendar') 'Twenty-one chart types, gauge, ring, timeline, range and calendar among them'
 foreach($kind in @('Line','Area','Scatter','Bubble','Column','Bar','StackedColumn','Donut','Heatmap','Radar')){
  $spec=@{title='API test';kind=$kind;series=@(@{name='Sample';points=@(@{x=0;y=2;label='A'},@{x=1;y=4;label='B'},@{x=2;y=3;label='C'})})}
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body ($spec|ConvertTo-Json -Depth 10) -SkipHttpErrorCheck
@@ -30,7 +32,8 @@ $families=@(
  @{name='Gauge';marker="class='lumen-gauge-value'";body='{"title":"Recovery","kind":"Gauge","yLabel":"%","gaugeSweep":270,"yZones":{"zones":[{"name":"Low","upper":33,"color":"#DD4B45"},{"name":"Moderate","upper":66,"color":"#A88200"},{"name":"Good","upper":"Infinity","color":"#2E9B58"}]},"annotations":[{"axis":"Y","from":60,"label":"Average"}],"series":[{"name":"Recovery","points":[{"x":0,"y":72,"label":"Recovery"}]}]}'},
  @{name='Ring';marker="class='lumen-ring-progress'";body='{"title":"Activity","kind":"Ring","series":[{"name":"Move","goal":600,"points":[{"x":0,"y":540,"label":"kcal"}]},{"name":"Exercise","goal":30,"points":[{"x":0,"y":47,"label":"min"}]},{"name":"Stand","goal":12,"points":[{"x":0,"y":9,"label":"h"}]}]}'},
  @{name='Timeline';marker="class='lumen-span'";body='{"title":"Night","kind":"Timeline","xFormat":"TimeOfDay","series":[{"name":"Light","points":[{"x":82800,"xEnd":84600}]},{"name":"REM","points":[{"x":84600,"xEnd":86220}]}]}'},
- @{name='Range';marker="class='lumen-range'";body='{"title":"Heart rate","kind":"Range","xAxis":"Time","series":[{"name":"Heart rate","points":[{"x":1789171200000,"y":74,"low":52,"high":168,"label":"12 Sep"},{"x":1789257600000,"y":70,"low":48,"high":150,"label":"13 Sep"},{"x":1789344000000,"low":50,"high":140,"label":"14 Sep"}]}]}'})
+ @{name='Range';marker="class='lumen-range'";body='{"title":"Heart rate","kind":"Range","xAxis":"Time","series":[{"name":"Heart rate","points":[{"x":1789171200000,"y":74,"low":52,"high":168,"label":"12 Sep"},{"x":1789257600000,"y":70,"low":48,"high":150,"label":"13 Sep"},{"x":1789344000000,"low":50,"high":140,"label":"14 Sep"}]}]}'},
+ @{name='Calendar';marker="class='lumen-day'";body='{"title":"Training","kind":"Calendar","xAxis":"Time","timeZone":"America/New_York","yZones":{"zones":[{"name":"Easy","upper":50},{"name":"Hard","upper":"Infinity"}]},"annotations":[{"axis":"X","from":1789387200000,"label":"Race"}],"series":[{"name":"Stress","points":[{"x":1789387200000,"y":40,"label":"Ride"},{"x":1789390800000,"y":30},{"x":1789473600000,"y":0},{"x":1789560000000,"y":20}]}]}'})
 foreach($family in $families){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $family.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') "$($family.name) SVG response"
@@ -83,6 +86,24 @@ foreach($bad in @(@{body='{"kind":"Timeline","series":[{"name":"Light","points":
   @{body=$range.body.Replace('"name":"Heart rate","points"','"name":"Heart rate","zones":{"zones":[{"name":"All","upper":"Infinity"}]},"points"');reason='takes no zones';name='Zones on a range series'},
   @{body=$range.body.Replace('"y":74,','"y":200,');reason='between its Low and its High';name='A range average outside its bar'},
   @{body='{"kind":"Line","yAxis":"Log","yFormat":"TimeOfDay","series":[{"name":"S","points":[{"x":0,"y":1}]}]}';reason='time-of-day';name='A time-of-day format on a log axis'})){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
+}
+# A calendar counts its days in its zone and adds up each day's points, names each day with its labels, total and zone, outlines an
+# annotated day, leaves a day without activity an empty cell, and lays a month out as bubbles; its CSV carries each point.
+$calendar=$families|Where-Object{$_.name -eq 'Calendar'}
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $calendar.body
+Verify ($r.Content.Contains("aria-label='Mon 14 Sep 2026, Ride: 70, Hard'") -and $r.Content.Contains("aria-label='Wed 16 Sep 2026: 20, Easy'") -and $r.Content.Contains("aria-label='Race: Mon 14 Sep 2026'") -and ([regex]::Matches($r.Content,"class='lumen-outline'")).Count -eq 1 -and ([regex]::Matches($r.Content,"class='lumen-track'")).Count -eq 1 -and ([regex]::Matches($r.Content,'data-point=')).Count -eq 2 -and $r.Content.Contains('>Hard<') -and $r.Content.Contains('>Sep<')) 'A calendar posted as JSON adds up a day in its zone, names each day with its zone, outlines the race and keeps a rest day empty'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $calendar.body.Replace('"kind":"Calendar",','"kind":"Calendar","calendarLayout":"Months","calendarCell":"Bubble","weekStart":"Sunday",')
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('>September<') -and ([regex]::Matches($r.Content,"<circle [^>]*class='lumen-track'")).Count -eq 3 -and ([regex]::Matches($r.Content,"<circle [^>]*class='lumen-day'")).Count -eq 2 -and $r.Content.Contains("text-anchor='middle' class='lumen-muted' font-size='10'>S<")) 'A month of bubbles from Sunday posted as JSON draws a track for every day and a bubble for each day with activity'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $calendar.body
+Verify ($r.Content.StartsWith('Series,X,XTime,Y,Label,Size') -and $r.Content.Contains('"Stress",1789387200000,2026-09-14T12:00:00.000Z,40,"Ride",1') -and $r.Content.Contains('"Stress",1789390800000,2026-09-14T13:00:00.000Z,30,"",1')) 'Calendar CSV carries each original point with its moment'
+foreach($bad in @(@{body=$calendar.body.Replace('"xAxis":"Time",','');reason='time X axis';name='A calendar without a time axis'},
+  @{body=$calendar.body.Replace(']}]}',']},{"name":"Again","points":[{"x":1789387200000,"y":1}]}]}');reason='one series of days';name='A calendar of two series'},
+  @{body=$calendar.body.Replace('"axis":"X"','"axis":"Y"');reason='X annotations';name='A Y annotation on a calendar'},
+  @{body=$calendar.body.Replace('"y":40,','"y":40,"color":"#123456",');reason='colours of their own';name='A point colour on a calendar'},
+  @{body=$calendar.body.Replace('"y":20}','"y":-5}');reason='negative';name='A negative day on a calendar'},
+  @{body='{"kind":"Line","calendarLayout":"Months","series":[{"name":"S","points":[{"x":0,"y":1}]}]}';reason='calendar charts only';name='A calendar layout on a line chart'})){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
 }

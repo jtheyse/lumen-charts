@@ -19,8 +19,9 @@ public static partial class ChartValidation
         Style(spec.Style);
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");
         if (spec.Kind == ChartKind.Timeline) Timeline(spec);
-        if (spec.XAxis != AxisKind.Linear && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline))
-            throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC, band and range charts, and a time axis to timelines; the other kinds index or derive their X values.");
+        if (spec.Kind == ChartKind.Calendar) Calendar(spec);
+        if (spec.XAxis != AxisKind.Linear && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Calendar))
+            throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC, band and range charts, and a time axis to timelines and calendars; the other kinds index or derive their X values.");
         if (spec.YAxis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Box or ChartKind.Violin))
             throw new ArgumentException("Log Y axes require line, scatter, bubble, candlestick, OHLC, band, range, box or violin charts; magnitude, count and radial charts need a zero baseline.");
         if (!Enum.IsDefined(spec.Y2Axis) || spec.Y2Axis == AxisKind.Time) throw new ArgumentException("The secondary axis is numeric or logarithmic; time axes are supported on X only.");
@@ -78,14 +79,18 @@ public static partial class ChartValidation
             throw new ArgumentException("GaugeSweep sets how far round a gauge's arc runs, so it applies to gauge charts only.");
         if (!spec.TimelineConnectors && spec.Kind != ChartKind.Timeline)
             throw new ArgumentException("TimelineConnectors joins the spans of a timeline's lanes, so only a timeline can turn it off.");
+        if (!Enum.IsDefined(spec.CalendarLayout) || !Enum.IsDefined(spec.CalendarCell) || !Enum.IsDefined(spec.WeekStart))
+            throw new ArgumentException("Unknown calendar layout, cell or week start.");
+        if (spec.Kind != ChartKind.Calendar && (spec.CalendarLayout != CalendarLayout.Weeks || spec.CalendarCell != CalendarCell.Square || spec.WeekStart != DayOfWeek.Monday))
+            throw new ArgumentException("CalendarLayout, CalendarCell and WeekStart lay out a calendar's days, so they apply to calendar charts only.");
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
         foreach (var annotation in spec.Annotations)
         {
             if (annotation is null) throw new ArgumentException("Annotations cannot be null.");
             if (spec.Kind == ChartKind.Ring)
                 throw new ArgumentException("Ring charts take no annotations: each ring's goal is its target.");
-            if (!Annotated(spec.Kind) && spec.Kind != ChartKind.Gauge)
-                throw new ArgumentException("Annotations apply to charts drawn on an X and Y axis, and to a gauge's arc; donut, radar, heatmap, histogram, box and violin charts do not take them yet.");
+            if (!Annotated(spec.Kind) && spec.Kind is not (ChartKind.Gauge or ChartKind.Calendar))
+                throw new ArgumentException("Annotations apply to charts drawn on an X and Y axis, to a gauge's arc and to a calendar's days; donut, radar, heatmap, histogram, box and violin charts do not take them yet.");
             if (!Enum.IsDefined(annotation.Axis)) throw new ArgumentException("Unknown annotation axis.");
             if (!Finite(annotation.From) || (annotation.To.HasValue && !Finite(annotation.To.Value)))
                 throw new ArgumentException("Annotation values must be finite, magnitude <= 1e100.");
@@ -110,8 +115,8 @@ public static partial class ChartValidation
         {
             if (spec.Kind == ChartKind.Ring)
                 throw new ArgumentException("Ring charts take no zones: each ring is drawn in its series' colour.");
-            if (!Annotated(spec.Kind) && spec.Kind != ChartKind.Gauge)
-                throw new ArgumentException("Zone bands apply wherever Y annotations do, on charts drawn on an X and Y axis and on a gauge's track; donut, radar, heatmap, histogram, box and violin charts refuse them.");
+            if (!Annotated(spec.Kind) && spec.Kind is not (ChartKind.Gauge or ChartKind.Calendar))
+                throw new ArgumentException("Zone bands apply wherever Y annotations do, on charts drawn on an X and Y axis and on a gauge's track, and zones colour a calendar's days; donut, radar, heatmap, histogram, box and violin charts refuse them.");
             Zones(spec.YZones, style);
         }
         foreach (var pane in spec.Panes) Pane(pane, spec, style);
@@ -263,7 +268,16 @@ public static partial class ChartValidation
             if (reversed) throw new ArgumentException("Column and area series draw from a zero baseline, which a reversed axis would hang from the top.");
             if (min > 0 || max < 0) throw new ArgumentException("Column and area series draw from a zero baseline, so the bounds of their axis must include zero.");
         }
+        // A calendar draws a cell for every day it spans, so the span is bounded; it is read in the chart's zone, checked above.
+        if (spec.Kind == ChartKind.Calendar && spec.Series.Any(series => series.Points.Count > 0))
+        {
+            var (first, last) = ChartSvg.CalendarSpan(spec);
+            if (last.DayNumber - first.DayNumber >= MaxCalendarDays)
+                throw new ArgumentException($"A calendar spans at most {MaxCalendarDays.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} days, about ten years, from its first day to its last; aggregate a longer span first.");
+        }
     }
+
+    private const int MaxCalendarDays = 3660;
 
     /// <summary>A gauge draws one score and a ring chart one value a ring, so each series carries exactly one point. A chart
     /// with no series is left to draw its empty state, as every kind does, and as the component's legend leaves it when every
@@ -453,6 +467,41 @@ public static partial class ChartValidation
             throw new ArgumentException("A timeline draws no trend line: its spans are states, not values to fit.");
         if (spec.Annotations?.Any(annotation => annotation?.Axis == AnnotationAxis.Y) == true)
             throw new ArgumentException("A timeline marks moments, so it takes X annotations; it has no Y axis for a Y annotation.");
+    }
+
+    private const string CalendarTime = "A calendar places each point on the day it falls on, so it needs a time X axis: XAxis = AxisKind.Time, with X in Unix milliseconds.";
+
+    /// <summary>A calendar colours the days of one series in a grid, so everything that belongs to a Y axis, a second axis, a pane,
+    /// several series, a series' own mark or a point's own colour has no meaning on it. Checked before the general rules, so each
+    /// refusal gives the calendar's reason. A calendar without points is left to draw its empty state, as every kind does.</summary>
+    private static void Calendar(ChartSpec spec)
+    {
+        var points = spec.Series?.Where(series => series?.Points is not null).SelectMany(series => series.Points).Where(p => p is not null).ToArray() ?? [];
+        if (spec.XAxis == AxisKind.Log || spec.XAxis == AxisKind.Linear && points.Length > 0) throw new ArgumentException(CalendarTime);
+        if (spec.YAxis != AxisKind.Linear || spec.YReversed || spec.YMin is not null || spec.YMax is not null || spec.YAxisSide != AxisSide.Left || spec.YTickLabels != TickLabels.All)
+            throw new ArgumentException("A calendar colours each day by its value rather than measuring it on a Y axis, so it takes no logarithmic or reversed axis, no bounds, no axis side and no tick labelling; YFormat still writes its values.");
+        if (spec.Y2Axis != AxisKind.Linear || spec.Y2Reversed || spec.Y2Format != ValueFormat.Number || spec.Y2Min is not null || spec.Y2Max is not null || spec.Series?.Any(series => series?.Secondary == true) == true)
+            throw new ArgumentException("A calendar has no secondary axis: its one series is its days.");
+        if (spec.Panes is { Count: > 0 } || spec.Series?.Any(series => series is not null && series.Pane != 0) == true)
+            throw new ArgumentException("A calendar draws its days in one grid, so it takes no panes.");
+        if (spec.Series is { Count: > 1 }) throw new ArgumentException("A calendar draws one series of days; draw several series as several calendars.");
+        if (spec.Series?.Any(series => series?.Kind is not null) == true)
+            throw new ArgumentException("A series' own kind does not apply to a calendar, which draws its one series as days.");
+        if (spec.Series?.Any(series => series?.Trend == true) == true)
+            throw new ArgumentException("A calendar draws no trend line: its days are coloured by value, not plotted along an axis.");
+        if (spec.Series?.Any(series => series?.Zones is not null) == true)
+            throw new ArgumentException("A calendar takes its zones from YZones, which colour each day by its value.");
+        if (spec.SkipWeekends || spec.TimeSkips is { Count: > 0 })
+            throw new ArgumentException("A calendar draws every day of its weeks, so it skips none: SkipWeekends and TimeSkips apply to continuous time axes.");
+        if (spec.Annotations?.Any(annotation => annotation?.Axis == AnnotationAxis.Y) == true)
+            throw new ArgumentException("A calendar marks days, so it takes X annotations, each outlining its day; it has no Y axis for a Y annotation.");
+        if (spec.Annotations?.Any(annotation => annotation?.Axis == AnnotationAxis.X && annotation.To is not null) == true)
+            throw new ArgumentException("A calendar outlines the one day an X annotation marks, so it takes lines, not bands.");
+        if (points.Any(p => p.XEnd is not null)) throw new ArgumentException("A calendar's points are days, each at its X; XEnd ends the spans of a timeline.");
+        if (points.Any(p => p.Color is not null))
+            throw new ArgumentException("A calendar colours each day by its value, from YZones or the style's heatmap ramp, so its points take no colours of their own.");
+        if (points.Any(p => p.Y < 0))
+            throw new ArgumentException("A calendar's values are amounts, such as distance, time or training stress, so none can be negative; zero or a missing value is a day without activity.");
     }
 
     /// <summary>A zone without its own colour takes the style's ramp at its position, so a scale longer than the ramp

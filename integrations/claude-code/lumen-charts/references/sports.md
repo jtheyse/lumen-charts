@@ -1,6 +1,6 @@
 # Sports and training charts
 
-Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.27.0.
+Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.28.0.
 
 ## Conventions the numbers follow
 
@@ -252,6 +252,33 @@ var heartRange = new ChartSpec {
 ```
 
 A bar reads `12 Sep: 52 to 168, average 74`. There is no zero baseline, so the axis spans the bars. A range can also be a series' own kind: `new("Range", points) { Kind = ChartKind.Range }` beside a resting-heart-rate line, or on a column chart in each category's slot. Range series refuse `Trend`, `Zones` and `ProjectedFrom`; colour a single bar with its point's `Color`.
+
+## Training calendar
+
+The season at a glance: each day of a contribution grid in the tier of its training stress, as Bevel, Peloton and WHOOP colour their days, and a month of runs as bubbles sized by distance, as Strava's training log draws them.
+
+```csharp
+// stressByDay: (DateOnly Day, double Stress) for each day of the season, a rest day 0 or left out; today: a DateOnly
+var stressTiers = new ZoneScale([new("Easy", 50, "#3F87D9"), new("Moderate", 100, "#2E9B58"), new("Hard", 150, "#A88200"), new("Very hard", double.PositiveInfinity, "#DD4B45")]);
+var seasonCalendar = new ChartSpec {
+    Title = "Training calendar", Description = "Each day's training stress, in tiers",
+    Kind = ChartKind.Calendar, XAxis = AxisKind.Time, YZones = stressTiers,     // a column per week, Monday to Sunday
+    Annotations = [new ChartAnnotation(AnnotationAxis.X, Day(today)) { Label = "Today" }],
+    Series = [ChartSeries.From("Training stress", stressByDay, d => Day(d.Day), d => d.Stress)]
+};
+
+// runsThisMonth: (DateTimeOffset Start, double Km, string Name) for each run; monthStart: the month's first DateOnly
+var runCalendar = new ChartSpec {
+    Title = "Running this month", Description = "Each day's running in km, the longest run filling its day",
+    Kind = ChartKind.Calendar, XAxis = AxisKind.Time, TimeZone = "Europe/London",
+    CalendarLayout = CalendarLayout.Months, CalendarCell = CalendarCell.Bubble,
+    XMin = Day(monthStart), XMax = Day(monthStart.AddMonths(1).AddDays(-1)),    // the whole month, not just the days run
+    YZones = new([new("Run", double.PositiveInfinity, "#3F87D9")]),            // one colour: the bubble's size is the distance
+    Series = [new("Distance (km)", runsThisMonth.Select(r => new ChartPoint(TimeAxis.Value(r.Start), r.Km, r.Name)).ToArray())]
+};
+```
+
+A point counts for the day its moment falls on in `TimeZone` (UTC unless set), so give a late-evening session its zone; two sessions on one day add up. A day with activity reads `Tue 15 Sep 2026: 54, Moderate` (with each point's label, as `…, Long run: 14, Run`); a rest day, zero or missing, is an empty grey cell that takes no focus. `WeekStart = DayOfWeek.Sunday` starts the weeks on Sunday; `CalendarCell.Dot` draws dots. Without `YZones` the days take the style's heatmap ramp from its lowest to its highest active day, which reads well on `ChartStyle.Light`; on dark styles prefer tiers. The tier colours above are `ChartStyle.Light.Zones[1]`, `[2]`, `[3]` and `[5]`; on Midnight take the same entries of `ChartStyle.Midnight.Zones`. One series per calendar, nonnegative values, at most 3,660 days; `YMin`/`YMax`, point colours and Y annotations are refused.
 
 ## Look
 

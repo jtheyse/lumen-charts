@@ -39,7 +39,7 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 | `TimeZone` | string? | IANA or Windows zone id for a time axis's calendar, e.g. `"Europe/London"`. |
 | `SkipWeekends`, `TimeSkips` | bool, `IReadOnlyList<TimeSkip>` | Leave weekends or spans (`TimeAxis.Day(date)` for a holiday) out of a time axis. |
 | `Annotations` | `IReadOnlyList<ChartAnnotation>` | Reference lines and bands behind the data. |
-| `YZones` | `ZoneScale?` | Shades each zone as a band behind the main plot. |
+| `YZones` | `ZoneScale?` | Shades each zone as a band behind the main plot; on a calendar, colours each day by its zone. |
 | `Panes` | `IReadOnlyList<ChartPane>` | Extra panes beneath the main plot; pane *k* is `Panes[k − 1]`. |
 | `MinorGridlines` | bool | Lighter lines between labelled ticks. |
 | `Bins` | int? | Histogram bin count; null chooses from the data. |
@@ -47,6 +47,9 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 | `MaxRenderedPoints` | int, 1200 | Line and area sampling budget per continuous run (min/max sampling keeps extremes). |
 | `GaugeSweep` | double, 270 | Gauge only (0.26.0): how far round the arc runs, 180 (semicircle) to 360 (full circle), centred at the top. Any other kind refuses a value but 270. |
 | `TimelineConnectors` | bool, true | Timeline only (0.27.0): join a span to the span in another lane that starts exactly where it ends with a thin vertical line, as a hypnogram does. `false` draws a plain state chart; every other kind refuses `false`. |
+| `CalendarLayout` | `CalendarLayout`, `Weeks` | Calendar only (0.28.0): `Weeks` is the contribution grid, a column per week and a row per weekday, months named above; `Months` is a small grid per month, set left to right and wrapping. Other kinds refuse it set. |
+| `CalendarCell` | `CalendarCell`, `Square` | Calendar only (0.28.0): each day as a rounded `Square` (corners `BarRadius` or 3 px), a `Dot`, or a `Bubble` whose area is proportional to its value, the largest filling its cell. Other kinds refuse it set. |
+| `WeekStart` | `DayOfWeek`, `Monday` | Calendar only (0.28.0): the day each week starts on, ISO's Monday unless set. Other kinds refuse it set. |
 
 ## ChartSeries
 
@@ -88,7 +91,7 @@ Init properties: `Label` (left axis title), `Weight` (height beside the main plo
 
 ## Enums
 
-`ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc, Gauge, Ring, Timeline, Range }` · `ChartTheme { Light, Dark }` · `AxisKind { Linear, Log, Time }` · `ValueFormat { Number, Duration, Compact, TimeOfDay }` · `LineCurve { Linear, Smooth, Step }` · `AreaFill { Flat, Fade }` · `MarkerStyle { Auto, None, Hollow, Filled }` · `AxisSide { Left, Right }` · `TickLabels { All, Ends }` · `GridLine { Solid, Dotted, Dashed, Hidden }` · `ChartFinish { Refined, Classic }` · `AnnotationAxis { X, Y }` · `GraphLayout { Circular, Layered }`.
+`ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc, Gauge, Ring, Timeline, Range, Calendar }` · `CalendarLayout { Weeks, Months }` · `CalendarCell { Square, Dot, Bubble }` · `ChartTheme { Light, Dark }` · `AxisKind { Linear, Log, Time }` · `ValueFormat { Number, Duration, Compact, TimeOfDay }` · `LineCurve { Linear, Smooth, Step }` · `AreaFill { Flat, Fade }` · `MarkerStyle { Auto, None, Hollow, Filled }` · `AxisSide { Left, Right }` · `TickLabels { All, Ends }` · `GridLine { Solid, Dotted, Dashed, Hidden }` · `ChartFinish { Refined, Classic }` · `AnnotationAxis { X, Y }` · `GraphLayout { Circular, Layered }`.
 
 ## ChartStyle
 
@@ -107,7 +110,9 @@ public static readonly ChartStyle Brand = new() {
 
 - `ChartSvg.Render(spec, includeLegend = true, includeTitles = true)` → SVG string. Throws `ArgumentException` for an invalid spec.
 - `ChartSvg.ResolveStyle(spec)`, `ChartSvg.SeriesColor(series, index, style)`, `ChartSvg.LegendKey(spec, index)` (a series' legend key as a small SVG) and `ChartSvg.LegendLabel(spec, index)` (what the legend writes: the name, and on a ring `Move: 540 of 600 kcal`, on a gauge `Recovery: 72 %`, on a timeline `REM 1:42, 22 %`).
-- `ChartExport.Csv(spec)` → CSV of the original observations (time charts add an ISO `XTime` column, band and range series `Low,High`, ring charts a `Goal` column, timelines an `XEnd` column).
+- `ChartExport.Csv(spec)` → CSV of the original observations (time charts add an ISO `XTime` column, band and range series `Low,High`, ring charts a `Goal` column, timelines an `XEnd` column; a calendar writes each original point, not each day's total).
+
+A calendar (`ChartKind.Calendar`, 0.28.0) takes one series on a time X axis. A point counts for the day its `X` falls on in `TimeZone`, and one day's points add up; a zero or null total is a rest day, drawn as an empty cell that takes no focus. Days run from the earliest point to the latest, or from `XMin` to `XMax`. Each day with activity is a focusable mark named `Tue 15 Sep 2026: 54, Moderate` (date, its points' labels, total in `YFormat`, zone); `PointSelected` reports the day's first point. With `YZones` a day takes its zone's colour; without, the style's `HeatmapLow`→`HeatmapHigh` ramp across the active days. An X annotation outlines its day and joins the key under the grid. Values must be nonnegative; `YMin`/`YMax` are refused, so the ramp cannot be pinned across charts.
 - `ChartValidation.Validate(spec)` validates without rendering.
 
 ## Axes and time

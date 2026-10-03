@@ -27,7 +27,12 @@ public sealed record Season(IReadOnlyList<Session> Sessions, IReadOnlyList<(Date
 
 /// <summary>A chart on the Sports &amp; performance page, with the plain title above it and a one-line note, in which code is
 /// set between backticks.</summary>
-public sealed record SportsCard(string Section, string Id, string Title, string Note, bool Wide, ChartSpec Spec);
+public sealed record SportsCard(string Section, string Id, string Title, string Note, bool Wide, ChartSpec Spec)
+{
+    /// <summary>A second chart drawn beside the first in the same wide card, each half its width, as the training calendar's month
+    /// stands beside its season.</summary>
+    public ChartSpec? Beside { get; init; }
+}
 
 /// <summary>
 /// One simulated athlete who runs and rides: sixteen weeks of training from 8 June 2026 and two planned weeks tapering to a
@@ -308,6 +313,11 @@ public static class SportsData
     public static ZoneScale ReadinessZones(IReadOnlyList<string> zones) =>
         new([new("Low", 33, zones[5]), new("Moderate", 66, zones[3]), new("Good", double.PositiveInfinity, zones[2])]);
 
+    /// <summary>A day's training stress in four illustrative tiers, no vendor's: easy to 50, moderate to 100, hard to 150 and very
+    /// hard above, in the blue, green, gold and red of <paramref name="zones"/>, a brand's zone ramp.</summary>
+    public static ZoneScale StressTiers(IReadOnlyList<string> zones) =>
+        new([new("Easy", 50, zones[1]), new("Moderate", 100, zones[2]), new("Hard", 150, zones[3]), new("Very hard", double.PositiveInfinity, zones[5])]);
+
     /// <summary>The day's training as three rings: active calories from its runs at <see cref="BodyMass"/>, against 1000; its
     /// minutes, against 45; and its training stress, against yesterday's fitness, which is the athlete's average day.</summary>
     public static IReadOnlyList<(string Name, double Value, string Unit, double Goal)> Activity(Season season, DateOnly day)
@@ -499,6 +509,29 @@ public static class SportsData
                     Math.Round(Prior(week) * .8), Math.Round(Prior(week) * 1.3), WeekOf(week))).ToArray()) { Kind = ChartKind.Band }]
         };
 
+        // The season's days as a contribution grid, each in its tier of training stress, and this month's runs as bubbles sized by
+        // their distance on a grid of the whole month, today outlined in both.
+        var trained = load.Take(Weeks * 7).ToArray();
+        var calendar = Chart(half, 360) with
+        {
+            Kind = ChartKind.Calendar, XAxis = AxisKind.Time,
+            Title = $"{Text(trained.Count(d => d.Stress > 0))} days trained, {Text(trained.Count(d => d.Stress > 100))} of them hard",
+            Description = "Each day's training stress, in tiers",
+            YZones = StressTiers(zones), Annotations = [new(AnnotationAxis.X, When(Today)) { Label = "Today" }],
+            Series = [ChartSeries.From("Training stress", trained, d => When(d.Day), d => (double?)d.Stress)]
+        };
+        var first = new DateOnly(Today.Year, Today.Month, 1);
+        var runs = season.Sessions.Where(s => s.Sport == Sport.Run && s.Day >= first && s.Day <= Today).ToArray();
+        var month = Chart(half, 360) with
+        {
+            Kind = ChartKind.Calendar, XAxis = AxisKind.Time, CalendarLayout = CalendarLayout.Months, CalendarCell = CalendarCell.Bubble,
+            XMin = When(first), XMax = When(first.AddMonths(1).AddDays(-1)),
+            Title = $"{Text(runs.Sum(r => r.Metres) / 1000)} km run in {first.ToString("MMMM", CultureInfo.InvariantCulture)}, {runs.Length} runs",
+            Description = "Each day's running in km, the longest run filling its day",
+            YZones = new([new("Run", double.PositiveInfinity, zones[1])]), Annotations = [new(AnnotationAxis.X, When(Today)) { Label = "Today" }],
+            Series = [new("Distance (km)", runs.Select(r => new ChartPoint(When(r.Day), Math.Round(r.Metres / 1000, 1), r.Name)).ToArray())]
+        };
+
         // Time in each zone per week, stacked from recovery up.
         var weeklyZones = WeeklyZones(season);
         var easy = weeklyZones.Sum(week => week[0] + week[1]) / weeklyZones.Sum(week => week.Sum());
@@ -671,6 +704,7 @@ public static class SportsData
             new("load", "performance", "Performance management", "Daily stress as columns, fitness and fatigue as lines and form as an area on the right axis, all from `Training.Load`; `ProjectedFrom` dashes the planned weeks and `HighlightLast` rings race-day fitness.", true, performance),
             new("load", "weekly-load", "Weekly load against a target", "Each week's stress in capsule columns over a `Band` series from 80 to 130 % of the four weeks before, whose centre line is their average.", false, weeklyLoad),
             new("load", "weekly-zones", "Weekly zone distribution", "Every session's `Training.TimeInZone` added up by week and stacked in the zone colours.", false, distribution),
+            new("load", "training-calendar", "Training calendar", "The season's daily stress as a `ChartKind.Calendar` contribution grid, each day in its tier from `YZones` — illustrative tiers, no vendor's — and this month's runs on a `CalendarLayout.Months` grid of `CalendarCell.Bubble` days sized by distance; an X annotation outlines today in both.", true, calendar) { Beside = month },
             new("session", "stream", "Activity stream", "Heart rate coloured by zone over its `YZones` bands, pace on a reversed duration axis and elevation as a faded area, in three `Panes` on one elapsed-time axis.", true, stream),
             new("session", "time-in-zone", "Time in zone", "`Training.TimeInZone` over the same heart-rate samples the stream draws, one bar per zone in its colour.", false, timeInZone),
             new("session", "splits", "Pace by kilometre", "Each kilometre's split on a reversed duration axis, with a `Trend` line and the race's goal pace.", false, pace),

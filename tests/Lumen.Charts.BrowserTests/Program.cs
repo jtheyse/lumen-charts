@@ -34,6 +34,11 @@ var status = chart.Locator(".lumen-status");
 // and box glyphs, which are labelled and focusable but report no observation.
 ILocator Marks() => chart.Locator(".lumen-datum[data-point]");
 ILocator Tool(string name) => chart.Locator(".lumen-tools button", new() { HasTextString = name });
+// A chart set to FitWidth is drawn at its spec's width until its script measures its box, and then again at the box's width. A
+// check that switches to another chart and then measures or focuses its marks waits for that second drawing first; a chart that
+// does not fit is settled at once.
+Task Settled() => page.WaitForFunctionAsync(@"() => { const c = document.querySelector('.lumen-chart'), s = c?.querySelector(':scope > .lumen-viewport > svg');
+    return !!s && (!c.classList.contains('lumen-fit') || Number(s.getAttribute('viewBox').split(' ')[2]) === Math.max(320, c.querySelector(':scope > .lumen-viewport').clientWidth)); }");
 
 await Test("Chart renders focusable marks", async () =>
 {
@@ -240,6 +245,25 @@ var firstFitted = page.Locator(".lumen-chart.lumen-fit").First;
 if (await firstFitted.CountAsync() > 0) await FitChecks(page, firstFitted, "first page");
 else Console.WriteLine("SKIP FitWidth checks on the first page: this host's first page has no FitWidth chart");
 
+// The gallery's chart explorer fits its card, so on a phone neither the explorer nor the page around it scrolls sideways. A host
+// without a fitted explorer says SKIP.
+if (await page.Locator("#playground .lumen-chart.lumen-fit").CountAsync() > 0)
+{
+    await Test("On a 375-pixel phone the home page's chart explorer fits the screen, and the page does not scroll sideways", async () =>
+    {
+        const string explorer = "document.querySelector('#playground .lumen-viewport > svg')";
+        await page.SetViewportSizeAsync(375, 812);
+        await page.WaitForFunctionAsync($"() => {{ const s = {explorer}; const w = s.getBoundingClientRect().width; return w <= 375 && Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - w) < 1.5; }}");
+        await page.WaitForTimeoutAsync(600);
+        var overflow = await page.EvaluateAsync<int[]>("() => [document.documentElement.scrollWidth, ...[...document.querySelectorAll('#playground .lumen-viewport')].map(v => v.scrollWidth - v.clientWidth)]");
+        Check(overflow[0] <= 375, $"the page is {overflow[0]} pixels wide");
+        Check(overflow.Length == 2 && overflow[1] <= 0, $"the explorer scrolls sideways: {string.Join(", ", overflow.Skip(1))}");
+        await page.SetViewportSizeAsync(1400, 1000);
+        await page.WaitForFunctionAsync($"() => Number({explorer}.getAttribute('viewBox').split(' ')[2]) > 375");
+    });
+}
+else Console.WriteLine("SKIP home explorer phone check: this host has no fitted chart explorer");
+
 var graph = page.Locator(".lumen-chart").Nth(1);
 if (await graph.CountAsync() > 0 && await graph.Locator("[data-node]").CountAsync() > 0)
 {
@@ -319,6 +343,7 @@ if (await stream.CountAsync() > 0)
 {
     await stream.First.ClickAsync();
     await page.WaitForFunctionAsync("() => document.querySelector('.lumen-chart svg')?.querySelectorAll(':scope > svg').length === 3");
+    await Settled();
 
     await Test("Zooming moves every pane together", async () =>
     {
@@ -447,6 +472,7 @@ if (await gaugeTab.CountAsync() > 0 && await ringsTab.CountAsync() > 0)
             // The chart before it has marks of the same series and point, so the check waits for the radial drawing itself.
             var mark = chart.Locator($"g.{group} .lumen-datum[data-series='{series}'][data-point='0']");
             await mark.WaitForAsync();
+            await Settled();
             Check(await chart.Locator(".lumen-tools button[aria-label='Zoom in']").CountAsync() == 0, "a radial chart offers zoom");
             var label = await mark.GetAttributeAsync("aria-label");
             await mark.FocusAsync();
@@ -481,6 +507,7 @@ if (await timelineTab.CountAsync() > 0 && await rangeTab.CountAsync() > 0)
             // The mark is found by its own shape, so the check waits for the new kind's drawing rather than the chart before it.
             var mark = chart.Locator($".lumen-datum[data-series='{series}'][data-point='{point}']:has(rect.{shape})");
             await mark.WaitForAsync();
+            await Settled();
             Check(await chart.Locator(".lumen-tools button[aria-label='Zoom in']").CountAsync() == 1, $"the {shape} chart offers no zoom");
             var label = await mark.GetAttributeAsync("aria-label");
             await mark.FocusAsync();
@@ -496,6 +523,7 @@ if (await timelineTab.CountAsync() > 0 && await rangeTab.CountAsync() > 0)
         await timelineTab.First.ClickAsync();
         const string middle = ".lumen-chart .lumen-datum[data-series='2'][data-point='1'] rect.lumen-span";
         await page.WaitForSelectorAsync(middle);
+        await Settled();
         double Width(string value) => double.Parse(value, CultureInfo.InvariantCulture);
         var before = Width((await page.GetAttributeAsync(middle, "width"))!);
         await chart.Locator(".lumen-tools button[aria-label='Zoom in']").ClickAsync();
@@ -507,6 +535,40 @@ if (await timelineTab.CountAsync() > 0 && await rangeTab.CountAsync() > 0)
     });
 }
 else Console.WriteLine("SKIP timeline and range check: this host offers no timeline or range bars");
+
+// Calendars belong to the chart kinds a host offers too, so the suite finds one by the button that names it, and a host without one
+// says SKIP. A day with activity takes focus with the focus ring, shows its tooltip and raises selection through Enter, which the
+// status line reads as the day's date and total; a rest day is an empty cell outside every mark; and a calendar offers no zoom.
+var calendarTab = page.GetByRole(AriaRole.Button, new() { Name = "Calendar", Exact = true });
+if (await calendarTab.CountAsync() > 0)
+{
+    await Test("A calendar day takes focus, shows its tooltip and raises selection, a rest day takes none, and there is no zoom", async () =>
+    {
+        await calendarTab.First.ClickAsync();
+        var days = chart.Locator(".lumen-datum[data-point]:has(.lumen-day)");
+        await days.First.WaitForAsync();
+        await Settled();
+        Check(await chart.Locator(".lumen-tools button[aria-label='Zoom in']").CountAsync() == 0, "a calendar offers zoom");
+        Check(await chart.Locator(".lumen-track").CountAsync() > 0 && await chart.Locator(".lumen-datum .lumen-track").CountAsync() == 0, "the rest days are not empty cells outside the marks");
+        var mark = days.Nth(5);
+        var label = (await mark.GetAttributeAsync("aria-label"))!;
+        await mark.FocusAsync();
+        await tooltip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        Check(await tooltip.TextContentAsync() == label, $"the tooltip reads \"{await tooltip.TextContentAsync()}\", the day \"{label}\"");
+        var ring = await mark.EvaluateAsync<string>("g => getComputedStyle(g.querySelector('.lumen-day')).strokeWidth");
+        Check(ring == "3px", $"the focused day's outline is {ring} wide");
+        var point = int.Parse((await mark.GetAttributeAsync("data-point"))!, CultureInfo.InvariantCulture);
+        await page.Keyboard.PressAsync("Enter");
+        await page.WaitForFunctionAsync("text => document.querySelector('.under-chart')?.textContent.includes(text)", $"Selected series 1, observation {point + 1}");
+        // A day's name reads "Tue 9 Jun 2026: 78, Moderate"; the status line reads its date and its total.
+        await page.WaitForFunctionAsync("() => document.querySelector('.lumen-status')?.textContent.includes(' = ')");
+        var reported = (await status.TextContentAsync())!.Trim();
+        var (date, total) = (label.Split(": ")[0], label.Split(": ")[1].Split(',')[0]);
+        Check(reported.EndsWith($": {date} = {total}"), $"the status line reads \"{reported}\" for \"{label}\"");
+        await page.Keyboard.PressAsync("Escape");
+    });
+}
+else Console.WriteLine("SKIP calendar check: this host offers no calendar");
 
 // The Sports & performance page belongs to the gallery, so the suite finds it as a visitor does, by the link that names it, and a
 // host without one says SKIP. It opens in a page of its own, so it starts in the light theme and the Lumen brand.
@@ -521,15 +583,15 @@ if (await sportsLink.CountAsync() > 0)
     var charts = sports.Locator(".lumen-chart");
     // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
-        return svgs.length === 15 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+        return svgs.length === 17 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
-    await Test("The Sports & performance page renders its fifteen training charts, each live and drawn at the width it is shown", async () =>
+    await Test("The Sports & performance page renders its seventeen training charts, each live and drawn at the width it is shown", async () =>
     {
-        Check(await charts.CountAsync() == 15, $"the page shows {await charts.CountAsync()} charts");
-        for (var i = 0; i < 15; i++)
+        Check(await charts.CountAsync() == 17, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 17; i++)
             Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
-        // Each chart's script adds its tooltip, so fifteen of them prove every chart is interactive.
-        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 15");
+        // Each chart's script adds its tooltip, so seventeen of them prove every chart is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 17");
         await sports.WaitForFunctionAsync(drawnToFit);
     });
 
