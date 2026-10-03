@@ -6,6 +6,8 @@ foreach($path in @('/health','/_framework/blazor.web.js','/_content/Lumen.Charts
  $r=Invoke-WebRequest "$BaseUrl$path" -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 200) "Asset/health $path"
 }
+$r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart"')).Count -eq 10 -and $r.Content.Contains('not real training data')) 'The Sports & performance page answers 200 and prerenders its ten simulated charts'
 $types=Invoke-RestMethod "$BaseUrl/api/charts/types"
 Verify ($types.Count -eq 16) 'Sixteen chart types'
 foreach($kind in @('Line','Area','Scatter','Bubble','Column','Bar','StackedColumn','Donut','Heatmap','Radar')){

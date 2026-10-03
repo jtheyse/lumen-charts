@@ -66,6 +66,8 @@ Test values are given where a source provides them, because each is something th
 
 **Not covered by any source used here**, and so not to be implemented without one: heart-rate and running TSS (TRIMP, hrTSS, rTSS), grade-adjusted pace, Friel zones, and the vendors' own load, strain, recovery and readiness formulas, which are unpublished.
 
+The gallery's Sports & performance page (`/sports`) shows the charts shipped so far together, drawn from one simulated athlete.
+
 ## Build order
 
 Cross-cutting work comes first, because each piece unlocks several charts. Each release is independently useful and is checked the same way as the rest of the library: executable assertions, the hashed rendering baseline, HTTP checks and the browser suite.

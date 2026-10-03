@@ -5,6 +5,7 @@ using Lumen.Gallery.Components;
 var builder=WebApplication.CreateBuilder(args);
 if (builder.Environment.IsDevelopment()) builder.WebHost.UseStaticWebAssets();
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+builder.Services.AddScoped<Lumen.Gallery.GalleryLook>();
 builder.Services.ConfigureHttpJsonOptions(options=>options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.WebHost.ConfigureKestrel(options=>options.Limits.MaxRequestBodySize=16*1024*1024);
 var app=builder.Build();

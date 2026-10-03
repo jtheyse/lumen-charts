@@ -308,9 +308,10 @@ else Console.WriteLine("SKIP pane checks: this host offers no chart with panes")
 await page.ReloadAsync(new() { WaitUntil = WaitUntilState.NetworkIdle });
 await page.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });
 
-async Task Sweep()
+Task Sweep() => SweepOf(page);
+async Task SweepOf(IPage target)
 {
-    var result = await page.RunAxe(new AxeRunOptions
+    var result = await target.RunAxe(new AxeRunOptions
     {
         RunOnly = new RunOnlyOptions { Type = "tag", Values = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] }
     });
@@ -352,6 +353,72 @@ if (await midnight.CountAsync() > 0)
     });
 }
 else Console.WriteLine("SKIP Midnight axe sweep: this host offers no Midnight brand");
+
+// The Sports & performance page belongs to the gallery, so the suite finds it as a visitor does, by the link that names it, and a
+// host without one says SKIP. It opens in a page of its own, so it starts in the light theme and the Lumen brand.
+var sportsLink = page.GetByRole(AriaRole.Link, new() { Name = "Sports & performance" });
+if (await sportsLink.CountAsync() > 0)
+{
+    var sports = await browser.NewPageAsync(new() { ViewportSize = new() { Width = 1400, Height = 1000 } });
+    sports.SetDefaultTimeout(15_000);
+    var sportsUrl = new Uri(new Uri(address.TrimEnd('/') + "/"), await sportsLink.First.GetAttributeAsync("href"));
+    await sports.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+    await sports.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });
+    var charts = sports.Locator(".lumen-chart");
+    // The page measures its cards and draws each chart at the width it is shown, so the checks wait until it has.
+    const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
+        return svgs.length === 10 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+
+    await Test("The Sports & performance page renders its ten training charts, each live and drawn at the width it is shown", async () =>
+    {
+        Check(await charts.CountAsync() == 10, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 10; i++)
+            Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
+        // Each chart's script adds its tooltip, so ten of them prove every chart is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 10");
+        await sports.WaitForFunctionAsync(drawnToFit);
+    });
+
+    await Test("Hovering a mark on the Sports & performance page shows its tooltip", async () =>
+    {
+        var bars = sports.Locator("#time-in-zone .lumen-chart");
+        var mark = bars.Locator(".lumen-datum[data-point]").Nth(2);
+        var label = await mark.GetAttributeAsync("aria-label");
+        await mark.HoverAsync();
+        var tip = bars.Locator(".lumen-tooltip");
+        await tip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        Check(await tip.TextContentAsync() == label, $"the tooltip reads \"{await tip.TextContentAsync()}\", the mark \"{label}\"");
+        await sports.Mouse.MoveAsync(1, 1);
+    });
+
+    await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page", () => SweepOf(sports));
+
+    await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page in the dark theme", async () =>
+    {
+        var before = await charts.First.Locator(".lumen-viewport > svg").GetAttributeAsync("style");
+        await sports.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) }).First.ClickAsync();
+        await sports.WaitForFunctionAsync("before => document.querySelector('.lumen-viewport > svg')?.getAttribute('style') !== before", before);
+        await SweepOf(sports);
+    });
+
+    await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page in the Midnight brand", async () =>
+    {
+        await sports.GetByRole(AriaRole.Button, new() { Name = "Midnight", Exact = true }).ClickAsync();
+        await sports.WaitForFunctionAsync("() => [...document.querySelectorAll('.lumen-viewport > svg')].every(s => s.getAttribute('style')?.includes('background:#0B0E14'))");
+        await SweepOf(sports);
+    });
+
+    await Test("On a 375-pixel phone the Sports & performance page and its charts fit the screen", async () =>
+    {
+        await sports.SetViewportSizeAsync(375, 800);
+        await sports.WaitForFunctionAsync(drawnToFit);
+        var overflow = await sports.EvaluateAsync<int[]>("() => [document.documentElement.scrollWidth, ...[...document.querySelectorAll('.lumen-viewport')].map(v => v.scrollWidth - v.clientWidth)]");
+        Check(overflow[0] <= 375, $"the page is {overflow[0]} pixels wide");
+        Check(overflow.Skip(1).All(extra => extra <= 0), $"a chart scrolls sideways: {string.Join(", ", overflow.Skip(1))}");
+    });
+    await sports.CloseAsync();
+}
+else Console.WriteLine("SKIP Sports & performance checks: this host has no Sports & performance page");
 
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed. ({address})");
 foreach (var failure in failures) Console.Error.WriteLine(failure);

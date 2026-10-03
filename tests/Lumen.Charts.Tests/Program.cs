@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Xml.Linq;
 using Lumen.Charts;
 using Lumen.Charts.Blazor;
+using Lumen.Gallery;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
@@ -3663,6 +3664,106 @@ Test("The component's legend draws the chart's own keys in the refined finish an
     // The stylesheet sets the key beside its name.
     var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
     Check(css.Contains(".lumen-legend svg{")&&css.Contains(".lumen-legend span{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px}"));
+});
+// The gallery's Sports & performance page draws one simulated athlete, so its charts must agree with one another.
+var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
+ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
+var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
+DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
+Test("Sports page: ten charts, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+    Check(sports.Count==10&&sports.Select(card=>card.Id).Distinct().Count()==10,"the page should have ten charts");
+    foreach(var (theme,style,zones) in new[]{(ChartTheme.Light,(ChartStyle?)null,ChartStyle.Light.Zones),(ChartTheme.Dark,null,ChartStyle.Light.Zones),(ChartTheme.Dark,ChartStyle.Midnight,ChartStyle.Midnight.Zones)})
+        foreach(var (wide,half) in new[]{(1100,540),(337,337)})
+            foreach(var card in SportsData.Cards(theme,zones,wide,half))
+            {
+                var doc=XDocument.Parse(ChartSvg.Render(card.Spec with{Style=style}));
+                Check(doc.Descendants().Any(e=>e.Attribute("data-point") is not null),$"{card.Id} drew no marks");
+                Check(card.Spec.Width==(card.Wide?wide:half)&&card.Spec.Source.Contains("simulated"),$"{card.Id} is not drawn at its card's width or does not say it is simulated");
+            }
+});
+Test("Sports page: the stream's run is a day of the performance chart, at the stress it scored, and every day is its sessions",()=>{
+    var daily=Sports("performance").Series.Single(s=>s.Name=="Daily stress").Points;
+    Check(athlete.Sessions.Count(s=>s.Day==latest.Day)==1&&daily.Single(p=>p.X==SportsData.When(latest.Day)).Y==latest.Stress,"the run's day does not carry its stress");
+    Check(latest.Day==SportsData.Today&&Sports("stream").Description.StartsWith("Sunday 27 September"),"the stream is not the last day trained");
+    foreach(var p in daily)
+        Check(p.Y==athlete.Sessions.Where(s=>s.Day==DayOf(p.X)).Sum(s=>s.Stress)+athlete.Planned.Where(d=>d.Day==DayOf(p.X)).Sum(d=>d.Stress),$"{DayOf(p.X)} is not the sum of its sessions");
+    Check(DayOf(daily[0].X)==SportsData.Start&&DayOf(daily[^1].X)==SportsData.Race&&athlete.Planned.All(d=>d.Day>SportsData.Today));
+});
+Test("Sports page: time in zone counts the heart rate the stream draws, in the zones the stream is coloured by",()=>{
+    var stream=Sports("stream");var heart=stream.Series.Single(s=>s.Name=="Heart rate");
+    var bars=Sports("time-in-zone").Series.Single().Points;
+    var counted=Training.TimeInZone(heart.Points.Select(p=>p.Y!.Value).ToArray(),SportsData.HeartZones,SportsData.RunSample);
+    Check(bars.Select(p=>p.Y!.Value).SequenceEqual(counted)&&counted.SequenceEqual(latest.TimeInZone),"the bars are not the stream's time in zone");
+    Check(bars.Sum(p=>p.Y)==latest.Seconds&&heart.Points.Count*SportsData.RunSample==latest.Seconds,"the bars do not add up to the run");
+    Check(stream.YZones==SportsData.HeartZones&&heart.Zones==SportsData.HeartZones&&bars.Select(p=>p.Color).SequenceEqual(ChartStyle.Light.Zones.Take(5)),"the bars and the stream use different zones");
+    Check(Sports("time-in-zone").YMax>bars.Max(p=>p.Y),"the longest bar leaves no room for its value");
+});
+Test("Sports page: each week's load adds up its days in the performance chart, inside a band of 80 to 130 % of the four weeks before",()=>{
+    var daily=Sports("performance").Series.Single(s=>s.Name=="Daily stress").Points;
+    var weekly=Sports("weekly-load");var load=weekly.Series[0].Points;var band=weekly.Series[1].Points;
+    Check(load.Count==SportsData.Weeks&&band.Count==SportsData.Weeks&&weekly.Series[1].Kind==ChartKind.Band);
+    for(var w=0;w<SportsData.Weeks;w++)
+    {
+        Check(load[w].Y==daily.Skip(7*w).Take(7).Sum(p=>p.Y),$"week {w} is not the sum of its days");
+        var prior=Enumerable.Range(w-4,4).Average(k=>k<0?SportsData.SeedFitness*7:load[k].Y!.Value);
+        Check(band[w].Y==Math.Round(prior)&&band[w].Low==Math.Round(prior*.8)&&band[w].High==Math.Round(prior*1.3),$"week {w}'s band is not the four weeks before it");
+    }
+});
+Test("Sports page: the weekly zones add up every session of the week, the stream's run included",()=>{
+    var stacked=Sports("weekly-zones").Series;var bars=Sports("time-in-zone").Series.Single().Points;
+    Check(stacked.Select(s=>s.Name).SequenceEqual(SportsData.HeartZones.Zones.Select(z=>z.Name))&&stacked.Select(s=>s.Color).SequenceEqual(ChartStyle.Light.Zones.Take(5)));
+    for(var w=0;w<SportsData.Weeks;w++)
+        Check(stacked.Sum(s=>s.Points[w].Y)==athlete.Sessions.Where(s=>(s.Day.DayNumber-SportsData.Start.DayNumber)/7==w).Sum(s=>s.Seconds),$"week {w}'s zones do not add up to its sessions");
+    Check(Enumerable.Range(0,5).All(z=>stacked[z].Points[^1].Y>=bars[z].Y),"the last week holds less time in a zone than its last run");
+});
+Test("Sports page: the kilometre splits, the elevation profile and the stream are one run",()=>{
+    var track=latest.Track!;var splits=Sports("splits").Series[0].Points.Select(p=>p.Y!.Value).ToArray();
+    Check(splits.Length==(int)(latest.Metres/1000)&&Math.Abs(splits.Sum()-SportsData.TimeAt(track,latest.Metres,splits.Length*1000))<=splits.Length*.5+.5,"the splits do not add up to the run");
+    var profile=Sports("elevation").Series[0].Points;var drawn=Sports("stream").Series.Single(s=>s.Name=="Elevation").Points.Select(p=>p.Y!.Value).ToArray();
+    Check(latest.Metres-profile[^1].X*1000 is >=0 and <100&&profile.Min(p=>p.Y)>=drawn.Min()-.05&&profile.Max(p=>p.Y)<=drawn.Max()+.05,"the profile is not the stream's route");
+    Check(profile.All(p=>p.Color is not null&&p.Label!.Contains("grade")),"a stretch of the profile is not coloured and named by its grade");
+    Check(Sports("stream").Series.Single(s=>s.Name=="Pace").Points.Count==track.Pace.Count&&track.Distance.Zip(track.Distance.Skip(1)).All(d=>d.Second>d.First),"the stream does not draw every sample in order");
+});
+Test("Sports page: the 5 km record only falls, and no run beats the record of its day",()=>{
+    var spec=Sports("records");var record=spec.Series[0].Points;var weekly=spec.Series[1].Points;
+    Check(spec.YReversed&&record[0].Y==SportsData.PriorRecord&&record[^1].X==SportsData.When(SportsData.Today));
+    Check(record.Zip(record.Skip(1)).All(p=>p.Second.Y<=p.First.Y&&p.Second.X>p.First.X),"the record rises");
+    double Held(double x)=>record.Last(r=>r.X<=x).Y!.Value;
+    Check(athlete.Sessions.Where(s=>s.Best5k is not null).All(s=>s.Best5k>=Held(SportsData.When(s.Day))),"a run beat the record of its day");
+    Check(record.Skip(1).SkipLast(1).All(r=>athlete.Sessions.Any(s=>s.Day==DayOf(r.X)&&s.Best5k==r.Y&&s.Name=="5 km time trial")),"a record was not set by a time trial");
+    Check(weekly.Count==SportsData.Weeks&&weekly.All(p=>p.Y>=Held(p.X)),"a week's fastest 5 km is missing or beats the record");
+});
+Test("Sports page: each night's HRV falls where its series says, against the 28 nights before it",()=>{
+    var hrv=Sports("hrv").Series;var band=hrv[0].Points;var nights=athlete.Hrv;
+    Check(band.Count==SportsData.Weeks*7&&hrv.Skip(1).Sum(s=>s.Points.Count)==SportsData.Weeks*7&&nights.Count==SportsData.Weeks*7+SportsData.BaselineNights);
+    for(var i=0;i<band.Count;i++)
+    {
+        var window=nights.Skip(i).Take(SportsData.BaselineNights).ToArray();var mean=window.Average();var deviation=Math.Sqrt(window.Sum(v=>(v-mean)*(v-mean))/(window.Length-1));
+        Check(Math.Abs(band[i].Y!.Value-mean)<.051&&Math.Abs(band[i].Low!.Value-(mean-deviation))<.051&&Math.Abs(band[i].High!.Value-(mean+deviation))<.051,$"night {i}'s baseline is not the 28 nights before it");
+    }
+    ChartPoint BandAt(double x)=>band.Single(b=>b.X==x);
+    Check(hrv[1].Points.All(p=>p.Y>=BandAt(p.X).Low&&p.Y<=BandAt(p.X).High)&&hrv[2].Points.All(p=>p.Y<BandAt(p.X).Low)&&hrv[3].Points.All(p=>p.Y>BandAt(p.X).High),"a night is in the wrong series");
+    Check(hrv.Skip(1).All(s=>s.Points.Count>0),"a status has no nights");
+});
+Test("Sports page: the power curves are each month's best rides, and the critical-power line is fitted to this month's",()=>{
+    var power=Sports("power-curve");
+    foreach(var (name,month) in new[]{("September",9),("August",8)})
+    {
+        var rides=athlete.Sessions.Where(s=>s.Sport==Sport.Ride&&s.Day.Month==month).ToArray();
+        Check(rides.Any(s=>s.Name=="20-minute test"),$"{name} has no test");
+        foreach(var p in power.Series.Single(s=>s.Name==name).Points)
+            Check(p.Y==Math.Round(rides.SelectMany(s=>s.PowerCurve).Where(c=>c.Seconds==p.X).Max(c=>c.Value)),$"{name} at {p.X} s is not its best ride");
+    }
+    var fit=Training.CriticalPower(power.Series[0].Points.Select(p=>(p.X,p.Y!.Value)))!;
+    Check(power.Annotations.Single().From==Math.Round(fit.CriticalPower)&&power.XAxis==AxisKind.Log,"the reference line is not this month's fit");
+});
+Test("Sports page: the headline numbers are the charts' own, and the season is the same every time it is simulated",()=>{
+    var facts=SportsData.Facts();var today=athlete.Load.Single(d=>d.Day==SportsData.Today);
+    Check(facts[0].Value==Math.Round(today.Fitness).ToString(CultureInfo.InvariantCulture)&&facts[2].Value==SportsData.Clock(Sports("records").Series[0].Points[^1].Y!.Value)
+        &&facts[3].Value==$"{Sports("power-curve").Annotations[0].From.ToString(CultureInfo.InvariantCulture)} W","a headline number differs from its chart");
+    var again=SportsData.Simulate();
+    Check(again.Sessions.Select(s=>(s.Day,s.Name,s.Stress,s.Seconds,s.Best5k)).SequenceEqual(athlete.Sessions.Select(s=>(s.Day,s.Name,s.Stress,s.Seconds,s.Best5k)))
+        &&again.Load.SequenceEqual(athlete.Load)&&again.Hrv.SequenceEqual(athlete.Hrv)&&again.Planned.SequenceEqual(athlete.Planned),"two simulations differ");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

@@ -2,6 +2,8 @@ namespace Lumen.Gallery;
 
 public enum AxisDemo { Numeric, Time, Log, PowerCurve, Pace, Zones, Performance, Target, Stream }
 public enum BrandDemo { Lumen, Harbour, PageCss, Midnight }
+/// <summary>The theme and brand a visitor picked, kept for the circuit so they carry from one gallery page to the next.</summary>
+public sealed class GalleryLook { public bool Dark { get; set; } public BrandDemo Brand { get; set; } }
 
 public static class DemoData
 {

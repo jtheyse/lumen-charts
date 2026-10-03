@@ -1,0 +1,123 @@
+@page "/sports"
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject GalleryLook Look
+<PageTitle>Sports &amp; performance — Lumen</PageTitle>
+<div class="app sports @(Look.Dark ? "dark" : "")">
+    <aside class="sidebar">
+        <a class="brand" href="/"><span class="brand-icon">◒</span> lumen<span class="brand-dot">.</span></a>
+        <div class="workspace">VISUALIZATION LIBRARY <span>0.1</span></div>
+        <a class="nav-item" href="/#playground"><span>▦</span> Chart explorer <b>16</b></a>
+        <a class="nav-item" href="/#network"><span>⌘</span> Network graphs <b>2</b></a>
+        <a class="nav-item" href="/#integration"><span>⌁</span> Developer API</a>
+        <a class="nav-item active" href="sports" aria-current="page"><span>∿</span> Sports &amp; performance <b>10</b></a>
+        <div class="nav-label">ON THIS PAGE</div>
+        @foreach (var section in Sections)
+        { <a class="purpose" href="sports#@section.Id">@section.Name<span>↓</span></a> }
+        <div class="sidebar-bottom"><span class="live-dot"></span> One simulated athlete<p>Sixteen weeks trained, two planned.</p><a href="/#integration">Start building →</a></div>
+    </aside>
+    <main @ref="main">
+        <header class="topbar"><div>Library <span>/</span> <strong>Sports &amp; performance</strong></div><div class="top-actions"><span class="version">Simulated data</span><button @onclick="ToggleTheme" aria-label="Toggle color theme">@(Look.Dark ? "☀ Light mode" : "☾ Dark mode")</button></div></header>
+        <section class="sports-intro">
+            <div class="eyebrow"><span></span> TRAINING DASHBOARD</div>
+            <h1>One athlete. <em>Every training chart.</em></h1>
+            <p>A simulated athlete who runs and rides: sixteen weeks from 8 June, and two weeks planned towards a 10 km race on 11 October. Every chart is drawn from that one season, so they agree with one another — the activity stream is the last run, its time in zone is counted from the samples it draws, and each week adds up the days above it. Each is a live <code>LumenChart</code>: hover or focus a mark, hide a series, zoom, or export it.</p>
+            <div class="segmented" role="group" aria-label="Chart brand">
+                @foreach (var (choice, name) in Brands)
+                { <button class="@(Look.Brand == choice ? "selected" : "")" aria-pressed="@(Look.Brand == choice ? "true" : "false")" @onclick="() => SetBrand(choice)">@name</button> }
+            </div>
+        </section>
+        <div class="feature-strip">
+            @foreach (var (value, label) in facts)
+            { <div><b>@value</b><span>@label</span></div> }
+        </div>
+        @foreach (var section in Sections)
+        {
+            <section id="@section.Id" class="sports-section">
+                <div class="section-heading"><div><div class="eyebrow">@section.Name.ToUpperInvariant()</div><h2>@section.Heading</h2></div></div>
+                <p class="session-facts">@(section.Id == "session" ? SportsData.SessionSummary() : section.Lead)</p>
+                <div class="sports-grid">
+                    @foreach (var card in Cards.Where(card => card.Section == section.Id))
+                    {
+                        <article id="@card.Id" class="sports-card @(card.Wide ? "wide" : "half")">
+                            <header>
+                                <h3>@card.Title</h3>
+                                <p>@foreach (var (part, i) in card.Note.Split('`').Select((part, i) => (part, i))) { if (i % 2 == 1) { <code>@part</code> } else { @part } }</p>
+                            </header>
+                            @Branded(@<LumenChart Spec="Spec(card)"/>)
+                        </article>
+                    }
+                </div>
+            </section>
+        }
+        <footer><span class="brand">lumen.</span><span>Charts that help you see.</span><span>Simulated data · Built with Blazor</span></footer>
+    </main>
+</div>
+@code {
+    private static readonly (string Id, string Name, string Heading, string Lead)[] Sections =
+    [
+        ("load", "Training load", "How the season built.", "Stress from every ride and run, day by day and week by week."),
+        ("session", "Latest session", "Sunday's hilly progression run.", ""),
+        ("fitness", "Fitness and recovery", "What the training built.", "Power and pace at their best, and how the body is absorbing the work.")
+    ];
+    private static readonly (BrandDemo Brand, string Name)[] Brands =
+        [(BrandDemo.Lumen, "Lumen brand"), (BrandDemo.Harbour, "Harbour (C#)"), (BrandDemo.PageCss, "Page CSS"), (BrandDemo.Midnight, "Midnight")];
+    private readonly IReadOnlyList<(string Value, string Label)> facts = SportsData.Facts();
+    private ElementReference main;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<Sports>? reference;
+    // Until the page has been measured the charts are drawn at a desktop's widths, and the browser scales them to fit.
+    private int wide = 1100, half = 540;
+    private IReadOnlyList<SportsCard>? cards;
+    private IReadOnlyList<SportsCard> Cards => cards ??= SportsData.Cards(Look.Dark ? ChartTheme.Dark : ChartTheme.Light, Zones, wide, half);
+    // The marks this page colours itself take the zone ramp of the brand they draw in, so they match the zones the library draws:
+    // Midnight has a ramp of its own, and Harbour and the page's CSS keep the library's.
+    private IReadOnlyList<string> Zones => Look.Brand switch
+    {
+        BrandDemo.Midnight => ChartStyle.Midnight.Zones,
+        BrandDemo.Harbour => DemoData.Harbour.Zones,
+        _ => ChartStyle.Light.Zones
+    };
+    // As on the home page, bar ends belong to a brand: the Lumen brand draws the weekly load as capsules, Midnight draws every
+    // bar that way, and Harbour and the page's CSS keep their square ends.
+    private ChartSpec Spec(SportsCard card) => card.Id == "weekly-load" && Look.Brand == BrandDemo.Lumen
+        ? card.Spec with { Style = ChartSvg.ResolveStyle(card.Spec) with { BarRadius = 9999 } } : card.Spec;
+    private RenderFragment Branded(RenderFragment content) => Look.Brand switch
+    {
+        BrandDemo.Midnight => @<CascadingValue Value="ChartStyle.Midnight">@content</CascadingValue>,
+        BrandDemo.PageCss => @<LumenBrand Series="--brand-1, --brand-2, --brand-3, --brand-4" Background="--surface" Text="--text" Muted="--muted" Grid="--line">@content</LumenBrand>,
+        BrandDemo.Harbour => @<CascadingValue Value="DemoData.Harbour">@content</CascadingValue>,
+        _ => content
+    };
+    private void ToggleTheme() { Look.Dark = !Look.Dark; cards = null; }
+    private void SetBrand(BrandDemo brand) { Look.Brand = brand; cards = null; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./sports.js");
+            reference = DotNetObjectReference.Create(this);
+            await module.InvokeVoidAsync("watch", main, reference);
+        }
+        catch (JSDisconnectedException) { }
+    }
+
+    /// <summary>The widths the page gives a full-width chart and a half-width one, which the charts are then drawn at.</summary>
+    [JSInvokable] public Task Measured(int wideWidth, int halfWidth)
+    {
+        var next = (Math.Clamp(wideWidth, 320, 1800), Math.Clamp(halfWidth, 320, 1800));
+        if (next == (wide, half)) return Task.CompletedTask;
+        (wide, half) = next;
+        cards = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { if (module is not null) { await module.InvokeVoidAsync("unwatch", main); await module.DisposeAsync(); } }
+        catch (JSDisconnectedException) { }
+        finally { reference?.Dispose(); }
+    }
+}

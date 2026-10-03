@@ -1,4 +1,5 @@
 @page "/"
+@inject GalleryLook Look
 <PageTitle>Lumen — Charts & Graphs for .NET</PageTitle>
 <div class="app @(dark ? "dark" : "")">
     <aside class="sidebar">
@@ -7,6 +8,7 @@
         <a class="nav-item active" href="#playground"><span>▦</span> Chart explorer <b>16</b></a>
         <a class="nav-item" href="#network"><span>⌘</span> Network graphs <b>2</b></a>
         <a class="nav-item" href="#integration"><span>⌁</span> Developer API</a>
+        <a class="nav-item" href="sports"><span>∿</span> Sports &amp; performance <b>10</b></a>
         <div class="nav-label">EXPLORE BY PURPOSE</div>
         @foreach(var item in new[]{("Change over time",ChartKind.Line),("Compare categories",ChartKind.Bar),("Find relationships",ChartKind.Scatter),("Parts of a whole",ChartKind.Donut),("Patterns & density",ChartKind.Heatmap)})
         { <button class="purpose" @onclick="()=>Select(item.Item2)">@item.Item1<span>↗</span></button> }
@@ -14,7 +16,7 @@
     </aside>
     <main>
         <header class="topbar"><div>Library <span>/</span> <strong>Chart explorer</strong></div><div class="top-actions"><span class="version">.NET 8+ compatible</span><button @onclick="ToggleTheme" aria-label="Toggle color theme">@(dark ? "☀ Light mode" : "☾ Dark mode")</button></div></header>
-        <section class="intro"><div class="eyebrow"><span></span> A NEW PERSPECTIVE ON YOUR DATA</div><h1>Make the numbers<br/><em>mean something.</em></h1><p>A native .NET charting toolkit for clear comparisons, meaningful<br class="desktop"/> relationships, and the stories hiding in your data.</p><a class="primary-link" href="#integration">Build your first chart <span>↗</span></a><a class="secondary-link" href="#network">Explore graph layouts →</a><div class="intro-art" aria-hidden="true"><div class="art-grid"></div><svg viewBox="0 0 330 155"><path d="M0 140 L45 112 L85 122 L130 66 L172 87 L220 28 L263 42 L315 5" fill="none" stroke="#5675e7" stroke-width="3"/><path d="M0 148 L45 132 L85 135 L130 105 L172 112 L220 75 L263 84 L315 48" fill="none" stroke="#69bbaa" stroke-width="2" stroke-dasharray="5 5"/></svg><span>LESS NOISE. MORE SIGNAL.</span></div></section>
+        <section class="intro"><div class="eyebrow"><span></span> A NEW PERSPECTIVE ON YOUR DATA</div><h1>Make the numbers<br/><em>mean something.</em></h1><p>A native .NET charting toolkit for clear comparisons, meaningful<br class="desktop"/> relationships, and the stories hiding in your data.</p><a class="primary-link" href="#integration">Build your first chart <span>↗</span></a><a class="secondary-link" href="#network">Explore graph layouts →</a><a class="secondary-link" href="sports">Sports &amp; performance →</a><div class="intro-art" aria-hidden="true"><div class="art-grid"></div><svg viewBox="0 0 330 155"><path d="M0 140 L45 112 L85 122 L130 66 L172 87 L220 28 L263 42 L315 5" fill="none" stroke="#5675e7" stroke-width="3"/><path d="M0 148 L45 132 L85 135 L130 105 L172 112 L220 75 L263 84 L315 48" fill="none" stroke="#69bbaa" stroke-width="2" stroke-dasharray="5 5"/></svg><span>LESS NOISE. MORE SIGNAL.</span></div></section>
         <div class="feature-strip"><div><b>16</b><span>Chart types</span></div><div><b>02</b><span>Graph layouts</span></div><div><b>SVG</b><span>Resolution independent</span></div><div><b>C#</b><span>From data to display</span></div></div>
         <section id="playground" class="explorer">
             <div class="section-heading"><div><div class="eyebrow">THE PLAYGROUND</div><h2>Your data, a different angle.</h2></div><span class="quiet">Choose a chart. Explore the possibilities.</span></div>
@@ -59,7 +61,9 @@
 @code {
     private ChartKind selected=ChartKind.Area;
     private AxisDemo axisDemo=AxisDemo.Numeric;
-    private BrandDemo brand=BrandDemo.Lumen;
+    // The theme and brand live in the circuit, so the Sports & performance page opens in the ones picked here, and back.
+    private BrandDemo brand{get=>Look.Brand;set=>Look.Brand=value;}
+    private bool dark{get=>Look.Dark;set=>Look.Dark=value;}
     // Page CSS reads this page's own custom properties, so it follows the dark-mode switch by itself;
     // Harbour and Midnight are fixed in C#, and the Lumen brand is the library default driven by the theme.
     private RenderFragment Branded(RenderFragment content) => brand switch
@@ -70,7 +74,7 @@
         _ => content
     };
     private GraphLayout layout=GraphLayout.Layered;
-    private bool dark;private int revision;private string? selection;private string? node;private GraphSpec? graphCache;
+    private int revision;private string? selection;private string? node;private GraphSpec? graphCache;
     private GraphSpec Graph=>graphCache ??= DemoData.Graph(layout,Theme);
     private void SetLayout(GraphLayout value){layout=value;graphCache=null;node=null;}
     private void ToggleTheme(){dark=!dark;graphCache=null;}
