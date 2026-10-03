@@ -323,3 +323,9 @@ signed/labels 848D300C05FE97D3
 symmetric/columns 26D60E6A9C9FFD39
 fitness/340-light 0785B12CD6B7A160
 fitness/340-midnight 12420E26314A64AA
+sampling/average 15F264FC5F486FA1
+sampling/window-minmax C3189B7EBD2A1811
+sampling/window-average 0947AF12FA828809
+ticks/pane-none 74E4D73CDCADC787
+channels/340-light C4052BBFC5B2F4E2
+channels/340-midnight 4C03A6C5D93D420E

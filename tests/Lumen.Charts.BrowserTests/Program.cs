@@ -333,6 +333,89 @@ await Test("Zooming narrows the axis and reset restores it", async () =>
     Check(await labels() == before, "reset did not restore the axis");
 });
 
+// 0.37.0: drag to zoom. With a mouse or a pen, pressing on the plots and dragging 8 pixels or more across them draws a translucent band
+// through every pane, and letting go zooms to the X it covers through the component; Escape lets a drag go without zooming, a shorter drag
+// is a click, and Reset view brings the whole range back. A chart without zoom says SKIP.
+async Task DragChecks(IPage target, ILocator card, string where, bool windowed = false)
+{
+    if (await card.Locator(".lumen-tools button[aria-label='Zoom in']").CountAsync() == 0) { Console.WriteLine($"SKIP drag checks: the {where} offers no zoom"); return; }
+    async Task<string> Labels() => string.Join("|", await card.Locator(".lumen-viewport > svg > text").AllTextContentsAsync());
+    // The plots on screen: the first pane's clip's top and left to the last one's bottom and right, kept 12 pixels in from each edge.
+    async Task<float[]> Plots() => await card.EvaluateAsync<float[]>(@"c => { const clips = [...c.querySelectorAll(':scope > .lumen-viewport > svg > svg')],
+        a = clips[0].getBoundingClientRect(), b = clips[clips.length - 1].getBoundingClientRect(); return [a.left + 12, a.top + 12, a.right - 12, b.bottom - 12]; }");
+    const string band = @"c => { const r = c.querySelector('g.lumen-brush rect'), clips = [...c.querySelectorAll(':scope > .lumen-viewport > svg > svg')], last = clips[clips.length - 1];
+        return r ? [Number(r.getAttribute('width')), Number(r.getAttribute('y')), Number(r.getAttribute('height')), Number(clips[0].getAttribute('y')), Number(last.getAttribute('y')) + Number(last.getAttribute('height')),
+            c.querySelectorAll('g.lumen-readout > *').length, c.querySelector(':scope > .lumen-tooltip').hidden ? 1 : 0, c.querySelectorAll('g.lumen-brush line').length] : []; }";
+    async Task<double[]> Band() => await card.EvaluateAsync<double[]>(band);
+    var tool = card.Locator(".lumen-tools button", new() { HasTextString = "Reset view" });
+
+    await Test($"Dragging across the plots with a mouse draws a band through every pane, hides the readout and zooms to the band; Reset view restores the whole range ({where})", async () =>
+    {
+        await card.ScrollIntoViewIfNeededAsync();
+        await target.Mouse.MoveAsync(1, 1);
+        var before = await Labels();
+        var plots = await Plots();
+        float y = (plots[1] + plots[3]) / 2, from = plots[0] + (plots[2] - plots[0]) * .3f, to = plots[0] + (plots[2] - plots[0]) * .6f;
+        await target.Mouse.MoveAsync(from, y);
+        await target.Mouse.DownAsync();
+        await target.Mouse.MoveAsync(from + 20, y, new() { Steps = 4 });
+        await target.Mouse.MoveAsync(to, y, new() { Steps = 8 });
+        var drawn = await Band();
+        Check(drawn.Length == 8 && drawn[0] > 0 && drawn[1] >= drawn[3] && drawn[1] <= drawn[3] + 12 && drawn[1] + drawn[2] <= drawn[4] && drawn[1] + drawn[2] >= drawn[4] - 12 && drawn[7] == 2,
+            $"the band: {string.Join(", ", drawn)}");
+        Check(drawn[5] == 0 && drawn[6] == 1, "the readout or a tooltip shows while the band is drawn");
+        // The band is the text colour at a tenth, edged in the muted colour, which clears 3:1 on the background and on the band.
+        var contrast = await card.EvaluateAsync<double[]>(@"c => {
+            const rgb = s => s.match(/[\d.]+/g).slice(0, 3).map(Number), lum = v => { const [r, g, b] = v.map(x => { x /= 255; return x <= .03928 ? x / 12.92 : Math.pow((x + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * g + .0722 * b; };
+            const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+            const s = c.querySelector(':scope > .lumen-viewport > svg'), ground = rgb(getComputedStyle(s).backgroundColor), ink = rgb(getComputedStyle(s).color), edge = rgb(getComputedStyle(c.querySelector('g.lumen-brush line')).stroke);
+            const tint = ground.map((v, i) => v + (ink[i] - v) * .1);
+            return [ratio(edge, ground), ratio(edge, tint)]; }");
+        Check(contrast[0] >= 3 && contrast[1] >= 3, $"the band's edge stands {contrast[0]:0.00}:1 on the background and {contrast[1]:0.00}:1 on the band");
+        await target.Mouse.UpAsync();
+        await target.WaitForFunctionAsync("([c, before]) => [...c.querySelectorAll(':scope > .lumen-viewport > svg > text')].map(t => t.textContent).join('|') !== before && !c.querySelector('g.lumen-brush')",
+            new object[] { await card.ElementHandleAsync(), before });
+        // Every pane draws the zoomed stretch alone.
+        var spans = await card.EvaluateAsync<int[][]>("c => { const by = new Map(); for (const m of c.querySelectorAll('.lumen-datum[data-point]')) { const s = m.dataset.series; if (!by.has(s)) by.set(s, []); by.get(s).push(Number(m.dataset.point)); } return [...by.values()].map(v => [Math.min(...v), Math.max(...v)]); }");
+        // A long line is thinned over the window shown, so each of its panes draws the zoomed stretch alone.
+        if (windowed) Check(spans.Length > 0 && spans.All(span => span[0] > 0), $"a pane still draws its first point: {string.Join(" | ", spans.Select(span => string.Join("-", span)))}");
+        await tool.ClickAsync();
+        await target.WaitForFunctionAsync("([c, before]) => [...c.querySelectorAll(':scope > .lumen-viewport > svg > text')].map(t => t.textContent).join('|') === before", new object[] { await card.ElementHandleAsync(), before });
+    });
+
+    await Test($"Escape during a drag lets it go without zooming, and a drag shorter than 8 pixels is a click ({where})", async () =>
+    {
+        await target.Mouse.MoveAsync(1, 1);
+        var before = await Labels();
+        var plots = await Plots();
+        float y = (plots[1] + plots[3]) / 2, from = plots[0] + (plots[2] - plots[0]) * .4f;
+        await target.Mouse.MoveAsync(from, y);
+        await target.Mouse.DownAsync();
+        await target.Mouse.MoveAsync(from + 60, y, new() { Steps = 6 });
+        Check((await Band()).Length == 8, "no band");
+        await target.Keyboard.PressAsync("Escape");
+        Check((await Band()).Length == 0, "Escape left the band");
+        await target.Mouse.UpAsync();
+        await target.WaitForTimeoutAsync(700);
+        Check(await Labels() == before, "Escape zoomed");
+        // A mark pressed and moved 3 pixels is selected, as a click selects it, and nothing zooms.
+        var mark = card.Locator(".lumen-datum[data-point]").Nth(3);
+        var box = (await mark.BoundingBoxAsync())!;
+        var shown = card.Locator(".lumen-status");
+        var was = await shown.TextContentAsync();
+        await target.Mouse.MoveAsync(box.X + box.Width / 2, box.Y + box.Height / 2);
+        await target.Mouse.DownAsync();
+        await target.Mouse.MoveAsync(box.X + box.Width / 2 + 3, box.Y + box.Height / 2, new() { Steps = 2 });
+        Check((await Band()).Length == 0, "a 3-pixel drag drew a band");
+        await target.Mouse.UpAsync();
+        await target.WaitForFunctionAsync("([c, was]) => { const t = c.querySelector('.lumen-status')?.textContent || ''; return t !== was && (t.includes(':') || t.includes(' · ')); }", new object[] { await card.ElementHandleAsync(), was ?? "" });
+        await target.WaitForTimeoutAsync(500);
+        Check(await Labels() == before, "a click zoomed");
+        await target.Mouse.MoveAsync(1, 1);
+    });
+}
+await DragChecks(page, chart, "first page's first chart");
+
 // FitWidth draws a chart at the width its container gives it. The checks run on a host's first fitted chart: the gallery has
 // its fitted charts on the Sports & performance page, where they run below, and a page without one says SKIP.
 async Task FitChecks(IPage target, ILocator fitted, string where)
@@ -898,15 +981,15 @@ if (await sportsLink.CountAsync() > 0)
     var charts = sports.Locator(".lumen-chart");
     // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
-        return svgs.length === 24 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+        return svgs.length === 25 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
-    await Test("The Sports & performance page renders its twenty-four charts, each live and drawn at the width it is shown", async () =>
+    await Test("The Sports & performance page renders its twenty-five charts, each live and drawn at the width it is shown", async () =>
     {
-        Check(await charts.CountAsync() == 24, $"the page shows {await charts.CountAsync()} charts");
-        for (var i = 0; i < 24; i++)
+        Check(await charts.CountAsync() == 25, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 25; i++)
             Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
-        // Each chart's script adds its tooltip, so twenty-four of them prove every chart, sparklines included, is interactive.
-        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 24");
+        // Each chart's script adds its tooltip, so twenty-five of them prove every chart, sparklines included, is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 25");
         await sports.WaitForFunctionAsync(drawnToFit);
     });
 
@@ -954,13 +1037,60 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 24", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 25", null, new() { Timeout = 120_000 });
             await Sparklines(tab, "phone");
         });
     }
     else Console.WriteLine("SKIP sparkline checks: this host's Sports & performance page has no Getting faster? card");
 
     await ReadoutChecks(sports, "Sports & performance page");
+
+    // 0.37.0: the Ride channels card reads six channels at once, zooms by a drag through all six panes, takes a tap on a phone as the
+    // readout, never a band, and keeps every word inside its drawing there.
+    if (await sports.Locator("#ride-channels .lumen-chart").CountAsync() > 0)
+    {
+        var ride = sports.Locator("#ride-channels .lumen-chart");
+        await Test("Ride channels: the shared readout reads all six channels in legend order, saying once that each is an average of a 12-second slice", async () =>
+        {
+            await ride.ScrollIntoViewIfNeededAsync();
+            await sports.WaitForFunctionAsync(drawnToFit);
+            var box = (await ride.Locator(".lumen-viewport > svg").BoundingBoxAsync())!;
+            await sports.Mouse.MoveAsync(box.X + box.Width * .45f, box.Y + box.Height * .5f);
+            var tip = ride.Locator(".lumen-tooltip");
+            await tip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            var lines = ((await tip.TextContentAsync()) ?? "").Split('\n');
+            var legend = (await ride.Locator(".lumen-legend button").AllTextContentsAsync()).Select(t => t.Trim()).ToArray();
+            Check(legend.Length == 6 && lines.Length == 7 && lines[0].EndsWith(" · average of 12 s") && lines.Skip(1).Select((line, i) => line.StartsWith(legend[i] + " ") && !line.Contains("average")).All(b => b), string.Join(" / ", lines));
+            // Every header stands whole, none cut with an ellipsis.
+            Check(await ride.EvaluateAsync<int>("c => [...c.querySelectorAll('text.lumen-pane-title')].filter(t => t.textContent.endsWith('…')).length") == 0, "a header was cut");
+            Check(await ride.EvaluateAsync<int>("c => c.querySelectorAll('g.lumen-readout circle').length") == 12 && await ride.Locator(".lumen-datum[data-point]").CountAsync() <= 6 * 600, "the rings or the marks");
+            await sports.Mouse.MoveAsync(1, 1);
+        });
+        await DragChecks(sports, ride, "Ride channels card", windowed: true);
+        await Test("Ride channels on a 375-pixel phone: a tap shows the readout and draws no band, and every header and word stands inside the drawing", async () =>
+        {
+            await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+            var tab = await phone.NewPageAsync();
+            tab.SetDefaultTimeout(15_000);
+            await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 25", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
+            var card = tab.Locator("#ride-channels .lumen-chart");
+            await card.ScrollIntoViewIfNeededAsync();
+            await tab.WaitForTimeoutAsync(400);
+            var box = (await card.Locator(".lumen-viewport > svg").BoundingBoxAsync())!;
+            await tab.Touchscreen.TapAsync(box.X + box.Width * .6f, box.Y + box.Height * .5f);
+            var tip = card.Locator(".lumen-tooltip");
+            await tip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            Check(((await tip.TextContentAsync()) ?? "").Split('\n').Length == 7 && await card.EvaluateAsync<int>("c => c.querySelectorAll('g.lumen-brush').length") == 0, "the tap");
+            var measured = await card.EvaluateAsync<double[]>(@"c => { const s = c.querySelector(':scope > .lumen-viewport > svg'), box = s.getBoundingClientRect(), texts = [...s.querySelectorAll('text')];
+                const outside = texts.filter(t => { const b = t.getBoundingClientRect(); return b.width > 0 && (b.left < box.left - .5 || b.right > box.right + .5 || b.top < box.top - .5 || b.bottom > box.bottom + .5); }).length;
+                return [s.querySelectorAll('text.lumen-pane-title').length, outside, texts.length, Number(s.getAttribute('viewBox').split(' ')[2]), box.width, document.documentElement.scrollWidth]; }");
+            Check(measured[0] == 6 && measured[1] == 0 && measured[3] <= 375 && Math.Abs(measured[4] - measured[3]) < 1.5 && measured[5] <= 375, string.Join(", ", measured));
+            Check(await card.EvaluateAsync<int>("c => [...c.querySelectorAll('text.lumen-pane-title')].filter(t => t.textContent.endsWith('…')).length") == 0, "a header was cut on the phone");
+        });
+    }
+    else Console.WriteLine("SKIP Ride channels checks: this host's Sports & performance page has no Ride channels card");
 
     // Each sweep runs with the performance chart's shared readout showing, its guide, rings and tooltip included.
     async Task Hovered(IPage target)
@@ -1043,7 +1173,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 24", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 25", null, new() { Timeout = 120_000 });
             await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
             var card = tab.Locator("#field .lumen-chart");
             await card.ScrollIntoViewIfNeededAsync();
@@ -1059,7 +1189,7 @@ if (await sportsLink.CountAsync() > 0)
             Check(measured[0] > 10 && measured[1] == 0, $"{measured[1]} of the card's {measured[0]} texts run outside its drawing");
             // Its title, its description and its source on two lines, the card drawn at the width it is shown and the page not scrolling sideways.
             Check(measured[2] == 4 && measured[6] <= 375 && Math.Abs(measured[7] - measured[6]) < 1.5 && measured[8] <= 375, $"{measured[2]} lines written from the left, drawn {measured[6]} wide and shown {measured[7]:0.#}, the page {measured[8]} wide");
-            Check(measured[3] == 21 && measured[4] >= 63 && measured[5] == 0, $"{measured[5]} of the {measured[4]} titles, descriptions and sources of {measured[3]} charts run outside their drawings");
+            Check(measured[3] == 22 && measured[4] >= 66 && measured[5] == 0, $"{measured[5]} of the {measured[4]} titles, descriptions and sources of {measured[3]} charts run outside their drawings");
         });
     else Console.WriteLine("SKIP field phone check: this host's Sports & performance page has no How the field finished");
     await sports.CloseAsync();

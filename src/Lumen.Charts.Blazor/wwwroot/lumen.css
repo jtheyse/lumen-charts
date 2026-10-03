@@ -5,3 +5,5 @@
 .lumen-tooltip{position:absolute;z-index:5;pointer-events:none;transform:translate(-50%,-100%);background:var(--lumen-tooltip-bg,#1d2436);color:var(--lumen-tooltip-fg,#f4f7fd);border:1px solid #ffffff26;font-size:12px;line-height:1.35;padding:6px 10px;border-radius:6px;max-width:280px;box-shadow:0 6px 20px #1d24363d}.lumen-spark>.lumen-tooltip{width:max-content}
 
 .lumen-readout-tip{transform:none;white-space:pre-line;width:max-content}.lumen-readout-tip::first-line{font-weight:600}.lumen-keys{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
+
+.lumen-brushing,.lumen-brushing *{-webkit-user-select:none;user-select:none;cursor:col-resize}

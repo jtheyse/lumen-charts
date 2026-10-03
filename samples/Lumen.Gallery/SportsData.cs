@@ -37,6 +37,11 @@ public sealed record Season(IReadOnlyList<Session> Sessions, IReadOnlyList<(Date
     public IReadOnlyList<Session> Upcoming { get; init; } = [];
 }
 
+/// <summary>An invented ride as a bike computer records it, one sample a second: heart rate in bpm, missing where the strap dropped
+/// out; power in watts; cadence in rpm, 0 while coasting; speed in metres per second; elevation in metres; and temperature in °C.</summary>
+public sealed record Ride(IReadOnlyList<double?> HeartRate, IReadOnlyList<double> Power, IReadOnlyList<double> Cadence, IReadOnlyList<double> Speed,
+    IReadOnlyList<double> Elevation, IReadOnlyList<double> Temperature);
+
 /// <summary>A chart on the Sports &amp; performance page, with the plain title above it and a one-line note, in which code is
 /// set between backticks.</summary>
 public sealed record SportsCard(string Section, string Id, string Title, string Note, bool Wide, ChartSpec Spec)
@@ -116,6 +121,40 @@ public static class SportsData
 
     public static Season Season => season.Value;
     private static readonly Lazy<Season> season = new(Simulate);
+
+    /// <summary>How long the invented long ride lasts, in seconds, one sample each.</summary>
+    public const int RideSeconds = 7200;
+    /// <summary>The second the heart-rate strap drops out at, and how long it stays out.</summary>
+    public const int DropoutAt = 3720, DropoutSeconds = 45;
+    /// <summary>The road's height in metres a given second into the long ride: long rolling climbs with shorter rises on them.</summary>
+    private static double RideHeight(int second) => 140 + 55 * Math.Sin(second / 380.0 - 1.3) + 18 * Math.Sin(second / 116.0 + .4);
+    /// <summary>
+    /// An invented two-hour ride, apart from the simulated season, worked out from sines so it is the same on every run: ten minutes'
+    /// warm-up, then a steady effort that rises on each climb and stops on the steeper descents, where cadence falls to 0 and speed
+    /// rises; heart rate follows the power a minute behind; the air warms through the morning; and the heart-rate strap drops out for
+    /// <see cref="DropoutSeconds"/> seconds a little after the hour, leaving those samples missing, never zero.
+    /// </summary>
+    public static Ride LongRide()
+    {
+        var heart = new double?[RideSeconds];
+        double[] power = new double[RideSeconds], cadence = new double[RideSeconds], speed = new double[RideSeconds],
+            elevation = new double[RideSeconds], temperature = new double[RideSeconds];
+        var pulse = 92d;
+        for (var t = 0; t < RideSeconds; t++)
+        {
+            var climb = RideHeight(t + 1) - RideHeight(t);
+            var effort = t < 600 ? 120 + t / 6d : 215;
+            var watts = climb < -.2 ? 0 : Math.Max(0, effort + 450 * climb + 28 * Math.Sin(t * 1.7) + 16 * Math.Sin(t * .31 + 1));
+            power[t] = Math.Round(watts);
+            cadence[t] = watts == 0 ? 0 : Math.Round(85 + (watts - 215) / 25 + 3 * Math.Sin(t * .83));
+            speed[t] = Math.Round(Math.Clamp(8.6 - 9 * climb + .4 * Math.Sin(t / 50d), 3.5, 16), 2);
+            elevation[t] = Math.Round(RideHeight(t), 1);
+            temperature[t] = Math.Round(17.5 + 5.5 * t / RideSeconds + .6 * Math.Sin(t / 700d), 1);
+            pulse += (88 + .3 * watts - pulse) / 60;
+            heart[t] = t >= DropoutAt && t < DropoutAt + DropoutSeconds ? null : Math.Round(pulse);
+        }
+        return new(heart, power, cadence, speed, elevation, temperature);
+    }
 
     // Heart rate an effort settles at, as a fraction of threshold heart rate, against the effort as a fraction of threshold power.
     private static readonly (double Effort, double Heart)[] HeartCurve =
@@ -733,6 +772,37 @@ public static class SportsData
                 { Color = Steepness(Grade(k)) }).ToArray(), zones[0]) { Fill = AreaFill.Fade }]
         };
 
+        // The invented long ride, channel by channel: six plots of equal height on one elapsed-time axis, each named above it with its
+        // average, highest and lowest, worked out here with a missing sample left out, never counted as zero, and no tick labels up the
+        // side. The headers are short, their key fact first, so each stands whole on a phone. Each channel's 7,200 seconds are drawn as 600 averages of about 12 seconds, so the lines read as the ride rather than as
+        // its noise, and the shared readout reads all six at once. Speed is recorded in metres per second and drawn in km/h.
+        var ride = LongRide();
+        string Header(string name, IEnumerable<double?> values, string unit, string format = "0")
+        {
+            var present = values.OfType<double>().ToArray();
+            return $"{name} · avg {Text(present.Average(), format)} · max {Text(present.Max(), format)} · min {Text(present.Min(), format)} {unit}";
+        }
+        ChartSeries Channel(string name, IEnumerable<double?> values, int pane) =>
+            new(name, values.Select((value, t) => new ChartPoint(t, value)).ToArray()) { Pane = pane, Markers = MarkerStyle.None, StrokeWidth = 1.5 };
+        IEnumerable<double?> Present(IEnumerable<double> values) => values.Select(value => (double?)value);
+        var kmh = ride.Speed.Select(metres => (double?)Math.Round(metres * 3.6, 1)).ToArray();
+        var channels = Chart(wide, 760) with
+        {
+            Kind = ChartKind.Line, XFormat = ValueFormat.Duration, Sampling = SamplingMethod.Average, MaxRenderedPoints = 600,
+            YTickLabels = TickLabels.None, PaneTitles = PaneTitlePlacement.Above, SharedReadout = true,
+            Title = $"{Text(ride.Speed.Sum() / 1000, "0.0")} km in {Clock(RideSeconds)}, {Text(ride.Power.Average())} W average",
+            Description = "An invented long ride, one sample a second, each channel averaged over 12 seconds",
+            XLabel = "Elapsed time", YLabel = Header("HR", ride.HeartRate, "bpm"),
+            Panes = [
+                new() { Label = Header("Power", Present(ride.Power), "W"), Weight = 1 },
+                new() { Label = Header("Cadence", Present(ride.Cadence), "rpm"), Weight = 1 },
+                new() { Label = Header("Speed", kmh, "km/h"), Weight = 1 },
+                new() { Label = Header("Elevation", Present(ride.Elevation), "m"), Weight = 1 },
+                new() { Label = Header("Temp", Present(ride.Temperature), "°C", "0.0"), Weight = 1 }],
+            Series = [Channel("Heart rate", ride.HeartRate, 0), Channel("Power", Present(ride.Power), 1), Channel("Cadence", Present(ride.Cadence), 2),
+                Channel("Speed", kmh, 3), Channel("Elevation", Present(ride.Elevation), 4), Channel("Temperature", Present(ride.Temperature), 5)]
+        };
+
         // Power for every duration over the rides of each month, and the critical-power fit to this month's.
         var september = MonthBest(season, 9);
         var august = MonthBest(season, 8);
@@ -907,6 +977,7 @@ public static class SportsData
             new("session", "splits", "Pace by kilometre", "Each kilometre's split on a reversed duration axis, with a `Trend` line and the race's goal pace.", false, pace),
             new("session", "laps", "Laps", "One `ChartPoint.Block` per lap of the progression, as wide as the lap is long and as high as its pace on a reversed duration axis, with the run's average pace as a reference line; its distance axis is the elevation's below.", true, lapChart),
             new("session", "elevation", "Elevation coloured by grade", "The same route as an area, each 100 m segment taking a point `Color` from its grade band.", true, elevation),
+            new("ride", "ride-channels", "Ride channels", "Six `Panes` of equal height on one elapsed-time axis, each named above its plot by `PaneTitles.Above` with its average, high and low, and no tick labels up the side, `TickLabels.None`; `SamplingMethod.Average` draws each channel's 7,200 seconds as 600 averages, the heart-rate strap's dropout stays a gap, and `SharedReadout` reads all six at the second under the pointer. Drag across the plots to zoom in on a stretch; Reset view draws the whole ride.", true, channels),
             new("fitness", "power-curve", "Power–duration curve", "`Training.MeanMaximal` over this month's rides against last month's on a logarithmic duration axis, with the `Training.CriticalPower` fit as a reference line.", false, power),
             new("fitness", "records", "5 km record progression", "Each week's fastest 5 km inside a run, and the record as a `LineCurve.Step` envelope on a reversed axis, so faster is higher.", false, best),
             new("fitness", "getting-faster", "Getting faster?", "Word-sized `Sparkline` charts, no axes, beside the numbers they draw: each week's fastest 5 km and each session's fastest kilometre, faster higher, every time faster than all before it ringed by a `Highlight` and noted `· PB` so its tooltip says why; and an invented weekly weigh-in in grey alone, its axis held at least 8 kg tall by `YMinSpan` so a few hundred grams read as steady.", true, fiveK.Spec)

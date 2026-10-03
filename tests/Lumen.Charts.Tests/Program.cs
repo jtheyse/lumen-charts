@@ -2739,8 +2739,10 @@ Test("Panes are refused where they cannot be drawn, each with its reason",()=>{
     Check(Refusal(spec with{Series=[..spec.Series,new("Lost",[new(0,1)]){Pane=-1}]}).Contains("pane is 0"));
     Check(Refusal(spec with{Series=[spec.Series[0],spec.Series[2]]}).Contains("pane 1 has none"));
     Check(Refusal(spec with{Series=spec.Series.Skip(1).ToArray()}).Contains("pane 0 has none"));
-    Check(Refusal(spec with{Panes=[new(),new(),new(),new()]}).Contains("at most four panes")&&Refusal(spec with{Panes=null!}).Contains("at most four panes"));
+    // From 0.37.0 a chart takes six plots, the main one and five panes, and refuses a seventh.
+    Check(Refusal(spec with{Panes=[new(),new(),new(),new(),new(),new()]}).Contains("at most six plots")&&Refusal(spec with{Panes=null!}).Contains("at most six plots"));
     ChartSvg.Render(spec with{Panes=[..spec.Panes,new()],Series=[..spec.Series,new("Fourth",[new(0,1)]){Pane=3}]});
+    ChartSvg.Render(spec with{Panes=[..spec.Panes,new(),new(),new()],Series=[..spec.Series,new("Fourth",[new(0,1)]){Pane=3},new("Fifth",[new(0,1)]){Pane=4},new("Sixth",[new(0,1)]){Pane=5}]});
     foreach(var weight in new[]{0,-1,double.NaN,double.PositiveInfinity,1e101})
         Check(Refusal(spec with{Panes=[spec.Panes[0] with{Weight=weight},spec.Panes[1]]}).Contains("weight"),$"{weight}");
     Check(Refusal(spec with{Panes=[spec.Panes[0],null!]}).Contains("cannot be null"));
@@ -3702,11 +3704,11 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: twenty-four charts in twenty-one cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+Test("Sports page: twenty-five charts in twenty-two cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
     // 0.34.0's Getting faster? card draws three sparklines in place of one chart; they are checked on their own below. 0.35.0 adds
-    // How the field finished to the Racing section.
-    Check(sports.Count==21&&sports.Select(card=>card.Id).Distinct().Count()==21&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
-        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==24,"the page should have twenty-four charts in twenty-one cards");
+    // How the field finished to the Racing section, and 0.37.0 Ride channels in a Long ride section of its own.
+    Check(sports.Count==22&&sports.Select(card=>card.Id).Distinct().Count()==22&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
+        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==25,"the page should have twenty-five charts in twenty-two cards");
     // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order; 0.33.0's Racing section stands
     // before it.
     Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
@@ -4219,16 +4221,18 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // since 0.32.0, each series' trend fit, window and degree, written after its trend, and since 0.33.0 the chart's X ticks, written
     // after its X label, and each series' change colours, written after its value labels, and since 0.34.0 the chart's sparkline,
     // written after its height, and since 0.35.0 the chart's X tick labels, written after its X ticks, and since 0.36.0 the chart's shared
-    // readout, written last, which is never hashed.
+    // readout, written last, which is never hashed, and since 0.37.0 the chart's sampling, written after its rendered points, and its pane
+    // titles, written after its panes.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
     const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"SharedReadout\":false}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
-    Check(json.EndsWith(defaults)&&json.Contains(trended)&&json.Contains(ticked)&&json.Contains(changed)&&json.Contains(sparked),json[^120..]);
-    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(defaults,"}").Replace(trended,"\"Trend\":false,")
-        .Replace(ticked,"\"XLabel\":\"\",").Replace(changed,"\"ValueLabels\":false").Replace(sparked,"\"Height\":420,"))))[..12].ToLowerInvariant();
+    const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
+    Check(json.EndsWith(defaults)&&json.Contains(trended)&&json.Contains(ticked)&&json.Contains(changed)&&json.Contains(sparked)&&json.Contains(sampled)&&json.Contains(titled),json[^120..]);
+    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(titled,"\"Panes\":[],").Replace(defaults,"}").Replace(trended,"\"Trend\":false,")
+        .Replace(ticked,"\"XLabel\":\"\",").Replace(changed,"\"ValueLabels\":false").Replace(sparked,"\"Height\":420,").Replace(sampled,"\"MaxRenderedPoints\":1200,"))))[..12].ToLowerInvariant();
     Check(Prefix(ChartSvg.Render(faded))==before,$"{Prefix(ChartSvg.Render(faded))} is not 0.25.0's {before}");
     // Gauges and rings define no IDs: a gradient gauge draws its arc in pieces.
     var strain=Gauge(14) with{YMax=21,Series=[new("Strain",[new(0,14)]){Gradient=[new(0,"#3F87D9"),new(21,"#DD4B45")]}]};
@@ -6521,7 +6525,7 @@ Test("Sports page: Getting faster? rings each time faster than all before it, fr
             Check(!Svg(line.Spec with{Style=style}).Descendants(ns+"text").Any(),$"{line.Name} wrote a word");
         }
     // The page draws each at its own size beside its words, and its sparklines and charts number twenty-four.
-    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==24,"the page's count");
+    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==25,"the page's count");
 });
 // 0.35.0: how the field finished, and text that fits. Blocks keep a visible height; an annotation can draw its label without its value
 // and stand over the data; an X axis chooses which of its labels it writes, and either axis can label just its two ends; and a chart's
@@ -7012,6 +7016,304 @@ Test("Sports page: Performance management stands in two panes, fitness and fatig
     Check(readout.Columns.Count==spec.Series[0].Points.Count&&column.Entries.Select(e=>e.Text.Split(' ')[0]).SequenceEqual(["Fitness","Fatigue","Form","Daily"])&&column.Label==TimeAxis.Moment(today).ToString("d MMM yyyy",CultureInfo.InvariantCulture),column.Text);
     // The upper pane's clip reaches 12 past its plot for the ring round race-day fitness, and the lower one's 6.
     Check(form>0&&readout.Top==Attr(doc.Root!.Elements(ns+"svg").First(),"y")+12&&Close(readout.Bottom,Attr(doc.Root!.Elements(ns+"svg").Last(),"y")+Attr(doc.Root!.Elements(ns+"svg").Last(),"height")-6),"the guide's ends");
+});
+// 0.37.0: ride channels. SamplingMethod.Average draws a long line as the means of equal slices of the X range shown; a run longer than
+// the budget is thinned over the visible window only; the shared readout reads the points drawn; a chart takes six plots; a pane labels
+// its own ticks, TickLabels.None writing none; and PaneTitles.Above names each plot over it. Every example is invented.
+ChartSpec Long37(int count,int budget=16,SamplingMethod sampling=SamplingMethod.Average,Func<int,double?>? y=null)=>new(){Title="Long",Kind=ChartKind.Line,
+    Sampling=sampling,MaxRenderedPoints=budget,Series=[new("S",Enumerable.Range(0,count).Select(i=>new ChartPoint(i,y is null?i:y(i))).ToArray()){Markers=MarkerStyle.Filled}]};
+string[] Names37(XDocument doc,int series=0)=>Datums(doc,series).Select(m=>m.Attribute("aria-label")!.Value).ToArray();
+int[] Points37(XDocument doc,int series=0)=>Datums(doc,series).Select(m=>int.Parse(m.Attribute("data-point")!.Value,CultureInfo.InvariantCulture)).ToArray();
+// An invented ride of `seconds` one-second samples on three channels, the first missing for 45 seconds from `dropout` when it is set.
+ChartSpec Ride37(int seconds,int? dropout=null,int budget=600,SamplingMethod sampling=SamplingMethod.Average)=>new(){Title="Ride",Kind=ChartKind.Line,
+    XFormat=ValueFormat.Duration,Sampling=sampling,MaxRenderedPoints=budget,SharedReadout=true,YTickLabels=TickLabels.None,PaneTitles=PaneTitlePlacement.Above,
+    YLabel="Heart rate",Panes=[new(){Label="Power",Weight=1},new(){Label="Cadence",Weight=1}],
+    Series=[new("Heart rate",Enumerable.Range(0,seconds).Select(t=>new ChartPoint(t,dropout is {} d&&t>=d&&t<d+45?null:Math.Round(140+20*Math.Sin(t/300d)))).ToArray()){Markers=MarkerStyle.None},
+        new("Power",Enumerable.Range(0,seconds).Select(t=>new ChartPoint(t,Math.Round(200+60*Math.Sin(t/90d)+15*Math.Sin(t*1.7)))).ToArray()){Pane=1,Markers=MarkerStyle.None},
+        new("Cadence",Enumerable.Range(0,seconds).Select(t=>new ChartPoint(t,Math.Round(85+4*Math.Sin(t*.83)))).ToArray()){Pane=2,Markers=MarkerStyle.None}]};
+Test("SamplingMethod.Average draws a long line as one point a slice, at the mean X and mean Y of its points, named as the average of them; a series within the budget is drawn whole",()=>{
+    // 64 points from 0 to 63 in 16 slices of 4: the first mark stands for points 0 to 3, at X and Y 1.5, the last for 60 to 63.
+    var doc=Svg(Long37(64));
+    var names=Names37(doc);
+    Check(names.Length==16&&names.All(n=>n.EndsWith(", average of 4 points")),string.Join(" | ",names));
+    // Each average is written as precisely as the values it averages, whole numbers here, half rounding away from zero.
+    Check(names[0]=="S: 1.5, 2, average of 4 points"&&names[^1]=="S: 61.5, 62, average of 4 points",names[0]);
+    // Values in tenths average to tenths, and in hundredths or finer to hundredths, at most.
+    Check(Names37(Svg(Long37(64,y:i=>i*.25)))[0]=="S: 1.5, 0.38, average of 4 points"&&Names37(Svg(Long37(64,y:i=>Math.Round(i*.2,1))))[0]=="S: 1.5, 0.3, average of 4 points"
+        &&Names37(Svg(Long37(64,y:i=>i*.0001+1)))[0]=="S: 1.5, 1, average of 4 points",string.Join(" | ",Names37(Svg(Long37(64,y:i=>i*.25)))[0],Names37(Svg(Long37(64,y:i=>Math.Round(i*.2,1))))[0]));
+    Check(Points37(doc).SequenceEqual(Enumerable.Range(0,16).Select(j=>4*j)),"each average reports its slice's first point");
+    // Its tooltip says the same, and it stands at its mean: X 1.5 of 0 to 63 across the plot from 76 to 870.
+    var first=Datums(doc,0)[0];
+    Check(first.Element(ns+"title")!.Value==names[0]&&Close(Attr(first.Element(ns+"circle")!,"cx"),76+1.5/63*794),"the first average's place or tooltip");
+    // Uneven slices: 70 points in 16 slices hold 4 or 5 each, and every point is counted once.
+    var uneven=Names37(Svg(Long37(70)));
+    Check(uneven.Sum(n=>int.Parse(n.Split("average of ")[1].Split(' ')[0],CultureInfo.InvariantCulture))==70&&uneven.All(n=>n.Contains("average of 4 points")||n.Contains("average of 5 points")),string.Join(" | ",uneven));
+    // Within the budget the series is drawn whole, as MinMax draws it, with no average in any name.
+    Check(ChartSvg.Render(Long37(16))==ChartSvg.Render(Long37(16,sampling:SamplingMethod.MinMax))&&!ChartSvg.Render(Long37(16)).Contains("average of"),"a series within the budget");
+    // MinMax, the default, is drawn as before: the same marks Sampling.MinMax picks, and the same SVG as a spec that leaves it unset.
+    var wave=Long37(500,40,SamplingMethod.MinMax,i=>Math.Sin(i/7d)*10+i%5);
+    Check(ChartSvg.Render(wave)==ChartSvg.Render(wave with{Sampling=default})&&Points37(Svg(wave)).SequenceEqual(Sampling.MinMax(wave.Series[0].Points,40)),"MinMax moved");
+    // Averages smooth the noise MinMax keeps: the drawn range of a wave with spikes is narrower.
+    double Range(XDocument d)=>Datums(d,0).Select(m=>Attr(m.Element(ns+"circle")!,"cy")).Max()-Datums(d,0).Select(m=>Attr(m.Element(ns+"circle")!,"cy")).Min();
+    var spiky=Long37(2000,100,SamplingMethod.MinMax,i=>i%50==0?100:Math.Sin(i/100d)*10);
+    Check(Range(Svg(spiky with{Sampling=SamplingMethod.Average}))<Range(Svg(spiky))/2,"the averages kept the spikes");
+    // An area averages the same way and closes its fill under its first and last average; a column series is never averaged.
+    var area=Svg(Long37(64) with{Kind=ChartKind.Area});
+    Check(Names37(area).Length==16&&Names37(area).All(n=>n.EndsWith("average of 4 points")),"the area");
+    var columns=Svg(Long37(64) with{Series=[Long37(64).Series[0] with{Kind=ChartKind.Column,Markers=MarkerStyle.Auto}]});
+    Check(Names37(columns).Length==64&&!ChartSvg.Render(Long37(64) with{Series=[Long37(64).Series[0] with{Kind=ChartKind.Column,Markers=MarkerStyle.Auto}]}).Contains("average of"),"columns were averaged");
+    // Classic draws the same marks.
+    Check(Names37(Svg(Classic(Long37(64)))).SequenceEqual(names),"the classic finish");
+});
+Test("Average keeps a missing value a gap, keeps a highlighted point and the highlighted last point as marks of their own beside their slice's average, and colours a slice whose points share a colour",()=>{
+    // 64 points with 30 to 33 missing: two runs, each drawn on the same slices, with no mark or stroke across the gap.
+    var gapped=Svg(Long37(64,y:i=>i is >= 30 and < 34?null:i));
+    var marks=Datums(gapped,0).Select(m=>(X:Attr(m.Element(ns+"circle")!,"cx"),Name:m.Attribute("aria-label")!.Value)).ToArray();
+    double At(double x)=>76+x/63*794;
+    Check(!marks.Any(m=>m.X>At(29.5)+1e-6&&m.X<At(34)-1e-6),string.Join(" | ",marks.Select(m=>m.Name)));
+    Check(marks.Any(m=>m.Name=="S: 28.5, 29, average of 2 points")&&marks.Any(m=>m.Name=="S: 34.5, 35, average of 2 points"),"the slices at the gap's edges");
+    var strokes=gapped.Descendants(ns+"path").Where(p=>(string?)p.Attribute("fill")=="none").ToArray();
+    Check(strokes.Length==2,$"{strokes.Length} strokes for two runs");
+    // A highlighted point keeps its own ringed mark, at its own value, beside the average of its slice, which the slice's first other
+    // point names; the stroke runs through the averages alone.
+    var ringed=Long37(64) with{Series=[Long37(64).Series[0] with{Points=Long37(64).Series[0].Points.Select((p,i)=>i is 4 or 9?p with{Highlight="#DD4B45",ValueNote=" · PB"}:p).ToArray()}]};
+    var doc=Svg(ringed);
+    Check(Points37(doc).Count(i=>i==4)==1&&Points37(doc).Count(i=>i==9)==1&&Points37(doc).Contains(5)&&Points37(doc).Contains(8)&&Points37(doc).Length==18,string.Join(",",Points37(doc)));
+    var four=Datums(doc,0).Single(m=>m.Attribute("data-point")!.Value=="4");
+    Check(four.Attribute("aria-label")!.Value=="S: 4, 4 · PB"&&four.Element(ns+"circle")!.Attribute("fill")!.Value=="#DD4B45","the highlighted point");
+    Check(Names37(doc).Single(n=>n.StartsWith("S: 5.5,"))=="S: 5.5, 6, average of 4 points","its slice's average");
+    var stroke=doc.Descendants(ns+"path").Single(p=>(string?)p.Attribute("fill")=="none").Attribute("d")!.Value;
+    Check(stroke.Split(' ').Length==16,$"the stroke runs through {stroke.Split(' ').Length} points");
+    // The last point keeps its ring, at its own value, beside the last slice's average.
+    var last=Svg(Long37(64) with{Series=[Long37(64).Series[0] with{HighlightLast=true}]});
+    var end=Datums(last,0).Single(m=>m.Attribute("data-point")!.Value=="63");
+    Check(end.Elements(ns+"circle").Count()==2&&end.Attribute("aria-label")!.Value=="S: 63, 63"&&Names37(last).Contains("S: 61.5, 62, average of 4 points"),"the last point's ring");
+    // Points of one colour colour their average; mixed colours leave it the series' colour.
+    var inked=Long37(64) with{Series=[Long37(64).Series[0] with{Points=Long37(64).Series[0].Points.Select((p,i)=>p with{Color=i<4?"#2E9B58":i==5?"#DD4B45":null}).ToArray()}]};
+    var circles=Datums(Svg(inked),0).Select(m=>m.Element(ns+"circle")!.Attribute("fill")!.Value).ToArray();
+    Check(circles[0]=="#2E9B58"&&circles[1]==ChartStyle.Light.Series[0]&&circles[2]==ChartStyle.Light.Series[0],string.Join(",",circles));
+    // A change-coloured series averages without a change of its own.
+    var changed=Svg(Long37(64) with{Series=[Long37(64).Series[0] with{ChangeColors=ChangeColors.HigherIsBetter}]});
+    Check(Names37(changed).All(n=>!n.Contains("previous")),"an average named a change");
+});
+Test("A run longer than the budget is thinned over the X range shown, with the nearest point outside at each side; a run within it is drawn whole, in both methods",()=>{
+    foreach(var sampling in new[]{SamplingMethod.MinMax,SamplingMethod.Average})
+    {
+        var spec=Long37(6000,100,sampling,i=>Math.Sin(i/40d)*20+i%7);
+        // Zoomed to 1000 to 4000 the marks stand for points 999 to 4001 alone, the two outside drawn as they are.
+        var zoomed=Svg(spec with{XMin=1000,XMax=4000});
+        var points=Points37(zoomed);
+        Check(points.Min()==999&&points.Max()==4001&&points.Length<=103,$"{sampling}: {points.Length} marks from {points.Min()} to {points.Max()}");
+        Check(Names37(zoomed)[0].StartsWith("S: 999,")&&!Names37(zoomed)[0].Contains("average"),Names37(zoomed)[0]);
+        // Zoomed far enough, 50 seconds and the two beside them, every point is drawn.
+        var close=Points37(Svg(spec with{XMin=2000,XMax=2049}));
+        Check(close.SequenceEqual(Enumerable.Range(1999,52)),$"{sampling}: {close.Length} marks");
+        // A window between two points keeps those two, so the line still crosses the plot.
+        var between=Points37(Svg(spec with{XMin=2000.2,XMax=2000.8}));
+        Check(between.SequenceEqual([2000,2001]),$"{sampling}: {string.Join(",",between)}");
+        // A run within the budget is drawn whole, outside the window too, as before 0.37.0.
+        var whole=Points37(Svg(Long37(50,100,sampling) with{XMin=10,XMax=20}));
+        Check(whole.SequenceEqual(Enumerable.Range(0,50)),$"{sampling}: {whole.Length} marks within the budget");
+        // A run wholly outside the window draws nothing; the run in view is drawn.
+        var parted=Long37(3000,100,sampling,i=>i is >= 1000 and < 1010?null:i%13);
+        var shown=Points37(Svg(parted with{XMin=1500,XMax=2500}));
+        Check(shown.Min()==1499&&shown.Max()==2501,$"{sampling}: {shown.Min()} to {shown.Max()}");
+    }
+    // A band's central line and outline keep their whole run, as they always did.
+    var band=new ChartSpec{Title="B",Kind=ChartKind.Band,MaxRenderedPoints=50,XMin=100,XMax=200,Series=[new("F",Enumerable.Range(0,600).Select(i=>ChartPoint.Interval(i,i%9,i%9-1,i%9+1)).ToArray())]};
+    Check(Points37(Svg(band)).Min()<99,"a band was windowed");
+});
+Test("The shared readout reads the points the chart draws, an average as its mark is named, so a four-hour ride reads one X a mark rather than one a second",()=>{
+    var ride=Ride37(14_400);
+    var readout=ChartSvg.Readout(ride);
+    Check(readout.Columns.Count==600&&readout.Columns.All(c=>c.Entries.Count==3),$"{readout.Columns.Count} columns");
+    // The column says once what its averages take in, a 24-second slice, and each entry reads its average alone.
+    Check(readout.Columns[0].Entries.All(e=>!e.Text.Contains("average")&&e.Count==24)&&readout.Columns[0].Label=="0:12 · average of 24 s"&&readout.Columns[0].Text.StartsWith("0:12 · average of 24 s · Heart rate "),readout.Columns[0].Text);
+    // Each entry stands where its mark does and names its slice's first point.
+    var doc=Svg(ride);
+    foreach(var column in readout.Columns.Where((_,i)=>i%97==0))
+        foreach(var entry in column.Entries)
+        {
+            var mark=doc.Descendants(ns+"g").Single(g=>(string?)g.Attribute("data-series")==entry.Series.ToString(CultureInfo.InvariantCulture)&&(string?)g.Attribute("data-point")==entry.Point.ToString(CultureInfo.InvariantCulture));
+            var circle=mark.Element(ns+"circle")!;
+            Check(Close(Attr(circle,"cx"),column.Position)&&Close(Attr(circle,"cy"),entry.Position!.Value)&&mark.Attribute("aria-label")!.Value.EndsWith($", {entry.Text.Split(' ')[^1]}, average of 24 points"),entry.Text);
+        }
+    // MinMax reads its own thinned points, at most its budget a series.
+    var alone=Ride37(14_400,budget:1200,sampling:SamplingMethod.MinMax);
+    var thinned=ChartSvg.Readout(alone with{Panes=[],Series=[alone.Series[0]]});
+    Check(thinned.Columns.Count<=1200&&thinned.Columns.Count>600&&!thinned.Columns[5].Text.Contains("average"),$"{thinned.Columns.Count} columns");
+    // A dropout in one channel stays a gap: its slices around it are read missing or not at all, the others read throughout, and the
+    // columns stay within the budget but for the two slices the gap cuts.
+    var dropped=ChartSvg.Readout(Ride37(7200,dropout:3600));
+    Check(dropped.Columns.Count<=602&&dropped.Columns.Count(c=>c.Entries.Count==3)>=595,$"{dropped.Columns.Count} columns, {dropped.Columns.Count(c=>c.Entries.Count==3)} of all three");
+    Check(dropped.Columns.Where(c=>c.X>3612&&c.X<3630).All(c=>c.Entries.All(e=>e.Series!=0)||c.Entries.Single(e=>e.Series==0).Text=="Heart rate missing"),"the dropout read a value");
+    // Zoomed in, the readout reads every second.
+    var zoomed=ChartSvg.Readout(ride with{XMin=1000,XMax=1199});
+    string At1000(int series)=>LinearScale.Label(ride.Series[series].Points[1000].Y!.Value);
+    Check(zoomed.Columns.Count==200&&zoomed.Columns[0].Text==$"16:40 · Heart rate {At1000(0)} · Power {At1000(1)} · Cadence {At1000(2)}",zoomed.Columns[0].Text);
+    // The gallery's ride reads its six channels at every X but the gap's edges.
+    var card=Sports("ride-channels");
+    var gallery=ChartSvg.Readout(card);
+    Check(card is {Sampling:SamplingMethod.Average,MaxRenderedPoints:600,PaneTitles:PaneTitlePlacement.Above,SharedReadout:true,Panes.Count:5}&&gallery.Columns.Count<=602&&gallery.Columns.Count(c=>c.Entries.Count==6)>=595,$"{gallery.Columns.Count} columns");
+});
+Test("A chart draws up to six plots, five panes under the main one, of equal height when their weights are equal",()=>{
+    var six=new ChartSpec{Title="Six",Kind=ChartKind.Line,Height=760,Panes=Enumerable.Range(1,5).Select(k=>new ChartPane{Label=$"P{k}",Weight=1}).ToArray(),
+        Series=Enumerable.Range(0,6).Select(k=>new ChartSeries($"S{k}",[new(0,k),new(1,k+1)]){Pane=k}).ToArray()};
+    var spans=PaneClips(Svg(six)).Select(PaneSpan).ToArray();
+    Check(spans.Length==6&&spans.All(s=>Close(s.Bottom-s.Top,(760-78-76-5*24)/6d)),string.Join(" | ",spans));
+    Check(Refused(six with{Panes=[..six.Panes,new()],Series=[..six.Series,new("S6",[new(0,1)]){Pane=6}]}).StartsWith("A chart has at most six plots"),"a seventh plot");
+});
+Test("A pane labels its own Y ticks, or takes the spec's; TickLabels.None writes no tick label and keeps every gridline; the X axis refuses None",()=>{
+    var spec=new ChartSpec{Title="Ticks",Kind=ChartKind.Line,Height=600,YTickLabels=TickLabels.All,
+        Panes=[new(){Weight=1,YTickLabels=TickLabels.None},new(){Weight=1,YTickLabels=TickLabels.Ends},new(){Weight=1}],
+        Series=Enumerable.Range(0,4).Select(k=>new ChartSeries($"S{k}",[new(0,10*k),new(1,10*k+40),new(2,10*k+15)]){Pane=k}).ToArray()};
+    foreach(var classic in new[]{false,true})
+    {
+        var doc=Svg(classic?Classic(spec):spec);
+        var spans=PaneClips(doc).Select(PaneSpan).ToArray();
+        int Labels(int k)=>doc.Descendants(ns+"text").Count(t=>(string?)t.Attribute("text-anchor")=="end"&&Attr(t,"x")==64&&Attr(t,"y")>=spans[k].Top-1&&Attr(t,"y")<=spans[k].Bottom+5);
+        int Lines(int k)=>doc.Descendants(ns+"line").Count(l=>(string?)l.Attribute("class")=="lumen-grid"&&Attr(l,"y1")>=spans[k].Top-.5&&Attr(l,"y1")<=spans[k].Bottom+.5&&Attr(l,"y1")==Attr(l,"y2"));
+        Check(Labels(0)>2&&Labels(1)==0&&Labels(2)==2&&Labels(3)==Lines(3)&&Labels(0)==Lines(0),$"classic {classic}: {Labels(0)}, {Labels(1)}, {Labels(2)}, {Labels(3)} labels");
+        // Every gridline stays: labelled all round, the chart draws the same lines.
+        var labelled=Svg(classic?Classic(spec with{Panes=spec.Panes.Select(p=>p with{YTickLabels=TickLabels.All}).ToArray()}):spec with{Panes=spec.Panes.Select(p=>p with{YTickLabels=TickLabels.All}).ToArray()});
+        Check(Lines(1)>=2&&Lines(2)>=2&&Grid(doc).SequenceEqual(Grid(labelled)),$"classic {classic}: {Lines(0)}, {Lines(1)} gridlines");
+        // The spec's None reaches a pane that sets nothing.
+        var none=Svg(classic?Classic(spec with{YTickLabels=TickLabels.None}):spec with{YTickLabels=TickLabels.None});
+        Check(none.Descendants(ns+"text").Count(t=>(string?)t.Attribute("text-anchor")=="end"&&Attr(t,"x")==64)==2,$"classic {classic}: the spec's None");
+    }
+    // At the end of the enum, so the values before it keep their numbers.
+    Check((int)TickLabels.All==0&&(int)TickLabels.Ends==1&&(int)TickLabels.Bounds==2&&(int)TickLabels.None==3,"the enum's values moved");
+    Check(Refused(spec with{XTickLabels=TickLabels.None}).StartsWith("TickLabels.None leaves a Y axis unlabelled"),Refused(spec with{XTickLabels=TickLabels.None}));
+    Check(Refused(spec with{Panes=[new(){YTickLabels=(TickLabels)9}],Series=spec.Series.Take(2).ToArray()}).StartsWith("Unknown"),"an unknown pane labelling");
+    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Gauge,ChartKind.Timeline,ChartKind.Calendar}) Check(Refused(Sample(kind) with{YTickLabels=TickLabels.None}).Length>0,$"{kind}");
+    // A horizontal bar chart writes no value along the bottom; a histogram none up the side.
+    Check(!Svg(Spec(ChartKind.Bar) with{YTickLabels=TickLabels.None}).Descendants(ns+"text").Any(t=>Attr(t,"y")>344&&Attr(t,"y")<=364&&(string?)t.Attribute("text-anchor")=="middle"),"the bar chart's values");
+    Svg(Sample(ChartKind.Histogram) with{YTickLabels=TickLabels.None});
+    // Hidden in the component, a pane that took the spec's labelling keeps it when another takes the main plot's place.
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    ChartSpec shown=spec;
+    Operate(spec with{Panes=[spec.Panes[0],spec.Panes[1],spec.Panes[2] with{Label="Last"}]},chart=>{typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[0]);shown=(ChartSpec)typeof(LumenChart).GetMethod("VisibleSpec",flags)!.Invoke(chart,[])!;return Task.CompletedTask;});
+    Check(shown.YTickLabels==TickLabels.None&&shown.Panes.Select(p=>p.YTickLabels).SequenceEqual(new TickLabels?[]{TickLabels.Ends,TickLabels.All}),$"{shown.YTickLabels} {string.Join(",",shown.Panes.Select(p=>p.YTickLabels))}");
+});
+Test("PaneTitles.Above writes each plot's name on one line over its left edge, cut to its width, in the text colour, clear of the title, the description and the plot above, at 340 and 1280",()=>{
+    var spec=Ride37(600) with{Description="Heart rate, power and cadence, one sample a second",YLabel="Heart rate · avg 148 · max 182 · min 96 bpm",
+        Panes=[new(){Label="Power · avg 205 · max 412 · min 0 W",Weight=1},new(){Label="A cadence header far too long for any phone card to hold on one line · avg 85 rpm",Weight=1}]};
+    foreach(var width in new[]{340,1280})
+        foreach(var classic in new[]{false,true})
+        {
+            var shown=spec with{Width=width};
+            var doc=Svg(classic?Classic(shown):shown);
+            var headers=doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("class")=="lumen-pane-title").ToArray();
+            var spans=PaneClips(doc).Select(PaneSpan).ToArray();
+            var lines=doc.Descendants(ns+"text").Count(t=>Attr(t,"x")==24&&(Attr(t,"y")==49||Attr(t,"y")==63)&&(string?)t.Attribute("font-size")=="11");
+            Check(headers.Length==3&&headers.All(h=>Attr(h,"x")==30&&h.Attribute("transform") is null&&h.Attribute("fill") is null),$"{width} classic {classic}: {headers.Length} headers");
+            for(var k=0;k<3;k++)
+            {
+                // Its baseline 8 above its plot, the top of its letters 9 above that, clear of the plot above or the description.
+                Check(Close(Attr(headers[k],"y"),spans[k].Top-8),$"{width}: header {k} at {Attr(headers[k],"y")}, its plot at {spans[k].Top}");
+                var above=k==0?49+14*(lines-1)+3:spans[k-1].Bottom;
+                Check(Attr(headers[k],"y")-9>above+4,$"{width}: header {k} runs into what is above it");
+            }
+            // What a header shows: its own text, leaving out the title a cut header carries.
+            string Shown(XElement header)=>string.Concat(header.Nodes().OfType<XText>().Select(n=>n.Value));
+            Check(Shown(headers[0])==spec.YLabel&&Shown(headers[1])==spec.Panes[0].Label&&(width==340?Shown(headers[2]).EndsWith("…")&&spec.Panes[1].Label.StartsWith(Shown(headers[2]).TrimEnd('…')):Shown(headers[2])==spec.Panes[1].Label),$"{width}: {Shown(headers[2])}");
+            // A cut header keeps its whole as its accessible name and its tooltip, as a title does; a whole one carries neither.
+            Check(width!=340||headers[2].Attribute("aria-label")?.Value==spec.Panes[1].Label&&headers[2].Element(ns+"title")?.Value==spec.Panes[1].Label&&(string?)headers[2].Attribute("role")=="img",$"{width}: the cut header lost its whole");
+            Check(headers[0].Attribute("aria-label") is null&&headers[0].Element(ns+"title") is null,$"{width}: a whole header carries a title");
+            // The main plot moves down 18 and each gap grows to 30; no title is written up the side.
+            Check(Close(spans[0].Top,78+14*(lines-1)+18)&&Close(spans[1].Top-spans[0].Bottom,30)&&!doc.Descendants(ns+"text").Any(t=>t.Attribute("transform")?.Value.StartsWith("rotate(-90")==true),$"{width}: {spans[0].Top}");
+        }
+    // Written in the text colour, which clears 4.5:1 on every preset; the drawing's fill is that colour.
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight})
+        Check(Lumen.Charts.Contrast.Ratio(style.Text,style.Background)>=4.5&&ChartSvg.Render(spec with{Style=style}).Contains($"color:{style.Text}"),$"{style.Background}");
+    // With a label on the left the margin stays 76; with none written up the left it narrows to 30. A right-hand title stays up the side.
+    var labelled=Svg(spec with{YTickLabels=TickLabels.All});
+    Check(PaneClips(labelled).All(c=>Attr(c,"x")==76-6)&&PaneClips(Svg(spec)).All(c=>Attr(c,"x")==30-6),"the left margin");
+    var paired=Svg(spec with{Y2Label="Speed",Series=[..spec.Series,new("Speed",[new(0,30),new(1,32)]){Secondary=true}]});
+    Check(paired.Descendants(ns+"text").Any(t=>t.Value=="Speed"&&t.Attribute("transform")?.Value.StartsWith("rotate(90")==true),"the right-hand title");
+    // Axis, the default, writes titles up the side, as before.
+    Check(Svg(spec with{PaneTitles=PaneTitlePlacement.Axis}).Descendants(ns+"text").Count(t=>t.Attribute("transform")?.Value.StartsWith("rotate(-90")==true)==3,"titles up the side");
+    // Refused where there is no Y axis up the side, and on a sparkline.
+    foreach(var kind in new[]{ChartKind.Bar,ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Gauge,ChartKind.Ring,ChartKind.Timeline,ChartKind.Calendar})
+        Check(Refused(Sample(kind) with{PaneTitles=PaneTitlePlacement.Above}).StartsWith("PaneTitles names each plot above it"),$"{kind}: {Refused(Sample(kind) with{PaneTitles=PaneTitlePlacement.Above})}");
+    Check(Refused(Pb() with{PaneTitles=PaneTitlePlacement.Above}).StartsWith("A sparkline draws its data alone, with no words"),"a sparkline");
+    Check(Refused(Spec() with{PaneTitles=(PaneTitlePlacement)2}).StartsWith("Unknown pane title placement")&&Refused(Spec() with{Sampling=(SamplingMethod)2}).StartsWith("Unknown sampling method"),"unknown values");
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Area,ChartKind.Scatter,ChartKind.Bubble,ChartKind.Column,ChartKind.StackedColumn,ChartKind.Band,ChartKind.Range,ChartKind.Candlestick,ChartKind.Ohlc,ChartKind.Blocks})
+        Check(ChartSvg.Render(Sample(kind) with{PaneTitles=PaneTitlePlacement.Above,YLabel="Named"}).Contains("class='lumen-pane-title'>Named</text>"),$"{kind}");
+});
+Test("ChartSvg.Plot gives where the plots and the X axis stand, as the marks are placed, and the component zooms to a drag across them, no narrower than a hundredth",()=>{
+    var spec=Ride37(600);
+    var plot=ChartSvg.Plot(spec)!;
+    var doc=Svg(spec with{Sampling=SamplingMethod.MinMax});
+    var marks=Datums(doc,1);
+    Check(Close(Attr(marks[0].Element(ns+"circle")!,"cx"),plot.Left)&&Close(Attr(marks[^1].Element(ns+"circle")!,"cx"),plot.Right)&&plot.X.Min==0&&plot.X.Max==599,$"{plot}");
+    var spans=PaneClips(doc).Select(PaneSpan).ToArray();
+    Check(Close(plot.Top,spans[0].Top)&&Close(plot.Bottom,spans[^1].Bottom),$"{plot.Top} {plot.Bottom}");
+    // A range chart's X stands in from its edges by half a slot; a timeline's by its lanes' names; the other kinds have none.
+    var range=ChartSvg.Plot(Sample(ChartKind.Range))!;
+    Check(range.Left>76&&range.Right<870,$"{range.Left} {range.Right}");
+    Check(ChartSvg.Plot(Sample(ChartKind.Timeline)) is {Top:78}&&ChartSvg.Plot(Sample(ChartKind.Column)) is null&&ChartSvg.Plot(Pb()) is null&&ChartSvg.Plot(new ChartSpec()) is null,"the kinds");
+    // The component turns a drag from one position to another into a view of the X between them.
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    (double?,double?) View(LumenChart chart)=>((double?)typeof(LumenChart).GetField("viewMin",flags)!.GetValue(chart),(double?)typeof(LumenChart).GetField("viewMax",flags)!.GetValue(chart));
+    (double?,double?) zoomed=default,narrowest=default,reset=default;
+    Operate(spec,async chart=>{
+        await chart.ZoomTo(plot.X.Map(300,plot.Left,plot.Right),plot.X.Map(150,plot.Left,plot.Right));
+        zoomed=View(chart);
+        typeof(LumenChart).GetMethod("ResetView",flags)!.Invoke(chart,[]);
+        reset=View(chart);
+        await chart.ZoomTo(plot.X.Map(300,plot.Left,plot.Right),plot.X.Map(300.5,plot.Left,plot.Right));
+        narrowest=View(chart);
+    });
+    Check(zoomed.Item1 is {} a&&Close(a,150)&&zoomed.Item2 is {} b&&Close(b,300),$"{zoomed}");
+    Check(reset==(null,null)&&narrowest.Item1 is {} c&&narrowest.Item2 is {} d&&Close(d-c,5.99)&&Close((c+d)/2,300.25),$"{narrowest}");
+    // A chart without zoom ignores it.
+    Operate(Spec(ChartKind.Column),async chart=>{await chart.ZoomTo(100,200);zoomed=View(chart);});
+    Check(zoomed==(null,null),"a column chart zoomed");
+});
+Test("The component reads an averaged mark's status as its name does, and draws the same averages as ChartSvg.Render",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    var status="";
+    var spec=Long37(64);
+    var html=Operate(spec,async chart=>{await chart.SelectPoint(0,4);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    Check(status=="S: 5.5 = 6, average of 4 points",status);
+    Check(html.Contains("aria-label='S: 5.5, 6, average of 4 points'"),"the component's drawing");
+    // MinMax marks keep reading their own point.
+    Operate(spec with{Sampling=SamplingMethod.MinMax},async chart=>{await chart.SelectPoint(0,4);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    Check(status=="S: 4 = 4",status);
+    // The script draws the band, ignores touch and lets Escape go.
+    var script=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.js"));
+    Check(script.Contains("export function drawn(root, readout, plot)")&&script.Contains("event.pointerType === 'touch'")&&script.Contains("< 8) return false")&&script.Contains("'ZoomTo'")&&script.Contains("event.key !== 'Escape'"),"the script's drag");
+});
+Test("Sampling, PaneTitles and a pane's YTickLabels round-trip through the HTTP API's JSON, a request that names none keeps the defaults, and only a setting away from its default renames gradients",()=>{
+    var spec=Ride37(100) with{Panes=[new(){Label="Power",Weight=1,YTickLabels=TickLabels.Ends},new(){Label="Cadence",Weight=1}]};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,finishJson);
+    Check(json.Contains("\"sampling\":\"Average\"")&&json.Contains("\"paneTitles\":\"Above\"")&&json.Contains("\"yTickLabels\":\"Ends\"")&&json.Contains("\"yTickLabels\":\"None\""),json[..400]);
+    var back=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,finishJson)!;
+    Check(back is {Sampling:SamplingMethod.Average,PaneTitles:PaneTitlePlacement.Above,YTickLabels:TickLabels.None}&&back.Panes[0].YTickLabels==TickLabels.Ends&&back.Panes[1].YTickLabels is null&&ChartSvg.Render(back)==ChartSvg.Render(spec),"the spec changed in transit");
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"panes\":[{}],\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]},{\"name\":\"T\",\"pane\":1,\"points\":[{\"x\":0,\"y\":1}]}]}",finishJson)!;
+    Check(old.Sampling==SamplingMethod.MinMax&&old.PaneTitles==PaneTitlePlacement.Axis&&old.Panes[0].YTickLabels is null,"the defaults");
+    // 0.34.0 named this gradient lumen-4bce89394b87; the defaults leave it so, and each setting away from its default names it afresh.
+    string GradientId(ChartSpec s)=>System.Text.RegularExpressions.Regex.Match(ChartSvg.Render(s),"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}],Annotations=[new(AnnotationAxis.Y,2){Label="T"}]};
+    Check(GradientId(faded)=="lumen-4bce89394b87"&&GradientId(faded with{Sampling=SamplingMethod.MinMax,PaneTitles=PaneTitlePlacement.Axis})=="lumen-4bce89394b87",GradientId(faded));
+    Check(GradientId(faded with{Sampling=SamplingMethod.Average})!="lumen-4bce89394b87"&&GradientId(faded with{PaneTitles=PaneTitlePlacement.Above})!="lumen-4bce89394b87"&&GradientId(faded with{YTickLabels=TickLabels.None})!="lumen-4bce89394b87","a setting kept a gradient's name");
+    var paned=faded with{Panes=[new()],Series=[..faded.Series,new("P",[new(0,1)]){Pane=1}]};
+    Check(GradientId(paned)!=GradientId(paned with{Panes=[new(){YTickLabels=TickLabels.None}]}),"a pane's labelling kept a gradient's name");
+});
+Test("Sports page: Ride channels draws an invented two-hour ride in six plots named above them, no tick label up the side, each channel averaged into 600 slices, the strap's dropout a gap",()=>{
+    var spec=Sports("ride-channels");
+    var ride=SportsData.LongRide();
+    Check(spec.Series.Count==6&&spec.Series.All(s=>s.Points.Count==SportsData.RideSeconds&&s.Markers==MarkerStyle.None&&s.StrokeWidth==1.5&&s.Color is null)&&spec.Series.Select(s=>s.Pane).SequenceEqual([0,1,2,3,4,5]),"the series");
+    Check(spec is {YTickLabels:TickLabels.None,XFormat:ValueFormat.Duration}&&spec.Panes.All(p=>p.YTickLabels is null&&p.Weight==1),"the axes");
+    Check(ride.HeartRate.Count(v=>v is null)==SportsData.DropoutSeconds&&ride.HeartRate.Skip(SportsData.DropoutAt).Take(SportsData.DropoutSeconds).All(v=>v is null),"the dropout");
+    var hr=ride.HeartRate.OfType<double>().ToArray();
+    Check(spec.YLabel==$"HR · avg {hr.Average().ToString("0",CultureInfo.InvariantCulture)} · max {hr.Max().ToString("0",CultureInfo.InvariantCulture)} · min {hr.Min().ToString("0",CultureInfo.InvariantCulture)} bpm",spec.YLabel);
+    Check(spec.Panes[2].Label.StartsWith("Speed · avg 3")&&spec.Panes[2].Label.EndsWith(" km/h")&&spec.Series[3].Points[100].Y==Math.Round(ride.Speed[100]*3.6,1),spec.Panes[2].Label);
+    var doc=Svg(spec);
+    Check(Datums(doc,1).Length==600&&Datums(doc,0).Length<600&&Datums(doc,0).Length>=595&&doc.Descendants(ns+"text").Count(t=>(string?)t.Attribute("class")=="lumen-pane-title")==6,$"{Datums(doc,0).Length} heart-rate marks");
+    // The same ride, its data identical on every run.
+    Check(SportsData.LongRide().Power.SequenceEqual(ride.Power),"the ride is not deterministic");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

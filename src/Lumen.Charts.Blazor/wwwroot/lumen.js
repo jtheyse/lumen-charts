@@ -12,8 +12,10 @@ export function attach(root, dotnet) {
     tooltip.hidden = true;
     root.appendChild(tooltip);
     // The readout the component worked out for the drawing shown, the X it stands at, its guide and rings, the mark that is the chart's
-    // one tab stop, the series the keyboard keeps to, and the drawing they belong to.
-    const state = { readout: null, index: new Map(), column: -1, overlay: null, current: null, series: null, keep: false, svg: null, timer: 0 };
+    // one tab stop, the series the keyboard keeps to, and the drawing they belong to; and the plots a drag zooms across, the drag under
+    // way, and whether the click a drag ends with is to be ignored.
+    const state = { readout: null, index: new Map(), column: -1, overlay: null, current: null, series: null, keep: false, svg: null, timer: 0,
+        plot: null, brush: null, suppress: false };
 
     const mark = target => {
         const found = target instanceof Element ? target.closest('.lumen-datum') : null;
@@ -172,6 +174,8 @@ export function attach(root, dotnet) {
     };
 
     const select = event => {
+        // A drag across the plots ends with a click, which selects nothing.
+        if (event.type === 'click' && state.suppress) { state.suppress = false; return; }
         const point = event.target.closest('[data-point]');
         if (!point || !root.contains(point)) return;
         if (event.type === 'keydown') event.preventDefault();
@@ -202,11 +206,74 @@ export function attach(root, dotnet) {
         showReadout(column);
         announce(column);
     };
-    const over = event => { if (state.readout) pointed(event); else show(event); };
-    const moved = event => { if (state.readout) pointed(event); else if (!tooltip.hidden) show(event); };
-    const out = event => { if (!state.readout && !mark(event.relatedTarget)) hide(); };
+    // Drag to zoom: a mouse or a pen pressed on the plots and drawn 8 pixels or more across them marks a band through every pane, and
+    // letting go zooms the chart to the X the band covers, through the component. A shorter drag is a click; a touch keeps the tap that
+    // reads the chart; Escape lets a drag go without zooming. The band is the text colour at a tenth, edged in the muted text colour,
+    // which clears 3:1 on the chart's background and on the band.
+    const located = (event, svg) => { const matrix = svg?.getScreenCTM(); return matrix ? new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse()) : null; };
+    let escaped = null;
+    const unbrush = () => {
+        const brush = state.brush;
+        state.brush = null;
+        if (!brush?.band) return;
+        brush.band.remove();
+        root.classList.remove('lumen-brushing');
+        try { root.releasePointerCapture?.(brush.id); } catch { }
+        document.removeEventListener('keydown', escaped, true);
+        // The click the drag ends with is ignored.
+        state.suppress = true;
+    };
+    escaped = event => {
+        if (event.key !== 'Escape' || !state.brush?.band) return;
+        event.preventDefault();
+        event.stopPropagation();
+        unbrush();
+    };
+    const pressed = event => {
+        state.suppress = false;
+        const plot = state.plot, svg = drawing();
+        if (!plot || !svg || event.pointerType === 'touch' || event.button !== 0) return;
+        const at = located(event, svg);
+        if (!at || at.x < plot.left || at.x > plot.right || at.y < plot.top || at.y > plot.bottom) return;
+        state.brush = { id: event.pointerId, from: at.x, to: at.x, start: event.clientX, svg, band: null };
+    };
+    // Whether the pointer is dragging a band, which is drawn to where the pointer stands, kept to the plots.
+    const brushing = event => {
+        const brush = state.brush, plot = state.plot;
+        if (!brush || event.pointerId !== brush.id || !plot) return false;
+        if (!brush.band) {
+            if (Math.abs(event.clientX - brush.start) < 8) return false;
+            brush.band = draw('g', { class: 'lumen-brush', 'aria-hidden': 'true', 'pointer-events': 'none' });
+            brush.svg.appendChild(brush.band);
+            root.classList.add('lumen-brushing');
+            window.getSelection?.()?.removeAllRanges();
+            try { root.setPointerCapture?.(brush.id); } catch { }
+            document.addEventListener('keydown', escaped, true);
+            hide();
+        }
+        const at = located(event, brush.svg);
+        if (at) brush.to = Math.max(plot.left, Math.min(plot.right, at.x));
+        const from = Math.min(brush.from, brush.to), to = Math.max(brush.from, brush.to);
+        const edge = { y1: plot.top, y2: plot.bottom, 'stroke-width': 1.5, 'vector-effect': 'non-scaling-stroke', style: 'stroke:var(--lumen-muted)' };
+        brush.band.replaceChildren(draw('rect', { x: from, y: plot.top, width: to - from, height: plot.bottom - plot.top, fill: 'currentColor', 'fill-opacity': .1 }),
+            draw('line', { x1: from, x2: from, ...edge }), draw('line', { x1: to, x2: to, ...edge }));
+        return true;
+    };
+    const released = event => {
+        const brush = state.brush;
+        if (!brush || event.pointerId !== brush.id) return;
+        if (!brush.band) { state.brush = null; return; }
+        unbrush();
+        if (brush.to !== brush.from) dotnet.invokeMethodAsync('ZoomTo', brush.from, brush.to);
+    };
+    const cancelled = event => { if (state.brush && event.pointerId === state.brush.id) { if (state.brush.band) unbrush(); else state.brush = null; } };
+
+    // While a band is drawn the readout and the tooltips stay hidden.
+    const over = event => { if (state.brush?.band) return; if (state.readout) pointed(event); else show(event); };
+    const moved = event => { if (brushing(event)) return; if (state.readout) pointed(event); else if (!tooltip.hidden) show(event); };
+    const out = event => { if (!state.readout && !state.brush?.band && !mark(event.relatedTarget)) hide(); };
     // A readout stays while the pointer is anywhere on the chart, and after a tap, so a reader on a phone can read it.
-    const left = event => { if (state.readout && event.pointerType !== 'touch') hide(); };
+    const left = event => { if (state.readout && !state.brush?.band && event.pointerType !== 'touch') hide(); };
     const blurred = event => { if (!mark(event.relatedTarget)) hide(); };
 
     // The words that name the keys describe the chart's scrolling viewport, which Tab reaches first, or a sparkline's drawing. They are
@@ -217,8 +284,9 @@ export function attach(root, dotnet) {
 
     // Each new drawing: the readout it reads, its one tab stop, and, on a sparkline, the keys named in its drawing's description. A
     // drawing replaced takes its guide and tooltip with it.
-    state.drawn = data => {
+    state.drawn = (data, plot) => {
         state.readout = data ? { top: data[0], bottom: data[1], left: data[2], right: data[3], columns: data[4] } : null;
+        state.plot = plot ? { left: plot[0], right: plot[1], top: plot[2], bottom: plot[3] } : null;
         state.index = new Map();
         if (state.readout)
             state.readout.columns.forEach((column, c) => { for (const entry of column[2]) if (!state.index.has(`${entry[0]}:${entry[1]}`)) state.index.set(`${entry[0]}:${entry[1]}`, c); });
@@ -226,6 +294,8 @@ export function attach(root, dotnet) {
         if (svg !== state.svg) {
             state.svg = svg;
             state.overlay = null;
+            if (state.brush?.band) unbrush();
+            state.brush = null;
             hide();
         }
         settle();
@@ -233,14 +303,15 @@ export function attach(root, dotnet) {
     };
 
     const bindings = [['click', select], ['keydown', keydown], ['pointerover', over], ['pointermove', moved],
-        ['pointerout', out], ['pointerleave', left], ['focusin', focused], ['focusout', blurred]];
+        ['pointerout', out], ['pointerleave', left], ['focusin', focused], ['focusout', blurred],
+        ['pointerdown', pressed], ['pointerup', released], ['pointercancel', cancelled]];
     for (const [type, handler] of bindings) root.addEventListener(type, handler);
-    handlers.set(root, { bindings, tooltip, state });
+    handlers.set(root, { bindings, tooltip, state, escaped });
 }
 
-/// Tells the script of a chart's new drawing and the shared readout it reads, or null.
-export function drawn(root, readout) {
-    handlers.get(root)?.state?.drawn(readout);
+/// Tells the script of a chart's new drawing, the shared readout it reads, or null, and the plots a drag zooms across, or null.
+export function drawn(root, readout, plot) {
+    handlers.get(root)?.state?.drawn(readout, plot);
 }
 
 /// Node dragging and selection for a graph. Dragging previews with a transform and commits on release.
@@ -331,6 +402,8 @@ export function detach(root) {
     state.tooltip?.remove();
     clearTimeout(state.state?.timer);
     state.state?.overlay?.remove();
+    state.state?.brush?.band?.remove();
+    if (state.escaped) document.removeEventListener('keydown', state.escaped, true);
     handlers.delete(root);
 }
 

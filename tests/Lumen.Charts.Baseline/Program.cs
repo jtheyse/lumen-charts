@@ -635,6 +635,38 @@ ChartSpec Fitness(ChartStyle style)
 }
 lines.Add($"fitness/340-light {Hash(Render(Fitness(ChartStyle.Light)))}");
 lines.Add($"fitness/340-midnight {Hash(Render(Fitness(ChartStyle.Midnight)))}");
+// 0.37.0: ride channels. A long line averaged into slices, and one thinned by minimum and maximum over a zoomed window; tick labels left
+// out of one pane; and an invented ride in six plots named above them, no tick label up the side, averaged into 300 slices, its heart
+// rate missing for 45 seconds, at 340 by 640 in the light palette and in Midnight.
+ChartPoint[] Wavy(int count) => Enumerable.Range(0, count).Select(i => new ChartPoint(i, Math.Round(100 + 40 * Math.Sin(i / 90.0) + 12 * Math.Sin(i * 1.7), 1))).ToArray();
+lines.Add($"sampling/average {Hash(Render(line with { Title = "Averaged", Sampling = SamplingMethod.Average, MaxRenderedPoints = 120, Series = [new("Power", Wavy(6000))] }))}");
+lines.Add($"sampling/window-minmax {Hash(Render(line with { Title = "Zoomed", MaxRenderedPoints = 120, XMin = 1500, XMax = 2700, Series = [new("Power", Wavy(6000))] }))}");
+lines.Add($"sampling/window-average {Hash(Render(line with { Title = "Zoomed", Sampling = SamplingMethod.Average, MaxRenderedPoints = 120, XMin = 1500, XMax = 2700, Series = [new("Power", Wavy(6000))] }))}");
+lines.Add($"ticks/pane-none {Hash(Render(line with { Title = "Labels in the main plot alone", Panes = [new() { Label = "Lower", Weight = 1, YTickLabels = TickLabels.None }],
+    Series = [line.Series[0], line.Series[1] with { Pane = 1 }] }))}");
+ChartSpec Channels(ChartStyle style)
+{
+    var dark = style == ChartStyle.Midnight;
+    var seconds = 3600;
+    ChartPoint[] Channel(Func<int, double?> value) => Enumerable.Range(0, seconds).Select(t => new ChartPoint(t, value(t))).ToArray();
+    string Header(string name, ChartPoint[] points, string unit) => $"{name} · avg {points.Where(p => p.Y.HasValue).Average(p => p.Y!.Value):0} · max {points.Max(p => p.Y):0} · min {points.Min(p => p.Y):0} {unit}";
+    ChartPoint[] heart = Channel(t => t is >= 1800 and < 1845 ? null : Math.Round(140 + 20 * Math.Sin(t / 300.0))), power = Channel(t => Math.Round(Math.Max(0, 200 + 90 * Math.Sin(t / 240.0) + 25 * Math.Sin(t * 1.7)))),
+        cadence = Channel(t => Math.Round(85 + 4 * Math.Sin(t * .83))), speed = Channel(t => Math.Round(31 + 6 * Math.Sin(t / 200.0), 1)),
+        elevation = Channel(t => Math.Round(140 + 60 * Math.Sin(t / 600.0), 1)), temperature = Channel(t => Math.Round(18 + 4.0 * t / seconds, 1));
+    ChartSeries Series(string name, ChartPoint[] points, string color, int pane) => new(name, points, dark ? color : null) { Pane = pane, Markers = MarkerStyle.None, StrokeWidth = 1.5 };
+    return new()
+    {
+        Kind = ChartKind.Line, Style = style, Width = 340, Height = 640, Title = "Ride channels", Description = "An invented hour, each channel averaged over 12 seconds",
+        XFormat = ValueFormat.Duration, Sampling = SamplingMethod.Average, MaxRenderedPoints = 300, YTickLabels = TickLabels.None, PaneTitles = PaneTitlePlacement.Above, SharedReadout = true,
+        YLabel = Header("Heart rate", heart, "bpm"),
+        Panes = [new() { Label = Header("Power", power, "W"), Weight = 1 }, new() { Label = Header("Cadence", cadence, "rpm"), Weight = 1 }, new() { Label = Header("Speed", speed, "km/h"), Weight = 1 },
+            new() { Label = Header("Elevation", elevation, "m"), Weight = 1 }, new() { Label = Header("Temperature", temperature, "°C"), Weight = 1 }],
+        Series = [Series("Heart rate", heart, "#e24b4a", 0), Series("Power", power, "#7048e8", 1), Series("Cadence", cadence, "#1098ad", 2), Series("Speed", speed, "#0ca678", 3),
+            Series("Elevation", elevation, "#868e96", 4), Series("Temperature", temperature, "#e8950c", 5)]
+    };
+}
+lines.Add($"channels/340-light {Hash(Unlegended(Channels(ChartStyle.Light)))}");
+lines.Add($"channels/340-midnight {Hash(Unlegended(Channels(ChartStyle.Midnight)))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

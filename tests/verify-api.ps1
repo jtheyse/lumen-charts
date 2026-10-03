@@ -7,7 +7,7 @@ foreach($path in @('/health','/_framework/blazor.web.js','/_content/Lumen.Charts
  Verify ($r.StatusCode -eq 200) "Asset/health $path"
 }
 $r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 21 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'") -and $r.Content.Contains('id="laps"') -and $r.Content.Contains('id="next-session"') -and $r.Content.Contains('id="field"') -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 31) 'The Sports & performance page answers 200 and prerenders its twenty-one charts, each set to fit its card, last night''s sleep stages, the training calendar, the run''s four laps, the next session''s ten steps and the seventeen bins of how the field finished among them'
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 22 -and $r.Content.Contains('id="ride-channels"') -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'") -and $r.Content.Contains('id="laps"') -and $r.Content.Contains('id="next-session"') -and $r.Content.Contains('id="field"') -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 31) 'The Sports & performance page answers 200 and prerenders its twenty-two charts, each set to fit its card, the ride channels, last night''s sleep stages, the training calendar, the run''s four laps, the next session''s ten steps and the seventeen bins of how the field finished among them'
 $r=Invoke-WebRequest "$BaseUrl/" -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('class="lumen-chart lumen-fit"') -and $r.Content.Contains('<b>22</b><span>Chart types</span>') -and $r.Content.Contains('>Calendar</button>') -and $r.Content.Contains('>Blocks</button>')) 'The home page answers 200, its chart explorer set to fit its card, with twenty-two chart types and a calendar and blocks among them'
 Verify (([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 2 -and $r.Content.Contains("data-node='sources'") -and $r.Content.Contains("viewBox='0 0 900 460'")) 'The home page prerenders its network graph set to fit its card too, drawn at its own width until the browser measures the card'
@@ -372,6 +372,44 @@ foreach($bad in @(@{body=$form.Replace('"ySymmetric":10','"ySymmetric":10,"yMin"
   @{body='{"kind":"Donut","sharedReadout":true,"series":[{"name":"D","points":[{"x":0,"y":1}]}]}';reason='SharedReadout reads every series at one X';name='A shared readout on a donut'},
   @{body='{"kind":"Line","width":120,"height":32,"sparkline":true,"sharedReadout":true,"series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}';reason='takes no shared readout';name='A shared readout on a sparkline'},
   @{body=$form.Replace('"yFormat":"Signed"','"yFormat":"Signs"');reason='';name='An unknown value format'})){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
+}
+# 0.37.0: ride channels. A long line averaged into slices or thinned over the window shown, six plots named above them, and a pane's own
+# tick labelling, TickLabels.None among them.
+$wave=(0..999|ForEach-Object{'{"x":'+$_+',"y":'+[string]([math]::Round(100+40*[math]::Sin($_/90),1)).ToString([Globalization.CultureInfo]::InvariantCulture)+'}'}) -join ','
+$averaged='{"title":"Ride","kind":"Line","sampling":"Average","maxRenderedPoints":100,"series":[{"name":"Power","points":['+$wave+']}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $averaged -SkipHttpErrorCheck
+$names=@(([xml]$r.Content).SelectNodes('//*[local-name()="g"][@data-point]')|ForEach-Object{$_.GetAttribute('aria-label')})
+Verify ($r.StatusCode -eq 200 -and $names.Count -eq 100 -and @($names|Where-Object{$_.EndsWith(', average of 10 points')}).Count -eq 100 -and $names[0] -like 'Power: 4.5, *') 'A thousand points posted as JSON with "sampling":"Average" and a budget of 100 draw 100 averages of 10 points each'
+$minmax=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $averaged.Replace('"sampling":"Average",','"sampling":"MinMax",') -SkipHttpErrorCheck
+$plain=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $averaged.Replace('"sampling":"Average",','') -SkipHttpErrorCheck
+Verify ($minmax.StatusCode -eq 200 -and $minmax.Content -eq $plain.Content -and -not $plain.Content.Contains('average of')) '"sampling":"MinMax" posted as JSON draws what a spec that leaves it out draws'
+$zoomed=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $averaged.Replace('"maxRenderedPoints":100,','"maxRenderedPoints":100,"xMin":200,"xMax":260,') -SkipHttpErrorCheck
+$points=@(([xml]$zoomed.Content).SelectNodes('//*[local-name()="g"][@data-point]')|ForEach-Object{[int]$_.GetAttribute('data-point')})
+Verify ($zoomed.StatusCode -eq 200 -and $points.Count -eq 63 -and $points[0] -eq 199 -and $points[-1] -eq 261 -and -not $zoomed.Content.Contains('average of')) 'Zoomed to 200 to 260 by xMin and xMax, the long line draws every point in view and the nearest one outside each side'
+$panes=(1..5|ForEach-Object{'{"label":"Channel '+$_+' \u00b7 avg 1'+$_+' \u00b7 max 2'+$_+' \u00b7 min 0","weight":1'+$(if($_ -eq 2){',"yTickLabels":"All"'}else{''})+'}'}) -join ','
+$series=(0..5|ForEach-Object{'{"name":"C'+$_+'","pane":'+$_+',"markers":"None","strokeWidth":1.5,"points":[{"x":0,"y":'+$_+'},{"x":600,"y":'+(10+$_)+'},{"x":1200,"y":'+(5+$_)+'}]}'}) -join ','
+$channels='{"title":"Channels","kind":"Line","height":640,"xFormat":"Duration","yTickLabels":"None","paneTitles":"Above","yLabel":"Heart rate \u00b7 avg 148 \u00b7 max 182 \u00b7 min 96 bpm","panes":['+$panes+'],"series":['+$series+']}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $channels -SkipHttpErrorCheck
+$doc=[xml]$r.Content
+$headers=@($doc.SelectNodes('//*[local-name()="text"][@class="lumen-pane-title"]')|ForEach-Object{$_.InnerText})
+$ticks=@($doc.SelectNodes('//*[local-name()="text"][@text-anchor="end"][@class="lumen-muted"]'))
+$rotated=@($doc.SelectNodes('//*[local-name()="text"][starts-with(@transform,"rotate(-90")]'))
+Verify ($r.StatusCode -eq 200 -and $headers.Count -eq 6 -and $headers[0] -eq ('Heart rate {0} avg 148 {0} max 182 {0} min 96 bpm' -f [char]0x00B7) -and $headers[2] -like 'Channel 2 *' -and $ticks.Count -ge 1 -and $rotated.Count -eq 0) 'Six plots posted as JSON with "paneTitles":"Above" are each named above their plot, and only the pane set to "yTickLabels":"All" labels its ticks'
+$bare=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $channels.Replace(',"yTickLabels":"All"','') -SkipHttpErrorCheck
+$clips=@(([xml]$bare.Content).DocumentElement.ChildNodes|Where-Object{$_.LocalName -eq 'svg'})
+Verify ($bare.StatusCode -eq 200 -and @(([xml]$bare.Content).SelectNodes('//*[local-name()="text"][@text-anchor="end"][@class="lumen-muted"]')).Count -eq 0 -and $clips.Count -eq 6 -and $clips[0].GetAttribute('x') -eq '24') 'With no tick label written up the left, the six plots posted as JSON stand 30 pixels from the left edge'
+$axis=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $channels.Replace('"paneTitles":"Above",','"paneTitles":"Axis",') -SkipHttpErrorCheck
+Verify ($axis.StatusCode -eq 200 -and -not $axis.Content.Contains('lumen-pane-title') -and @(([xml]$axis.Content).SelectNodes('//*[local-name()="text"][starts-with(@transform,"rotate(-90")]')).Count -eq 6) '"paneTitles":"Axis" posted as JSON writes each plot''s name up the side, as before'
+$seventh=$channels.Replace('"panes":[','"panes":[{"label":"Extra"},').Replace('"series":[','"series":[{"name":"C6","pane":6,"points":[{"x":0,"y":1}]},')
+foreach($bad in @(@{body=$seventh;reason='at most six plots';name='A seventh plot'},
+  @{body=$channels.Replace('"yTickLabels":"None"','"yTickLabels":"None","xTickLabels":"None"');reason='TickLabels.None leaves a Y axis unlabelled';name='X tick labels set to None'},
+  @{body='{"kind":"Donut","paneTitles":"Above","series":[{"name":"D","points":[{"x":0,"y":1}]}]}';reason='PaneTitles names each plot above it';name='Pane titles above a donut'},
+  @{body='{"kind":"Line","width":120,"height":32,"sparkline":true,"paneTitles":"Above","series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}';reason='names no plot above it';name='Pane titles above a sparkline'},
+  @{body=$averaged.Replace('"sampling":"Average"','"sampling":"Median"');reason='';name='An unknown sampling method'},
+  @{body=$channels.Replace('"paneTitles":"Above"','"paneTitles":"Below"');reason='';name='An unknown pane title placement'},
+  @{body=$channels.Replace(',"yTickLabels":"All"',',"yTickLabels":"Some"');reason='';name='An unknown pane tick labelling'})){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
 }

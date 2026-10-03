@@ -73,6 +73,8 @@ else
     private string svg="",status="";
     // What the shared readout reads in the drawing shown, and the drawing the script was last told of, so it is told once per drawing.
     private ChartReadout? readout;
+    // Where the plots stand in the drawing shown, which a drag across them with a mouse or a pen zooms to; null where the chart has no zoom.
+    private ChartPlot? plot;
     private string? told;
     // The keys a reader moves with, said once for the chart through its viewport's description, or its drawing's on a sparkline.
     private string Keys => Spec.SharedReadout
@@ -148,7 +150,9 @@ else
         spec=spec with { Panes=used.Skip(1).Select(p=>Spec.Panes[p-1]).ToArray(), Series=spec.Series.Select(s=>s with {Pane=Math.Max(0,Array.IndexOf(used,s.Pane))}).ToArray() };
         if(used[0]==0)return spec;
         var main=Spec.Panes[used[0]-1];
+        // A pane that labels its ticks as the spec does keeps the spec's labelling when another pane takes the main plot's place.
         return spec with { YLabel=main.Label, YAxis=main.YAxis, YMin=main.YMin, YMax=main.YMax, YMinSpan=main.YMinSpan, YSymmetric=main.YSymmetric, YFormat=main.YFormat, YReversed=main.YReversed, YZones=main.YZones,
+            YTickLabels=main.YTickLabels ?? Spec.YTickLabels, Panes=spec.Panes.Select(p=>p with {YTickLabels=p.YTickLabels ?? Spec.YTickLabels}).ToArray(),
             Y2Label=main.Y2Label, Y2Axis=main.Y2Axis, Y2Min=main.Y2Min, Y2Max=main.Y2Max, Y2Format=main.Y2Format, Y2Reversed=main.Y2Reversed, Annotations=Spec.Annotations.Where(a=>a?.Axis!=AnnotationAxis.Y).ToArray() };
     }
     // Hidden candles stay without their points, because a candlestick or OHLC chart draws its other series beside them; and a
@@ -162,11 +166,14 @@ else
         var shown=VisibleSpec();
         svg=ChartSvg.Render(shown, includeLegend:false, includeTitles:false);
         readout=Spec.SharedReadout ? ChartSvg.Readout(shown) : null;
+        plot=CanZoom&&!Spec.Sparkline ? ChartSvg.Plot(shown) : null;
     }
     // The readout as the script takes it, in arrays of plain values: the guide's top and bottom, the plot's left and right, and each X's
     // position, its label and its entries, each the series drawn, its point, its height or null, its words and its colour.
     private object? Told => readout is not { } r ? null : new object[] { r.Top, r.Bottom, r.Left, r.Right,
         r.Columns.Select(c => new object[] { c.Position, c.Label, c.Entries.Select(e => new object?[] { e.Series, e.Point, e.Position, e.Text, e.Color }).ToArray() }).ToArray() };
+    // The plots as the script's drag to zoom takes them: the X axis's two ends across the drawing, and the top and bottom of the plots.
+    private double[]? Brushed => plot is { } p ? [p.Left, p.Right, p.Top, p.Bottom] : null;
     private void Toggle(int index) { if(!hidden.Add(index))hidden.Remove(index);Render(); }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -175,7 +182,7 @@ else
         if(module is not null&&!ReferenceEquals(told,svg))
         {
             told=svg;
-            await module.InvokeVoidAsync("drawn",root,Told);
+            await module.InvokeVoidAsync("drawn",root,Told,Brushed);
         }
         // The script measures the chart's box only while the chart is asked to fit it.
         if(module is not null&&FitWidth!=fitting)
@@ -207,6 +214,15 @@ else
             await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
             return;
         }
+        // An average reads as its mark is named, at the X it stands at, with the number of points it stands for.
+        if(readout is null&&Spec.Sampling==SamplingMethod.Average&&(Spec.Series[index].Kind ?? Spec.Kind) is ChartKind.Line or ChartKind.Area
+            &&ChartSvg.Readout(VisibleSpec()).Columns.SelectMany(c=>c.Entries.Where(e=>e.Series==series&&e.Point==point).Select(e=>(c.X,Entry:e))).FirstOrDefault() is {Entry:{Count:>1} entry} averaged)
+        {
+            var value=entry.Text[(Spec.Series[index].Name.Length+1)..];
+            status=$"{Spec.Series[index].Name}: {xAxis.Format(averaged.X)} = {(value.Contains(", average of ")?value:$"{value}, average of {entry.Count.ToString("N0",System.Globalization.CultureInfo.InvariantCulture)} points")}";
+            await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
+            return;
+        }
         // A gauge's or a ring's one point reads as its legend does, with its unit and a ring's goal.
         // A span reads from its start to its end, a block its label, its span and its height, and a range bar from its low to its
         // high and its typical value.
@@ -218,6 +234,19 @@ else
             : $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y)+p.ValueNote : "missing")}";
         await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
     }
+    /// <summary>Called by the component's script when a reader drags across the plots with a mouse or a pen and lets go, with the drag's
+    /// two ends across the drawing in its own units: the chart zooms to the X between them, as the zoom buttons do, never to less than a
+    /// hundredth of its whole range, and Reset view brings the whole range back. A chart without zoom ignores it.</summary>
+    [JSInvokable] public Task ZoomTo(double from,double to) => InvokeAsync(()=>
+    {
+        if(!CanZoom||Spec.Sparkline||plot is not { } p||!double.IsFinite(from)||!double.IsFinite(to))return;
+        var full=FullRange;
+        double Fraction(double at)=>full.Map(p.X.Invert(Math.Clamp(at,p.Left,p.Right),p.Left,p.Right),0,1);
+        var (low,high)=(Fraction(Math.Min(from,to)),Fraction(Math.Max(from,to)));
+        var span=Math.Clamp(high-low,.01,1);
+        SetView((low+high)/2-span/2,span);
+        StateHasChanged();
+    });
     /// <summary>Called by the component's script, while <see cref="ChartSpec.SharedReadout"/> is on, when the keyboard brings the
     /// readout to another X: the status line reads that X and every series there, as the readout's tooltip does.</summary>
     [JSInvokable] public Task Readout(int column) => InvokeAsync(()=>

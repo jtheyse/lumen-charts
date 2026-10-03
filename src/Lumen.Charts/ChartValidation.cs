@@ -61,6 +61,13 @@ public static partial class ChartValidation
             throw new ArgumentException("XTickLabels chooses which labels a continuous X axis writes along the bottom, so it applies to line, area, scatter, bubble, candlestick, OHLC, band, range, blocks and timeline charts; column, bar and stacked column charts label each category, a histogram the edges of its bins and a calendar its own dates, and the other kinds have no X axis.");
         if (spec.XTickLabels == TickLabels.Bounds && spec.XTicks == TickSource.PointLabels)
             throw new ArgumentException("XTickLabels = Bounds labels the X axis's own two ends, and XTicks = PointLabels asks for the points' labels instead, so a chart takes one or the other.");
+        if (spec.XTickLabels == TickLabels.None)
+            throw new ArgumentException("TickLabels.None leaves a Y axis unlabelled, its values read from each mark's name; the X axis is shared by every pane and is how a reader places each mark, so XTickLabels takes All, Ends or Bounds.");
+        if (!Enum.IsDefined(spec.Sampling)) throw new ArgumentException("Unknown sampling method.");
+        if (!Enum.IsDefined(spec.PaneTitles)) throw new ArgumentException("Unknown pane title placement.");
+        if (spec.PaneTitles != PaneTitlePlacement.Axis && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.StackedColumn
+            or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Blocks))
+            throw new ArgumentException("PaneTitles names each plot above it in place of its Y axis title, so it applies to line, area, scatter, bubble, column, stacked column, band, range, candlestick, OHLC and blocks charts; a horizontal bar chart writes its value axis along the bottom, a timeline names its lanes, and the other kinds have no Y axis up the side.");
         if (spec.SharedReadout && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Blocks))
             throw new ArgumentException("SharedReadout reads every series at one X of a continuous X axis, so it applies to line, area, scatter, bubble, band, range, candlestick, OHLC and blocks charts; column, bar and stacked column charts place their series by category, and the other kinds have no X axis their series share.");
         if (secondary)
@@ -70,7 +77,7 @@ public static partial class ChartValidation
             if (spec.Series!.Where(series => series is not null).GroupBy(series => series.Pane).Any(pane => pane.All(series => series.Secondary)))
                 throw new ArgumentException("A secondary axis needs at least one series on the left of its pane to measure against.");
         }
-        if (spec.Panes is null || spec.Panes.Count > 3) throw new ArgumentException("A chart has at most four panes: the main plot and three more in Panes.");
+        if (spec.Panes is null || spec.Panes.Count > 5) throw new ArgumentException("A chart has at most six plots: the main plot and five more in Panes.");
         if ((spec.Panes.Count > 0 || spec.Series?.Any(series => series is not null && series.Pane != 0) == true)
             && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Blocks or ChartKind.Candlestick or ChartKind.Ohlc))
             throw new ArgumentException("Panes share one continuous X axis, so they apply to line, area, scatter, bubble, band, range, blocks, candlestick and OHLC charts; column, bar and stacked column charts place their bars by category, and the other kinds derive their X or have none.");
@@ -376,6 +383,8 @@ public static partial class ChartValidation
             throw new ArgumentException("A sparkline draws its data alone, so it writes no value labels; write the numbers in the words beside it, and each point's value stays in its tooltip and accessible name.");
         if (spec.SharedReadout)
             throw new ArgumentException("A sparkline is read beside the words that give its numbers, a point at a time, so it takes no shared readout; draw the series as a full chart to read them together.");
+        if (spec.PaneTitles != PaneTitlePlacement.Axis)
+            throw new ArgumentException("A sparkline draws its data alone, with no words, so it names no plot above it; PaneTitles applies to a full chart.");
     }
 
     /// <summary>A minimum span widens an axis fitted to the data about the data's middle, so it needs an axis that is fitted to the
@@ -427,6 +436,7 @@ public static partial class ChartValidation
         if (pane.Y2Axis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Blocks))
             throw new ArgumentException("A logarithmic secondary axis requires line, scatter, bubble, band, range or blocks charts.");
         if (!Enum.IsDefined(pane.YFormat) || !Enum.IsDefined(pane.Y2Format)) throw new ArgumentException("Unknown value format.");
+        if (pane.YTickLabels is { } labels && !Enum.IsDefined(labels)) throw new ArgumentException("Unknown Y axis side or tick labelling.");
         if (pane.YFormat == ValueFormat.TimeOfDay && pane.YAxis != AxisKind.Linear || pane.Y2Format == ValueFormat.TimeOfDay && pane.Y2Axis != AxisKind.Linear)
             throw new ArgumentException(TimeOfDayAxes);
         if ((pane.YReversed || pane.Y2Reversed) && spec.Kind == ChartKind.Area)

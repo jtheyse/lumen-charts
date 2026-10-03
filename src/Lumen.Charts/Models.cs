@@ -222,7 +222,33 @@ public enum TickLabels
     /// stands there: <see cref="ChartSpec.XMin"/> and <see cref="ChartSpec.XMax"/>, or the data's ends, along X, and the ends of the
     /// axis as it is fitted or bounded up the side. Along the bottom the first end's label starts at the plot's left edge and the
     /// last's ends at its right edge, so both stand whole under the plot.</summary>
-    Bounds
+    Bounds,
+    /// <summary>No label at all: the gridlines stay, and each value is read from its mark's name, a tooltip or a shared readout, as a
+    /// stack of channels whose headers give their numbers is read. Up the side only, on <see cref="ChartSpec.YTickLabels"/> and
+    /// <see cref="ChartPane.YTickLabels"/>; the X axis, which every pane shares, refuses it.</summary>
+    None
+}
+/// <summary>How a long line or area is thinned to <see cref="ChartSpec.MaxRenderedPoints"/>.</summary>
+public enum SamplingMethod
+{
+    /// <summary>Each unbroken run longer than the budget keeps the lowest and the highest point of each of its buckets, and its first and
+    /// last, so peaks and dips survive; every mark drawn is one of the series' own points. The default, and how every chart was thinned
+    /// before 0.37.0.</summary>
+    MinMax,
+    /// <summary>Each bucket is drawn as one point at the mean X and mean Y of its points, as a ride's channels are smoothed, so a noisy
+    /// stream reads as its trend rather than as a band of spikes. Series drawn as lines or areas only; every other mark, a band's
+    /// outline and a trend keep <see cref="MinMax"/>.</summary>
+    Average
+}
+/// <summary>Where a chart drawn on X and Y axes writes the name of each plot: the main plot's <see cref="ChartSpec.YLabel"/> and each
+/// pane's <see cref="ChartPane.Label"/>.</summary>
+public enum PaneTitlePlacement
+{
+    /// <summary>Up the side, read upwards beside the axis, as every chart did before 0.37.0. The default.</summary>
+    Axis,
+    /// <summary>As one horizontal line above each plot, starting at its left edge, cut with <c>…</c> where it is wider than the plot, in
+    /// the style's text colour: a header such as <c>Heart rate · avg 148 · max 182 bpm</c>, which a stack of channels reads best by.</summary>
+    Above
 }
 /// <summary>A colour a gradient takes at <paramref name="Value"/>, measured on the axis of the series it colours.</summary>
 /// <param name="Value">The value at which the stroke takes this colour.</param>
@@ -435,9 +461,9 @@ public sealed record ChartSpec
     /// on the left, because the right edge is taken; a horizontal bar chart, whose value axis runs along the bottom, and the
     /// charts without a Y axis refuse it.</summary>
     public AxisSide YAxisSide { get; init; }
-    /// <summary>Which ticks of the main Y axis carry a label, in every pane: all of them, the lowest and highest drawn, or, with
-    /// <see cref="TickLabels.Bounds"/>, none but the axis's two ends at their exact values. Gridlines stay at every tick; a secondary
-    /// axis labels all of its own.</summary>
+    /// <summary>Which ticks of the main Y axis carry a label, in every pane that does not set its own <see cref="ChartPane.YTickLabels"/>:
+    /// all of them, the lowest and highest drawn, with <see cref="TickLabels.Bounds"/> none but the axis's two ends at their exact values,
+    /// or with <see cref="TickLabels.None"/> none at all. Gridlines stay at every tick; a secondary axis labels all of its own.</summary>
     public TickLabels YTickLabels { get; init; }
     /// <summary>The data: at most 32 series and 100,000 points in all.</summary>
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];
@@ -453,7 +479,8 @@ public sealed record ChartSpec
     /// the axis's two ends at their exact values in its format, <see cref="XMin"/> and <see cref="XMax"/> or the data's ends, as a
     /// histogram of finish times labels its first start and its last end. Gridlines stay where they are. A continuous X axis takes it:
     /// line, area, scatter, bubble, candlestick, OHLC, band, range, blocks and timeline charts; the others refuse it set, and
-    /// <see cref="TickLabels.Bounds"/> is refused beside <see cref="TickSource.PointLabels"/>, which asks for the points' labels instead.</summary>
+    /// <see cref="TickLabels.Bounds"/> is refused beside <see cref="TickSource.PointLabels"/>, which asks for the points' labels instead.
+    /// <see cref="TickLabels.None"/> is refused: every pane shares the X axis, and its labels are how a reader places each mark.</summary>
     public TickLabels XTickLabels { get; init; }
     /// <summary>Names the main plot's left-hand axis. On a gauge it is the unit written after the score, such as <c>%</c>.</summary>
     public string YLabel { get; init; } = "";
@@ -507,9 +534,24 @@ public sealed record ChartSpec
     public double? Y2Min { get; init; }
     /// <summary>The top of the main plot's right-hand axis. Null fits its series.</summary>
     public double? Y2Max { get; init; }
-    /// <summary>The most points a line or area draws for each unbroken run of points. Longer runs are thinned by keeping
-    /// each bucket's lowest and highest point, so peaks survive, and every point drawn keeps its original index.</summary>
+    /// <summary>The most points a line or area draws for each unbroken run of points, from 16 to 5000. Longer runs are thinned as
+    /// <see cref="Sampling"/> says: by default by keeping each bucket's lowest and highest point, so peaks survive, and every point drawn
+    /// keeps its original index. A run longer than this is thinned over the X range the chart shows, <see cref="XMin"/> to
+    /// <see cref="XMax"/>, with the nearest point outside it at each side so the line still runs to the plot's edges, so a zoomed view
+    /// draws more of its own detail; a run within it is drawn whole, as before 0.37.0.</summary>
     public int MaxRenderedPoints { get; init; } = 1200;
+    /// <summary>How a line or area longer than <see cref="MaxRenderedPoints"/> is thinned. <see cref="SamplingMethod.MinMax"/>, the
+    /// default, keeps each bucket's lowest and highest point. <see cref="SamplingMethod.Average"/> divides the X range the chart shows
+    /// into <see cref="MaxRenderedPoints"/> equal slices, the same for every series, and draws a series' points in each slice as one point
+    /// at their mean X and mean Y, the mean written as precisely as the series' own values, to at most two places, so channels recorded at
+    /// the same moments line up slice for slice; on evenly sampled data, such as a
+    /// 1 Hz ride, every slice holds the same number of points, give or take one. It applies to a series drawn as a line or an area whose
+    /// points in view number more than the budget: a series within it is drawn whole. Each unbroken run keeps its own slices, so a
+    /// missing value stays a gap; a slice of one point draws that point. An averaged mark's name and tooltip end <c>, average of N
+    /// points</c>, and it reports its slice's first point; a highlighted point, and the last point of a series with
+    /// <see cref="ChartSeries.HighlightLast"/>, keeps a mark of its own beside the average of its slice, off the line. Other marks,
+    /// bands' outlines and trends keep MinMax.</summary>
+    public SamplingMethod Sampling { get; init; }
     /// <summary>Histogram bin count. Null selects a count from the data.</summary>
     public int? Bins { get; init; }
     /// <summary>Scatter only. Set a cell count across the plot to draw one shaded cell per occupied
@@ -527,8 +569,17 @@ public sealed record ChartSpec
     /// <summary>Plots stacked under the main one, sharing its X axis, each with Y axes of its own, such as volume under
     /// prices. The main plot is pane 0 and takes this spec's Y properties; <c>Panes[k - 1]</c> sets up pane k, which holds
     /// the series whose <see cref="ChartSeries.Pane"/> is k. Line, area, scatter, bubble, band, range, blocks, candlestick and
-    /// OHLC charts take them, at most three. Empty draws one plot.</summary>
+    /// OHLC charts take them, at most five, so a chart draws up to six plots. Empty draws one plot.</summary>
     public IReadOnlyList<ChartPane> Panes { get; init; } = [];
+    /// <summary>Where each plot is named: up the side, the default, or with <see cref="PaneTitlePlacement.Above"/> as one horizontal
+    /// header line above it, the main plot's <see cref="YLabel"/> and each pane's <see cref="ChartPane.Label"/>, starting at the plot's
+    /// left edge and cut with <c>…</c> to its width, in the style's text colour; a header cut short keeps its whole as its accessible name
+    /// and its native tooltip, as a title does, so put its key fact first. The main plot moves down 18 pixels and the gap between
+    /// two plots grows from 24 to 30 to hold them; a right-hand axis keeps its title up the side. Where no left-hand axis writes a label
+    /// either, every one set to <see cref="TickLabels.None"/>, the left margin narrows from 76 pixels to 30, as nothing is left to stand
+    /// in it. Line, area, scatter, bubble, column, stacked column, band, range, candlestick, OHLC and blocks charts take it; a horizontal
+    /// bar chart, a sparkline and the kinds without a Y axis up the side refuse it.</summary>
+    public PaneTitlePlacement PaneTitles { get; init; }
     /// <summary>Gauge charts only: how far round the arc runs, in degrees, from 180, a semicircle, to 360, a full circle. The arc
     /// is centred at the top, so the default 270 leaves its opening at the bottom.</summary>
     public double GaugeSweep { get; init; } = 270;
@@ -585,6 +636,9 @@ public sealed record ChartPane
     public ValueFormat YFormat { get; init; }
     /// <summary>Puts the smallest value at the top of the pane's left-hand axis.</summary>
     public bool YReversed { get; init; }
+    /// <summary>Which ticks of the pane's left-hand axis carry a label, as <see cref="ChartSpec.YTickLabels"/> says for the main plot;
+    /// null, the default, takes the spec's. <see cref="TickLabels.None"/> writes none, the gridlines staying.</summary>
+    public TickLabels? YTickLabels { get; init; }
     /// <summary>Shades each zone as a band behind this pane's data.</summary>
     public ZoneScale? YZones { get; init; }
     /// <summary>Names the pane's right-hand axis, which appears when one of its series is secondary.</summary>

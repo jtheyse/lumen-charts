@@ -60,7 +60,7 @@ var stream = new ChartSpec {
 };
 ```
 
-Use `Gradient = [new ColorStop(120, "#3F87D9"), new ColorStop(180, "#DD4B45")]` instead of `Zones` for a continuous colour. Zooming the component moves every pane together.
+Use `Gradient = [new ColorStop(120, "#3F87D9"), new ColorStop(180, "#DD4B45")]` instead of `Zones` for a continuous colour. Zooming the component moves every pane together, and from 0.37.0 a mouse drag across the plots zooms to the stretch it covers. For a long 1 Hz ride with many channels, `Sampling = SamplingMethod.Average`, a plot per channel named above it (`PaneTitles = PaneTitlePlacement.Above`) and no tick labels (`TickLabels.None`) read better: see "Ride channels" in `recipes-race-face.md`.
 
 ## Power–duration curve with critical power
 

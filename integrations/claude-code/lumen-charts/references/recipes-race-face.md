@@ -1,6 +1,6 @@
 # Race results recipes
 
-Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, and how a race's whole field finished, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.36.0, together with the recipes in `sports.md`.
+Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, and how a race's whole field finished, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.37.0, together with the recipes in `sports.md`.
 
 ```csharp
 using System.Globalization;
@@ -15,7 +15,7 @@ using Lumen.Charts;
 - **Accessible.** `Title` and `Description` are the drawing's accessible name; each mark is focusable and named, `Position: 16-05-2026, 24/48, better than the previous`, and the same words are its tooltip.
 - **Missing data is a gap, never a zero.** A race without a position or without points is a `null` Y: its line breaks there and no mark is drawn. A race without a field size writes its place alone.
 - **Never colour alone.** A place coloured by its change also says the change in words, in its tooltip and its accessible name.
-- **Keys.** From 0.36.0 each `<LumenChart>` is one tab stop: Tab reaches one point, and the arrow keys move from it — Left and Right along a series, skipping its gaps, Up and Down to the series before or after it, Home and End to its ends, Page Up and Page Down ten points — with the keys named in the chart's description. The static SVG keeps every mark focusable on its own.
+- **Keys.** From 0.36.0 each `<LumenChart>` has two tab stops: its scrollable viewport (a `role=region`), and then one roving point, from which the arrow keys move — Left and Right along a series, skipping its gaps, Up and Down to the series before or after it, Home and End to its ends, Page Up and Page Down ten points — with the keys named in the chart's description. The static SVG keeps every mark focusable on its own. Test the keys with real input, such as Playwright's `keyboard.press`: a `KeyboardEvent` dispatched from script can move focus without bringing up the shared readout or its status line.
 
 ## A dark brand style from design tokens
 
@@ -322,7 +322,75 @@ string fitnessSvg = ChartSvg.Render(fitnessMonth);
 - **Colours.** Every colour here is checked against the card, `#161618`: fitness `#38bdf8` 8.44:1, fatigue `#f87171` 6.53:1, form `#f59e0b` 8.41:1, the race lines `#a78bfa` 6.64:1, so each clears 4.5:1 and the race label keeps its colour; TSS is the token `low`, `#80858E`, 4.87:1, neutral, since a day's stress is not good or bad. These are colours for a dark card: on a white one they stand only 2.14, 2.77, 2.15 and 2.72 to 1, short even of the 3:1 a line needs. A light theme takes darker ones, `ChartStyle.Light`'s series for instance; and a colour that carries text, as an annotation's label does, should clear 4.5:1 — test it with `Contrast.Ratio(color, style.Background) >= 4.5` and pass `Color = null`, the muted colour, where it falls short, as value labels fall back to the text colour on their own.
 - **Never colour alone.** The series are told apart by colour in the drawing, and by name everywhere else: each point's tooltip and accessible name, `Form: 14 Sep 2026, −8.6`, and the readout, which names every series. A race line's name reads `Race: 4 Jul 2026`. At 340 units a year's races stand about 25 units apart, so their labels step down a row where they would touch, and one with no room left is left out, its name kept.
 - **The shared readout.** `SharedReadout = true` changes nothing in the SVG: `ChartSvg.Render` draws the same chart with it or without it. In `<LumenChart>` a guide runs through both panes at the day nearest the pointer, a tap or the focused point, each series' point there is ringed, and one tooltip reads the day and then each series in legend order: `4 Jul 2026`, `Fitness 61.2`, `Fatigue 70.4`, `Form −9.1`, `TSS 0`. Left and Right step a day, Up and Down move between the series, Home and End go to the first and last day, Page Up and Page Down ten days, and Escape hides it; the status line reads the same words for a screen reader. `ChartSvg.Readout(spec)` gives the same table to a host that draws its own.
+- **The app's own load.** When the app already computes fitness, fatigue and form, as an API with custom from–to windows does, draw its values rather than run `Training.Load`: `ChartSeries.From("Fitness", apiDays, d => UtcDay(d.Day), d => d.Fitness)` and the same for the others, so the chart and the app never disagree.
+- **Race names.** A race line may carry the race's own name, `Label = race.Name`, rather than `Race`; its tooltip and accessible name read it whole. Where race lines stand close, labels step down a row and one with no room left is left out, and a long name needs the most room, so it is the first to be left out: keep the label short, the date or an abbreviation, and leave the full name to the tooltip or the page.
 - **Ranges.** Slice the model's days, not the stress before the model, so a 7-day chart's first fitness is the one the whole year built. Fitness takes about six weeks to build, so seed `Training.Load` with the rider's typical daily stress, or start the log six weeks before the first day shown.
+
+## Ride channels
+
+A ride's channels as a bike computer records them, one sample a second, each in a plot of its own over one elapsed-time axis: heart rate, power, cadence, speed, elevation and temperature, six plots of equal height. Each plot is named on one line above it with its average, highest and lowest, so no plot needs tick labels up the side; each channel's two hours are drawn as 600 averages of 12 seconds, so the lines read as the ride rather than as its noise; and on an interactive page the shared readout reads all six at the second under a finger, the pointer or the focused point, and a drag across the plots with a mouse zooms to the stretch it covers (0.37.0).
+
+```csharp
+// The app's ride as recorded, one sample a second: heart rate (null where the strap dropped out), power, cadence, speed in m/s, elevation
+// and temperature. An invented two-hour ride, worked out from sines so it is the same on every run.
+const int channelSeconds = 7200;
+static double RoadHeight(int t) => 140 + 55 * Math.Sin(t / 380.0 - 1.3) + 18 * Math.Sin(t / 116.0 + 0.4);
+var rideHeart = new double?[channelSeconds];
+double[] ridePower = new double[channelSeconds], rideCadence = new double[channelSeconds], rideSpeed = new double[channelSeconds],
+    rideElevation = new double[channelSeconds], rideTemperature = new double[channelSeconds];
+var pulse = 92.0;
+for (var t = 0; t < channelSeconds; t++)
+{
+    var gained = RoadHeight(t + 1) - RoadHeight(t);                                        // metres gained this second
+    var effort = t < 600 ? 120 + t / 6.0 : 215;                                           // ten minutes' warm-up, then steady
+    var watts = gained < -0.2 ? 0 : Math.Max(0, effort + 450 * gained + 28 * Math.Sin(t * 1.7) + 16 * Math.Sin(t * 0.31 + 1));
+    ridePower[t] = Math.Round(watts);                                                     // 0 while coasting down the steeper descents
+    rideCadence[t] = watts == 0 ? 0 : Math.Round(85 + (watts - 215) / 25 + 3 * Math.Sin(t * 0.83));
+    rideSpeed[t] = Math.Round(Math.Clamp(8.6 - 9 * gained + 0.4 * Math.Sin(t / 50.0), 3.5, 16), 2);
+    rideElevation[t] = Math.Round(RoadHeight(t), 1);
+    rideTemperature[t] = Math.Round(17.5 + 5.5 * t / channelSeconds + 0.6 * Math.Sin(t / 700.0), 1);
+    pulse += (88 + 0.3 * watts - pulse) / 60;                                             // heart rate follows the power a minute behind
+    rideHeart[t] = t is >= 3720 and < 3765 ? null : Math.Round(pulse);                     // the strap drops out for 45 seconds
+}
+// Each channel's header, worked out with plain LINQ: a missing sample is left out, never counted as zero.
+string ChannelHeader(string name, IEnumerable<double?> values, string unit, string format = "0")
+{
+    var present = values.OfType<double>().ToArray();
+    string Text(double value) => value.ToString(format, CultureInfo.InvariantCulture);
+    return $"{name} · avg {Text(present.Average())} · max {Text(present.Max())} · min {Text(present.Min())} {unit}";
+}
+static IEnumerable<double?> Readings(IEnumerable<double> values) => values.Select(value => (double?)value);
+ChartSeries Channel(string name, IEnumerable<double?> values, string color, int pane) =>
+    new(name, values.Select((value, t) => new ChartPoint(t, value)).ToArray(), color) { Pane = pane, Markers = MarkerStyle.None, StrokeWidth = 1.5 };
+var rideKmh = rideSpeed.Select(metres => (double?)Math.Round(metres * 3.6, 1)).ToArray();   // stored in m/s, drawn in km/h
+var rideChannels = new ChartSpec {
+    Title = string.Create(CultureInfo.InvariantCulture, $"{rideSpeed.Sum() / 1000:0.0} km in {Clock(channelSeconds)}"),
+    Description = "Six channels, one sample a second, each averaged over 12 seconds",
+    Kind = ChartKind.Line, Width = 340, Height = 640, Style = raceFace, XFormat = ValueFormat.Duration, XLabel = "Elapsed time",
+    Sampling = SamplingMethod.Average, MaxRenderedPoints = 600, YTickLabels = TickLabels.None, PaneTitles = PaneTitlePlacement.Above, SharedReadout = true,
+    YLabel = ChannelHeader("HR", rideHeart, "bpm"),
+    Panes = [
+        new ChartPane { Label = ChannelHeader("Power", Readings(ridePower), "W"), Weight = 1 },
+        new ChartPane { Label = ChannelHeader("Cadence", Readings(rideCadence), "rpm"), Weight = 1 },
+        new ChartPane { Label = ChannelHeader("Speed", rideKmh, "km/h"), Weight = 1 },
+        new ChartPane { Label = ChannelHeader("Elevation", Readings(rideElevation), "m"), Weight = 1 },
+        new ChartPane { Label = ChannelHeader("Temp", Readings(rideTemperature), "°C", "0.0"), Weight = 1 }],
+    Series = [
+        Channel("Heart rate", rideHeart, "#e24b4a", 0), Channel("Power", Readings(ridePower), "#7048e8", 1),
+        Channel("Cadence", Readings(rideCadence), "#1098ad", 2), Channel("Speed", rideKmh, "#0ca678", 3),
+        Channel("Elevation", Readings(rideElevation), "#868e96", 4), Channel("Temperature", Readings(rideTemperature), "#e8950c", 5)]
+};
+string rideSvg = ChartSvg.Render(rideChannels, includeLegend: false);
+// Interactive: <LumenChart Spec="rideChannels" FitWidth="true" />
+```
+
+- **Six plots.** `Panes` takes five from 0.37.0, so the main plot and five panes, each `Weight = 1`, share the height equally: at 340 by 640 each plot is about 53 units tall. Every pane shares the X axis, `XFormat = ValueFormat.Duration` writing `30:00` and `1:30:00`.
+- **Headers, not tick labels.** `PaneTitles = PaneTitlePlacement.Above` writes the main plot's `YLabel` and each pane's `Label` as one line over the plot's left edge, in the text colour, `hi` `#F5F6F7`, 16.70:1 on the card. Put the key fact first and keep it short, the channel's short name and then its numbers, `HR · avg 147 · max 191 · min 89 bpm`: all six here stand whole at 340, and at 320. A header the card is too narrow for is cut at a word with `…`, its end lost from the drawing, though not from its tooltip or its accessible name, which keep the whole of it. Speed's header is written in whole km/h to fit; its points keep their tenths. `YTickLabels = TickLabels.None` writes no tick label in any plot, its gridlines staying; a pane may set its own `ChartPane.YTickLabels`, `Ends` say, to put its two ends back. With nothing written up the left, the plots run from 30 units in rather than 76.
+- **Averaged slices.** `Sampling = SamplingMethod.Average` with `MaxRenderedPoints = 600` cuts the two hours into 600 slices of 12 seconds, the same slices for every channel, and draws each channel's 12 samples in a slice as one point at their mean, written as precisely as the channel's own samples, to at most two places, and named `Power: 1:00:06, 266, average of 12 points`; channels recorded at the same seconds line up slice for slice, and the readout reads all six at each, saying once what they average: `1:00:06 · average of 12 s`, `Heart rate 166`, `Power 266`, `Speed 27.7`. `MinMax`, the default, would keep each bucket's lowest and highest second instead, a band of spikes at this size. Zoomed in far enough, to 10 minutes say, every second in view is drawn as it was recorded.
+- **Missing is a gap.** The strap's 45 missing seconds are `null`: the heart-rate line breaks there, its slices on either side average only the seconds they hold, and the readout reads `Heart rate missing` in the gap. The headers leave them out, `OfType<double>()`, never count them as zero. A real zero, the power and cadence while coasting, is a value and is drawn.
+- **Never colour alone.** Each plot holds one channel, named in its header and in every point's name and the readout, so the colours only tell the lines apart. Against the card, `#161618`, the lines need 3:1: heart rate `#e24b4a` 4.59:1, power `#7048e8` 3.25:1, cadence `#1098ad` 5.26:1, speed `#0ca678` 5.80:1, elevation `#868e96` 5.44:1 and temperature `#e8950c` 7.52:1. On a white card heart rate stands 3.93:1, power 5.55:1, cadence 3.43:1, speed 3.12:1 and elevation 3.32:1, but temperature only 2.40:1: there take `#e8590c`, 3.58:1 on white and 5.05:1 on the card, and a light style such as `ChartStyle.Light`, whose text colour writes the headers at 12.80:1.
+- **Interactive.** `SharedReadout = true` reads all six at the slice nearest the pointer, a tap or the focused point, and the arrow keys step it slice by slice. With a mouse or a pen, a drag across the plots of 8 pixels or more draws a band through all six and zooms to it; Escape lets it go, Reset view draws the whole ride again, and on a phone a tap still reads the chart. The zoom and pan buttons do the same from the keyboard.
+- **Buckets of your own.** If the app already buckets its channels, to 600 points say, pass those points and leave `Sampling` alone: a series within the budget is drawn as given. `includeLegend: false` leaves out the legend, since each header names its channel.
 
 ## Rendering notes
 
