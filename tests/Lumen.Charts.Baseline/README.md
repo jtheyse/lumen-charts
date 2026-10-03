@@ -9,7 +9,7 @@ dotnet run -c Release -- mine.txt          # any argument ending .txt names the 
 dotnet run -c Release -- svg-out <dir>     # also writes each rendering, for a contact sheet
 ```
 
-`reference/refined.txt` and `reference/classic.txt` are the hashes of **v0.31.0**, 275 rows, recorded by its verification: v0.30.0's 269 rows with 0.31.0's six graph rows added (the gallery's pipeline at 900 pixels and fitted to 337, and a crowded graph, in each layout). The 249 rows that are not graphs reproduced exactly in both finishes; the twenty graph rows changed by design in both, since 0.31.0 keeps edges and edge labels clear of node labels and stands a circle in from the sides by half its widest label. (0.30.0 had changed the seven calendars drawn without `YZones` the same way, by design.) Compare a new build with:
+`reference/refined.txt` and `reference/classic.txt` are the hashes of **v0.32.0**, 288 rows, recorded by its verification: v0.31.0's 275 rows, every one reproduced exactly in both finishes, with 0.32.0's thirteen trend rows added (moving averages, polynomials and exponentials). Earlier releases changed rows by design: 0.31.0 the twenty graph rows, 0.30.0 the seven calendars drawn without `YZones`. Compare a new build with:
 
 ```bash
 diff <(tr -d '\r' < reference/refined.txt) <(tr -d '\r' < baseline.txt)

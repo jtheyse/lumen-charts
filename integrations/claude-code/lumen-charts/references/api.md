@@ -60,7 +60,10 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 | `Secondary` | Measure on the right-hand axis. At least one series per pane stays on the left. |
 | `Kind` | Override this series' mark: `Line`, `Area`, `Column`, `Scatter`, `Band`, `Range` (0.27.0) or `Blocks` (0.29.0). Allowed on line, area, scatter, bubble, band, range, blocks, column, candlestick and OHLC charts; blocks are refused on a column chart. |
 | `Pane` | 0 is the main plot; *k* needs `ChartSpec.Panes[k − 1]`. |
-| `Trend` | Draw a least-squares line (line, area, scatter, bubble marks). |
+| `Trend` | Draw a trend (line, area, scatter, bubble marks): a least-squares line across the plot unless `TrendFit` says otherwise. Dashed in the series colour, named for assistive technology. |
+| `TrendFit` | `TrendFit.Linear` (default), `MovingAverage`, `Polynomial` or `Exponential` (0.32.0). All are fitted in the space the chart draws, so on a log Y axis a moving average is the geometric mean and an exponential is straight. A polynomial or an exponential is drawn only across the X its observations cover (an exponential's positive ones), named `Load trend: quadratic fit, R squared 0.93` or `… exponential fit, rising, R squared 0.88` (R² on the logarithms, as Excel reports it); a moving average is drawn at the last point of each trailing window, named `HRV trend: 7-point moving average`. Refused without `Trend = true`. |
+| `TrendPoints` | A moving average's window, 2–1000 points, 7 by default (0.32.0). A missing value holds its slot and adds nothing; the line breaks where fewer than half the window (rounded up) is present. Points must be in X order. Refused set on any other fit. |
+| `TrendDegree` | A polynomial's degree, 2 (quadratic, default), 3 (cubic) or 4 (quartic) (0.32.0). Refused set on any other fit. |
 | `ProjectedFrom` | Dash a line or area from this X onward (planned values). |
 | `Zones` | Colour the series by the zone each value falls in (`ZoneScale`): lines, areas, scatter points, bubbles, columns, bars and blocks. |
 | `Summary` | A precomputed `BoxSummary` for a box chart (then `Points` must be empty). |
@@ -91,7 +94,7 @@ Init properties: `Label` (left axis title), `Weight` (height beside the main plo
 
 ## Enums
 
-`ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc, Gauge, Ring, Timeline, Range, Calendar, Blocks }` · `CalendarLayout { Weeks, Months }` · `CalendarCell { Square, Dot, Bubble }` · `ChartTheme { Light, Dark }` · `AxisKind { Linear, Log, Time }` · `ValueFormat { Number, Duration, Compact, TimeOfDay }` · `LineCurve { Linear, Smooth, Step }` · `AreaFill { Flat, Fade }` · `MarkerStyle { Auto, None, Hollow, Filled }` · `AxisSide { Left, Right }` · `TickLabels { All, Ends }` · `GridLine { Solid, Dotted, Dashed, Hidden }` · `ChartFinish { Refined, Classic }` · `AnnotationAxis { X, Y }` · `GraphLayout { Circular, Layered }` · `GraphDirection { LeftToRight, TopToBottom }` (0.30.0).
+`ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc, Gauge, Ring, Timeline, Range, Calendar, Blocks }` · `CalendarLayout { Weeks, Months }` · `CalendarCell { Square, Dot, Bubble }` · `ChartTheme { Light, Dark }` · `AxisKind { Linear, Log, Time }` · `ValueFormat { Number, Duration, Compact, TimeOfDay }` · `LineCurve { Linear, Smooth, Step }` · `TrendFit { Linear, MovingAverage, Polynomial, Exponential }` (0.32.0) · `AreaFill { Flat, Fade }` · `MarkerStyle { Auto, None, Hollow, Filled }` · `AxisSide { Left, Right }` · `TickLabels { All, Ends }` · `GridLine { Solid, Dotted, Dashed, Hidden }` · `ChartFinish { Refined, Classic }` · `AnnotationAxis { X, Y }` · `GraphLayout { Circular, Layered }` · `GraphDirection { LeftToRight, TopToBottom }` (0.30.0).
 
 ## ChartStyle
 
@@ -138,7 +141,7 @@ Static class `Training`; power in watts, time in seconds, samples uniformly spac
 
 ## Statistics
 
-`Statistics.Fit(points)` → `LinearFit?(Slope, Intercept, R2, Count)` · `Statistics.Rolling(values, window, minimum?)` → `RollingWindow?(Mean, Deviation, Count)` per entry (a moving average or a baseline band) · `Statistics.Summarize(values)` → `BoxSummary` · `Statistics.Quantile(sorted, p)` · `Statistics.Density(values, samples = 64)` · `Statistics.Bins(values, count?)` · `Statistics.SharedBins(sets, count?)`.
+`Statistics.Fit(points)` → `LinearFit?(Slope, Intercept, R2, Count)` · `Statistics.Polynomial(points, degree)` (degree 1–4, 0.32.0) → `PolynomialFit?(Coefficients, R2, Count)`, coefficients from the constant term up in your X, `Predict(x)` precise with Unix-millisecond X · `Statistics.Exponential(points)` (0.32.0) → `ExponentialFit?(A, B, R2, Count)` for `y = A·e^(B·x)` over the positive Y only, R² on the logarithms, `Predict(x)` (A can read 0 for Unix-millisecond X; `Predict` still holds) · each returns null where no fit exists · `Statistics.Rolling(values, window, minimum?)` → `RollingWindow?(Mean, Deviation, Count)` per entry (a moving average or a baseline band) · `Statistics.Summarize(values)` → `BoxSummary` · `Statistics.Quantile(sorted, p)` · `Statistics.Density(values, samples = 64)` · `Statistics.Bins(values, count?)` · `Statistics.SharedBins(sets, count?)`.
 
 ## Zones
 

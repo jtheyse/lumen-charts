@@ -4168,13 +4168,15 @@ Test("Gauge and ring: specs survive JSON, a request that names no sweep draws 27
 });
 Test("A gauge's sweep left at its default is left out of the hash that names gradients, so every other chart keeps its IDs",()=>{
     // 0.25.0 had no sweep: its hash of a spec is the JSON written today less the sweep and, since 0.27.0, the timeline's
-    // connectors and, since 0.28.0, the calendar's layout, cell and week start, which are the last five properties written.
+    // connectors and, since 0.28.0, the calendar's layout, cell and week start, which are the last five properties written, and,
+    // since 0.32.0, each series' trend fit, window and degree, written after its trend.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
     const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1}";
-    Check(json.EndsWith(defaults),json[^120..]);
-    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(defaults,"}"))))[..12].ToLowerInvariant();
+    const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
+    Check(json.EndsWith(defaults)&&json.Contains(trended),json[^120..]);
+    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(defaults,"}").Replace(trended,"\"Trend\":false,"))))[..12].ToLowerInvariant();
     Check(Prefix(ChartSvg.Render(faded))==before,$"{Prefix(ChartSvg.Render(faded))} is not 0.25.0's {before}");
     // Gauges and rings define no IDs: a gradient gauge draws its arc in pieces.
     var strain=Gauge(14) with{YMax=21,Series=[new("Strain",[new(0,14)]){Gradient=[new(0,"#3F87D9"),new(21,"#DD4B45")]}]};
@@ -5523,6 +5525,276 @@ Test("A fitted graph redraws at the width its box reports, holds dragged nodes i
     var ignored=new List<string>();
     OperateGraph(Pipeline(),async graph=>{await graph.Fit(375);ignored.Add(Box(Drawn(graph)));await graph.MoveNode("validate",5000,5000);ignored.Add(At(Drawn(graph),"validate"));});
     Check(ignored.SequenceEqual(["0 0 900 460","860,408"]),string.Join(" | ",ignored));
+});
+// 0.32.0: trend families. A plot runs from x 76 to 870 and y 78 to 344, so on X fixed from 0 to 12 a value x sits at TrendX(x), and
+// with Y fixed from 0 to 120 a value y at TrendY(y).
+double TrendX(double x)=>76+x/12*794;
+double TrendY(double y)=>344-y/120*266;
+ChartSpec OnFixedAxes(params ChartSeries[] series)=>new(){Title="Trends",Kind=ChartKind.Scatter,XMin=0,XMax=12,YMin=0,YMax=120,Series=series};
+XElement TrendOf(ChartSpec spec)=>Svg(spec).Descendants(ns+"path").Single(p=>(string?)p.Attribute("class")=="lumen-trend");
+// A trend's path as its pieces, each begun by a move and continued by lines.
+List<List<(double X,double Y)>> Subpaths(XElement path)
+{
+    var pieces=new List<List<(double X,double Y)>>();
+    foreach(var part in path.Attribute("d")!.Value.Split(' '))
+    {
+        var xy=part[1..].Split(',').Select(v=>double.Parse(v,CultureInfo.InvariantCulture)).ToArray();
+        if(part[0]=='M')pieces.Add([]);
+        pieces[^1].Add((xy[0],xy[1]));
+    }
+    return pieces;
+}
+Test("Statistics.Polynomial recovers a quadratic, a cubic and a quartic exactly, from the constant term up, a straight line as Fit does, and leaves noise no lean on any power of X",()=>{
+    double[][] shapes=[[3,-2,.5],[1,1,-.3,.02],[-4,.5,.25,-.03,.001]];
+    foreach(var c in shapes)
+    {
+        var points=Enumerable.Range(-5,21).Select(i=>(X:(double)i,Y:c.Select((k,j)=>k*Math.Pow(i,j)).Sum())).ToArray();
+        var fit=Statistics.Polynomial(points,c.Length-1)!;
+        Check(fit.Coefficients.Count==c.Length&&fit.Coefficients.Zip(c).All(p=>Math.Abs(p.First-p.Second)<1e-9),$"degree {c.Length-1}: {string.Join(", ",fit.Coefficients)}");
+        Check(fit.R2>1-1e-12&&fit.Count==21&&points.All(p=>Math.Abs(fit.Predict(p.X)-p.Y)<1e-9),$"degree {c.Length-1} misses its points");
+    }
+    var line=Enumerable.Range(0,10).Select(i=>(X:(double)i,Y:3+i*1.5+(i%3==0?2:0))).ToArray();
+    var (one,straight)=(Statistics.Polynomial(line,1)!,Statistics.Fit(line)!);
+    Check(Math.Abs(one.Coefficients[0]-straight.Intercept)<1e-9&&Math.Abs(one.Coefficients[1]-straight.Slope)<1e-9&&Math.Abs(one.R2-straight.R2)<1e-9,"a first-degree fit is not the line");
+    // Least squares leaves residuals that lean on no power of X it fitted, and R squared is the share of the variance explained.
+    var noisy=Enumerable.Range(0,30).Select(i=>(X:i*.7,Y:5+2*i-.1*i*i+Math.Sin(i*1.3)*3)).ToArray();
+    var quadratic=Statistics.Polynomial(noisy,2)!;
+    for(var j=0;j<3;j++) Check(Math.Abs(noisy.Sum(p=>(p.Y-quadratic.Predict(p.X))*Math.Pow(p.X,j)))<1e-6,$"the residuals lean on x^{j}");
+    var mean=noisy.Average(p=>p.Y);
+    Check(quadratic.R2<1&&Math.Abs(quadratic.R2-(1-noisy.Sum(p=>Math.Pow(p.Y-quadratic.Predict(p.X),2))/noisy.Sum(p=>Math.Pow(p.Y-mean,2))))<1e-12,$"R squared {quadratic.R2}");
+});
+Test("Statistics.Polynomial keeps its precision with X in Unix milliseconds, in its coefficients and in what it predicts",()=>{
+    var day=86400000d;var start=Utc(2026,6,8);
+    var points=Enumerable.Range(0,60).Select(d=>(X:start+d*day,Y:60-.5*d+.02*d*d)).ToArray();
+    var fit=Statistics.Polynomial(points,2)!;
+    // The same curve in the caller's X: y = 60 − 0.5 (x − s) / D + 0.02 ((x − s) / D)².
+    double[] expected=[60+.5*start/day+.02*start*start/(day*day),-.5/day-.04*start/(day*day),.02/(day*day)];
+    Check(fit.Coefficients.Zip(expected).All(p=>Math.Abs(p.First-p.Second)<=1e-6*Math.Abs(p.Second)),string.Join(", ",fit.Coefficients));
+    Check(points.All(p=>Math.Abs(fit.Predict(p.X)-p.Y)<1e-9)&&fit.R2>1-1e-9,"the fit lost its precision");
+    // A quartic over a week of hours, where the coefficients in Unix milliseconds alone would cancel to noise.
+    var week=Enumerable.Range(0,7*24).Select(h=>(X:start+h*3600000d,Y:50+Math.Pow(h/24d-3.5,4)-3*Math.Pow(h/24d-3.5,2))).ToArray();
+    var quartic=Statistics.Polynomial(week,4)!;
+    Check(week.All(p=>Math.Abs(quartic.Predict(p.X)-p.Y)<1e-7)&&quartic.R2>1-1e-9,"a quartic over a week lost its precision");
+    // A fit built from coefficients alone, or given others, predicts from them.
+    Check(Math.Abs(new PolynomialFit([1,2,3],1,3).Predict(2)-17)<1e-12&&Math.Abs((fit with{Coefficients=[4,0,1]}).Predict(3)-13)<1e-12);
+});
+Test("Statistics.Polynomial and Statistics.Exponential return null where no fit exists, and a polynomial's degree runs from 1 to 4",()=>{
+    Check(Statistics.Polynomial([(1,2),(2,3)],2) is null&&Statistics.Polynomial([(1,2),(1,3),(2,5),(2,1)],2) is null,"a quadratic through two X values");
+    Check(Statistics.Polynomial([(1,2),(2,3),(3,1)],2) is {Count:3}&&Statistics.Polynomial([(1,2),(2,3),(3,1),(4,4)],4) is null,"three X values take a quadratic and four no quartic");
+    Check(Statistics.Polynomial([(1,4),(2,4),(3,4),(5,4)],3) is {R2:1} flat&&Math.Abs(flat.Coefficients[0]-4)<1e-12&&flat.Coefficients.Skip(1).All(c=>Math.Abs(c)<1e-12),"a flat set is not a flat curve");
+    Check(Statistics.Polynomial([],2) is null&&Statistics.Exponential([]) is null);
+    foreach(var degree in new[]{0,5,-1}) Reject(()=>Statistics.Polynomial([(1,2),(2,3),(3,4),(4,5),(5,6),(6,7)],degree));
+    Check(Statistics.Exponential([(0,-1),(1,0),(2,5)]) is null,"one positive value took a fit");
+    Check(Statistics.Exponential([(2,1),(2,5),(2,9)]) is null,"one X took a fit");
+});
+Test("Statistics.Exponential recovers A, B and an R squared measured on the logarithms, from the positive values only",()=>{
+    var exact=Enumerable.Range(0,11).Select(i=>(X:(double)i,Y:3*Math.Exp(.25*i))).ToArray();
+    var fit=Statistics.Exponential(exact.Concat([(4.5,0),(5.5,-7)]))!;
+    Check(Math.Abs(fit.A-3)<1e-9&&Math.Abs(fit.B-.25)<1e-12&&fit.R2>1-1e-12&&fit.Count==11,$"{fit}");
+    Check(exact.All(p=>Math.Abs(fit.Predict(p.X)-p.Y)<1e-9*p.Y));
+    // Four readings worked by hand on their logarithms, as Excel's exponential trendline reports them: y = 1.0445 e^(0.6213 x),
+    // R squared 0.9337, which is not the R squared of the curve on Y itself.
+    (double X,double Y)[] readings=[(1,2),(2,3),(3,9),(4,11)];
+    var logs=readings.Select(p=>Math.Log(p.Y)).ToArray();var meanLog=logs.Average();
+    double sxy=readings.Select((p,i)=>(p.X-2.5)*(logs[i]-meanLog)).Sum(),syy=logs.Sum(l=>(l-meanLog)*(l-meanLog));
+    var worked=Statistics.Exponential(readings)!;
+    Check(Math.Abs(worked.B-sxy/5)<1e-12&&Math.Abs(worked.A-Math.Exp(meanLog-sxy/5*2.5))<1e-12&&Math.Abs(worked.R2-sxy*sxy/(5*syy))<1e-12,$"{worked}");
+    Check(Math.Abs(worked.B-.6213)<1e-4&&Math.Abs(worked.A-1.0445)<1e-4&&Math.Abs(worked.R2-.9337)<1e-4,$"{worked}");
+    var mean=readings.Average(p=>p.Y);
+    Check(Math.Abs(worked.R2-(1-readings.Sum(p=>Math.Pow(p.Y-worked.Predict(p.X),2))/readings.Sum(p=>Math.Pow(p.Y-mean,2))))>.01,"R squared was measured on Y");
+    // Unix milliseconds put A below the smallest double, and the fit still predicts.
+    var day=86400000d;var start=Utc(2026,6,8);
+    var growth=Statistics.Exponential(Enumerable.Range(0,30).Select(d=>(start+d*day,50*Math.Exp(.05*d))))!;
+    Check(growth.A==0&&Math.Abs(growth.B*day-.05)<1e-9&&Enumerable.Range(0,30).All(d=>Math.Abs(growth.Predict(start+d*day)/(50*Math.Exp(.05*d))-1)<1e-9),$"{growth}");
+    // One built by hand, or given another A, predicts from its A and B.
+    Check(Math.Abs(new ExponentialFit(2,.5,1,3).Predict(2)-2*Math.E)<1e-12&&Math.Abs((fit with{A=6}).Predict(1)-6*Math.Exp(.25))<1e-9);
+});
+Test("A moving average averages a trailing window at its last point, holds a missing value's place without counting it, and breaks where less than half a window is present",()=>{
+    double?[] values=[10,20,null,40,null,null,null,80,90,100,110,120];
+    var spec=OnFixedAxes(new ChartSeries("S",values.Select((v,i)=>new ChartPoint(i,v)).ToArray()){Trend=true,TrendFit=TrendFit.MovingAverage,TrendPoints=4}) with{Kind=ChartKind.Line};
+    // The axes are where the constants say: the mark at x 9 is drawn at TrendX(9), TrendY(100).
+    Check(Svg(spec).Descendants(ns+"g").Where(g=>(string?)g.Attribute("data-point")=="9").Select(g=>g.Element(ns+"circle")!).Any(c=>Close((double)c.Attribute("cx")!,TrendX(9))&&Close((double)c.Attribute("cy")!,TrendY(100))));
+    var pieces=Subpaths(TrendOf(spec));
+    (double X,double Y)[][] expected=[[(1,15),(2,15),(3,70/3d),(4,30)],[(8,85),(9,90),(10,95),(11,105)]];
+    Check(pieces.Count==2&&pieces.Zip(expected).All(p=>p.First.Count==p.Second.Length&&p.First.Zip(p.Second).All(q=>Close(q.First.X,TrendX(q.Second.X))&&Close(q.First.Y,TrendY(q.Second.Y)))),
+        string.Join(" | ",pieces.Select(p=>string.Join(" ",p))));
+    // A window of three needs two values: a lone window between gaps has nothing to join to and draws nothing.
+    ChartSpec Sparse(params double?[] ys)=>OnFixedAxes(new ChartSeries("S",ys.Select((v,i)=>new ChartPoint(i,v)).ToArray()){Trend=true,TrendFit=TrendFit.MovingAverage,TrendPoints=3}) with{Kind=ChartKind.Line};
+    Check(!ChartSvg.Render(Sparse(10,null,30,null,null)).Contains("lumen-trend"),"a lone window was drawn");
+    var tail=Subpaths(TrendOf(Sparse(10,null,30,null,null,60,70,80)));
+    Check(tail.Count==1&&tail[0].Count==2&&Close(tail[0][0].X,TrendX(6))&&Close(tail[0][0].Y,TrendY(65))&&Close(tail[0][1].Y,TrendY(70)),string.Join(" ",tail[0]));
+    // Seven points unless set; fewer present than half of seven draw nothing.
+    var week=OnFixedAxes(new ChartSeries("S",Enumerable.Range(0,10).Select(i=>new ChartPoint(i,i*10)).ToArray()){Trend=true,TrendFit=TrendFit.MovingAverage});
+    var weekly=Subpaths(TrendOf(week))[0];
+    Check(weekly.Count==7&&Close(weekly[0].X,TrendX(3))&&Close(weekly[0].Y,TrendY(15))&&Close(weekly[^1].Y,TrendY(60)),string.Join(" ",weekly));
+    Check(!ChartSvg.Render(OnFixedAxes(new ChartSeries("S",[new(0,1),new(1,2),new(2,3)]){Trend=true,TrendFit=TrendFit.MovingAverage})).Contains("lumen-trend"));
+    // On a logarithmic axis it averages drawn positions, so a window of 1 and 100 stands at 10, their geometric mean.
+    var logged=new ChartSpec{Kind=ChartKind.Line,YAxis=AxisKind.Log,XMin=0,XMax=12,YMin=1,YMax=1000,Series=[new("G",Enumerable.Range(0,13).Select(i=>new ChartPoint(i,i%2==0?1:100)).ToArray()){Trend=true,TrendFit=TrendFit.MovingAverage,TrendPoints=2}]};
+    var geometric=Subpaths(TrendOf(logged)).Single();
+    Check(geometric.Count==13&&Close(geometric[0].Y,344)&&geometric.Skip(1).All(v=>Close(v.Y,344-266/3d)),string.Join(" ",geometric));
+    // A long run is thinned as a line is, to the chart's budget.
+    var many=new ChartSpec{Kind=ChartKind.Line,MaxRenderedPoints=100,Series=[new("Long",Enumerable.Range(0,5000).Select(i=>new ChartPoint(i,Math.Sin(i/50d)*10+i%7)).ToArray()){Trend=true,TrendFit=TrendFit.MovingAverage,TrendPoints=20}]};
+    var thinned=Subpaths(TrendOf(many));
+    Check(thinned.Count==1&&thinned[0].Count is >= 90 and <= 100,$"{thinned[0].Count} vertices");
+});
+Test("A polynomial, an exponential and a moving average are drawn only across the X their observations cover, a line still across the plot",()=>{
+    ChartPoint[] data=Enumerable.Range(2,8).Select(i=>new ChartPoint(i,10+i*i)).ToArray();
+    foreach(var fit in Enum.GetValues<TrendFit>())
+    {
+        var xs=Subpaths(TrendOf(OnFixedAxes(new ChartSeries("S",data){Trend=true,TrendFit=fit}))).SelectMany(p=>p).Select(v=>v.X).ToArray();
+        if(fit==TrendFit.Linear){Check(xs.Length==2&&Close(xs[0],76)&&Close(xs[1],870),"a line no longer spans the plot");continue;}
+        // Positions are written to eight decimals.
+        Check(xs.Min()>=TrendX(2)-1e-6&&xs.Max()<=TrendX(9)+1e-6,$"{fit} runs past the data");
+        if(fit==TrendFit.MovingAverage) Check(Close(xs.Min(),TrendX(5))&&Close(xs.Max(),TrendX(9)),"the moving average does not run from its first half-full window to the last point");
+        else Check(Close(xs[0],TrendX(2))&&Close(xs[^1],TrendX(9))&&xs.Zip(xs.Skip(1)).All(p=>p.Second>p.First&&p.Second-p.First<=2+1e-6),$"{fit} does not run the data's range every 2 pixels or less");
+    }
+    // An exponential leaves out the values that have no logarithm, and is drawn across the positive ones only.
+    var lifted=Subpaths(TrendOf(OnFixedAxes(new ChartSeries("S",[new(0,0),new(1,-3),..data]){Trend=true,TrendFit=TrendFit.Exponential}))).Single();
+    Check(Close(lifted[0].X,TrendX(2))&&Close(lifted[^1].X,TrendX(9)),"the exponential runs past its positive values");
+    // Zoomed into the middle, a curve is sampled across the plot it shows and the clip's 12-pixel bleed, not the stretch it hides.
+    var zoomed=Subpaths(TrendOf(OnFixedAxes(new ChartSeries("S",data){Trend=true,TrendFit=TrendFit.Polynomial}) with{XMin=5,XMax=5.5}))[0];
+    Check(zoomed.Count==410&&Close(zoomed[0].X,64)&&Close(zoomed[^1].X,882),$"{zoomed.Count} vertices from {zoomed[0].X} to {zoomed[^1].X}");
+});
+Test("An exponential is straight on a logarithmic Y axis, through its exact data, and curves on a linear one",()=>{
+    var growth=Enumerable.Range(0,13).Select(i=>new ChartPoint(i,2*Math.Exp(.4*i))).ToArray();
+    var series=new ChartSeries("Growth",growth){Trend=true,TrendFit=TrendFit.Exponential};
+    var line=Subpaths(TrendOf(OnFixedAxes(series) with{YAxis=AxisKind.Log,YMin=1,YMax=1000})).Single();
+    var slope=(line[^1].Y-line[0].Y)/(line[^1].X-line[0].X);
+    Check(line.Count==398&&line.All(v=>Math.Abs(line[0].Y+slope*(v.X-line[0].X)-v.Y)<1e-6),"the exponential bends on a log axis");
+    Check(growth.All(p=>Math.Abs(line[0].Y+slope*(TrendX(p.X)-line[0].X)-(344-Math.Log10(p.Y!.Value)/3*266))<1e-6),"it misses its own points on a log axis");
+    // On a linear axis every vertex is the curve through the data, and the middle sags below the chord between the ends.
+    var curve=Subpaths(TrendOf(OnFixedAxes(series) with{YMax=300})).Single();
+    Check(curve.All(v=>Math.Abs(v.Y-(344-2*Math.Exp(.4*(v.X-76)/794*12)/300*266))<1e-6),"the curve is not the data's on a linear axis");
+    var middle=curve[curve.Count/2];var chord=curve[0].Y+(curve[^1].Y-curve[0].Y)*(middle.X-curve[0].X)/(curve[^1].X-curve[0].X);
+    Check(middle.Y-chord>20,"the exponential is straight on a linear axis");
+    // A polynomial on a log axis is fitted to the drawn positions, so powers of ten in a line are a straight line there too.
+    var decades=Subpaths(TrendOf(OnFixedAxes(new ChartSeries("Decades",Enumerable.Range(1,9).Select(i=>new ChartPoint(i,Math.Pow(10,i/3d))).ToArray()){Trend=true,TrendFit=TrendFit.Polynomial}) with{YAxis=AxisKind.Log,YMin=1,YMax=1000})).Single();
+    var rise=(decades[^1].Y-decades[0].Y)/(decades[^1].X-decades[0].X);
+    Check(decades.All(v=>Math.Abs(decades[0].Y+rise*(v.X-decades[0].X)-v.Y)<1e-6),"a quadratic through a straight drawn line bends");
+});
+Test("A polynomial on a trading axis is fitted in the space it draws, so a quadratic in trading days runs through every point",()=>{
+    var days=TradingDays(28);
+    var spec=new ChartSpec{Kind=ChartKind.Scatter,XAxis=AxisKind.Time,SkipWeekends=true,YMin=0,YMax=200,Series=[new("Close",days.Select((v,i)=>new ChartPoint(v,100+3*i-.2*i*i)).ToArray()){Trend=true,TrendFit=TrendFit.Polynomial}]};
+    var doc=Svg(spec);
+    var path=doc.Descendants(ns+"path").Single(p=>(string?)p.Attribute("class")=="lumen-trend");
+    Check(days.Length==20&&path.Attribute("aria-label")!.Value=="Close trend: quadratic fit, R squared 1.00",path.Attribute("aria-label")!.Value);
+    var curve=Subpaths(path).Single();
+    var marks=doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("class")=="lumen-datum").Select(g=>g.Element(ns+"circle")!).Select(c=>(X:(double)c.Attribute("cx")!,Y:(double)c.Attribute("cy")!)).ToArray();
+    Check(marks.Length==20&&Close(curve[0].X,marks[0].X)&&Close(curve[^1].X,marks[^1].X),"the curve does not run from the first trading day to the last");
+    // Each mark lies on the curve, read between the two samples either side of it.
+    foreach(var m in marks)
+    {
+        var k=Math.Max(1,curve.FindIndex(v=>v.X>=m.X-1e-9));var (a,b)=(curve[k-1],curve[k]);
+        Check(Math.Abs(a.Y+(b.Y-a.Y)*(m.X-a.X)/(b.X-a.X)-m.Y)<.01,$"the mark at {m.X} is off the curve");
+    }
+});
+Test("Each trend is named for its fit, keeps the line's look and carries a native title only where titles are drawn",()=>{
+    ChartPoint[] rising=Enumerable.Range(1,10).Select(i=>new ChartPoint(i,5+i*i*.5)).ToArray();
+    string Label(ChartSeries s)=>TrendOf(Spec(ChartKind.Scatter) with{Series=[s]}).Attribute("aria-label")!.Value;
+    var load=new ChartSeries("Load",rising){Trend=true};
+    Check(Label(load).StartsWith("Load trend: rising, R squared 0.9"),Label(load));
+    Check(Label(load with{TrendFit=TrendFit.MovingAverage})=="Load trend: 7-point moving average"&&Label(load with{TrendFit=TrendFit.MovingAverage,TrendPoints=3})=="Load trend: 3-point moving average");
+    Check(Label(load with{TrendFit=TrendFit.Polynomial})=="Load trend: quadratic fit, R squared 1.00"&&Label(load with{TrendFit=TrendFit.Polynomial,TrendDegree=3})=="Load trend: cubic fit, R squared 1.00"
+        &&Label(load with{TrendFit=TrendFit.Polynomial,TrendDegree=4})=="Load trend: quartic fit, R squared 1.00");
+    Check(Label(load with{TrendFit=TrendFit.Exponential}) is var up&&up.StartsWith("Load trend: exponential fit, rising, R squared 0.9")&&up.Length=="Load trend: exponential fit, rising, R squared 0.95".Length,up);
+    Check(Label(load with{TrendFit=TrendFit.Exponential,Points=rising.Select(p=>p with{Y=100/p.Y}).ToArray()}).StartsWith("Load trend: exponential fit, falling, R squared 0.9"));
+    foreach(var fit in Enum.GetValues<TrendFit>())
+    {
+        var spec=Spec(ChartKind.Line) with{Series=[new("Load",rising,"#123456"){Trend=true,TrendFit=fit,StrokeWidth=3}]};
+        var path=TrendOf(spec);
+        Check((string?)path.Attribute("stroke-dasharray")=="7 5"&&(string?)path.Attribute("stroke-opacity")==".85"&&(string?)path.Attribute("fill")=="none"&&(string?)path.Attribute("role")=="img"
+            &&(string?)path.Attribute("stroke")=="#123456"&&(string?)path.Attribute("stroke-width")=="2.25"&&(string?)path.Attribute("vector-effect")=="non-scaling-stroke",$"{fit} looks different: {path}");
+        Check(path.Element(ns+"title")?.Value==path.Attribute("aria-label")!.Value,$"{fit} has no native title");
+        Check(TrendOf(spec with{Series=[spec.Series[0] with{StrokeWidth=null}]}).Attribute("stroke-width")!.Value=="1.2",$"{fit} is not three quarters of the refined stroke");
+        var bare=XDocument.Parse(ChartSvg.Render(spec,includeTitles:false)).Descendants(ns+"path").Single(p=>(string?)p.Attribute("class")=="lumen-trend");
+        Check(bare.Element(ns+"title") is null&&bare.Attribute("aria-label")!.Value==path.Attribute("aria-label")!.Value,$"{fit} keeps a title without titles");
+        var classic=Svg(Classic(spec)).Descendants(ns+"path").Single(p=>(string?)p.Attribute("class")=="lumen-trend");
+        Check((string?)classic.Attribute("stroke-width")=="2"&&classic.Attribute("vector-effect") is null,$"{fit} in the classic finish");
+    }
+});
+Test("A trend's fit, window and degree are refused without a trend, out of range and on the wrong fit, and every fit where a trend is",()=>{
+    ChartSeries s=new("S",[new(0,1),new(1,2),new(2,4),new(3,3)]);
+    string Refusal(ChartSpec spec){try{ChartSvg.Render(spec);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
+    string Refused(ChartSeries series,ChartKind kind=ChartKind.Line)=>Refusal(Spec(kind) with{Series=[series]});
+    foreach(var unasked in new[]{s with{TrendFit=TrendFit.MovingAverage},s with{TrendFit=TrendFit.Polynomial},s with{TrendFit=TrendFit.Exponential},s with{TrendPoints=5},s with{TrendDegree=3}})
+        Check(Refused(unasked).Contains("need Trend = true"),Refused(unasked));
+    var trended=s with{Trend=true};
+    foreach(var points in new[]{1,0,-7,1001}) Check(Refused(trended with{TrendFit=TrendFit.MovingAverage,TrendPoints=points}).Contains("from 2 to 1000"),$"{points} points");
+    foreach(var degree in new[]{1,5,0}) Check(Refused(trended with{TrendFit=TrendFit.Polynomial,TrendDegree=degree}).Contains("2, 3 or 4"),$"degree {degree}");
+    Check(Refused(trended with{TrendPoints=5}).Contains("applies to TrendFit.MovingAverage")&&Refused(trended with{TrendFit=TrendFit.Polynomial,TrendPoints=5}).Contains("applies to TrendFit.MovingAverage"));
+    Check(Refused(trended with{TrendDegree=3}).Contains("applies to TrendFit.Polynomial")&&Refused(trended with{TrendFit=TrendFit.Exponential,TrendDegree=3}).Contains("applies to TrendFit.Polynomial"));
+    Check(Refused(trended with{TrendFit=(TrendFit)9})=="Unknown trend fit.");
+    // The ends of each range are taken, and so are the defaults written out without a trend.
+    foreach(var taken in new[]{trended with{TrendFit=TrendFit.MovingAverage,TrendPoints=2},trended with{TrendFit=TrendFit.MovingAverage,TrendPoints=1000},trended with{TrendFit=TrendFit.Polynomial,TrendDegree=4},s with{TrendPoints=7,TrendDegree=2,TrendFit=TrendFit.Linear}})
+        ChartSvg.Render(Spec() with{Series=[taken]});
+    // A moving average runs through points in the order they come, so dots out of X order are refused one; the other fits take them.
+    var shuffled=new ChartSeries("Dots",[new(2,1),new(0,3),new(1,2),new(3,5)]){Trend=true};
+    Check(Refused(shuffled with{TrendFit=TrendFit.MovingAverage},ChartKind.Scatter).Contains("ordered by X"));
+    foreach(var fit in new[]{TrendFit.Linear,TrendFit.Polynomial,TrendFit.Exponential}) Check(ChartSvg.Render(Spec(ChartKind.Scatter) with{Series=[shuffled with{TrendFit=fit}]}).Contains("lumen-trend"),$"{fit} refused dots out of order");
+    // Every fit is refused where the line is, each with the reason the line is given.
+    foreach(var fit in Enum.GetValues<TrendFit>())
+    {
+        ChartSpec Trending(ChartKind kind)=>Sample(kind) with{Series=Sample(kind).Series.Select(x=>x with{Trend=true,TrendFit=fit}).ToArray()};
+        foreach(var kind in (ChartKind[])[ChartKind.Column,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Band,ChartKind.Range,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Donut,ChartKind.Candlestick])
+            Check(Refusal(Trending(kind)).Contains("trend line applies"),$"{fit} on {kind}: {Refusal(Trending(kind))}");
+        Check(Refusal(Spec() with{Series=[new("Bars",[new(0,1),new(1,2)]){Kind=ChartKind.Column,Trend=true,TrendFit=fit}]}).Contains("trend line applies"),$"{fit} on a column series");
+        Check(Refusal(Trending(ChartKind.Timeline)).Contains("timeline draws no trend")&&Refusal(Trending(ChartKind.Calendar)).Contains("calendar draws no trend")&&Refusal(Trending(ChartKind.Blocks)).Contains("block series draws no trend"),$"{fit} on timelines, calendars or blocks");
+    }
+});
+Test("Trend = true alone draws as 0.31.0 drew it, byte for byte with its gradient IDs, and a fit away from the line names its gradients afresh",()=>{
+    // Rows of 0.31.0's rendering baseline that draw trends, in both finishes, and a gradient beside a trend recorded from 0.31.0's
+    // own code. Hashes were recorded on Windows; elsewhere the IDs below still hold the hash that names gradients.
+    var line=Baseline(ChartKind.Line,ChartTheme.Light);var scatter=Baseline(ChartKind.Scatter,ChartTheme.Light);
+    var faded=new ChartSpec{Kind=ChartKind.Area,Title="Fade and trend",Description="A gradient beside a trend",
+        Series=[new("Climb",Enumerable.Range(0,24).Select(i=>new ChartPoint(i,20+i%5*3+i)).ToArray()){Fill=AreaFill.Fade},
+            new("Pace",Enumerable.Range(0,24).Select(i=>new ChartPoint(i,40-i%4+i/2.0)).ToArray()){Kind=ChartKind.Line,Trend=true}]};
+    var dark=faded with{Theme=ChartTheme.Dark,Series=[faded.Series[0],faded.Series[1] with{Gradient=[new(30,"#2E9B58"),new(50,"#DD4B45")]}]};
+    var trend=scatter with{Series=[..scatter.Series.Select((s,i)=>s with{Trend=true,Points=s.Points.Select(p=>p with{Y=i==0?p.Y:60-p.Y}).ToArray()})]};
+    var pace=line with{YFormat=ValueFormat.Duration,YReversed=true,Annotations=[new(AnnotationAxis.Y,300){Label="Target"}],Series=[new("Pace",Enumerable.Range(0,12).Select(i=>new ChartPoint(i,330-i*4+i%3*5)).ToArray()){Trend=true}]};
+    var order=line with{Y2Label="Half",Series=[new("A",Twelve()){Trend=true},new("B",Twelve().Select(p=>p with{Y=50-p.Y}).ToArray()){Trend=true},new("C",Twelve().Select(p=>p with{Y=p.Y/2}).ToArray()){Secondary=true}]};
+    (string Row,string Hash,Func<string> Draw)[] rows=[
+        ("guard/trend","6F3C39331C0B02AB",()=>ChartSvg.Render(trend)),("guard/trend, classic","7B99FC62158BEB58",()=>ChartSvg.Render(Classic(trend))),
+        ("pace-reversed","2A0753C00E774BFF",()=>ChartSvg.Render(pace)),("pace-reversed, classic","779AEF9057093620",()=>ChartSvg.Render(Classic(pace))),
+        ("guard/line-order","1023B23438A3732B",()=>ChartSvg.Render(order)),("guard/line-order, classic","63C0222F283AC476",()=>ChartSvg.Render(Classic(order))),
+        ("a fade beside a trend","015F07AE1A215C67",()=>ChartSvg.Render(faded)),("a fade beside a trend, classic","1E4C638A63DB4057",()=>ChartSvg.Render(Classic(faded))),
+        ("a gradient on a trended line, dark, untitled","65A6F80CFA0FE47D",()=>ChartSvg.Render(dark,includeTitles:false))];
+    if(OperatingSystem.IsWindows()) foreach(var (row,hash,draw) in rows) Check(Hash16(draw())==hash,$"{row} moved: {Hash16(draw())}");
+    string Id(ChartSpec spec)=>System.Text.RegularExpressions.Regex.Match(ChartSvg.Render(spec),"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var spelled=faded with{Series=[faded.Series[0],faded.Series[1] with{TrendFit=TrendFit.Linear,TrendPoints=7,TrendDegree=2}]};
+    Check(Id(faded)=="lumen-0b45c8e09ea1"&&ChartSvg.Render(spelled)==ChartSvg.Render(faded),"the defaults written out moved the drawing");
+    foreach(var other in new[]{faded.Series[1] with{TrendFit=TrendFit.Polynomial},faded.Series[1] with{TrendFit=TrendFit.MovingAverage,TrendPoints=5},faded.Series[1] with{TrendFit=TrendFit.Polynomial,TrendDegree=3},faded.Series[1] with{TrendFit=TrendFit.Exponential}})
+        Check(Id(faded with{Series=[faded.Series[0],other]}) is {Length:18} id&&id!=Id(faded),$"a {other.TrendFit} kept the line's IDs");
+});
+Test("A trend's fit, window and degree round-trip through JSON, the fit as a string, and a request that names none draws the line",()=>{
+    var json="{\"kind\":\"Scatter\",\"series\":["+
+        "{\"name\":\"Rate\",\"trend\":true,\"trendFit\":\"MovingAverage\",\"trendPoints\":3,\"points\":[{\"x\":0,\"y\":1},{\"x\":1,\"y\":3},{\"x\":2,\"y\":2},{\"x\":3,\"y\":5},{\"x\":4,\"y\":4}]},"+
+        "{\"name\":\"Curve\",\"trend\":true,\"trendFit\":\"Polynomial\",\"trendDegree\":3,\"points\":[{\"x\":0,\"y\":1},{\"x\":1,\"y\":2},{\"x\":2,\"y\":9},{\"x\":3,\"y\":28},{\"x\":4,\"y\":65}]},"+
+        "{\"name\":\"Growth\",\"trend\":true,\"trendFit\":\"Exponential\",\"points\":[{\"x\":0,\"y\":1},{\"x\":1,\"y\":2},{\"x\":2,\"y\":4},{\"x\":3,\"y\":8}]},"+
+        "{\"name\":\"Line\",\"trend\":true,\"points\":[{\"x\":0,\"y\":4},{\"x\":4,\"y\":1}]}]}";
+    var spec=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,finishJson)!;
+    Check(spec.Series[0].TrendFit==TrendFit.MovingAverage&&spec.Series[0].TrendPoints==3&&spec.Series[0].TrendDegree==2&&spec.Series[1].TrendFit==TrendFit.Polynomial&&spec.Series[1].TrendDegree==3&&spec.Series[1].TrendPoints==7
+        &&spec.Series[2].TrendFit==TrendFit.Exponential&&spec.Series[3].TrendFit==TrendFit.Linear&&spec.Series[3].TrendPoints==7&&spec.Series[3].TrendDegree==2,"a trend setting was lost on the way in");
+    var written=System.Text.Json.JsonSerializer.Serialize(spec,finishJson);
+    Check(written.Contains("\"trendFit\":\"MovingAverage\"")&&written.Contains("\"trendFit\":\"Polynomial\"")&&written.Contains("\"trendFit\":\"Exponential\"")&&written.Contains("\"trendFit\":\"Linear\"")
+        &&written.Contains("\"trendPoints\":3")&&written.Contains("\"trendDegree\":3"),written);
+    var svg=ChartSvg.Render(spec);
+    Check(svg==ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,finishJson)!),"a trend changed in transit");
+    foreach(var label in new[]{"Rate trend: 3-point moving average","Curve trend: cubic fit, R squared 1.00","Growth trend: exponential fit, rising, R squared 1.00","Line trend: falling, R squared 1.00"})
+        Check(svg.Contains($"aria-label='{label}'"),label);
+    Reject(()=>ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json.Replace("\"trend\":true,\"trendFit\":\"Polynomial\"","\"trendFit\":\"Polynomial\""),finishJson)!));
+});
+Test("Explorer: the curved fits draw a quadratic through throughput and an exponential through latency on the right, each across the users tested, beside the scatter's least-squares lines",()=>{
+    var spec=DemoData.Create(ChartKind.Scatter,ChartTheme.Light,0,AxisDemo.Fits);
+    var doc=Svg(spec);
+    var trends=doc.Descendants(ns+"path").Where(p=>(string?)p.Attribute("class")=="lumen-trend").ToArray();
+    var labels=trends.Select(t=>t.Attribute("aria-label")!.Value).ToArray();
+    Check(trends.Length==2&&labels[0].StartsWith("Throughput trend: quadratic fit, R squared 0.9")&&labels[1].StartsWith("Latency trend: exponential fit, rising, R squared 0.9"),string.Join(" | ",labels));
+    Check(spec.Series.Count==2&&!spec.Series[0].Secondary&&spec.Series[1].Secondary&&spec.Y2Label=="Latency (ms)");
+    // The throughput peaks inside the users tested, so its curve rises and then falls: on screen it climbs, then drops.
+    var curve=Subpaths(trends[0]).Single();var top=curve.MinBy(v=>v.Y);
+    Check(top.X>curve[0].X+100&&top.X<curve[^1].X-100,$"the throughput peaks at {top.X}");
+    Check(DemoData.Create(ChartKind.Scatter,ChartTheme.Light).Series.All(s=>s.Trend&&s.TrendFit==TrendFit.Linear),"the scatter's own trends changed");
+    foreach(var kind in Enum.GetValues<ChartKind>()) Check(DemoData.FitsCapable(kind)==(kind==ChartKind.Scatter));
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

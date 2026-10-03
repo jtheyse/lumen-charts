@@ -32,6 +32,50 @@ public sealed record LinearFit(double Slope, double Intercept, double R2, int Co
     public double Predict(double x) => Intercept + Slope * x;
 }
 
+/// <summary>A least-squares polynomial and the share of the variance in Y it accounts for.</summary>
+/// <param name="Coefficients">From the constant term upward, in the caller's X: <c>y = c₀ + c₁x + c₂x² + …</c>, one more than the
+/// degree.</param>
+/// <param name="R2">The share of the variance in Y the curve accounts for, from 0 to 1.</param>
+/// <param name="Count">How many observations it was fitted to.</param>
+public sealed record PolynomialFit(IReadOnlyList<double> Coefficients, double R2, int Count)
+{
+    // The fit as it was solved, in X centred and scaled to run from −1 to 1. Far from zero, as Unix milliseconds are, the terms of
+    // the coefficients in the caller's X cancel in all but their last digits, so a fit predicts from here while it still carries
+    // the coefficients it was solved with.
+    private readonly (IReadOnlyList<double> For, double Centre, double Scale, double[] Scaled)? solved;
+    internal PolynomialFit(IReadOnlyList<double> coefficients, double r2, int count, double centre, double scale, double[] scaled)
+        : this(coefficients, r2, count) => solved = (coefficients, centre, scale, scaled);
+    /// <summary>The fitted Y at <paramref name="x"/>. A fit from <see cref="Statistics.Polynomial"/> is evaluated about the middle of
+    /// its observations, where it was solved, so X in Unix milliseconds keeps its precision; one built from coefficients alone is
+    /// evaluated from them.</summary>
+    public double Predict(double x) => solved is { } s && ReferenceEquals(s.For, Coefficients) ? Horner(s.Scaled, (x - s.Centre) / s.Scale) : Horner(Coefficients, x);
+    internal static double Horner(IReadOnlyList<double> coefficients, double x)
+    {
+        var y = 0d;
+        for (var k = coefficients.Count - 1; k >= 0; k--) y = y * x + coefficients[k];
+        return y;
+    }
+}
+
+/// <summary>An exponential <c>y = A·e^(B·x)</c> fitted to the logarithms of the positive values, and the share of their variance
+/// it accounts for.</summary>
+/// <param name="A">The fitted Y where X is zero. Far from zero, as Unix milliseconds are, it can be smaller than a double holds and
+/// read 0; <see cref="Predict"/> still holds there.</param>
+/// <param name="B">The growth rate: Y is multiplied by e^B for each unit of X, so it rises where B is positive.</param>
+/// <param name="R2">The share of the variance in the logarithm of Y the fit accounts for, from 0 to 1, as Excel reports an
+/// exponential trend's.</param>
+/// <param name="Count">How many positive observations it was fitted to.</param>
+public sealed record ExponentialFit(double A, double B, double R2, int Count)
+{
+    // Where the fit was solved: the observations' mean X and the fitted logarithm there, so a fit far from zero predicts from it
+    // while it still carries the A and B it was solved with.
+    private readonly (double A, double B, double X, double Log)? solved;
+    internal ExponentialFit(double a, double b, double r2, int count, double x, double log) : this(a, b, r2, count) => solved = (a, b, x, log);
+    /// <summary>The fitted Y at <paramref name="x"/>. A fit from <see cref="Statistics.Exponential"/> is evaluated from the middle of
+    /// its observations, so it holds where <see cref="A"/> reads 0; one built from A and B alone is evaluated from them.</summary>
+    public double Predict(double x) => solved is { } s && s.A.Equals(A) && s.B.Equals(B) ? Math.Exp(s.Log + B * (x - s.X)) : A * Math.Exp(B * x);
+}
+
 /// <summary>The mean and sample standard deviation of the values present in one trailing window, and how many there were.</summary>
 /// <param name="Mean">The mean of the values present.</param>
 /// <param name="Deviation">Their sample standard deviation, dividing by n − 1; zero for a single value.</param>
@@ -61,6 +105,90 @@ public static class Statistics
         if (sxx == 0) return null;
         var slope = sxy / sxx;
         return new(slope, meanY - slope * meanX, syy == 0 ? 1 : Math.Clamp(sxy * sxy / (sxx * syy), 0, 1), data.Length);
+    }
+
+    /// <summary>
+    /// Fits <c>y = c₀ + c₁x + … + cₙxⁿ</c> of <paramref name="degree"/> 1 to 4 by least squares. Returns null when fewer than
+    /// degree + 1 distinct X values leave no one curve to draw. X is centred and scaled to run from −1 to 1, and Y centred, before the
+    /// normal equations are solved by elimination with partial pivoting, so a time axis in Unix milliseconds keeps its precision;
+    /// the coefficients are then given in the caller's X. Observations that share one Y are explained perfectly by a flat curve, so
+    /// their R squared is 1 rather than undefined.
+    /// </summary>
+    public static PolynomialFit? Polynomial(IEnumerable<(double X, double Y)> points, int degree)
+    {
+        if (degree is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(degree), "A polynomial's degree is from 1 to 4.");
+        var data = points.ToArray();
+        if (data.Select(p => p.X).Distinct().Take(degree + 1).Count() <= degree) return null;
+        double low = data.Min(p => p.X), high = data.Max(p => p.X), centre = (low + high) / 2, scale = (high - low) / 2, meanY = data.Average(p => p.Y);
+        var size = degree + 1;
+        // The normal equations: sums of the powers of the scaled X, and of those powers times the centred Y.
+        var sums = new double[2 * degree + 1];
+        var moments = new double[size];
+        foreach (var (x, y) in data)
+        {
+            double u = (x - centre) / scale, power = 1;
+            for (var k = 0; k < sums.Length; k++)
+            {
+                sums[k] += power;
+                if (k < size) moments[k] += power * (y - meanY);
+                power *= u;
+            }
+        }
+        var a = new double[size, size + 1];
+        for (var r = 0; r < size; r++)
+        {
+            for (var c = 0; c < size; c++) a[r, c] = sums[r + c];
+            a[r, size] = moments[r];
+        }
+        for (var column = 0; column < size; column++)
+        {
+            var pivot = column;
+            for (var r = column + 1; r < size; r++) if (Math.Abs(a[r, column]) > Math.Abs(a[pivot, column])) pivot = r;
+            if (a[pivot, column] == 0) return null;
+            for (var c = column; c <= size; c++) (a[column, c], a[pivot, c]) = (a[pivot, c], a[column, c]);
+            for (var r = column + 1; r < size; r++)
+            {
+                var factor = a[r, column] / a[column, column];
+                for (var c = column; c <= size; c++) a[r, c] -= factor * a[column, c];
+            }
+        }
+        var scaled = new double[size];
+        for (var r = size - 1; r >= 0; r--)
+        {
+            var sum = a[r, size];
+            for (var c = r + 1; c < size; c++) sum -= a[r, c] * scaled[c];
+            scaled[r] = sum / a[r, r];
+        }
+        scaled[0] += meanY;
+        double residual = 0, total = 0;
+        foreach (var (x, y) in data)
+        {
+            var miss = y - PolynomialFit.Horner(scaled, (x - centre) / scale);
+            residual += miss * miss; total += (y - meanY) * (y - meanY);
+        }
+        // Each power of (x − centre) / scale expanded by the binomial theorem gives the coefficients in the caller's X.
+        var coefficients = new double[size];
+        for (var k = 0; k < size; k++)
+        {
+            var term = scaled[k] / Math.Pow(scale, k);
+            for (var j = 0; j <= k; j++) coefficients[j] += term * Choose(k, j) * Math.Pow(-centre, k - j);
+        }
+        return new(Array.AsReadOnly(coefficients), total == 0 ? 1 : Math.Clamp(1 - residual / total, 0, 1), data.Length, centre, scale, scaled);
+        static double Choose(int n, int k) => k == 0 ? 1 : Choose(n - 1, k - 1) * n / k;
+    }
+
+    /// <summary>
+    /// Fits <c>y = A·e^(B·x)</c> by least squares on the logarithm of Y, as <see cref="Fit"/> fits a line, leaving out every
+    /// observation whose Y is zero or negative, which has no logarithm. Returns null when fewer than two positive observations
+    /// remain or they all share one X. R squared is measured on the logarithms, as Excel reports it for an exponential trend, not on
+    /// Y itself.
+    /// </summary>
+    public static ExponentialFit? Exponential(IEnumerable<(double X, double Y)> points)
+    {
+        var logs = points.Where(p => p.Y > 0).Select(p => (p.X, Math.Log(p.Y))).ToArray();
+        if (Fit(logs) is not { } line) return null;
+        // A least-squares line passes through its means, so the fitted logarithm at the mean X is the mean logarithm.
+        return new(Math.Exp(line.Intercept), line.Slope, line.R2, line.Count, logs.Average(p => p.X), logs.Average(p => p.Item2));
     }
 
     /// <summary>

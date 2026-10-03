@@ -179,6 +179,23 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify (-not $r.Content.Contains('lumen-trend')) 'A series that asks for no trend draws none'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $trend.Replace('"kind":"Scatter"','"kind":"Column"') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400) 'A trend line on a category chart is rejected'
+# 0.32.0: a moving average, a cubic and an exponential, each named for its fit; the fit is written as a string, as a graph's
+# direction is, and a fit, window or degree without a trend, or out of its range, is refused with its reason.
+$fits='{"title":"Fits","kind":"Scatter","yAxis":"Log","series":[{"name":"Rate","trend":true,"trendFit":"MovingAverage","trendPoints":3,"points":[{"x":0,"y":1},{"x":1,"y":3},{"x":2,"y":2},{"x":3,"y":5},{"x":4,"y":4}]},{"name":"Curve","trend":true,"trendFit":"Polynomial","trendDegree":3,"points":[{"x":0,"y":2},{"x":1,"y":3},{"x":2,"y":10},{"x":3,"y":29},{"x":4,"y":66}]},{"name":"Growth","trend":true,"trendFit":"Exponential","points":[{"x":0,"y":1},{"x":1,"y":2},{"x":2,"y":4},{"x":3,"y":8},{"x":4,"y":16}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $fits -SkipHttpErrorCheck
+$growth=[regex]::Match($r.Content,"<path class='lumen-trend' d='([^']+)'[^>]*aria-label='Growth trend").Groups[1].Value -split ' '|ForEach-Object{,($_.Substring(1) -split ',' | ForEach-Object{[double]$_})}
+$straight=($growth.Count -gt 100) -and (@($growth|Where-Object{[math]::Abs($growth[0][1]+($growth[-1][1]-$growth[0][1])*($_[0]-$growth[0][0])/($growth[-1][0]-$growth[0][0])-$_[1]) -gt 1e-6}).Count -eq 0)
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,"class='lumen-trend'")).Count -eq 3 -and $r.Content.Contains("aria-label='Rate trend: 3-point moving average'") -and $r.Content.Contains("aria-label='Growth trend: exponential fit, rising, R squared 1.00'") -and $straight) 'A moving average and an exponential posted as JSON draw as trends named for their fits, the exponential straight on a log axis'
+Verify ($r.Content -match "aria-label='Curve trend: cubic fit, R squared [01]\.\d\d'") 'A cubic posted with its degree draws as a cubic fit'
+foreach($bad in @(@{body=$fits.Replace('"trend":true,"trendFit":"MovingAverage"','"trendFit":"MovingAverage"');reason='need Trend = true';name='A moving average without a trend'},
+  @{body=$fits.Replace('"trendDegree":3','"trendDegree":5');reason='2, 3 or 4';name='A fifth-degree polynomial'},
+  @{body=$fits.Replace('"trendPoints":3','"trendPoints":1');reason='from 2 to 1000';name='A one-point moving average'},
+  @{body=$fits.Replace('"trendFit":"Exponential"','"trendFit":"Exponential","trendPoints":5');reason='applies to TrendFit.MovingAverage';name='A window on an exponential'})){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
+}
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $fits.Replace('"trendFit":"Exponential"','"trendFit":"Logistic"') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'An unknown trend fit is rejected'
 $logSpec='{"title":"Log","kind":"Scatter","yAxis":"Log","series":[{"name":"Load","points":[{"x":1,"y":2},{"x":2,"y":200},{"x":3,"y":20000}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $logSpec
 Verify (([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'Log axis SVG'

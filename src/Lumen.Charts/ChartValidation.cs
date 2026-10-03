@@ -181,6 +181,7 @@ public static partial class ChartValidation
             }
             if (series.Trend && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble))
                 throw new ArgumentException("A trend line applies to series drawn as lines, areas, scatter points or bubbles; the other kinds place their marks by index or derive their own values.");
+            Trended(series);
             if (series.Summary is not null) Summary(series, spec.Kind, spec.YAxis);
             Finish(series, mark, measure);
             if (series.Zones is not null)
@@ -250,6 +251,9 @@ public static partial class ChartValidation
             }
             if (mark is ChartKind.Line or ChartKind.Area or ChartKind.Band or ChartKind.Candlestick or ChartKind.Ohlc && series.Points.Zip(series.Points.Skip(1)).Any(p => p.First.X > p.Second.X))
                 throw new ArgumentException("Line, area, candlestick, OHLC and band points must be ordered by X.");
+            // Scatter points and bubbles may come in any order, but a moving average runs through them in the order they come.
+            if (series.Trend && series.TrendFit == TrendFit.MovingAverage && series.Points.Zip(series.Points.Skip(1)).Any(p => p.First.X > p.Second.X))
+                throw new ArgumentException("A moving average runs through a series' points in the order they are listed, a window at a time, so they must be ordered by X.");
             // Two columns at one X would stand in one place; a category chart already refuses that for every series.
             if (mark == ChartKind.Column && spec.Kind != ChartKind.Column && series.Points.Select(p => p.X).Distinct().Count() != series.Points.Count)
                 throw new ArgumentException("Columns on a continuous axis need unique X values within each series.");
@@ -347,6 +351,23 @@ public static partial class ChartValidation
         if (pane.Y2Axis == AxisKind.Log && (pane.Y2Min <= 0 || pane.Y2Max <= 0)) throw new ArgumentException("Log secondary bounds must be positive.");
         if (spec.Kind == ChartKind.Area && (pane.YMin > 0 || pane.YMax < 0 || pane.Y2Min > 0 || pane.Y2Max < 0)) throw new ArgumentException("Magnitude charts require a zero baseline.");
         if (pane.YZones is not null) Zones(pane.YZones, style);
+    }
+
+    /// <summary>A trend's fit, window and degree choose the trend <see cref="ChartSeries.Trend"/> draws, so each needs a trend, and
+    /// the window and degree the fit they belong to, before it can mean anything.</summary>
+    private static void Trended(ChartSeries series)
+    {
+        if (!Enum.IsDefined(series.TrendFit)) throw new ArgumentException("Unknown trend fit.");
+        if (!series.Trend && (series.TrendFit != TrendFit.Linear || series.TrendPoints != 7 || series.TrendDegree != 2))
+            throw new ArgumentException("TrendFit, TrendPoints and TrendDegree choose the trend a series draws, so they need Trend = true; without it nothing is drawn.");
+        if (series.TrendPoints is < 2 or > 1000)
+            throw new ArgumentException("TrendPoints, a moving average's window, is from 2 to 1000 points.");
+        if (series.TrendDegree is < 2 or > 4)
+            throw new ArgumentException("TrendDegree, a polynomial's degree, is 2, 3 or 4: a quadratic, a cubic or a quartic.");
+        if (series.TrendPoints != 7 && series.TrendFit != TrendFit.MovingAverage)
+            throw new ArgumentException("TrendPoints is a moving average's window, so it applies to TrendFit.MovingAverage.");
+        if (series.TrendDegree != 2 && series.TrendFit != TrendFit.Polynomial)
+            throw new ArgumentException("TrendDegree is a polynomial's degree, so it applies to TrendFit.Polynomial.");
     }
 
     /// <summary>Each finishing touch applies to the marks that can show it.</summary>

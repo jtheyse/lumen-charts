@@ -1,6 +1,6 @@
 namespace Lumen.Gallery;
 
-public enum AxisDemo { Numeric, Time, Log, PowerCurve, Pace, Zones, Performance, Target, Stream }
+public enum AxisDemo { Numeric, Time, Log, PowerCurve, Pace, Zones, Performance, Target, Stream, Fits }
 public enum BrandDemo { Lumen, Harbour, PageCss, Midnight }
 /// <summary>The theme and brand a visitor picked, kept for the circuit so they carry from one gallery page to the next.</summary>
 public sealed class GalleryLook { public bool Dark { get; set; } public BrandDemo Brand { get; set; } }
@@ -21,6 +21,7 @@ public static class DemoData
     public static bool PerformanceCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line;
     public static bool TargetCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Column;
     public static bool StreamCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Line;
+    public static bool FitsCapable(Lumen.Charts.ChartKind kind)=>kind is Lumen.Charts.ChartKind.Scatter;
     public static readonly string[] Months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     public static Lumen.Charts.ChartSpec Create(Lumen.Charts.ChartKind kind,Lumen.Charts.ChartTheme theme,int revision=0,AxisDemo axis=AxisDemo.Numeric)
     {
@@ -329,6 +330,16 @@ public static class DemoData
                 Panes=[new(){Label="Pace (min/km)",Weight=.6,YFormat=Lumen.Charts.ValueFormat.Duration,YReversed=true},new(){Label="Climb (m)",Weight=.4}],
                 Series=[new("Heart rate",Over(beats)){Gradient=effort,Markers=Lumen.Charts.MarkerStyle.None},new("Pace",Over(paces)){Pane=1,Markers=Lumen.Charts.MarkerStyle.None},
                     new("Climb",Over(climb)){Pane=2,Kind=Lumen.Charts.ChartKind.Area,Curve=Lumen.Charts.LineCurve.Smooth,Fill=Lumen.Charts.AreaFill.Fade,Markers=Lumen.Charts.MarkerStyle.None}]};
+        }
+        if(axis==AxisDemo.Fits&&FitsCapable(kind))
+        {
+            // A load test from 10 to 200 users at once: throughput rises with the load until contention takes it back, which is a
+            // parabola, and latency is multiplied by the same factor for every user added, which is an exponential, read on the right.
+            var users=Enumerable.Range(1,20).Select(i=>i*10d).ToArray();
+            spec=spec with{Title="Find the knee",Description="A simulated load test · throughput peaks, and latency climbs by a steady factor",
+                XLabel="Concurrent users",YLabel="Throughput (requests per second)",Y2Label="Latency (ms)",Annotations=[],
+                Series=[new("Throughput",users.Select(u=>new Lumen.Charts.ChartPoint(u,Math.Round(26*u-.1*u*u+random.Next(-90,91)))).ToArray()){Trend=true,TrendFit=Lumen.Charts.TrendFit.Polynomial},
+                    new("Latency",users.Select(u=>new Lumen.Charts.ChartPoint(u,Math.Round(40*Math.Exp(.015*u)*(1+(random.NextDouble()-.5)*.3)))).ToArray()){Secondary=true,Trend=true,TrendFit=Lumen.Charts.TrendFit.Exponential}]};
         }
         return spec;
     }

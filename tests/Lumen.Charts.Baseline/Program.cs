@@ -481,6 +481,34 @@ var crowded = new GraphSpec
 };
 foreach (var layout in Enum.GetValues<GraphLayout>())
     lines.Add($"graph/crowded-{layout} {Hash(Graph(crowded with { Layout = layout }))}");
+// 0.32.0: trend families. A seven-point moving average, a quadratic and an exponential in each theme; a cubic and a quartic; an
+// exponential on a logarithmic axis, where it is straight; a moving average across gaps in a line; a cubic on a trading axis that
+// skips weekends and a holiday; and in Midnight a load test's quadratic and exponential, one on each axis, and nightly HRV over its
+// baseline with its seven-night average.
+ChartPoint[] Wave() => Enumerable.Range(0, 40).Select(i => new ChartPoint(i, Math.Round(50 + 12 * Math.Sin(i / 5d) + i * .6 + i % 4 * 2, 1))).ToArray();
+ChartPoint[] Arc() => Enumerable.Range(0, 24).Select(i => new ChartPoint(i * 5, Math.Round(10 + 6 * i - .25 * i * i + i % 3 * 3, 1))).ToArray();
+ChartPoint[] Growth() => Enumerable.Range(0, 20).Select(i => new ChartPoint(i, Math.Round(3 * Math.Exp(.22 * i) * (1 + (i % 5 - 2) * .06), 2))).ToArray();
+foreach (var theme in Enum.GetValues<ChartTheme>())
+{
+    lines.Add($"trend/moving-average/{theme} {Hash(Render(Spec(ChartKind.Line, theme) with { Title = "Moving average", Series = [new("Daily", Wave()) { Kind = ChartKind.Scatter, Trend = true, TrendFit = TrendFit.MovingAverage }] }))}");
+    lines.Add($"trend/quadratic/{theme} {Hash(Render(Spec(ChartKind.Scatter, theme) with { Title = "Quadratic", Series = [new("Arc", Arc()) { Trend = true, TrendFit = TrendFit.Polynomial }] }))}");
+    lines.Add($"trend/exponential/{theme} {Hash(Render(Spec(ChartKind.Scatter, theme) with { Title = "Exponential", Series = [new("Growth", Growth()) { Trend = true, TrendFit = TrendFit.Exponential }] }))}");
+}
+lines.Add($"trend/cubic {Hash(Render(Spec(ChartKind.Scatter, ChartTheme.Light) with { Title = "Cubic", Series = [new("Arc", Arc()) { Trend = true, TrendFit = TrendFit.Polynomial, TrendDegree = 3 }, new("Wave", Wave().Select(p => p with { X = p.X * 3 }).ToArray()) { Trend = true, TrendFit = TrendFit.Polynomial, TrendDegree = 3 }] }))}");
+lines.Add($"trend/quartic {Hash(Render(line with { Title = "Quartic", Series = [new("Wave", Wave()) { Trend = true, TrendFit = TrendFit.Polynomial, TrendDegree = 4, StrokeWidth = 2 }] }, includeTitles: false))}");
+lines.Add($"trend/exponential-log {Hash(Render(Spec(ChartKind.Scatter, ChartTheme.Light) with { Title = "Exponential on a log axis", YAxis = AxisKind.Log, MinorGridlines = true, Series = [new("Growth", Growth()) { Trend = true, TrendFit = TrendFit.Exponential }] }))}");
+lines.Add($"trend/moving-average-gaps {Hash(Render(line with { Title = "Moving average across gaps", Series = [new("Daily", Wave().Select((p, i) => i % 9 is 4 or 5 or 6 || i is 20 or 22 ? p with { Y = null } : p).ToArray()) { Trend = true, TrendFit = TrendFit.MovingAverage, TrendPoints = 5 }] }))}");
+lines.Add($"trend/cubic-trading {Hash(Render(Trading(ChartKind.Line, ChartTheme.Light) with { Title = "Cubic on a trading axis", Kind = ChartKind.Scatter,
+    Series = [new("Close", sessions.Select((d, i) => new ChartPoint(TimeAxis.Value(d), 100 + 2 * i - .08 * i * i + i % 3)).ToArray()) { Trend = true, TrendFit = TrendFit.Polynomial, TrendDegree = 3 }] }))}");
+var users = Enumerable.Range(1, 20).Select(i => i * 10d).ToArray();
+lines.Add($"trend/midnight-load-test {Hash(Render(Spec(ChartKind.Scatter, ChartTheme.Dark) with { Title = "Load test", Style = ChartStyle.Midnight, XLabel = "Users", YLabel = "Throughput", Y2Label = "Latency (ms)",
+    Series = [new("Throughput", users.Select((u, i) => new ChartPoint(u, Math.Round(26 * u - .1 * u * u + (i % 5 - 2) * 40))).ToArray()) { Trend = true, TrendFit = TrendFit.Polynomial },
+        new("Latency", users.Select((u, i) => new ChartPoint(u, Math.Round(40 * Math.Exp(.015 * u) * (1 + (i % 4 - 1.5) * .08)))).ToArray()) { Secondary = true, Trend = true, TrendFit = TrendFit.Exponential }] }))}");
+var nightsHrv = Enumerable.Range(0, 60).Select(i => Math.Round(64 + 6 * Math.Sin(i / 9d) + i % 5 - 2, 1)).ToArray();
+lines.Add($"trend/midnight-hrv {Hash(Render(Spec(ChartKind.Line, ChartTheme.Dark) with { Title = "Nightly HRV", Style = ChartStyle.Midnight, XAxis = AxisKind.Time,
+    Series = [new("Baseline", nightsHrv.Select((v, i) => ChartPoint.Interval(1788825600000d + i * 86400000d, 64, 60, 68)).ToArray(), ChartStyle.Midnight.Zones[0]) { Kind = ChartKind.Band },
+        new("Nightly HRV", nightsHrv.Select((v, i) => new ChartPoint(1788825600000d + i * 86400000d, v) { Color = v < 60 ? ChartStyle.Midnight.Zones[4] : v > 68 ? ChartStyle.Midnight.Zones[1] : ChartStyle.Midnight.Zones[2] }).ToArray(), ChartStyle.Midnight.Zones[6])
+            { Kind = ChartKind.Scatter, Markers = MarkerStyle.Filled, Trend = true, TrendFit = TrendFit.MovingAverage }] }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

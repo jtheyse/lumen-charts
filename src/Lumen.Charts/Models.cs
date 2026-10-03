@@ -128,6 +128,32 @@ public enum LineCurve
     /// <summary>Level runs that rise or fall at each point.</summary>
     Step
 }
+/// <summary>The trend a series draws when it sets <see cref="ChartSeries.Trend"/>. Each is computed in the space the chart draws
+/// in, as the line always was, so it agrees with the marks it runs through on a logarithmic axis and on a time axis that skips
+/// spans. Every one is dashed in the series colour and named for assistive technology.</summary>
+public enum TrendFit
+{
+    /// <summary>A least-squares line across the whole plot, as <see cref="Statistics.Fit"/> computes it, named with its direction
+    /// and R squared: <c>Accounts trend: rising, R squared 0.93</c>.</summary>
+    Linear,
+    /// <summary>A trailing average over <see cref="ChartSeries.TrendPoints"/> of the series' points in the order it lists them, which
+    /// must be X order, drawn at the last point of each window: <c>HRV trend: 7-point moving average</c>. A point with a missing
+    /// value takes its place in a window and adds nothing, as <see cref="Statistics.Rolling"/> has it, and the line breaks wherever
+    /// fewer than half a window, rounded up, is present. It averages the positions the values are drawn at, so on a logarithmic
+    /// axis it is the geometric mean.</summary>
+    MovingAverage,
+    /// <summary>A least-squares polynomial of <see cref="ChartSeries.TrendDegree"/>, as <see cref="Statistics.Polynomial"/> computes
+    /// it, drawn across the X its observations cover and no further: <c>Throughput trend: quadratic fit, R squared 0.93</c>. A
+    /// polynomial stays a polynomial of its degree under the scaling between data and pixels, so on plain axes it is the ordinary
+    /// fit to the data.</summary>
+    Polynomial,
+    /// <summary><c>y = a·e^(b·x)</c>, as <see cref="Statistics.Exponential"/> computes it: fitted to the logarithm of each positive
+    /// value against the X it is drawn at, leaving out zero and negative values, and drawn through the series' axis across the X its
+    /// positive observations cover, so it is straight on a logarithmic Y axis and curves on a linear one: <c>Latency trend:
+    /// exponential fit, rising, R squared 0.88</c>. Its R squared is measured on the logarithms, as Excel reports it. Fewer than
+    /// two positive values draw none.</summary>
+    Exponential
+}
 /// <summary><see cref="Fade"/> shades an area from the series colour at the top of the plot to nothing at its baseline,
 /// and a column from its colour at the baseline to a lighter tint at its far end.</summary>
 public enum AreaFill
@@ -226,9 +252,20 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// <summary>Measure this series against the right-hand axis instead of the left, for a series in
     /// different units. At least one series in each pane must stay on the left.</summary>
     public bool Secondary { get; init; }
-    /// <summary>Draws a least-squares line through this series. Fitted in the space each axis draws in,
-    /// so it stays straight on screen; a series with no spread in X draws none.</summary>
+    /// <summary>Draws a trend through this series: a least-squares line, unless <see cref="TrendFit"/> chooses another. Fitted in
+    /// the space each axis draws in, so a line stays straight on screen; a series with no spread in X draws none. Applies to series
+    /// drawn as lines, areas, scatter points and bubbles.</summary>
     public bool Trend { get; init; }
+    /// <summary>The trend <see cref="Trend"/> draws: a least-squares line across the plot, the default; a moving average over
+    /// <see cref="TrendPoints"/>; a polynomial of <see cref="TrendDegree"/>; or an exponential. Set without <see cref="Trend"/>, it
+    /// is refused, since it would draw nothing.</summary>
+    public TrendFit TrendFit { get; init; }
+    /// <summary>A <see cref="TrendFit.MovingAverage"/>'s window, in points, from 2 to 1000; 7 unless set. Set away from 7 it is
+    /// refused on any other fit and without <see cref="Trend"/>.</summary>
+    public int TrendPoints { get; init; } = 7;
+    /// <summary>A <see cref="TrendFit.Polynomial"/>'s degree: 2, a quadratic, unless set; 3, a cubic; or 4, a quartic. Set away from
+    /// 2 it is refused on any other fit and without <see cref="Trend"/>.</summary>
+    public int TrendDegree { get; init; } = 2;
     /// <summary>Box charts only. A five-number summary computed elsewhere, such as in a warehouse, drawn as
     /// given instead of one computed from points, so a series that carries one has no points. Whiskers and
     /// outliers stand where the summary puts them and are not checked against Tukey's fences, so a host's own

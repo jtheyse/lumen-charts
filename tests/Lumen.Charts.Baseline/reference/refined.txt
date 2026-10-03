@@ -273,3 +273,16 @@ graph/pipeline-Layered/900 D0724311B7CE585C
 fit/pipeline-Layered/337 AAE79F9B8876BD00
 graph/crowded-Circular 1A82FA8C1303DF4C
 graph/crowded-Layered 4EF95D94050DFE93
+trend/moving-average/Light AA8C2ADEFA7CBB5D
+trend/quadratic/Light AA8A72A8D5DD85C8
+trend/exponential/Light 2325A502BF9764E5
+trend/moving-average/Dark D29CE76ADD3B1C03
+trend/quadratic/Dark 101A88AE6AA50441
+trend/exponential/Dark CB8C064BA22E10BF
+trend/cubic E231CD4C0A48D428
+trend/quartic 62908D4014FFB7CC
+trend/exponential-log A8318D8A1E9F914D
+trend/moving-average-gaps 9D3E77A7F5D834DD
+trend/cubic-trading CBB27FA2E7B7B120
+trend/midnight-load-test 07CF10CD2516308E
+trend/midnight-hrv 2732EBA127082BB8

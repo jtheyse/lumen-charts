@@ -81,7 +81,7 @@ public static class ChartSvg
     // every record, so leaving out the nulls loses nothing, and it halves the text a long series makes.
     private static readonly JsonSerializerOptions Hashing = new()
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
     /// <summary>A classic style is serialized for hashing as 0.23.0 serialized it, without its finish.</summary>
     private static void Unfinished(JsonTypeInfo info)
@@ -115,6 +115,16 @@ public static class ChartSvg
             if (property.Name == nameof(ChartSpec.CalendarLayout)) property.ShouldSerialize = (_, layout) => layout is not CalendarLayout.Weeks;
             else if (property.Name == nameof(ChartSpec.CalendarCell)) property.ShouldSerialize = (_, cell) => cell is not CalendarCell.Square;
             else if (property.Name == nameof(ChartSpec.WeekStart)) property.ShouldSerialize = (_, start) => start is not DayOfWeek.Monday;
+    }
+    /// <summary>A series that leaves its trend's fit, window and degree at their defaults is serialized for hashing as 0.31.0, which
+    /// drew only the line, serialized it, so every chart drawn before them, a trend line included, keeps its IDs.</summary>
+    private static void Untrended(JsonTypeInfo info)
+    {
+        if (info.Type != typeof(ChartSeries)) return;
+        foreach (var property in info.Properties)
+            if (property.Name == nameof(ChartSeries.TrendFit)) property.ShouldSerialize = (_, fit) => fit is not TrendFit.Linear;
+            else if (property.Name == nameof(ChartSeries.TrendPoints)) property.ShouldSerialize = (_, points) => points is not 7;
+            else if (property.Name == nameof(ChartSeries.TrendDegree)) property.ShouldSerialize = (_, degree) => degree is not 2;
     }
     private static byte[] Hashed<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, Hashing);
     /// <summary>
@@ -630,7 +640,7 @@ public static class ChartSvg
                         Datum(w, si, pi, PointLabel(series,p,xs,scale), shape, attributes);
                     }
                 }
-                if (series.Trend) Trend(w, series, color, X, At, left, right, scale.Reversed);
+                if (series.Trend) Trend(w, series, color, X, At, left, right, scale.Reversed, s.MaxRenderedPoints);
             }
             if (w.Refined) foreach (var reference in references) Label(w, reference);
             w.Add("</svg>");
@@ -919,24 +929,96 @@ public static class ChartSvg
     }
 
     /// <summary>
-    /// A least-squares line across the plot, fitted in the space the reader sees. The axes have already
-    /// taken the logarithm and left out the spans a calendar skips, so the line is straight on screen
-    /// instead of curving on a log axis or jumping where a trading axis closes. Least squares is
-    /// unchanged by the scaling between data and pixels, so on plain axes this is the ordinary fit.
+    /// A series' trend, fitted in the space the reader sees. The axes have already taken the logarithm and left out the spans a
+    /// calendar skips, so a line is straight on screen instead of curving on a log axis or jumping where a trading axis closes,
+    /// and a curve bends only where the data does. Least squares is unchanged by the scaling between data and pixels, and a
+    /// polynomial stays a polynomial of its degree under it, so on plain axes a line or a polynomial is the ordinary fit. A line
+    /// spans the plot. A polynomial and an exponential are drawn every 2 pixels or so across the X their observations cover and no
+    /// further, and a moving average from window to window, broken where a window is less than half full; a long run of it is
+    /// thinned to <paramref name="budget"/> as a line is.
     /// </summary>
-    private static void Trend(SvgWriter w, ChartSeries series, string color, Func<double, double> X, Func<double, double> Y, double left, double right, bool reversed)
+    private static void Trend(SvgWriter w, ChartSeries series, string color, Func<double, double> X, Func<double, double> Y, double left, double right, bool reversed, int budget)
     {
-        var fit = Statistics.Fit(series.Points.Where(p => p.Y.HasValue).Select(p => (X(p.X), Y(p.Y!.Value))));
-        if (fit is null) return;
-        // Screen y grows downwards, so a falling line is a rising series; on a reversed axis larger values sit
-        // lower, so there a falling line is a falling series.
-        var rising = reversed ? fit.Slope >= 0 : fit.Slope <= 0;
-        var label = $"{series.Name} trend: {(rising ? "rising" : "falling")}, R squared {fit.R2.ToString("0.00", CultureInfo.InvariantCulture)}";
+        var present = series.Points.Where(p => p.Y.HasValue);
+        string d, label;
+        switch (series.TrendFit)
+        {
+            case TrendFit.MovingAverage:
+            {
+                // Each window's mean of the drawn positions present in it, at the window's last point; a missing value holds its
+                // place in the window and adds nothing.
+                var windows = Statistics.Rolling(series.Points.Select(p => p.Y is { } v ? Y(v) : (double?)null).ToArray(), series.TrendPoints, (series.TrendPoints + 1) / 2);
+                var path = new StringBuilder();
+                var run = new List<ChartPoint>();
+                void Close()
+                {
+                    // A lone window has nothing to join to.
+                    if (run.Count > 1)
+                    {
+                        var kept = Sampling.MinMax(run, budget);
+                        for (var n = 0; n < kept.Count; n++) path.Append($"{(path.Length == 0 ? "" : " ")}{(n == 0 ? "M" : "L")}{N(run[kept[n]].X)},{N(run[kept[n]].Y!.Value)}");
+                    }
+                    run.Clear();
+                }
+                for (var i = 0; i < windows.Count; i++)
+                    if (windows[i] is { } window) run.Add(new(X(series.Points[i].X), window.Mean));
+                    else Close();
+                Close();
+                if (path.Length == 0) return;
+                d = path.ToString();
+                label = $"{series.Name} trend: {series.TrendPoints.ToString(CultureInfo.InvariantCulture)}-point moving average";
+                break;
+            }
+            case TrendFit.Polynomial:
+            {
+                var drawn = present.Select(p => (X: X(p.X), Y: Y(p.Y!.Value))).ToArray();
+                if (Statistics.Polynomial(drawn, series.TrendDegree) is not { } fit || Across(drawn, fit.Predict) is not { } curve) return;
+                d = curve;
+                label = $"{series.Name} trend: {series.TrendDegree switch { 3 => "cubic", 4 => "quartic", _ => "quadratic" }} fit, R squared {fit.R2.ToString("0.00", CultureInfo.InvariantCulture)}";
+                break;
+            }
+            case TrendFit.Exponential:
+            {
+                // Fitted to the logarithm of each positive value against the X it is drawn at, and drawn through the series' axis, so
+                // it is straight on a logarithmic axis and curves on a linear one. A value's own logarithm is taken whatever the axis,
+                // so the fit is the same on either.
+                var drawn = present.Where(p => p.Y > 0).Select(p => (X: X(p.X), Y: p.Y!.Value)).ToArray();
+                if (Statistics.Exponential(drawn) is not { } fit || Across(drawn, x => Y(fit.Predict(x))) is not { } curve) return;
+                d = curve;
+                label = $"{series.Name} trend: exponential fit, {(fit.B >= 0 ? "rising" : "falling")}, R squared {fit.R2.ToString("0.00", CultureInfo.InvariantCulture)}";
+                break;
+            }
+            default:
+            {
+                var fit = Statistics.Fit(present.Select(p => (X(p.X), Y(p.Y!.Value))));
+                if (fit is null) return;
+                // Screen y grows downwards, so a falling line is a rising series; on a reversed axis larger values sit
+                // lower, so there a falling line is a falling series.
+                var rising = reversed ? fit.Slope >= 0 : fit.Slope <= 0;
+                label = $"{series.Name} trend: {(rising ? "rising" : "falling")}, R squared {fit.R2.ToString("0.00", CultureInfo.InvariantCulture)}";
+                d = $"M{N(left)},{N(fit.Predict(left))} L{N(right)},{N(fit.Predict(right))}";
+                break;
+            }
+        }
         // A refined trend is three quarters the width of its series' stroke, so it reads as a guide rather than as data.
         var width = w.Refined ? N(Math.Round((series.StrokeWidth ?? 1.6) * .75, 2)) : "2";
-        w.Add($"<path class='lumen-trend' d='M{N(left)},{N(fit.Predict(left))} L{N(right)},{N(fit.Predict(right))}' " +
+        w.Add($"<path class='lumen-trend' d='{d}' " +
             $"fill='none' stroke='{color}' stroke-width='{width}' stroke-dasharray='7 5' stroke-opacity='.85'{w.Fixed} role='img' aria-label='{SvgWriter.E(label)}'>" +
             $"{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}</path>");
+
+        // A curve from the first observation's X to the last, every 2 pixels or so. Past the plot, and the 12-pixel bleed its clip
+        // allows, nothing would show, so a zoomed chart does not sample the stretch it hides.
+        string? Across((double X, double Y)[] drawn, Func<double, double> at)
+        {
+            double from = Math.Max(drawn.Min(p => p.X), left - 12), to = Math.Min(drawn.Max(p => p.X), right + 12);
+            if (from > to) return null;
+            var steps = Math.Max(1, (int)Math.Ceiling((to - from) / 2));
+            return string.Join(" ", Enumerable.Range(0, steps + 1).Select(k =>
+            {
+                var x = k == steps ? to : from + (to - from) * k / steps;
+                return $"{(k == 0 ? "M" : "L")}{N(x)},{N(at(x))}";
+            }));
+        }
     }
 
     /// <summary>
