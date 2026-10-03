@@ -52,6 +52,9 @@ public static partial class ChartValidation
         }
         if (spec.YTickLabels != TickLabels.All && spec.Kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Gauge or ChartKind.Ring)
             throw new ArgumentException("Tick labels apply to a Y axis, which donut, heatmap, radar, gauge and ring charts do not have.");
+        if (!Enum.IsDefined(spec.XTicks)) throw new ArgumentException("Unknown tick source.");
+        if (spec.XTicks != TickSource.Auto && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Blocks))
+            throw new ArgumentException("XTicks chooses between a continuous X axis's own ticks and its points' labels, so it applies to line, area, scatter, bubble, candlestick, OHLC, band, range and blocks charts; column, bar and stacked column charts label each category, a timeline and a calendar write their own time, and the other kinds have no X axis to label.");
         if (secondary)
         {
             if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Band or ChartKind.Range or ChartKind.Blocks))
@@ -194,6 +197,9 @@ public static partial class ChartValidation
             }
             if (spec.DensityCells is not null && mark == ChartKind.Scatter && (series.Zones is not null || series.Points.Any(p => p?.Color is not null)))
                 throw new ArgumentException("A density scatter shades cells rather than points, so it takes neither zones nor point colours.");
+            if (spec.DensityCells is not null && mark == ChartKind.Scatter && (series.ValueLabels || series.ChangeColors != ChangeColors.None))
+                throw new ArgumentException("A density scatter shades cells rather than points, so it takes no value labels or change colours.");
+            Changed(series, mark);
             if (series.ProjectedFrom is { } from)
             {
                 if (mark is not (ChartKind.Line or ChartKind.Area))
@@ -210,7 +216,14 @@ public static partial class ChartValidation
             {
                 if (p is null || !Finite(p.X) || (p.Y.HasValue && !Finite(p.Y.Value)) || !Finite(p.Size) || p.Size < 0)
                     throw new ArgumentException("Coordinates must be finite, magnitude <= 1e100; bubble sizes must be nonnegative.");
-                Text(p.Label); Color(p.Color);
+                Text(p.Label); Color(p.Color); Text(p.ValueNote);
+                if (p.ValueNote is not null)
+                {
+                    if (p.ValueNote.Length > 20)
+                        throw new ArgumentException("A value note follows a value on the chart, so it is at most 20 characters, such as /48 after a finishing position for the size of its field; longer words belong in the point's label.");
+                    if (mark is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Range or ChartKind.Histogram or ChartKind.Box or ChartKind.Violin or ChartKind.Timeline or ChartKind.Calendar or ChartKind.Gauge or ChartKind.Ring)
+                        throw new ArgumentException("A value note is written after a mark's one value, so it applies to lines, areas, bands, scatter points, bubbles, columns, bars, blocks, donut slices, heatmap cells and radar points; a candle reads four prices, a range bar two ends, a timeline's span has no value, histograms, boxes, violins and calendars add their points up, and a gauge or ring writes its value in its legend.");
+                }
                 if (p.Color is not null && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Range or ChartKind.Blocks or ChartKind.Donut))
                     throw new ArgumentException("Point colours apply to series drawn as lines, areas, scatter points, bubbles, columns, bars, ranges, blocks and donut slices; on the other kinds colour already says something else: direction on candlesticks and OHLC bars, value on a heatmap, the state a timeline's lane stands for, and the series or distribution a mark belongs to on stacked column, radar, band, histogram, box and violin charts.");
                 if (p.XEnd is { } end)
@@ -370,6 +383,24 @@ public static partial class ChartValidation
             throw new ArgumentException("TrendDegree is a polynomial's degree, so it applies to TrendFit.Polynomial.");
     }
 
+    /// <summary>Change colours compare each point with the one before it along a line or among scatter points, and own the colour
+    /// of every mark they touch, so they need marks in X order and refuse anything else that colours the same marks.</summary>
+    private static void Changed(ChartSeries series, ChartKind mark)
+    {
+        if (!Enum.IsDefined(series.ChangeColors)) throw new ArgumentException("Unknown change colours.");
+        if (series.ChangeColors == ChangeColors.None) return;
+        if (mark is not (ChartKind.Line or ChartKind.Scatter))
+            throw new ArgumentException("Change colours apply to series drawn as lines or scatter points, where each point follows the one before; on the other kinds a mark stands for a span, a category, a range or a distribution, or colour already says something else.");
+        if (series.Zones is not null)
+            throw new ArgumentException("Zones colour a point by the band its value falls in and change colours by how it moved from the point before, so a series takes one or the other.");
+        if (series.Gradient is not null)
+            throw new ArgumentException("A gradient colours a series by its value and change colours by how each point moved from the one before, so a series takes one or the other.");
+        if (series.Points.Any(p => p?.Color is not null))
+            throw new ArgumentException("A point's own colour would hide whether it did better or worse than the one before, so a series with change colours takes no point colours.");
+        if (series.Points.Zip(series.Points.Skip(1)).Any(p => p.First is not null && p.Second is not null && p.First.X > p.Second.X))
+            throw new ArgumentException("Change colours compare each point with the one before it, so the points must be ordered by X.");
+    }
+
     /// <summary>Each finishing touch applies to the marks that can show it.</summary>
     private static void Finish(ChartSeries series, ChartKind mark, AxisKind axis)
     {
@@ -391,8 +422,8 @@ public static partial class ChartValidation
             throw new ArgumentException("A scatter series is drawn as its markers, so it cannot hide them.");
         if (series.HighlightLast && mark is not (ChartKind.Line or ChartKind.Area))
             throw new ArgumentException("Highlighting the last point applies to series drawn as lines or areas.");
-        if (series.ValueLabels && mark is not (ChartKind.Column or ChartKind.Bar))
-            throw new ArgumentException("Value labels apply to series drawn as columns or bars.");
+        if (series.ValueLabels && mark is not (ChartKind.Column or ChartKind.Bar or ChartKind.Line or ChartKind.Scatter))
+            throw new ArgumentException("Value labels apply to series drawn as columns, bars, lines or scatter points.");
         if (series.Gradient is not { } stops) return;
         if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Gauge))
             throw new ArgumentException("A gradient colours a stroke and its markers, so it applies to series drawn as lines or areas, and to a gauge's arc.");

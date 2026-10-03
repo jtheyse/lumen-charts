@@ -81,7 +81,7 @@ public static class ChartSvg
     // every record, so leaving out the nulls loses nothing, and it halves the text a long series makes.
     private static readonly JsonSerializerOptions Hashing = new()
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended, Unchanged } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
     /// <summary>A classic style is serialized for hashing as 0.23.0 serialized it, without its finish.</summary>
     private static void Unfinished(JsonTypeInfo info)
@@ -125,6 +125,18 @@ public static class ChartSvg
             if (property.Name == nameof(ChartSeries.TrendFit)) property.ShouldSerialize = (_, fit) => fit is not TrendFit.Linear;
             else if (property.Name == nameof(ChartSeries.TrendPoints)) property.ShouldSerialize = (_, points) => points is not 7;
             else if (property.Name == nameof(ChartSeries.TrendDegree)) property.ShouldSerialize = (_, degree) => degree is not 2;
+    }
+    /// <summary>A series that leaves its change colours off, and a chart that leaves its X ticks to the rule it always had, are
+    /// serialized for hashing as 0.32.0, which had neither, serialized them, so every chart drawn before them keeps its IDs. A point's
+    /// value note is null unless set, and nulls are left out already.</summary>
+    private static void Unchanged(JsonTypeInfo info)
+    {
+        if (info.Type == typeof(ChartSeries))
+            foreach (var property in info.Properties)
+                if (property.Name == nameof(ChartSeries.ChangeColors)) property.ShouldSerialize = (_, change) => change is not ChangeColors.None;
+        if (info.Type == typeof(ChartSpec))
+            foreach (var property in info.Properties)
+                if (property.Name == nameof(ChartSpec.XTicks)) property.ShouldSerialize = (_, ticks) => ticks is not TickSource.Auto;
     }
     private static byte[] Hashed<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, Hashing);
     /// <summary>
@@ -306,13 +318,33 @@ public static class ChartSvg
     {
         w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-series='{series}' data-point='{index}' aria-label='{SvgWriter.E(label)}'{attributes}>{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}{shape}</g>");
     }
-    private static string PointLabel(ChartSeries s, ChartPoint p) => $"{s.Name}: {p.Label ?? LinearScale.Label(p.X)}, {(p.Y.HasValue ? LinearScale.Label(p.Y.Value) : "missing")}";
-    private static string PointLabel(ChartSeries s, ChartPoint p, Axis x, Axis y) =>
-        $"{s.Name}: {p.Label ?? x.Format(p.X)}, {(p.Y.HasValue ? y.Format(p.Y.Value) : "missing")}" +
+    private static string PointLabel(ChartSeries s, ChartPoint p) => $"{s.Name}: {p.Label ?? LinearScale.Label(p.X)}, {(p.Y.HasValue ? LinearScale.Label(p.Y.Value) + p.ValueNote : "missing")}";
+    /// <summary>A mark's name: its series, its label or X, its value and the value's note, then what colours it — its zone, or how it
+    /// changed from the point before — whether it is projected, and a band's bounds.</summary>
+    private static string PointLabel(ChartSeries s, ChartPoint p, Axis x, Axis y, int? change = null) =>
+        $"{s.Name}: {p.Label ?? x.Format(p.X)}, {(p.Y.HasValue ? y.Format(p.Y.Value) + p.ValueNote : "missing")}" +
         (s.Zones is { } zones && p.Y is { } value ? $", {zones.Zones[zones.IndexOf(value)].Name}" : "") +
+        change switch { > 0 => ", better than the previous", < 0 => ", worse than the previous", 0 => ", level with the previous", _ => "" } +
         (s.ProjectedFrom is { } from && p.X >= from ? ", projected" : "") +
         (p.Low.HasValue && p.High.HasValue ? $" (band {y.Format(p.Low.Value)} to {y.Format(p.High.Value)})" : "");
     private static string ZoneColor(ChartStyle style, ZoneScale zones, int index) => zones.Zones[index].Color ?? style.Zones[index];
+    /// <summary>How each point of a series with change colours moved from the nearest earlier point that has a value: 1 better, −1
+    /// worse and 0 level, by the series' own sense of better; null for a missing value, for the first value, and for every point of a
+    /// series without change colours. A gap is passed over, so the point after it compares with the last value before it.</summary>
+    private static int?[] Changes(ChartSeries series)
+    {
+        var changes = new int?[series.Points.Count];
+        if (series.ChangeColors == ChangeColors.None) return changes;
+        var sense = series.ChangeColors == ChangeColors.LowerIsBetter ? -1 : 1;
+        double? before = null;
+        for (var i = 0; i < series.Points.Count; i++)
+        {
+            if (series.Points[i].Y is not { } value) continue;
+            if (before is { } last) changes[i] = Math.Sign(value - last) * sense;
+            before = value;
+        }
+        return changes;
+    }
     // A timeline's spans and a range's bars have no Y of their own to be missing, and a calendar draws every day it spans.
     private static bool HasData(ChartSpec spec) => spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Timeline or ChartKind.Calendar
         ? spec.Series.Any(s => s.Points.Count > 0)
@@ -406,7 +438,15 @@ public static class ChartSvg
                     // A block's label names the block, not the moment it starts, so the axis keeps its ticks under blocks.
                     var labels = s.Series.Where(series => Mark(s, series) != ChartKind.Blocks).SelectMany(series => series.Points)
                         .Where(p => p.Label is not null && p.X >= xs.Min && p.X <= xs.Max).DistinctBy(p => p.X).OrderBy(p => p.X).ToArray();
-                    if (labels.Length is > 0 and <= 24)
+                    // A time axis writes its own dates, so the points' labels take their place only where none would be cut short;
+                    // a round's long name stays in its point's name rather than reading "Round 1 · Hi…" under it.
+                    var pointed = s.XTicks switch
+                    {
+                        TickSource.Axis => false,
+                        TickSource.PointLabels => labels.Length > 0,
+                        _ => labels.Length is > 0 and <= 24 && (s.XAxis != AxisKind.Time || labels.All(p => p.Label!.Length <= 12))
+                    };
+                    if (pointed)
                     {
                         var step = Math.Max(1, (int)Math.Ceiling(labels.Length / 7d));
                         if (w.Refined)
@@ -444,18 +484,50 @@ public static class ChartSvg
             // Value labels are drawn over the clip, so the label of the tallest column can rise into the margin above the
             // plot; a label whose column the plot does not show is left out with it.
             var named = new StringBuilder();
-            void Name(double x, double y, string text, string anchor) =>
-                named.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='{anchor}' font-size='11' aria-hidden='true'>{SvgWriter.E(text)}</text>");
-            // A column's label fits across the column, so it never runs into its neighbours'.
-            void Above(double x, double width, double far, bool up, string text)
+            // Every value label written in the pane, as a box round its 11 px text, so a point's label can keep clear of the ones
+            // before it, columns' and bars' included.
+            var written = new List<(double X1, double X2, double Y1, double Y2)>();
+            // A value's note follows it at normal weight in the muted colour.
+            string Noted(string text, string? note) => SvgWriter.E(text) + (note is null ? "" : $"<tspan class='lumen-muted' font-weight='400'>{SvgWriter.E(note)}</tspan>");
+            void Name(double x, double y, string text, string anchor, string? note)
             {
-                if (Wide(text) > width || x + width / 2 < left || x + width / 2 > right || far < top - .5 || far > bottom + .5) return;
-                Name(x + width / 2, up ? far - 5 : far + 12, text, "middle");
+                var width = Wide(text + note);
+                var x1 = anchor == "middle" ? x - width / 2 : anchor == "end" ? x - width : x;
+                written.Add((x1, x1 + width, y - 9, y + 3));
+                named.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='{anchor}' font-size='11' aria-hidden='true'>{Noted(text, note)}</text>");
             }
-            void Beside(double far, double y, double height, bool up, string text)
+            // A column's label fits across the column, so it never runs into its neighbours'.
+            void Above(double x, double width, double far, bool up, string text, string? note)
             {
-                if (Wide(text) > (up ? right - far : far - left) - 6) return;
-                Name(up ? far + 6 : far - 6, y + height / 2 + 4, text, up ? "start" : "end");
+                if (Wide(text + note) > width || x + width / 2 < left || x + width / 2 > right || far < top - .5 || far > bottom + .5) return;
+                Name(x + width / 2, up ? far - 5 : far + 12, text, "middle", note);
+            }
+            void Beside(double far, double y, double height, bool up, string text, string? note)
+            {
+                if (Wide(text + note) > (up ? right - far : far - left) - 6) return;
+                Name(up ? far + 6 : far - 6, y + height / 2 + 4, text, up ? "start" : "end", note);
+            }
+            // A line's or a scatter point's label stands above its marker of radius r, 4 pixels clear of it, moved in from the plot's
+            // sides so that it is never cut; it goes below where above would leave the plot or meet a label already written, and with
+            // room in neither place it is left out, as a column's is, its value kept in its mark's name. A point the plot does not show
+            // is left out with its label. The line it labels often runs through where it stands, so it is written over a copy of itself
+            // stroked 3 pixels wide in the background colour; a copy, rather than paint-order, so a rasteriser without SVG 2 draws it too.
+            void Over(double cx, double cy, double r, string text, string? note, string ink)
+            {
+                var width = Wide(text + note);
+                if (width > right - left || cx < left - .5 || cx > right + .5 || cy < top - .5 || cy > bottom + .5) return;
+                var x = Math.Clamp(cx, left + width / 2, right - width / 2);
+                foreach (var y in new[] { cy - r - 4, cy + r + 12 })
+                {
+                    if (y - 9 < top || y + 3 > bottom || written.Any(t => t.X2 > x - width / 2 && t.X1 < x + width / 2 && t.Y2 > y - 9 && t.Y1 < y + 3)) continue;
+                    written.Add((x - width / 2, x + width / 2, y - 9, y + 3));
+                    var at = $"x='{N(x)}' y='{N(y)}'";
+                    var ground = w.Style.Background;
+                    named.Append($"<g class='lumen-value' text-anchor='middle' font-size='11' font-weight='600' pointer-events='none' aria-hidden='true'>" +
+                        $"<text {at} fill='{ground}' stroke='{ground}' stroke-width='3' stroke-linejoin='round'>{SvgWriter.E(text)}{(note is null ? "" : $"<tspan font-weight='400'>{SvgWriter.E(note)}</tspan>")}</text>" +
+                        $"<text {at} fill='{ink}'>{Noted(text, note)}</text></g>");
+                    return;
+                }
             }
             w.Add($"<svg x='{N(left-bleed)}' y='{N(top-bleed)}' width='{N(right-left+2*bleed)}' height='{N(bottom-top+2*bleed)}' viewBox='{N(left-bleed)} {N(top-bleed)} {N(right-left+2*bleed)} {N(bottom-top+2*bleed)}' overflow='hidden'>");
             // Behind the data, and inside the clip, so a reference pans and zooms with what it refers to. A refined chart sets
@@ -496,6 +568,17 @@ public static class ChartSvg
                 var paint = series.Gradient is { } stops ? $"url(#{w.Gradient(ByValue(stops, At))})" : color;
                 // A point's own colour beats its zone's, which beats the series colour or gradient.
                 string Ink(ChartPoint p) => p.Color ?? (series.Zones is { } zones ? ZoneColor(w.Style, zones, zones.IndexOf(p.Y!.Value)) : paint);
+                // A change colour stands for a point that did better or worse than the one before; a level one keeps the series colour.
+                var changes = Changes(series);
+                string? Moved(int i) => changes[i] switch { > 0 => w.Style.Rising, < 0 => w.Style.Falling, _ => null };
+                // A value label takes its point's colour, and on a gradient the colour the gradient takes at its value, since text
+                // painted with the gradient would take the colour at its own height instead. A mark's colour need only clear 3:1, and
+                // 11 px text needs 4.5:1, so a colour that falls short gives the label the style's text colour instead.
+                string Lettered(int i, ChartPoint p)
+                {
+                    var ink = Moved(i) ?? (p.Color is null && series.Zones is null && series.Gradient is { } blend ? Blend(blend, p.Y!.Value) : Ink(p));
+                    return Contrast.Ratio(ink, w.Style.Background) >= 4.5 ? ink : w.Style.Text;
+                }
                 if (mark == ChartKind.Scatter && s.DensityCells is { } cells) Density(w, series, color, X, At, xs, scale, cells, left, right, top, bottom);
                 else if (mark == ChartKind.Candlestick) Candles(w, si, series, X, At, xs, scale);
                 else if (mark == ChartKind.Ohlc) Ohlc(w, si, series, X, At, xs, scale);
@@ -514,16 +597,25 @@ public static class ChartSvg
                         var end = start; while (end < series.Points.Count && series.Points[end].Y.HasValue) end++;
                         var run = series.Points.Skip(start).Take(end - start).ToArray();
                         var indices = Sampling.MinMax(run, s.MaxRenderedPoints);
-                        var (path, line) = Trace(series.Curve, run, indices, X, At, y => scale.Invert(y, bottom, top));
+                        // A stroke piece takes the colour of the point it starts from, and a change colour belongs to the segment that
+                        // arrives at its point, so for the stroke each drawn point carries the change colour of the next one drawn.
+                        var traced = run;
+                        if (series.ChangeColors != ChangeColors.None)
+                        {
+                            traced = [.. run];
+                            for (var n = 0; n < indices.Count; n++)
+                                traced[indices[n]] = run[indices[n]] with { Color = n + 1 < indices.Count ? Moved(start + indices[n + 1]) : null };
+                        }
+                        var (path, line) = Trace(series.Curve, traced, indices, X, At, y => scale.Invert(y, bottom, top));
                         if (mark == ChartKind.Area)
                             w.Add($"<path d='{path} L{N(X(run[^1].X))},{N(At(0))} L{N(X(run[0].X))},{N(At(0))} Z' {fill}/>");
-                        if (series.Zones is null && series.ProjectedFrom is null && indices.All(i => run[i].Color is null))
+                        if (series.Zones is null && series.ProjectedFrom is null && indices.All(i => traced[i].Color is null))
                             w.Add($"<path d='{path}' fill='none' stroke='{paint}' stroke-width='{N(width)}' stroke-linejoin='round'{Rounded(w)}/>");
                         else Stroke(w, series.Zones, line, paint, At, projected, width);
                         foreach (var i in indices)
                         {
                             var p = run[i];
-                            string cx = N(X(p.X)), cy = N(At(p.Y!.Value)), ink = Ink(p), r = indices.Count > 80 ? "2" : "4";
+                            string cx = N(X(p.X)), cy = N(At(p.Y!.Value)), ink = Moved(start + i) ?? Ink(p), r = indices.Count > 80 ? "2" : "4";
                             // A hidden marker keeps an invisible target, so the point can still be focused, hovered and announced.
                             // A refined chart's own markers are hidden the same way until the point is hovered or focused, except
                             // a point between two gaps, which has no line to show it.
@@ -536,7 +628,8 @@ public static class ChartSvg
                                     MarkerStyle.Auto when w.Refined && run.Length > 1 => ($"<circle class='lumen-marker' cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", ""),
                                     _ => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", "")
                                 };
-                            Datum(w, si, start + i, PointLabel(series,p,xs,scale), shape, attributes);
+                            Datum(w, si, start + i, PointLabel(series,p,xs,scale,changes[start + i]), shape, attributes);
+                            if (series.ValueLabels) Over(X(p.X), At(p.Y!.Value), start + i == last ? 5.5 : indices.Count > 80 ? 2 : 4, scale.Format(p.Y!.Value), p.ValueNote, Lettered(start + i, p));
                         }
                         start = end;
                     }
@@ -614,8 +707,8 @@ public static class ChartSvg
                         Datum(w, si, pi, PointLabel(series,p,xs,scale), Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost));
                         if (series.ValueLabels)
                         {
-                            if (horizontal) Beside(y >= 0 ? rx + rw : rx, ry, rh, y >= 0, scale.Format(y));
-                            else Above(rx, rw, At(y), y >= 0, scale.Format(y));
+                            if (horizontal) Beside(y >= 0 ? rx + rw : rx, ry, rh, y >= 0, scale.Format(y), p.ValueNote);
+                            else Above(rx, rw, At(y), y >= 0, scale.Format(y), p.ValueNote);
                         }
                     }
                     else if (place >= 0)
@@ -624,12 +717,12 @@ public static class ChartSvg
                         var width = slot / columns.Length;
                         var x = X(p.X) - slot / 2 + place * width;
                         Datum(w, si, pi, PointLabel(series,p,xs,scale), Bar(w, x, Math.Min(At(0), At(y)), width, Math.Abs(At(y) - At(0)), y >= 0 ? End.Top : End.Bottom, Ink(p), series.Fill));
-                        if (series.ValueLabels) Above(x, width, At(y), y >= 0, scale.Format(y));
+                        if (series.ValueLabels) Above(x, width, At(y), y >= 0, scale.Format(y), p.ValueNote);
                     }
                     else
                     {
                         var radius = mark == ChartKind.Bubble ? Math.Sqrt(p.Size / Math.Max(maxSize, double.Epsilon)) * 22 : 4;
-                        var ink = Ink(p);
+                        var ink = Moved(pi) ?? Ink(p);
                         string cx = N(X(p.X)), cy = N(At(y));
                         var (shape, attributes) = mark != ChartKind.Scatter ? ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'{w.Fixed}/>", "") : series.Markers switch
                         {
@@ -637,7 +730,8 @@ public static class ChartSvg
                             MarkerStyle.Hollow => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{w.Style.Background}'{w.Fixed}/>", $" stroke='{ink}' stroke-width='2'"),
                             _ => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'{w.Fixed}/>", "")
                         };
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale), shape, attributes);
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale,changes[pi]), shape, attributes);
+                        if (series.ValueLabels) Over(X(p.X), At(y), radius, scale.Format(y), p.ValueNote, Lettered(pi, p));
                     }
                 }
                 if (series.Trend) Trend(w, series, color, X, At, left, right, scale.Reversed, s.MaxRenderedPoints);
@@ -764,7 +858,7 @@ public static class ChartSvg
     /// series has zones — <c>Lap 3: 1 to 2, 4:52</c> or <c>Interval 2: 10:00 to 14:00, 275, Lactate threshold</c>. A block
     /// without a label is led by its series' name, and so is every block where several series draw blocks.</summary>
     private static string BlockLabel(ChartSeries s, ChartPoint p, Axis x, Axis y, bool several) =>
-        $"{(p.Label is null ? s.Name : several ? $"{s.Name}, {p.Label}" : p.Label)}: {x.Format(p.X)} to {x.Format(p.XEnd!.Value)}, {y.Format(p.Y!.Value)}" +
+        $"{(p.Label is null ? s.Name : several ? $"{s.Name}, {p.Label}" : p.Label)}: {x.Format(p.X)} to {x.Format(p.XEnd!.Value)}, {y.Format(p.Y!.Value)}{p.ValueNote}" +
         (s.Zones is { } zones ? $", {zones.Zones[zones.IndexOf(p.Y.Value)].Name}" : "");
 
     /// <summary>A column's fade on its own box: its colour at the baseline, lighter towards the far end, up or down.</summary>
@@ -2089,7 +2183,7 @@ public static class ChartSvg
             string At(double radius, double a) => $"{N(cx + radius * Math.Cos(a))},{N(cy + radius * Math.Sin(a))}";
             var path = $"M{At(r,angle)} A{N(r)},{N(r)} 0 {large} 1 {At(r,end)} L{At(inner,end)} A{N(inner)},{N(inner)} 0 {large} 0 {At(inner,angle)} Z";
             var color = p.Color ?? w.Style.SeriesColor(i);
-            Datum(w, 0, i, $"{p.Label ?? LinearScale.Label(p.X)}: {LinearScale.Label(p.Y.Value)} ({p.Y / total:P1})", $"<path d='{path}' fill='{color}'/>");
+            Datum(w, 0, i, $"{p.Label ?? LinearScale.Label(p.X)}: {LinearScale.Label(p.Y.Value)}{p.ValueNote} ({p.Y / total:P1})", $"<path d='{path}' fill='{color}'/>");
             if (i < 10)
             {
                 var ly = 95 + i * 25;

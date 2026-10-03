@@ -3267,7 +3267,9 @@ Test("Each finishing touch refuses the marks and values it cannot apply to",()=>
     foreach(var kind in new[]{ChartKind.Column,ChartKind.Bubble,ChartKind.Band,ChartKind.Bar}) No(kind,s with{Markers=MarkerStyle.Hollow});
     No(ChartKind.Scatter,s with{Markers=MarkerStyle.None});
     foreach(var kind in new[]{ChartKind.Scatter,ChartKind.Column,ChartKind.Band}) No(kind,s with{HighlightLast=true});
-    foreach(var kind in new[]{ChartKind.Line,ChartKind.Area,ChartKind.Scatter,ChartKind.StackedColumn}) No(kind,s with{ValueLabels=true});
+    // 0.33.0 writes value labels on lines and scatter points too.
+    foreach(var kind in new[]{ChartKind.Area,ChartKind.Bubble,ChartKind.Band,ChartKind.StackedColumn}) No(kind,s with{ValueLabels=true});
+    Yes(ChartKind.Line,s with{ValueLabels=true});Yes(ChartKind.Scatter,s with{ValueLabels=true});
     No(ChartKind.Line,s with{Curve=(LineCurve)7});No(ChartKind.Area,s with{Fill=(AreaFill)3});No(ChartKind.Line,s with{Markers=(MarkerStyle)9});
     ColorStop[] two=[new(1,"#2E9B58"),new(3,"#DD4B45")];
     foreach(var kind in new[]{ChartKind.Scatter,ChartKind.Column,ChartKind.Band}) No(kind,s with{Gradient=two});
@@ -3699,9 +3701,10 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: nineteen charts in eighteen cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
-    Check(sports.Count==18&&sports.Select(card=>card.Id).Distinct().Count()==18&&sports.Count(card=>card.Beside is not null)==1,"the page should have nineteen charts in eighteen cards");
-    // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order.
+Test("Sports page: twenty charts in nineteen cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+    Check(sports.Count==19&&sports.Select(card=>card.Id).Distinct().Count()==19&&sports.Count(card=>card.Beside is not null)==1,"the page should have twenty charts in nineteen cards");
+    // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order; 0.33.0's Racing section stands
+    // before it.
     Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
     foreach(var (theme,style,zones) in new[]{(ChartTheme.Light,(ChartStyle?)null,ChartStyle.Light.Zones),(ChartTheme.Dark,null,ChartStyle.Light.Zones),(ChartTheme.Dark,ChartStyle.Midnight,ChartStyle.Midnight.Zones)})
         foreach(var markers in new[]{true,false})
@@ -3798,17 +3801,54 @@ Test("Sports page: the 5 km record only falls, and no run beats the record of it
     Check(record.Skip(1).SkipLast(1).All(r=>athlete.Sessions.Any(s=>s.Day==DayOf(r.X)&&s.Best5k==r.Y&&s.Name=="5 km time trial")),"a record was not set by a time trial");
     Check(weekly.Count==SportsData.Weeks&&weekly.All(p=>p.Y>=Held(p.X)),"a week's fastest 5 km is missing or beats the record");
 });
-Test("Sports page: each night's HRV falls where its series says, against the 28 nights before it",()=>{
+Test("Sports page: each night's HRV falls where its colour and its note say, against the 28 nights before it, under its seven-night average",()=>{
     var hrv=Sports("hrv").Series;var band=hrv[0].Points;var nights=athlete.Hrv;
-    Check(band.Count==SportsData.Weeks*7&&hrv.Skip(1).Sum(s=>s.Points.Count)==SportsData.Weeks*7&&nights.Count==SportsData.Weeks*7+SportsData.BaselineNights);
+    Check(hrv.Count==2&&hrv[1].Name=="Nightly HRV"&&band.Count==SportsData.Weeks*7&&hrv[1].Points.Count==SportsData.Weeks*7&&nights.Count==SportsData.Weeks*7+SportsData.BaselineNights);
     for(var i=0;i<band.Count;i++)
     {
         var window=nights.Skip(i).Take(SportsData.BaselineNights).ToArray();var mean=window.Average();var deviation=Math.Sqrt(window.Sum(v=>(v-mean)*(v-mean))/(window.Length-1));
         Check(Math.Abs(band[i].Y!.Value-mean)<.051&&Math.Abs(band[i].Low!.Value-(mean-deviation))<.051&&Math.Abs(band[i].High!.Value-(mean+deviation))<.051,$"night {i}'s baseline is not the 28 nights before it");
     }
     ChartPoint BandAt(double x)=>band.Single(b=>b.X==x);
-    Check(hrv[1].Points.All(p=>p.Y>=BandAt(p.X).Low&&p.Y<=BandAt(p.X).High)&&hrv[2].Points.All(p=>p.Y<BandAt(p.X).Low)&&hrv[3].Points.All(p=>p.Y>BandAt(p.X).High),"a night is in the wrong series");
-    Check(hrv.Skip(1).All(s=>s.Points.Count>0),"a status has no nights");
+    // Each night is the night it stands for, in the colour of its status, and its note names that status, so its name says what its
+    // colour shows: green inside the band, orange below it and blue above it.
+    var zones=ChartStyle.Light.Zones;
+    for(var i=0;i<band.Count;i++)
+    {
+        var p=hrv[1].Points[i];var b=BandAt(p.X);
+        var status=p.Y<b.Low?"below":p.Y>b.High?"above":"inside";
+        Check(p.X==band[i].X&&p.Y==nights[i+SportsData.BaselineNights],$"night {i} is not its night");
+        Check(p.Color==(status=="below"?zones[4]:status=="above"?zones[1]:zones[2])&&p.ValueNote==$" {status} baseline",$"night {i} is coloured {p.Color} and noted '{p.ValueNote}' {status} its band");
+    }
+    Check(new[]{"inside","below","above"}.All(status=>hrv[1].Points.Any(p=>p.ValueNote==$" {status} baseline")),"a status has no nights");
+    // The seven-night moving average runs in the ramp's purple, the series colour no night is drawn in, and is named for assistive
+    // technology; each night's name reads its value and then its status.
+    Check(hrv[1].Trend&&hrv[1].TrendFit==TrendFit.MovingAverage&&hrv[1].TrendPoints==7&&hrv[1].Color==zones[6]&&hrv[1].Points.All(p=>p.Color!=zones[6]),"the average is not a seven-night moving average in a colour of its own");
+    var doc=Svg(Sports("hrv"));
+    var trend=doc.Descendants(ns+"path").Single(e=>(string?)e.Attribute("class")=="lumen-trend");
+    Check((string?)trend.Attribute("stroke")==zones[6]&&trend.Attribute("aria-label")!.Value=="Nightly HRV trend: 7-point moving average",trend.ToString()[..200]);
+    var named=doc.Descendants(ns+"g").Where(e=>(string?)e.Attribute("data-series")=="1").Select(e=>e.Attribute("aria-label")!.Value).ToArray();
+    Check(named.Length==band.Count&&named.All(n=>n.StartsWith("Nightly HRV: ")&&(n.EndsWith(" inside baseline")||n.EndsWith(" below baseline")||n.EndsWith(" above baseline"))),named[0]);
+    Check(named[^1].EndsWith($", {nights[^1].ToString(CultureInfo.InvariantCulture)}{hrv[1].Points[^1].ValueNote}")&&Sports("hrv").Title.Contains(hrv[1].Points[^1].ValueNote!.Split(' ')[1]),$"last night reads {named[^1]} under {Sports("hrv").Title}");
+});
+Test("Sports page: the race results are the five invented races, the place each finished coloured and named by its change, its field noted, and the points beneath",()=>{
+    var spec=Sports("race-results");var (position,points)=(spec.Series[0],spec.Series[1]);
+    Check(spec.Panes.Count==1&&spec.YReversed&&!spec.Panes[0].YReversed&&position.Pane==0&&points.Pane==1&&spec.XMin==-.5&&spec.XMax==4.5,"the panes are not position, first at the top, over points");
+    Check(position.ChangeColors==ChangeColors.LowerIsBetter&&position.ValueLabels&&points.ValueLabels&&points.ChangeColors==ChangeColors.None,"the places are not coloured by change, or a series writes no values");
+    Check(position.Points.Select(p=>(p.Y,p.ValueNote,p.Label)).SequenceEqual([(31d,"/50","11-04-2026"),(24d,"/48","16-05-2026"),(27d,"/51","04-07-2026"),(21d,"/49","08-08-2026"),(19d,"/52","19-09-2026")])
+        &&points.Points.Select(p=>p.Y).SequenceEqual([40d,52,47,58,61]),"the races are not the invented season");
+    foreach(var width in new[]{1100,337})
+    {
+        var doc=Svg(spec with{Width=width});
+        var marks=doc.Descendants(ns+"g").Where(e=>(string?)e.Attribute("data-series")=="0").ToArray();
+        Check(marks.Select(e=>e.Attribute("aria-label")!.Value).SequenceEqual(["Position: 11-04-2026, 31/50","Position: 16-05-2026, 24/48, better than the previous","Position: 04-07-2026, 27/51, worse than the previous",
+            "Position: 08-08-2026, 21/49, better than the previous","Position: 19-09-2026, 19/52, better than the previous"]),string.Join(" | ",marks.Select(e=>e.Attribute("aria-label")!.Value)));
+        Check(marks.Select(e=>(string?)e.Element(ns+"circle")!.Attribute("fill")).SequenceEqual([ChartStyle.Light.SeriesColor(0),ChartStyle.Light.Rising,ChartStyle.Light.Falling,ChartStyle.Light.Rising,ChartStyle.Light.Rising]),"a place is in the wrong colour");
+        // Every place and every points total is written, inside the drawing.
+        var values=doc.Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-value").Select(e=>e.Elements(ns+"text").Last()).ToArray();
+        Check(values.Select(t=>t.Value).SequenceEqual(["31/50","24/48","27/51","21/49","19/52","40","52","47","58","61"]),string.Join(",",values.Select(t=>t.Value)));
+        Check(values.All(t=>double.Parse(t.Attribute("x")!.Value,CultureInfo.InvariantCulture) is var x&&x-(t.Value.Length*.62*11)/2>=0&&x+(t.Value.Length*.62*11)/2<=width),"a value runs past the drawing's edge");
+    }
 });
 Test("Sports page: the power curves are each month's best rides, and the critical-power line is fitted to this month's",()=>{
     var power=Sports("power-curve");
@@ -4169,14 +4209,17 @@ Test("Gauge and ring: specs survive JSON, a request that names no sweep draws 27
 Test("A gauge's sweep left at its default is left out of the hash that names gradients, so every other chart keeps its IDs",()=>{
     // 0.25.0 had no sweep: its hash of a spec is the JSON written today less the sweep and, since 0.27.0, the timeline's
     // connectors and, since 0.28.0, the calendar's layout, cell and week start, which are the last five properties written, and,
-    // since 0.32.0, each series' trend fit, window and degree, written after its trend.
+    // since 0.32.0, each series' trend fit, window and degree, written after its trend, and since 0.33.0 the chart's X ticks, written
+    // after its X label, and each series' change colours, written after its value labels.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
     const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
-    Check(json.EndsWith(defaults)&&json.Contains(trended),json[^120..]);
-    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(defaults,"}").Replace(trended,"\"Trend\":false,"))))[..12].ToLowerInvariant();
+    const string ticked="\"XLabel\":\"\",\"XTicks\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";
+    Check(json.EndsWith(defaults)&&json.Contains(trended)&&json.Contains(ticked)&&json.Contains(changed),json[^120..]);
+    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(defaults,"}").Replace(trended,"\"Trend\":false,")
+        .Replace(ticked,"\"XLabel\":\"\",").Replace(changed,"\"ValueLabels\":false"))))[..12].ToLowerInvariant();
     Check(Prefix(ChartSvg.Render(faded))==before,$"{Prefix(ChartSvg.Render(faded))} is not 0.25.0's {before}");
     // Gauges and rings define no IDs: a gradient gauge draws its arc in pieces.
     var strain=Gauge(14) with{YMax=21,Series=[new("Strain",[new(0,14)]){Gradient=[new(0,"#3F87D9"),new(21,"#DD4B45")]}]};
@@ -5795,6 +5838,308 @@ Test("Explorer: the curved fits draw a quadratic through throughput and an expon
     Check(top.X>curve[0].X+100&&top.X<curve[^1].X-100,$"the throughput peaks at {top.X}");
     Check(DemoData.Create(ChartKind.Scatter,ChartTheme.Light).Series.All(s=>s.Trend&&s.TrendFit==TrendFit.Linear),"the scatter's own trends changed");
     foreach(var kind in Enum.GetValues<ChartKind>()) Check(DemoData.FitsCapable(kind)==(kind==ChartKind.Scatter));
+});
+// 0.33.0: race results on a line. Change colours, value labels on lines and scatter points, value notes and the X axis's tick source.
+// The plot of a 900 by 420 chart with one pane runs from x 76 to 870 and y 78 to 344; with X fixed at 0 to 6 and Y at 0 to 10 a point
+// stands where these say.
+double RaceX(double x)=>76+x/6*794;
+double RaceY(double y)=>344-y/10*266;
+// The library's generous width for 11 px text, which a label's place is worked out from.
+double Wide11(string text)=>text.Sum(c=>c is '.' or ',' or ':' or ' ' ? .3 : c is '-' ? .36 : c is 'm' or 'M' or 'w' or 'W' ? .9 : .62)*11;
+ChartSpec Raced(ChartSeries series,params ChartSeries[] more)=>new(){Title="Races",Kind=ChartKind.Line,XMin=0,XMax=6,YMin=0,YMax=10,Series=[series,..more]};
+// Five values, a gap and a sixth: down, level, up, a gap, down again across it, and up.
+ChartPoint[] Placings()=>[new(0,5,"R1"),new(1,3,"R2"),new(2,3,"R3"),new(3,4,"R4"),new(4,null,"R5"),new(5,2,"R6"),new(6,6,"R7")];
+XElement[] Datums(XDocument doc,int series)=>doc.Descendants(ns+"g").Where(e=>(string?)e.Attribute("data-series")==series.ToString(CultureInfo.InvariantCulture)).ToArray();
+// The colour of the stroke that arrives at each point, read from every data path in the plot, whose pieces each start at one point
+// and end at the next.
+Dictionary<(double X,double Y),string> Arrivals(XDocument doc)
+{
+    var arrivals=new Dictionary<(double X,double Y),string>();
+    foreach(var path in doc.Descendants(ns+"path").Where(p=>(string?)p.Attribute("fill")=="none"&&p.Attribute("class") is null))
+        foreach(var piece in Subpaths(path))
+            for(var i=1;i<piece.Count;i++) arrivals[(Math.Round(piece[i].X,6),Math.Round(piece[i].Y,6))]=path.Attribute("stroke")!.Value;
+    return arrivals;
+}
+Test("Change colours: lower is better colours a fall the rising colour and a rise the falling one, a level or first point the series colour, and names each change",()=>{
+    var light=ChartStyle.Light;var ink=light.SeriesColor(0);
+    var doc=Svg(Raced(new("Position",Placings()){ChangeColors=ChangeColors.LowerIsBetter,Markers=MarkerStyle.Filled}));
+    var marks=Datums(doc,0);
+    Check(marks.Select(m=>m.Attribute("data-point")!.Value).SequenceEqual(["0","1","2","3","5","6"]),"the gap drew a mark");
+    Check(marks.Select(m=>(string?)m.Element(ns+"circle")!.Attribute("fill")).SequenceEqual([ink,light.Rising,ink,light.Falling,light.Rising,light.Falling]),
+        string.Join(",",marks.Select(m=>(string?)m.Element(ns+"circle")!.Attribute("fill"))));
+    // The point after the gap compares with the last value before it, 2 against 4, and the words follow the colour.
+    Check(marks.Select(m=>m.Attribute("aria-label")!.Value).SequenceEqual(["Position: R1, 5","Position: R2, 3, better than the previous","Position: R3, 3, level with the previous",
+        "Position: R4, 4, worse than the previous","Position: R6, 2, better than the previous","Position: R7, 6, worse than the previous"]),string.Join(" | ",marks.Select(m=>m.Attribute("aria-label")!.Value)));
+    Check(marks.All(m=>m.Element(ns+"title")!.Value==m.Attribute("aria-label")!.Value),"a tooltip differs from its mark's name");
+    // Higher is better reverses every change and leaves the first and the level point alone.
+    var higher=Datums(Svg(Raced(new("Points",Placings()){ChangeColors=ChangeColors.HigherIsBetter,Markers=MarkerStyle.Filled})),0);
+    Check(higher.Select(m=>(string?)m.Element(ns+"circle")!.Attribute("fill")).SequenceEqual([ink,light.Falling,ink,light.Rising,light.Falling,light.Rising])
+        &&higher[1].Attribute("aria-label")!.Value.EndsWith(", worse than the previous")&&higher[3].Attribute("aria-label")!.Value.EndsWith(", better than the previous"),"higher is better does not reverse the changes");
+    // Without change colours, the same series names no change and draws one stroke in its colour.
+    var plain=Svg(Raced(new("Position",Placings()){Markers=MarkerStyle.Filled}));
+    Check(Datums(plain,0).All(m=>!m.Attribute("aria-label")!.Value.Contains("previous")&&(string?)m.Element(ns+"circle")!.Attribute("fill")==ink),"a plain series names a change");
+});
+Test("Change colours: the segment that arrives at a point takes its colour, a gap draws none, and a step or a smooth curve arrives the same way",()=>{
+    var light=ChartStyle.Light;var ink=light.SeriesColor(0);
+    foreach(var curve in Enum.GetValues<LineCurve>())
+    {
+        var doc=Svg(Raced(new("Position",Placings()){ChangeColors=ChangeColors.LowerIsBetter,Curve=curve}));
+        var arrivals=Arrivals(doc);
+        (double,double) At(double x,double y)=>(Math.Round(RaceX(x),6),Math.Round(RaceY(y),6));
+        Check(arrivals[At(1,3)]==light.Rising&&arrivals[At(2,3)]==ink&&arrivals[At(3,4)]==light.Falling&&arrivals[At(6,6)]==light.Falling,$"{curve}: {string.Join(", ",arrivals.Select(a=>$"{a.Key}={a.Value}"))}");
+        // The gap leaves the point after it with no segment arriving, though its mark is coloured by the change across the gap.
+        Check(!arrivals.ContainsKey(At(5,2))&&!arrivals.ContainsKey(At(0,5)),$"{curve}: a segment arrives at the first point or across the gap");
+        // Every piece of a stroke arriving at a point is in its colour: a step's rise and a smooth curve's cuts included.
+        foreach(var path in doc.Descendants(ns+"path").Where(p=>(string?)p.Attribute("fill")=="none"&&p.Attribute("class") is null))
+            foreach(var piece in Subpaths(path))
+                Check(piece.All(v=>v.X>=RaceX(0)-1e-6&&v.X<=RaceX(6)+1e-6),$"{curve}: a piece runs off the plot");
+        var rising=doc.Descendants(ns+"path").Where(p=>(string?)p.Attribute("stroke")==light.Rising).SelectMany(Subpaths).ToArray();
+        Check(rising.Length==1&&Math.Abs(rising[0][0].X-RaceX(0))<1e-6&&Math.Abs(rising[0][^1].X-RaceX(1))<1e-6&&Math.Abs(rising[0][^1].Y-RaceY(3))<1e-6,$"{curve}: the rise into the second point is not one piece from the first to the second");
+        if(curve==LineCurve.Step) Check(rising[0].Count==3&&Math.Abs(rising[0][1].X-RaceX(1))<1e-6&&Math.Abs(rising[0][1].Y-RaceY(5))<1e-6,"a step's corner is not in the colour of the point it arrives at");
+    }
+    // A point's own colour colours the segment that leaves it, which is the other rule; the two are refused together.
+    var leaving=Arrivals(Svg(Raced(new("Position",Placings().Select((p,i)=>i==1?p with{Color="#123456"}:p).ToArray()))));
+    Check(leaving[(Math.Round(RaceX(2),6),Math.Round(RaceY(3),6))]=="#123456","a point colour no longer colours the segment that leaves it");
+});
+Test("Change colours: better follows the setting, not the screen, on a reversed axis and on a scale shared with another measure",()=>{
+    var light=ChartStyle.Light;
+    string[] Fills(ChartSpec spec,int series)=>Datums(Svg(spec),series).Select(m=>(string)m.Element(ns+"circle")!.Attribute("fill")!).ToArray();
+    var position=new ChartSeries("Position",Placings()){ChangeColors=ChangeColors.LowerIsBetter,Markers=MarkerStyle.Filled};
+    var upright=Fills(Raced(position),0);
+    var reversed=Raced(position) with{YReversed=true};
+    Check(Fills(reversed,0).SequenceEqual(upright),"reversing the axis changed which points are better");
+    Check(Datums(Svg(reversed),0)[1].Attribute("aria-label")!.Value.EndsWith("better than the previous"),"a place gained on a reversed axis is not better");
+    // On one scale, a place and the points it earned each count better their own way: 31 then 24 is better, and 40 then 52 is too.
+    ChartSpec shared=new(){Title="Shared",Kind=ChartKind.Line,Series=[
+        new("Position",[new(0,31),new(1,24),new(2,27)]){ChangeColors=ChangeColors.LowerIsBetter,Markers=MarkerStyle.Filled},
+        new("Points",[new(0,40),new(1,52),new(2,47)]){ChangeColors=ChangeColors.HigherIsBetter,Markers=MarkerStyle.Filled}]};
+    Check(Fills(shared,0).Skip(1).SequenceEqual([light.Rising,light.Falling])&&Fills(shared,1).Skip(1).SequenceEqual([light.Rising,light.Falling]),"a shared scale colours one measure by the other's sense");
+    // Scatter points take the colours and the words, and draw no segments; Midnight's rising and falling colours are its own.
+    var dots=Svg(Raced(position with{Kind=ChartKind.Scatter}) with{Style=ChartStyle.Midnight});
+    Check(Datums(dots,0).Select(m=>(string)m.Element(ns+"circle")!.Attribute("fill")!).SequenceEqual([ChartStyle.Midnight.SeriesColor(0),ChartStyle.Midnight.Rising,ChartStyle.Midnight.SeriesColor(0),ChartStyle.Midnight.Falling,ChartStyle.Midnight.Rising,ChartStyle.Midnight.Falling])
+        &&Arrivals(dots).Count==0&&Datums(dots,0)[3].Attribute("aria-label")!.Value.EndsWith("worse than the previous"),"scatter points are not coloured and named by change");
+    // The classic finish colours them the same.
+    Check(Datums(Svg(Classic(Raced(position))),0).Select(m=>(string)m.Element(ns+"circle")!.Attribute("fill")!).SequenceEqual(upright),"the classic finish colours the changes differently");
+});
+Test("Value labels on a line stand above each point in its colour where it clears 4.5:1, move in from the plot's sides, and go below where above would leave the plot",()=>{
+    var light=ChartStyle.Light;
+    var series=new ChartSeries("Position",[new(0,5) {ValueNote="/48"},new(3,4),new(6,10){ValueNote="/52"}]){ValueLabels=true,Markers=MarkerStyle.Filled};
+    var doc=Svg(Raced(series));
+    var labels=doc.Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-value").ToArray();
+    Check(labels.Length==3,$"{labels.Length} labels");
+    var texts=labels.Select(g=>g.Elements(ns+"text").Last()).ToArray();
+    (double X,double Y) Place(XElement t)=>(double.Parse(t.Attribute("x")!.Value,CultureInfo.InvariantCulture),double.Parse(t.Attribute("y")!.Value,CultureInfo.InvariantCulture));
+    // At the left edge the label moves right until its start is the plot's; in the middle it is centred 8 pixels over its point; at the
+    // top it goes 16 pixels below, and at the right edge it moves left until its end is the plot's.
+    Check(Math.Abs(Place(texts[0]).X-(76+Wide11("5/48")/2))<1e-6&&Math.Abs(Place(texts[0]).Y-(RaceY(5)-8))<1e-6,$"left: {Place(texts[0])}");
+    Check(Math.Abs(Place(texts[1]).X-RaceX(3))<1e-6&&Math.Abs(Place(texts[1]).Y-(RaceY(4)-8))<1e-6,$"middle: {Place(texts[1])}");
+    Check(Math.Abs(Place(texts[2]).X-(870-Wide11("10/52")/2))<1e-6&&Math.Abs(Place(texts[2]).Y-(RaceY(10)+16))<1e-6,$"top right: {Place(texts[2])}");
+    // The value is in the axis's format and the point's colour at weight 600, the note muted at normal weight, under a halo in the
+    // background colour, all hidden from assistive technology, which reads the mark's name.
+    Check(texts[0].Value=="5/48"&&(string?)texts[0].Attribute("fill")==light.Text&&(string?)labels[0].Attribute("font-weight")=="600"&&(string?)labels[0].Attribute("font-size")=="11"
+        &&(string?)labels[0].Attribute("aria-hidden")=="true"&&(string?)labels[0].Attribute("pointer-events")=="none","the label's look");
+    var note=texts[0].Element(ns+"tspan")!;
+    Check(note.Value=="/48"&&(string?)note.Attribute("class")=="lumen-muted"&&(string?)note.Attribute("font-weight")=="400"&&texts[1].Element(ns+"tspan") is null,"the note's look");
+    var halo=labels[0].Elements(ns+"text").First();
+    Check(halo.Value=="5/48"&&(string?)halo.Attribute("stroke")==light.Background&&(string?)halo.Attribute("fill")==light.Background&&halo.Attribute("x")!.Value==texts[0].Attribute("x")!.Value,"the halo");
+    // Labels are written over the plot's clip, so none is cut by it, and a duration axis writes durations.
+    Check(labels.All(l=>l.Parent==doc.Root),"a label is inside the clip");
+    var pace=Svg(Raced(new("Pace",[new(1,300),new(2,315)]){ValueLabels=true}) with{YMin=240,YMax=360,YFormat=ValueFormat.Duration,YReversed=true});
+    Check(pace.Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-value").Select(g=>g.Elements(ns+"text").Last().Value).SequenceEqual(["5:00","5:15"]),"a duration axis's labels");
+    // A point's colour, a zone's and a gradient's colour at the value reach the label where they clear 4.5:1 as text, and the text
+    // colour stands in where they do not: on white, the series' blue, a mid grey and white itself.
+    string[] Inks(ChartSeries s)=>Svg(Raced(s)).Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-value").Select(g=>g.Elements(ns+"text").Last().Attribute("fill")!.Value).ToArray();
+    Check(Inks(new("P",[new(1,5){Color="#123456"},new(2,4)]){ValueLabels=true}).SequenceEqual(["#123456",light.Text]),"point colours");
+    Check(Inks(new("P",[new(1,2),new(2,8)]){ValueLabels=true,Zones=new([new("Low",5,"#1D4E89"),new("High",double.PositiveInfinity,"#9A2A1F")])}).SequenceEqual(["#1D4E89","#9A2A1F"]),"zone colours");
+    Check(Inks(new("P",[new(1,0),new(2,5),new(3,10)]){ValueLabels=true,Gradient=[new(0,"#000000"),new(10,"#FFFFFF")]}).SequenceEqual(["#000000",light.Text,light.Text]),"gradient colours");
+});
+Test("Value labels on lines and scatter points clear 4.5:1 as text: a point colour that does not gives the label the text colour, one that does keeps it, and the note stays muted",()=>{
+    string[] Inks(ChartSpec spec)=>Svg(spec).Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-value").Select(g=>g.Elements(ns+"text").Last().Attribute("fill")!.Value).ToArray();
+    string[] Markers(ChartSpec spec)=>Datums(Svg(spec),0).Select(m=>(string)m.Element(ns+"circle")!.Attribute("fill")!).ToArray();
+    // The light preset's first series colour, #5675E7, stands 4.12:1 on white: its marker keeps it, and its label is written in the text colour.
+    var light=Raced(new("Pace",[new(1,5){ValueNote="/48"},new(2,4),new(3,6)]){ValueLabels=true,Markers=MarkerStyle.Filled});
+    Check(Contrast(ChartStyle.Light.SeriesColor(0),ChartStyle.Light.Background)<4.5&&Markers(light).All(f=>f==ChartStyle.Light.SeriesColor(0)),"the marker lost its colour");
+    Check(Inks(light).SequenceEqual([ChartStyle.Light.Text,ChartStyle.Light.Text,ChartStyle.Light.Text]),$"the labels are {string.Join(",",Inks(light))}");
+    var note=Svg(light).Descendants(ns+"g").Single(g=>(string?)g.Attribute("class")=="lumen-value"&&g.Value.Contains("/48")).Elements(ns+"text").Last().Element(ns+"tspan")!;
+    Check(note.Value=="/48"&&(string?)note.Attribute("class")=="lumen-muted"&&note.Attribute("fill") is null&&Contrast(ChartStyle.Light.Muted,ChartStyle.Light.Background)>=4.5,"the note is not in the muted colour");
+    // Change colours on light, 3.44:1 rising and 3.38:1 falling, fall short too; on Midnight every one clears 4.5:1 and the labels keep them.
+    var changing=new ChartSeries("Position",[new(1,5),new(2,4),new(3,6)]){ValueLabels=true,ChangeColors=ChangeColors.LowerIsBetter,Markers=MarkerStyle.Filled};
+    Check(Inks(Raced(changing)).All(f=>f==ChartStyle.Light.Text)&&Markers(Raced(changing)).SequenceEqual([ChartStyle.Light.SeriesColor(0),ChartStyle.Light.Rising,ChartStyle.Light.Falling]),"light change colours");
+    var midnight=ChartStyle.Midnight;
+    Check(Inks(Raced(changing) with{Style=midnight}).SequenceEqual([midnight.SeriesColor(0),midnight.Rising,midnight.Falling]),$"Midnight's labels are {string.Join(",",Inks(Raced(changing) with{Style=midnight}))}");
+    // The dark preset is in between: its rising and falling colours clear 4.5:1 and keep the label, its blue does not and gives way.
+    var dark=ChartStyle.Dark;
+    Check(Contrast(dark.Rising,dark.Background)>=4.5&&Contrast(dark.SeriesColor(0),dark.Background)<4.5
+        &&Inks(Raced(changing) with{Theme=ChartTheme.Dark}).SequenceEqual([dark.Text,dark.Rising,dark.Falling]),$"the dark preset's labels are {string.Join(",",Inks(Raced(changing) with{Theme=ChartTheme.Dark}))}");
+    // Every label of every style is written in a colour that clears 4.5:1 against its background, scatter points' included.
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,midnight})
+        foreach(var kind in new[]{ChartKind.Line,ChartKind.Scatter})
+            Check(Inks(Raced(changing with{Kind=kind}) with{Style=style}).All(f=>Contrast(f,style.Background)>=4.5),$"{kind} on {style.Background}");
+});
+Test("Value labels on lines and scatter points keep clear of each other: one that would meet a label written before it goes below, and one with room in neither place is left out",()=>{
+    // Two series at one value: the second's label goes under its point. At the top of the plot the first goes under, so the second has
+    // nowhere to go and is left out. A point the plot does not show is left out with its label.
+    var doc=Svg(Raced(new("A",[new(1,5),new(3,10),new(5,4)]){ValueLabels=true},new ChartSeries("B",[new(1,5),new(3,10),new(7,4)]){ValueLabels=true}) with{XMax=6});
+    var texts=doc.Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-value").Select(g=>g.Elements(ns+"text").Last()).ToArray();
+    (double X,double Y)[] places=texts.Select(t=>(double.Parse(t.Attribute("x")!.Value,CultureInfo.InvariantCulture),double.Parse(t.Attribute("y")!.Value,CultureInfo.InvariantCulture))).ToArray();
+    Check(places.Length==4,$"{places.Length} labels: {string.Join(" ",places)}");
+    bool At((double X,double Y) place,double x,double y)=>Math.Abs(place.X-x)<1e-6&&Math.Abs(place.Y-y)<1e-6;
+    Check(At(places[0],RaceX(1),RaceY(5)-8)&&At(places[1],RaceX(3),RaceY(10)+16)&&At(places[2],RaceX(5),RaceY(4)-8)&&At(places[3],RaceX(1),RaceY(5)+16),string.Join(" ",places));
+    // Scatter points take labels too, by the same rule, and a column's label counts as written before them.
+    var mixed=Svg(new ChartSpec{Title="Mixed",Kind=ChartKind.Line,YMin=0,YMax=10,XMin=0,XMax=6,Series=[new("Bars",[new(3,6)]){Kind=ChartKind.Column,ValueLabels=true},new("Dots",[new(3,6.3)]){Kind=ChartKind.Scatter,ValueLabels=true}]});
+    var dot=mixed.Descendants(ns+"g").Where(e=>(string?)e.Attribute("class")=="lumen-value").Select(g=>g.Elements(ns+"text").Last()).Single();
+    Check(dot.Value=="6.3"&&Math.Abs(double.Parse(dot.Attribute("y")!.Value,CultureInfo.InvariantCulture)-(RaceY(6.3)+16))<1e-6,$"the dot's label stands at {dot.Attribute("y")!.Value} beside a column's");
+});
+Test("Value notes reach the label, the tooltip and accessible name, the component's table and status line, and a CSV Note column only when a point has one",()=>{
+    var spec=Raced(new("Position",[new(0,31,"11-04-2026"){ValueNote="/50"},new(1,24,"16-05-2026"){ValueNote="/48"},new(2,null,"04-07-2026"){ValueNote="/51"},new(3,21,"08-08-2026")]){ChangeColors=ChangeColors.LowerIsBetter}) with{YMax=40};
+    var marks=Datums(Svg(spec),0);
+    Check(marks.Select(m=>m.Attribute("aria-label")!.Value).SequenceEqual(["Position: 11-04-2026, 31/50","Position: 16-05-2026, 24/48, better than the previous","Position: 08-08-2026, 21, better than the previous"])
+        &&marks[1].Element(ns+"title")!.Value=="Position: 16-05-2026, 24/48, better than the previous","a note is not after its value, or a missing value wrote one");
+    Check(!ChartSvg.Render(spec).Contains("lumen-value"),"a note wrote a label without ValueLabels");
+    var csv=ChartExport.Csv(spec);
+    Check(csv.StartsWith("Series,X,Y,Label,Size,Note\r\n")&&csv.Contains("\"Position\",1,24,\"16-05-2026\",1,\"/48\"\r\n")&&csv.Contains("\"Position\",2,,\"04-07-2026\",1,\"/51\"\r\n")&&csv.Contains("\"Position\",3,21,\"08-08-2026\",1,\"\"\r\n"),csv);
+    Check(ChartExport.Csv(Spec()).StartsWith("Series,X,Y,Label,Size\r\n"),"a chart without notes has a Note column");
+    Check(ChartExport.Csv(Spec() with{Series=[new("S",[new(0,1){ValueNote="+1"}])]}).Contains(",\"'+1\"\r\n"),"a note is not protected against spreadsheet formulas");
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    var html=Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,1);});
+    Check(html.Contains("<tr><td>Position</td><td>16-05-2026</td><td>24/48</td></tr>")&&html.Contains("<tr><td>Position</td><td>04-07-2026</td><td>Missing</td></tr>")&&html.Contains("<tr><td>Position</td><td>08-08-2026</td><td>21</td></tr>"),"the table");
+    Check(html.Contains("Position: 16-05-2026 = 24/48"),"the status line");
+    // Columns, bars, blocks, donut slices, heatmap cells and radar points carry a note in their names, and a column's or bar's label
+    // writes it muted after the value; at its default it changes nothing.
+    var bars=Svg(Spec(ChartKind.Column) with{Series=[new("S",[new(0,2,"A"){ValueNote=" km"},new(1,5,"B")]){ValueLabels=true}]});
+    var bar=bars.Descendants(ns+"text").First(t=>t.Value=="2 km");
+    Check(bar.Element(ns+"tspan")?.Value==" km"&&(string?)bar.Element(ns+"tspan")!.Attribute("class")=="lumen-muted"&&Datums(bars,0)[0].Attribute("aria-label")!.Value=="S: A, 2 km","a column's note");
+    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Bar,ChartKind.Blocks,ChartKind.Area,ChartKind.Band,ChartKind.Bubble,ChartKind.StackedColumn})
+    {
+        var sample=Sample(kind);
+        var noted=sample with{Series=sample.Series.Select(s=>s with{Points=s.Points.Select((p,i)=>i==1?p with{ValueNote="!n"}:p).ToArray()}).ToArray()};
+        Check(Svg(noted).Descendants().Any(e=>((string?)e.Attribute("aria-label"))?.Contains("!n")==true),$"{kind} lost its note");
+    }
+});
+Test("XTicks: a time axis keeps its dates unless every point's label fits, Axis always draws the axis's ticks and PointLabels always the labels",()=>{
+    var monday=TimeAxis.Value(new DateTimeOffset(2026,4,6,10,0,0,TimeSpan.Zero));
+    ChartSpec Rounds(params string[] names)=>new(){Title="Season",Kind=ChartKind.Line,XAxis=AxisKind.Time,
+        Series=[new("Position",names.Select((n,i)=>new ChartPoint(monday+i*35*86400000d,30-i*2,n)).ToArray())]};
+    string[] Ticks(ChartSpec spec)=>Svg(spec).Descendants(ns+"text").Where(t=>t.Attribute("y")?.Value=="365").Select(t=>t.Value).ToArray();
+    string[] shortNames=["Round 1","Round 2","Round 3","Round 4","Round 5"];
+    string[] longNames=["Round 1 · Hilltop","Round 2 · Valley","Round 3 · Quarry","Round 4 · Forest","Round 5 · Ridge"];
+    var dates=Ticks(Rounds(longNames));
+    Check(dates.Length>=2&&dates.All(t=>System.Text.RegularExpressions.Regex.IsMatch(t,"^\\d{1,2} [A-Z][a-z]{2}$|^[A-Z][a-z]{2} \\d{4}$")),$"long names on a time axis: {string.Join(", ",dates)}");
+    Check(Svg(Rounds(longNames)).Descendants(ns+"g").Any(g=>g.Attribute("aria-label")?.Value=="Position: Round 3 · Quarry, 26"),"the long names left the points' names");
+    Check(Ticks(Rounds(shortNames)).SequenceEqual(shortNames),$"short names on a time axis: {string.Join(", ",Ticks(Rounds(shortNames)))}");
+    // Twelve characters is the most a label keeps, so a twelve-character name still labels the axis and a thirteen-character one does not.
+    var twelve=shortNames.Select(n=>n.PadRight(12,'x')).ToArray();
+    Check(Ticks(Rounds(twelve)).SequenceEqual(twelve)&&Ticks(Rounds([.. shortNames.Take(4),"Round 5 xxxxx"])).SequenceEqual(dates),"the twelve-character rule");
+    Check(Ticks(Rounds(shortNames) with{XTicks=TickSource.Axis}).SequenceEqual(dates),"Axis kept the names");
+    Check(Ticks(Rounds(longNames) with{XTicks=TickSource.PointLabels}).SequenceEqual(longNames.Select(n=>n[..11]+"…")),$"PointLabels: {string.Join(", ",Ticks(Rounds(longNames) with{XTicks=TickSource.PointLabels}))}");
+    // A linear axis keeps today's rule: up to 24 labelled points label it, long ones cut short, and past 24 the axis's own numbers.
+    ChartSpec Indexed(int count,string prefix)=>new(){Title="Index",Kind=ChartKind.Line,Series=[new("S",Enumerable.Range(0,count).Select(i=>new ChartPoint(i,i%5,$"{prefix}{i}")).ToArray())]};
+    Check(Ticks(Indexed(5,"Long label number ")).All(t=>t.StartsWith("Long label ")&&t.EndsWith("…"))&&Ticks(Indexed(5,"R")).SequenceEqual(["R0","R1","R2","R3","R4"]),"a linear axis's labels");
+    var numbers=Ticks(Indexed(30,"R"));
+    Check(numbers.All(t=>double.TryParse(t,CultureInfo.InvariantCulture,out _)),$"thirty labels: {string.Join(", ",numbers)}");
+    var thinned=Ticks(Indexed(30,"R") with{XTicks=TickSource.PointLabels});
+    Check(thinned.Length is >= 2 and < 30&&thinned.All(t=>t.StartsWith('R'))&&thinned[0]=="R0",$"PointLabels at thirty: {string.Join(", ",thinned)}");
+    Check(Ticks(Indexed(5,"R") with{XTicks=TickSource.Axis}).All(t=>double.TryParse(t,CultureInfo.InvariantCulture,out _)),"Axis on a linear axis");
+    // Where no labelled point stands in the range, PointLabels falls back to the axis's ticks; a block's label never labels the axis.
+    Check(Ticks(Spec() with{Series=[new("S",[new(0,1),new(1,2)])],XTicks=TickSource.PointLabels}).SequenceEqual(Ticks(Spec() with{Series=[new("S",[new(0,1),new(1,2)])]})),"PointLabels without labels");
+    var blocks=Sample(ChartKind.Blocks);
+    Check(Ticks(blocks with{XTicks=TickSource.PointLabels}).SequenceEqual(Ticks(blocks)),"a block's label labelled the axis");
+});
+Test("0.33.0 refuses change colours, value labels, value notes and tick sources where they cannot apply, each with its reason",()=>{
+    string Refusal(ChartSpec spec){try{ChartSvg.Render(spec);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
+    var change=new ChartSeries("S",[new(0,3),new(1,2),new(2,4)]){ChangeColors=ChangeColors.LowerIsBetter};
+    foreach(var kind in new[]{ChartKind.Area,ChartKind.Column,ChartKind.Bar,ChartKind.Bubble,ChartKind.Band,ChartKind.StackedColumn,ChartKind.Radar,ChartKind.Heatmap,ChartKind.Donut})
+        Check(Refusal(Spec(kind) with{Series=[change]}).Contains("Change colours apply to series drawn as lines or scatter points"),$"{kind}: {Refusal(Spec(kind) with{Series=[change]})}");
+    foreach(var kind in new[]{ChartKind.Range,ChartKind.Blocks,ChartKind.Timeline,ChartKind.Calendar,ChartKind.Candlestick,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Gauge,ChartKind.Ring})
+        Reject(()=>ChartSvg.Render(Sample(kind) with{Series=Sample(kind).Series.Select(s=>s with{ChangeColors=ChangeColors.HigherIsBetter}).ToArray()}));
+    Check(Refusal(Spec() with{Series=[change with{Kind=ChartKind.Column}]}).Contains("Change colours apply"),"a column series");
+    Check(Refusal(Spec() with{Series=[change with{Zones=new([new("Low",2),new("High",double.PositiveInfinity)])}]}).Contains("Zones colour a point"),"zones");
+    Check(Refusal(Spec() with{Series=[change with{Gradient=[new(0,"#000000"),new(5,"#FFFFFF")]}]}).Contains("A gradient colours a series"),"a gradient");
+    Check(Refusal(Spec() with{Series=[change with{Points=[new(0,3),new(1,2){Color="#123456"}]}]}).Contains("takes no point colours"),"point colours");
+    Check(Refusal(Spec(ChartKind.Scatter) with{Series=[change with{Points=[new(1,3),new(0,2)]}]}).Contains("ordered by X"),"scatter points out of order");
+    Check(Refusal(Spec() with{Series=[change with{ChangeColors=(ChangeColors)5}]})=="Unknown change colours.","an unknown sense");
+    Check(Refusal(Spec(ChartKind.Scatter) with{DensityCells=10,Series=[change]}).Contains("no value labels or change colours")&&Refusal(Spec(ChartKind.Scatter) with{DensityCells=10,Series=[change with{ChangeColors=ChangeColors.None,ValueLabels=true}]}).Contains("no value labels or change colours"),"a density scatter");
+    ChartSvg.Render(Spec(ChartKind.Scatter) with{Series=[change]});ChartSvg.Render(Spec() with{Series=[change with{ProjectedFrom=1,Curve=LineCurve.Smooth,HighlightLast=true}]});
+    Check(Refusal(Spec(ChartKind.Area) with{Series=[new("S",[new(0,1)]){ValueLabels=true}]})=="Value labels apply to series drawn as columns, bars, lines or scatter points.","value labels on an area");
+    var noted=new ChartPoint(0,1){ValueNote="/48"};
+    Check(Refusal(Spec() with{Series=[new("S",[new(0,1){ValueNote=new string('x',21)}])]}).Contains("at most 20 characters"),"a long note");
+    ChartSvg.Render(Spec() with{Series=[new("S",[new(0,1){ValueNote=new string('x',20)}])]});
+    Reject(()=>ChartSvg.Render(Spec() with{Series=[new("S",[new(0,1){ValueNote="/4\u00078"}])]}));
+    foreach(var kind in new[]{ChartKind.Range,ChartKind.Candlestick,ChartKind.Ohlc,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Timeline,ChartKind.Calendar,ChartKind.Gauge,ChartKind.Ring})
+    {
+        var sample=Sample(kind);
+        var with=sample with{Series=sample.Series.Select((s,i)=>i>0?s:s with{Points=s.Points.Select((p,k)=>k>0?p:p with{ValueNote="/48"}).ToArray()}).ToArray()};
+        Check(Refusal(with).Contains("A value note is written after a mark's one value"),$"{kind}: {Refusal(with)}");
+    }
+    Check(Refusal(Spec() with{Series=[new("S",[new(0,1),new(1,2)]),new("R",[ChartPoint.Interval(0,1,0,2) with{ValueNote="/48"}]){Kind=ChartKind.Range}]}).Contains("A value note"),"a range series beside a line");
+    foreach(var kind in new[]{ChartKind.Column,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Gauge,ChartKind.Ring,ChartKind.Timeline,ChartKind.Calendar})
+        foreach(var source in new[]{TickSource.Axis,TickSource.PointLabels})
+            Check(Refusal(Sample(kind) with{XTicks=source}).Contains("XTicks chooses between"),$"{kind} took {source}");
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Area,ChartKind.Scatter,ChartKind.Bubble,ChartKind.Candlestick,ChartKind.Ohlc,ChartKind.Band,ChartKind.Range,ChartKind.Blocks})
+        foreach(var source in Enum.GetValues<TickSource>()) ChartSvg.Render(Sample(kind) with{XTicks=source});
+    Check(Refusal(Spec() with{XTicks=(TickSource)3})=="Unknown tick source.","an unknown tick source");
+    Check(Refusal(Spec() with{Series=[new("S",[noted])],XTicks=(TickSource)(-1)})=="Unknown tick source.","a negative tick source");
+});
+Test("0.32.0's renderings do not move: rows of its baseline rebuilt here match its hashes in both finishes, value labels on columns and bars and labelled time axes among them",()=>{
+    // Hashes of v0.32.0's tests/Lumen.Charts.Baseline/reference files, refined and classic, recorded on Windows.
+    if(!OperatingSystem.IsWindows())return;
+    ChartSpec line=Baseline(ChartKind.Line,ChartTheme.Light),column=Baseline(ChartKind.Column,ChartTheme.Light),bar=Baseline(ChartKind.Bar,ChartTheme.Light),scatter=Baseline(ChartKind.Scatter,ChartTheme.Light);
+    ChartPoint[] Signed()=>Twelve().Select((p,i)=>p with{Y=i%3==0?-p.Y/2:p.Y-20}).ToArray();
+    ChartSeries[] Unlabelled(Func<double,double> x)=>line.Series.Select(s=>s with{Points=s.Points.Select(p=>p with{X=x(p.X),Label=null}).ToArray()}).ToArray();
+    double[] volume=[6.5,7.2,8.1,5.0,7.9,8.8,9.4,5.6,9.1,10.2,10.8,6.0];
+    var rolling=Statistics.Rolling(volume.Select(v=>(double?)v).ToArray(),4,1);
+    ChartSpec weekly=new(){Kind=ChartKind.Column,Title="Weekly volume",YLabel="Hours",Series=[new("Volume",volume.Select((v,i)=>new ChartPoint(i,v,$"W{i+1}")).ToArray()),
+        new("Four-week average",rolling.Select((r,i)=>new ChartPoint(i,Math.Round(r!.Mean,2),$"W{i+1}")).ToArray()){Kind=ChartKind.Line}]};
+    var fortnight=Enumerable.Range(0,14).Select(d=>new DateOnly(2026,9,14).AddDays(d)).ToArray();
+    double Morning(DateOnly day)=>TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue),TimeSpan.Zero));
+    var rates=fortnight.Select((day,d)=>(Day:day,Low:46d+d%5,High:d%7 is 1 or 3 or 5?150d+d*2:105d+d%4*5,Average:66d+d%6)).ToArray();
+    ChartSpec heart=new(){Kind=ChartKind.Range,XAxis=AxisKind.Time,Title="52 to 174 bpm today",Description="Each day's lowest and highest heart rate, the dot its average",Width=540,Height=360,YLabel="Heart rate (bpm)",
+        Series=[new("Heart rate",rates.Select(r=>ChartPoint.Interval(Morning(r.Day),r.Average,r.Low,r.High,r.Day.ToString("d MMM",CultureInfo.InvariantCulture))).ToArray(),ChartStyle.Light.Zones[5])]};
+    var heartZones=ZoneScale.CogganHeartRate(170);
+    var seconds=Training.TimeInZone(Enumerable.Range(0,2400).Select(t=>Math.Round(95+85*(1-Math.Exp(-t/400.0))+12*Math.Sin(t/70.0)+t%5,1)).ToArray(),heartZones);
+    (string Row,string Refined,string Classic,ChartSpec Spec)[] rows=[
+        ("Line/Light/True","D991008D3106193D","CB7DF56598CE861F",line),
+        ("finish/capsule-value-labels","A48E1BFCC1A75412","08631EBEDF404578",column with{Title="Capsules",Style=ChartStyle.Light with{BarRadius=9999},
+            Series=[new("Week",Signed()){ValueLabels=true,Fill=AreaFill.Fade},new("Last",Twelve().Select(p=>p with{Y=p.Y/2}).ToArray()){ValueLabels=true}]}),
+        ("finish/bars-dashed-ends","5C96B6407C738771","59360C834E33DCB8",bar with{Title="Bars",Style=ChartStyle.Light with{BarRadius=6,Gridlines=GridLine.Dashed},YTickLabels=TickLabels.Ends,Series=[new("A",Signed()){ValueLabels=true}]}),
+        ("finish/midnight-weekly","D2ECDD4B4F702555","53E74673F793CA0E",weekly with{Style=ChartStyle.Midnight,Series=[weekly.Series[0] with{ValueLabels=true},weekly.Series[1] with{Curve=LineCurve.Smooth,Markers=MarkerStyle.Hollow}]}),
+        ("range/heart-rate","060F181989F45FAB","904529397C741507",heart),
+        ("guard/time","6F65F0C3788C47BD","48647563F4A154CE",line with{XAxis=AxisKind.Time,Series=Unlabelled(x=>1767225600000d+x*86400000d)}),
+        ("guard/line-markers","6A03DBA7B8A29EB8","0AB8C0AE5E4BFCDC",line with{Series=[new("A",Twelve().Select((p,i)=>p with{Color=i==3?"#123456":null,Y=i==7?null:p.Y}).ToArray()),
+            new("B",Twelve()){Zones=new([new("Low",25),new("High",double.PositiveInfinity)]),ProjectedFrom=8}]}),
+        ("zones/time-in-zone","725159C7DD9ECD59","77633DA66248659B",bar with{YFormat=ValueFormat.Duration,Series=[new("Time in zone",heartZones.Zones.Select((z,i)=>new ChartPoint(i,seconds[i],z.Name){Color=ChartStyle.Light.Zones[i]}).ToArray())]}),
+        ("guard/scatter-markers","011DBD4AAAD9AF7B","9D9C47D723F1C608",scatter with{Theme=ChartTheme.Dark,Series=[scatter.Series[0] with{Points=scatter.Series[0].Points.Select((p,i)=>p with{Color=i%4==0?"#123456":null,Y=i==5?null:p.Y}).ToArray()},
+            scatter.Series[1] with{Secondary=true,Zones=new([new("Low",25),new("High",double.PositiveInfinity)])}]})];
+    foreach(var (row,refined,classic,spec) in rows)
+    {
+        var titles=row!="guard/scatter-markers";
+        Check(Hash16(ChartSvg.Render(spec,includeTitles:titles))==refined,$"{row} moved: {Hash16(ChartSvg.Render(spec,includeTitles:titles))}");
+        Check(Hash16(ChartSvg.Render(Classic(spec),includeTitles:titles))==classic,$"{row} moved in the classic finish: {Hash16(ChartSvg.Render(Classic(spec),includeTitles:titles))}");
+        // Each new setting written out at its default draws the same chart.
+        var spelled=spec with{XTicks=TickSource.Auto,Series=spec.Series.Select(s=>s with{ChangeColors=ChangeColors.None,Points=s.Points.Select(p=>p with{ValueNote=null}).ToArray()}).ToArray()};
+        Check(ChartSvg.Render(spelled,includeTitles:titles)==ChartSvg.Render(spec,includeTitles:titles),$"{row}: the defaults written out moved it");
+    }
+});
+Test("Change colours, value notes and tick sources round-trip through JSON as strings, a request that names none keeps the defaults, and only a set one renames gradients",()=>{
+    var spec=Raced(new("Position",[new(0,31,"R1"){ValueNote="/50"},new(1,24,"R2"){ValueNote="/48"}]){ChangeColors=ChangeColors.LowerIsBetter,ValueLabels=true}) with{XTicks=TickSource.PointLabels};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,finishJson);
+    Check(json.Contains("\"changeColors\":\"LowerIsBetter\"")&&json.Contains("\"valueNote\":\"/48\"")&&json.Contains("\"xTicks\":\"PointLabels\"")&&json.Contains("\"valueLabels\":true"),json);
+    var back=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,finishJson)!;
+    Check(back.XTicks==TickSource.PointLabels&&back.Series[0].ChangeColors==ChangeColors.LowerIsBetter&&back.Series[0].Points[1].ValueNote=="/48"&&ChartSvg.Render(back)==ChartSvg.Render(spec),"a setting changed in transit");
+    var written="{\"title\":\"Season\",\"kind\":\"Line\",\"xTicks\":\"Axis\",\"series\":[{\"name\":\"Position\",\"changeColors\":\"HigherIsBetter\",\"valueLabels\":true,\"points\":[{\"x\":0,\"y\":3,\"label\":\"A\",\"valueNote\":\" pts\"},{\"x\":1,\"y\":5,\"label\":\"B\"}]}]}";
+    var read=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,finishJson)!;
+    var svg=ChartSvg.Render(read);
+    Check(read.XTicks==TickSource.Axis&&svg.Contains("aria-label='Position: B, 5, better than the previous'")&&svg.Contains("aria-label='Position: A, 3 pts'")&&svg.Contains($"fill='{ChartStyle.Light.Rising}'"),"hand-written JSON");
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",finishJson)!;
+    Check(old.XTicks==TickSource.Auto&&old.Series[0].ChangeColors==ChangeColors.None&&old.Series[0].Points[0].ValueNote is null,"the defaults");
+    // A gradient's ID is named after the spec: the defaults leave it alone, and a setting away from them names it afresh.
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
+    string Id(ChartSpec s)=>System.Text.RegularExpressions.Regex.Match(ChartSvg.Render(s),"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var id=Id(faded);
+    Check(Id(faded with{XTicks=TickSource.Auto,Series=[faded.Series[0] with{ChangeColors=ChangeColors.None}]})==id,"the defaults renamed the gradient");
+    Check(Id(faded with{XTicks=TickSource.Axis})!=id&&Id(faded with{Series=[faded.Series[0] with{Points=[new(0,1){ValueNote="/2"},new(1,3)]}]})!=id
+        &&Id(Spec() with{Series=[new("S",[new(0,1),new(1,3)]){ChangeColors=ChangeColors.HigherIsBetter},new("F",[new(0,1),new(1,3)]){Kind=ChartKind.Area,Fill=AreaFill.Fade}]})
+          !=Id(Spec() with{Series=[new("S",[new(0,1),new(1,3)]),new("F",[new(0,1),new(1,3)]){Kind=ChartKind.Area,Fill=AreaFill.Fade}]}),"a setting kept the gradient's name");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

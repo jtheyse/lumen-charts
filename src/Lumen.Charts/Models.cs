@@ -154,6 +154,30 @@ public enum TrendFit
     /// two positive values draw none.</summary>
     Exponential
 }
+/// <summary>Which way a series counts a change as better, for <see cref="ChartSeries.ChangeColors"/>: up for points scored, down for
+/// a finishing position or a pace. It follows the data, not the screen, so it reads the same on a reversed axis.</summary>
+public enum ChangeColors
+{
+    /// <summary>No change colours: the series draws in its own colours, the default.</summary>
+    None,
+    /// <summary>A higher value than the one before is better, as points scored or a share price are.</summary>
+    HigherIsBetter,
+    /// <summary>A lower value than the one before is better, as a finishing position, a ranking or a pace is.</summary>
+    LowerIsBetter
+}
+/// <summary>What labels a continuous X axis along the bottom: its own ticks, or the labels of the points that stand on it.</summary>
+public enum TickSource
+{
+    /// <summary>Points' labels take the ticks' place when 1 to 24 labelled points stand in the visible range, each label cut to
+    /// twelve characters; otherwise the axis's own ticks, as every chart did before 0.33.0. On a time axis the labels take their
+    /// place only when none of them would be cut, since the dates are the axis's own; longer labels stay in the points' names.</summary>
+    Auto,
+    /// <summary>Always the axis's own ticks: numbers, or dates on a time axis. Points' labels stay in their names.</summary>
+    Axis,
+    /// <summary>Always the points' labels, at any count, thinned until they fit and each cut to twelve characters; the axis's own
+    /// ticks only where no labelled point stands in the visible range.</summary>
+    PointLabels
+}
 /// <summary><see cref="Fade"/> shades an area from the series colour at the top of the plot to nothing at its baseline,
 /// and a column from its colour at the baseline to a lighter tint at its far end.</summary>
 public enum AreaFill
@@ -223,6 +247,13 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// Kinds whose colours mean something else — direction, value, a state or a distribution — refuse it, as do stacked
     /// columns, whose colours tell the stacked series apart.</summary>
     public string? Color { get; init; }
+    /// <summary>A short note written straight after this point's value, at most 20 characters, such as <c>/48</c> after a finishing
+    /// position for the size of its field: in the muted colour at normal weight after a value label, and after the value in the
+    /// mark's tooltip and accessible name and in the component's data table. A <c>Note</c> column carries it into CSV. Give it any
+    /// space it needs: <c>" inside baseline"</c>. A missing value has nothing for a note to follow, so its note reaches the CSV
+    /// alone. Marks named by more than one value, or by none, refuse it: candles, range bars, histograms, boxes, violins,
+    /// timelines, calendars, gauges and rings.</summary>
+    public string? ValueNote { get; init; }
 
     /// <summary>A candle or OHLC bar, its Y the close. High must be the highest of the four prices and low the lowest.</summary>
     public static ChartPoint Candle(double x, double open, double high, double low, double close, string? label = null) =>
@@ -305,9 +336,25 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// <summary>Draws the last point of a line or area larger, with a soft ring round it, as phone apps mark the latest
     /// reading. It shows even when the other markers are hidden.</summary>
     public bool HighlightLast { get; init; }
-    /// <summary>Writes each column's or bar's value just past its far end, in its axis's format. A label that would not fit
-    /// within its column's width, or within the plot beside a bar, is left out.</summary>
+    /// <summary>Writes each column's or bar's value just past its far end, in its axis's format and the text colour, and from 0.33.0
+    /// each line or scatter point's value above its marker, in its axis's format and the point's colour, its change colour where it
+    /// has one, at weight 600, followed by its <see cref="ChartPoint.ValueNote"/> in the muted colour. A mark's colour need only clear
+    /// 3:1 and a label is small text, so a point colour that does not clear 4.5:1 against the background writes its label in the
+    /// style's <see cref="ChartStyle.Text"/> colour instead. A point's label is moved in
+    /// from the plot's sides so it is never cut, and goes below its marker where above would leave the plot or meet a value label
+    /// written before it. A label with no room, within its column's width, within the plot beside a bar, or above and below a
+    /// point, is left out; the value stays in its mark's name.</summary>
     public bool ValueLabels { get; init; }
+    /// <summary>Colours each point of a line or scatter series by how it changed from the nearest earlier point that has a value:
+    /// the style's <see cref="ChartStyle.Rising"/> colour when it is better, <see cref="ChartStyle.Falling"/> when it is worse, and
+    /// the series colour when it is level or has no earlier value. Better is what the setting says, not up the screen, so it holds on
+    /// a reversed axis and on a scale shared with another measure alike. A point's marker and the segment that arrives at it take its
+    /// colour, unlike <see cref="ChartPoint.Color"/>, which colours the segment that leaves; a gap draws no segment, but the point
+    /// after it still compares with the last value before it. Each mark's name says the change in words, <c>better than the
+    /// previous</c>, <c>worse than the previous</c> or <c>level with the previous</c>, so the colour is never the only cue. Applies to
+    /// series drawn as lines and scatter points, in X order, and is refused beside <see cref="Zones"/>, a <see cref="Gradient"/> and
+    /// point colours, which colour the same marks.</summary>
+    public ChangeColors ChangeColors { get; init; }
     /// <summary>Ring charts only: the target this ring's value is measured against, so its progress is Y ÷ Goal. Positive;
     /// null means 100. The point's label, if any, is the unit both are written in, such as <c>kcal</c>.</summary>
     public double? Goal { get; init; }
@@ -373,6 +420,11 @@ public sealed record ChartSpec
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];
     /// <summary>Names the X axis.</summary>
     public string XLabel { get; init; } = "";
+    /// <summary>What labels a continuous X axis along the bottom: <see cref="TickSource.Auto"/>, the default, puts 1 to 24 labelled
+    /// points' labels in place of the ticks, except that on a time axis it keeps the dates unless every label fits uncut;
+    /// <see cref="TickSource.Axis"/> always draws the axis's own ticks, and <see cref="TickSource.PointLabels"/> always the points'
+    /// labels. Line, area, scatter, bubble, candlestick, OHLC, band, range and blocks charts take it; the others refuse it set.</summary>
+    public TickSource XTicks { get; init; }
     /// <summary>Names the main plot's left-hand axis. On a gauge it is the unit written after the score, such as <c>%</c>.</summary>
     public string YLabel { get; init; } = "";
     /// <summary>Names the main plot's right-hand axis, which appears when one of its series is marked secondary.</summary>

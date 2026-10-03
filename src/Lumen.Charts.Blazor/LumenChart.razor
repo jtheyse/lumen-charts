@@ -84,10 +84,11 @@
             // A timeline span reads its start in the X column, and how long it runs to its end here.
             ChartKind.Timeline when point.XEnd is {} end=>$"to {xAxis.Format(end)}",
             // A block reads its height and the span it covers.
-            ChartKind.Blocks when point.XEnd is {} end&&point.Y.HasValue=>$"{y.Format(point.Y.Value)} from {xAxis.Format(point.X)} to {xAxis.Format(end)}",
+            ChartKind.Blocks when point.XEnd is {} end&&point.Y.HasValue=>$"{y.Format(point.Y.Value)}{point.ValueNote} from {xAxis.Format(point.X)} to {xAxis.Format(end)}",
             ChartKind.Range when point.Y is null&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Low.Value)} to {y.Format(point.High.Value)}",
-            _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Y.Value)} ({y.Format(point.Low.Value)} to {y.Format(point.High.Value)})",
-            _=>point.Y.HasValue?y.Format(point.Y.Value):"Missing"
+            _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Y.Value)}{point.ValueNote} ({y.Format(point.Low.Value)} to {y.Format(point.High.Value)})",
+            // A value's note follows it, as it does in the mark's name.
+            _=>point.Y.HasValue?y.Format(point.Y.Value)+point.ValueNote:"Missing"
         };
     }
     // How a value reads depends only on the axis kind and format, so the bounds here are nominal. A series in a pane below
@@ -168,10 +169,10 @@
         // high and its typical value.
         status=Spec.Kind is ChartKind.Gauge or ChartKind.Ring ? ChartSvg.LegendLabel(Spec,index)
             : Spec.Kind==ChartKind.Calendar ? Day(index,p)
-            : p.XEnd is {} end&&(Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Blocks&&p.Y is {} height ? $"{Spec.Series[index].Name}: {(p.Label is null ? "" : p.Label+", ")}{xAxis.Format(p.X)} to {xAxis.Format(end)} = {Measure(Spec.Series[index]).Format(height)}"
+            : p.XEnd is {} end&&(Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Blocks&&p.Y is {} height ? $"{Spec.Series[index].Name}: {(p.Label is null ? "" : p.Label+", ")}{xAxis.Format(p.X)} to {xAxis.Format(end)} = {Measure(Spec.Series[index]).Format(height)}{p.ValueNote}"
             : p.XEnd is {} finish ? $"{Spec.Series[index].Name}: {xAxis.Format(p.X)} to {xAxis.Format(finish)}"
             : (Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Range&&p.Low is {} low&&p.High is {} high ? $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {Measure(Spec.Series[index]).Format(low)} to {Measure(Spec.Series[index]).Format(high)}{(p.Y is {} typical ? $", average {Measure(Spec.Series[index]).Format(typical)}" : "")}"
-            : $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y) : "missing")}";
+            : $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y)+p.ValueNote : "missing")}";
         await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
     }
     // A calendar's mark is a day, which reports its first point: it reads the day, in the chart's zone, and the total of every

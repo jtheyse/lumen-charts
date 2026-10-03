@@ -7,7 +7,7 @@ foreach($path in @('/health','/_framework/blazor.web.js','/_content/Lumen.Charts
  Verify ($r.StatusCode -eq 200) "Asset/health $path"
 }
 $r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 19 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'") -and $r.Content.Contains('id="laps"') -and $r.Content.Contains('id="next-session"') -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 14) 'The Sports & performance page answers 200 and prerenders its nineteen simulated charts, each set to fit its card, last night''s sleep stages, the training calendar, the run''s four laps and the next session''s ten steps among them'
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 20 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'") -and $r.Content.Contains('id="laps"') -and $r.Content.Contains('id="next-session"') -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 14) 'The Sports & performance page answers 200 and prerenders its twenty charts, each set to fit its card, last night''s sleep stages, the training calendar, the run''s four laps and the next session''s ten steps among them'
 $r=Invoke-WebRequest "$BaseUrl/" -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('class="lumen-chart lumen-fit"') -and $r.Content.Contains('<b>22</b><span>Chart types</span>') -and $r.Content.Contains('>Calendar</button>') -and $r.Content.Contains('>Blocks</button>')) 'The home page answers 200, its chart explorer set to fit its card, with twenty-two chart types and a calendar and blocks among them'
 Verify (([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 2 -and $r.Content.Contains("data-node='sources'") -and $r.Content.Contains("viewBox='0 0 900 460'")) 'The home page prerenders its network graph set to fit its card too, drawn at its own width until the browser measures the card'
@@ -196,6 +196,30 @@ foreach($bad in @(@{body=$fits.Replace('"trend":true,"trendFit":"MovingAverage"'
 }
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $fits.Replace('"trendFit":"Exponential"','"trendFit":"Logistic"') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400) 'An unknown trend fit is rejected'
+# 0.33.0: a place coloured by its change and named with it, its field size a value note after its value in its label, its name and the
+# CSV's Note column; a time axis that keeps its dates under long round names unless asked for the names; and each new setting refused
+# where it cannot apply. The Sports & performance page prerenders its race results with their value labels.
+$r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
+Verify ($r.Content.Contains('id="race-results"') -and ([regex]::Matches($r.Content,"class='lumen-value'")).Count -eq 10 -and $r.Content.Contains("aria-label='Position: 16-05-2026, 24/48, better than the previous'") -and $r.Content.Contains('below baseline')) 'The Sports & performance page prerenders its race results, each place and points total written and each place named with its change, and the HRV nights named with their status'
+$race='{"title":"Race results","kind":"Line","xMin":-0.5,"xMax":2.5,"yReversed":true,"series":[{"name":"Position","changeColors":"LowerIsBetter","valueLabels":true,"points":[{"x":0,"y":31,"label":"11-04-2026","valueNote":"/50"},{"x":1,"y":24,"label":"16-05-2026","valueNote":"/48"},{"x":2,"y":27,"label":"04-07-2026","valueNote":"/51"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $race -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains("aria-label='Position: 16-05-2026, 24/48, better than the previous'") -and $r.Content.Contains("aria-label='Position: 04-07-2026, 27/51, worse than the previous'") -and $r.Content.Contains("aria-label='Position: 11-04-2026, 31/50'") -and $r.Content.Contains("fill='#169B8D'") -and $r.Content.Contains("fill='#D36B84'") -and ([regex]::Matches($r.Content,"class='lumen-value'")).Count -eq 3 -and $r.Content.Contains(">24<tspan class='lumen-muted' font-weight='400'>/48</tspan>")) 'A race posted as JSON colours a place better than the one before, names each change, and writes each place with its field size'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $race
+Verify ($r.Content.StartsWith('Series,X,Y,Label,Size,Note') -and $r.Content.Contains('"Position",1,24,"16-05-2026",1,"/48"')) 'The CSV of a race carries each field size in a Note column'
+$season='{"title":"Season","kind":"Line","xAxis":"Time","timeZone":"Africa/Johannesburg","yReversed":true,"series":[{"name":"Position","points":[{"x":1775901600000,"y":31,"label":"Round 1 - Hilltop Classic"},{"x":1778925600000,"y":24,"label":"Round 2 - River Valley"},{"x":1783159200000,"y":27,"label":"Round 3 - Quarry Loop"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $season
+Verify ($r.Content.Contains("aria-label='Position: Round 2 - River Valley, 24'") -and -not $r.Content.Contains('>Round') -and $r.Content -match '>\d{1,2} (Apr|May|Jun|Jul)<') 'A time axis under long round names keeps its dates, the names in the points'' tooltips'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $season.Replace('"yReversed":true','"yReversed":true,"xTicks":"PointLabels"')
+Verify ($r.Content.Contains('>Round 1 - H') -and $r.Content.Contains('>Round 3 - Q')) 'XTicks PointLabels posted as JSON puts the round names under the axis, cut short'
+foreach($bad in @(@{body='{"kind":"Column","series":[{"name":"S","changeColors":"LowerIsBetter","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}';reason='Change colours apply';name='Change colours on columns'},
+  @{body='{"kind":"Line","series":[{"name":"S","points":[{"x":0,"y":1,"valueNote":"/123456789012345678901"}]}]}';reason='at most 20 characters';name='A value note of 22 characters'},
+  @{body='{"kind":"Column","xTicks":"Axis","series":[{"name":"S","points":[{"x":0,"y":1}]}]}';reason='XTicks chooses';name='A tick source on a column chart'},
+  @{body='{"kind":"Area","series":[{"name":"S","valueLabels":true,"points":[{"x":0,"y":1}]}]}';reason='Value labels apply';name='Value labels on an area'})){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
+}
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $race.Replace('"LowerIsBetter"','"Sideways"') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'Unknown change colours are rejected'
 $logSpec='{"title":"Log","kind":"Scatter","yAxis":"Log","series":[{"name":"Load","points":[{"x":1,"y":2},{"x":2,"y":200},{"x":3,"y":20000}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $logSpec
 Verify (([xml]$r.Content).DocumentElement.LocalName -eq 'svg') 'Log axis SVG'

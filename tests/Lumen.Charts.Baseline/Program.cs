@@ -509,6 +509,50 @@ lines.Add($"trend/midnight-hrv {Hash(Render(Spec(ChartKind.Line, ChartTheme.Dark
     Series = [new("Baseline", nightsHrv.Select((v, i) => ChartPoint.Interval(1788825600000d + i * 86400000d, 64, 60, 68)).ToArray(), ChartStyle.Midnight.Zones[0]) { Kind = ChartKind.Band },
         new("Nightly HRV", nightsHrv.Select((v, i) => new ChartPoint(1788825600000d + i * 86400000d, v) { Color = v < 60 ? ChartStyle.Midnight.Zones[4] : v > 68 ? ChartStyle.Midnight.Zones[1] : ChartStyle.Midnight.Zones[2] }).ToArray(), ChartStyle.Midnight.Zones[6])
             { Kind = ChartKind.Scatter, Markers = MarkerStyle.Filled, Trend = true, TrendFit = TrendFit.MovingAverage }] }))}");
+// 0.33.0: race results on a line. An invented season of five races by index, each in the middle of its slot: the place coloured by its
+// change, written with its field size as a value note, and the points earned; as the hand-built chart draws it, on one scale padded 12 %
+// of its range with no gridlines, and as recommended, in two panes with the place reversed, each at 900 and 340 in light and Midnight.
+// The season's rounds on a time axis whose long names keep the dates, at 340 in Midnight. Change colours on a plain line across a gap in
+// each theme; value labels at the plot's left and right edges and its top, one below another's; and a time axis with long labels under
+// each tick source.
+(int? Position, int? Field, int? Points)[] races = [(31, 50, 40), (24, 48, 52), (27, 51, 47), (21, 49, 58), (19, 52, 61)];
+string[] raced = ["11-04-2026", "16-05-2026", "04-07-2026", "08-08-2026", "19-09-2026"];
+DateOnly[] raceDays = [new(2026, 4, 11), new(2026, 5, 16), new(2026, 7, 4), new(2026, 8, 8), new(2026, 9, 19)];
+string[] roundNames = ["Round 1 · Hilltop Classic", "Round 2 · River Valley", "Round 3 · Quarry Loop", "Round 4 · Forest Sprint", "Round 5 · Final Ridge"];
+ChartSeries Placed() => new("Position", races.Select((r, i) => new ChartPoint(i, r.Position, raced[i]) { ValueNote = r.Field is int field ? $"/{field}" : null }).ToArray())
+    { ChangeColors = ChangeColors.LowerIsBetter, ValueLabels = true, Markers = MarkerStyle.Filled };
+ChartSeries Earned() => new("Points", races.Select((r, i) => new ChartPoint(i, r.Points, raced[i])).ToArray()) { ValueLabels = true, Markers = MarkerStyle.Filled };
+ChartSpec Faithful(ChartStyle style, int width) => new()
+{
+    Kind = ChartKind.Line, Style = style with { Gridlines = GridLine.Hidden }, Title = "Position & points by race", Description = "Place over field size, and points",
+    Width = width, Height = 300, XMin = -.5, XMax = 4.5, YMin = 19 - 5.04, YMax = 61 + 5.04, Series = [Placed(), Earned()]
+};
+ChartSpec Recommended(ChartStyle style, int width) => new()
+{
+    Kind = ChartKind.Line, Style = style, Title = "Position & points by race", Description = "Place over field size, first at the top, and points",
+    Width = width, Height = 380, XMin = -.5, XMax = 4.5, YReversed = true, YLabel = "Position", Panes = [new() { Label = "Points", Weight = 1 }], Series = [Placed(), Earned() with { Pane = 1 }]
+};
+foreach (var (look, style) in new[] { ("light", ChartStyle.Light), ("midnight", ChartStyle.Midnight) })
+    foreach (var width in new[] { 900, 340 })
+    {
+        lines.Add($"race/faithful-{width}-{look} {Hash(Render(Faithful(style, width)))}");
+        lines.Add($"race/recommended-{width}-{look} {Hash(Render(Recommended(style, width)))}");
+    }
+ChartSpec Rounds(TickSource ticks, ChartStyle? style, int width) => new()
+{
+    Kind = ChartKind.Line, Style = style, XAxis = AxisKind.Time, TimeZone = "Africa/Johannesburg", XTicks = ticks, YReversed = true, Title = "Your season, round by round",
+    Description = "Your place in each round, first at the top", Width = width, Height = 260,
+    Series = [new("Position", races.Select((r, i) => new ChartPoint(TimeAxis.Value(new DateTimeOffset(raceDays[i].ToDateTime(new TimeOnly(12, 0)), TimeSpan.FromHours(2))), r.Position, roundNames[i])).ToArray(), "#FF5A54")
+        { Markers = MarkerStyle.Filled, HighlightLast = true }]
+};
+lines.Add($"race/season-340-midnight {Hash(Render(Rounds(TickSource.Auto, ChartStyle.Midnight, 340)))}");
+ChartPoint[] Zigzag() => [new(0, 5, "A"), new(1, 3, "B"), new(2, 3, "C"), new(3, 4, "D"), new(4, null, "E"), new(5, 2, "F"), new(6, 6, "G"), new(7, 1, "H")];
+foreach (var theme in Enum.GetValues<ChartTheme>())
+    lines.Add($"change/line/{theme} {Hash(Render(Spec(ChartKind.Line, theme) with { Title = "Change colours", Series = [new("Position", Zigzag()) { ChangeColors = ChangeColors.LowerIsBetter }, new("Points", Zigzag().Select(p => p with { Y = 10 - p.Y }).ToArray()) { ChangeColors = ChangeColors.HigherIsBetter, Curve = LineCurve.Step }] }))}");
+lines.Add($"labels/edges {Hash(Render(line with { Title = "Value labels at the edges", XMin = 0, XMax = 6, YMin = 0, YMax = 10,
+    Series = [new("A", [new(0, 5) { ValueNote = "/48" }, new(3, 4), new(6, 10) { ValueNote = "/52" }]) { ValueLabels = true, Markers = MarkerStyle.Filled }, new("B", [new(1, 6), new(3, 4.2), new(5, 7)]) { Kind = ChartKind.Scatter, ValueLabels = true }] }))}");
+foreach (var ticks in Enum.GetValues<TickSource>())
+    lines.Add($"ticks/time-long-{ticks} {Hash(Render(Rounds(ticks, null, 900)))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

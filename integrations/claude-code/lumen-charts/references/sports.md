@@ -1,6 +1,6 @@
 # Sports and training charts
 
-Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.32.0.
+Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.33.0. Recipes for a race-results app — finishing places coloured by their change, value labels on a line, a season on a time axis — are in `recipes-race-face.md`.
 
 ## Conventions the numbers follow
 
@@ -107,7 +107,7 @@ var weekly = new ChartSpec {
 
 ## HRV against its baseline
 
-Daily HRV as points, coloured by whether they sit inside a rolling baseline band (mean ± one standard deviation), as Garmin, Oura and Bevel show it, with a seven-day moving average through them (0.32.0).
+Daily HRV as points, coloured by whether they sit inside a rolling baseline band (mean ± one standard deviation), as Garmin, Oura and Bevel show it, each named with where it sits (0.33.0), with a seven-day moving average through them (0.32.0).
 
 ```csharp
 // hrv: double? per day (null = no reading), dates: matching DateOnly, in order
@@ -120,13 +120,15 @@ var hrvChart = new ChartSpec {
         new("Baseline", dates.Select((d, i) => baseline[i] is { } b
             ? ChartPoint.Interval(Day(d), Math.Round(b.Mean, 1), Math.Round(b.Mean - b.Deviation, 1), Math.Round(b.Mean + b.Deviation, 1))
             : new ChartPoint(Day(d), null)).ToArray()) { Kind = ChartKind.Band },
-        new("HRV", dates.Select((d, i) => new ChartPoint(Day(d), hrv[i]) {
-            Color = hrv[i] is { } v && baseline[i] is { } b && Math.Abs(v - b.Mean) > b.Deviation ? outside : inside }).ToArray(), "#9E63D3")
-            { Trend = true, TrendFit = TrendFit.MovingAverage }]
+        new("HRV", dates.Select((d, i) => {
+            var away = hrv[i] is { } v && baseline[i] is { } b && Math.Abs(v - b.Mean) > b.Deviation;
+            return new ChartPoint(Day(d), hrv[i]) { Color = away ? outside : inside,
+                ValueNote = hrv[i] is null || baseline[i] is null ? null : away ? " outside baseline" : " inside baseline" };
+        }).ToArray(), "#9E63D3") { Trend = true, TrendFit = TrendFit.MovingAverage }]
 };
 ```
 
-The average is drawn dashed in the series colour, a purple no day is coloured in, at the last day of each seven-day window, and reads `HRV trend: 7-point moving average`; `TrendPoints = 14` widens it. A day without a reading holds its place in the window and adds nothing, and the line breaks where fewer than four of the seven days have one. The points must be in date order.
+A day's colour is never the only sign of where it sits: its `ValueNote` follows its value in its tooltip and accessible name, `HRV: 14 Sep 2026, 52 outside baseline`, and in the component's data table and a CSV `Note` column. To tell a low night from a high one, colour them apart and note them `" below baseline"` and `" above baseline"`. The average is drawn dashed in the series colour, a purple no day is coloured in, at the last day of each seven-day window, and reads `HRV trend: 7-point moving average`; `TrendPoints = 14` widens it. A day without a reading holds its place in the window and adds nothing, and the line breaks where fewer than four of the seven days have one. The points must be in date order.
 
 ## Pace by kilometre, faster higher
 

@@ -71,6 +71,12 @@ public static class SportsData
     public static DateOnly Today => Start.AddDays(Weeks * 7 - 1);
     public static DateOnly Race => Start.AddDays((Weeks + PlannedWeeks) * 7 - 1);
 
+    /// <summary>An invented season of five races, apart from the simulated training: each race's day, the place it finished, the size
+    /// of its field and the series points it earned. A race without points would be a gap in the points, and one without a field
+    /// size would write its place alone.</summary>
+    public static readonly IReadOnlyList<(DateOnly Day, int Position, int? Field, int? Points)> Races =
+        [(new(2026, 4, 11), 31, 50, 40), (new(2026, 5, 16), 24, 48, 52), (new(2026, 7, 4), 27, 51, 47), (new(2026, 8, 8), 21, 49, 58), (new(2026, 9, 19), 19, 52, 61)];
+
     /// <summary>Coggan's five heart-rate levels at a threshold of 170 bpm, under the short names the apps use.</summary>
     public static ZoneScale HeartZones { get; } = new(ZoneScale.CogganHeartRate(ThresholdHeartRate).Zones
         .Zip(new[] { "Recovery", "Endurance", "Tempo", "Threshold", "VO2max" }, (zone, name) => zone with { Name = name }).ToArray());
@@ -712,17 +718,20 @@ public static class SportsData
                 ChartSeries.From("Week's fastest 5 km", WeeklyBests(season), s => When(s.Day), s => s.Best5k) with { Kind = ChartKind.Scatter }]
         };
 
-        // Each night against the mean and standard deviation of the nights before it.
+        // Each night against the mean and standard deviation of the nights before it, in the ramp's green inside the band, orange
+        // below it and blue above it. A night's note names its status after its value, so its tooltip and accessible name say what
+        // its colour shows, and the seven-night moving average runs through them in the ramp's purple, which no night is drawn in.
         var nights = season.Hrv;
         var rolling = Statistics.Rolling(nights.Select(v => (double?)v).ToArray(), BaselineNights);
-        var inside = new List<ChartPoint>(); var below = new List<ChartPoint>(); var above = new List<ChartPoint>(); var band = new List<ChartPoint>();
+        var nightly = new List<ChartPoint>(); var band = new List<ChartPoint>();
         for (var night = BaselineNights; night < nights.Count; night++)
         {
             var x = When(Start.AddDays(night - BaselineNights));
             var window = rolling[night - 1]!;
             var (floor, ceiling) = (Math.Round(window.Mean - window.Deviation, 1), Math.Round(window.Mean + window.Deviation, 1));
             band.Add(ChartPoint.Interval(x, Math.Round(window.Mean, 1), floor, ceiling));
-            (nights[night] < floor ? below : nights[night] > ceiling ? above : inside).Add(new(x, nights[night]));
+            var (status, ink) = nights[night] < floor ? ("below", zones[4]) : nights[night] > ceiling ? ("above", zones[1]) : ("inside", zones[2]);
+            nightly.Add(new(x, nights[night]) { Color = ink, ValueNote = $" {status} baseline" });
         }
         var last = nights[^1];
         var hrv = Chart(wide, 360) with
@@ -733,9 +742,26 @@ public static class SportsData
             XLabel = "Night (UTC)", YLabel = "HRV, rMSSD (ms)",
             Series = [
                 new("Baseline", band, zones[0]) { Kind = ChartKind.Band },
-                new("Inside baseline", inside, zones[2]) { Kind = ChartKind.Scatter, Markers = MarkerStyle.Filled },
-                new("Below baseline", below, zones[4]) { Kind = ChartKind.Scatter, Markers = MarkerStyle.Filled },
-                new("Above baseline", above, zones[1]) { Kind = ChartKind.Scatter, Markers = MarkerStyle.Filled }]
+                new("Nightly HRV", nightly, zones[6]) { Kind = ChartKind.Scatter, Markers = MarkerStyle.Filled, Trend = true, TrendFit = TrendFit.MovingAverage }]
+        };
+
+        // The race season in two panes on one race-by-race axis, each race in the middle of its slot so its date is never cut at the
+        // card's edge: the place each finished on a reversed axis, first at the top, coloured by whether it finished higher or lower
+        // than the race before and written with the size of its field, and beneath it the points each earned, in the ramp's neutral
+        // grey so they are not read as better or worse.
+        string Ordinal(int n) => n + (n % 100 is 11 or 12 or 13 ? "th" : (n % 10) switch { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" });
+        var raced = Races.Select(r => r.Day.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture)).ToArray();
+        var highest = Races.MinBy(r => r.Position);
+        var results = Chart(wide, 400) with
+        {
+            Kind = ChartKind.Line, XMin = -.5, XMax = Races.Count - .5, YReversed = true,
+            Title = $"Up {Races[0].Position - Races[^1].Position} places since the first race", Description = $"Five invented races · best {Ordinal(highest.Position)} of {highest.Field}",
+            XLabel = "Race", YLabel = "Position",
+            Panes = [new() { Label = "Points", Weight = 1 }],
+            Series = [
+                new("Position", Races.Select((r, i) => new ChartPoint(i, r.Position, raced[i]) { ValueNote = r.Field is { } field ? $"/{field}" : null }).ToArray())
+                    { ChangeColors = ChangeColors.LowerIsBetter, ValueLabels = true, Markers = MarkerStyle.Filled },
+                new("Points", Races.Select((r, i) => new ChartPoint(i, r.Points, raced[i])).ToArray(), zones[0]) { Pane = 1, ValueLabels = true, Markers = MarkerStyle.Filled }]
         };
 
         // Last night's stages, one lane each, on the clock: awake in the ramp's orange, REM blue, light sleep its neutral grey and
@@ -791,7 +817,8 @@ public static class SportsData
             new("session", "elevation", "Elevation coloured by grade", "The same route as an area, each 100 m segment taking a point `Color` from its grade band.", true, elevation),
             new("fitness", "power-curve", "Power–duration curve", "`Training.MeanMaximal` over this month's rides against last month's on a logarithmic duration axis, with the `Training.CriticalPower` fit as a reference line.", false, power),
             new("fitness", "records", "5 km record progression", "Each week's fastest 5 km inside a run, and the record as a `LineCurve.Step` envelope on a reversed axis, so faster is higher.", false, best),
-            new("fitness", "hrv", "HRV against its baseline", "Each night's HRV, coloured by where it falls against a band of the mean ± one standard deviation of the 28 nights before, from `Statistics.Rolling`.", true, hrv),
+            new("fitness", "hrv", "HRV against its baseline", "Each night's HRV in green inside a band of the mean ± one standard deviation of the 28 nights before, from `Statistics.Rolling`, orange below it and blue above it, its `ValueNote` naming that status in its tooltip; the dashed purple line is a seven-night `TrendFit.MovingAverage`.", true, hrv),
+            new("racing", "race-results", "Race results", "Five invented races in two `Panes` on one race-by-race axis: the place each finished on a reversed axis, first at the top, `ChangeColors.LowerIsBetter` drawing a race that finished higher than the one before in the style's rising colour and one that finished lower in its falling colour, and saying so in its tooltip, and `ValueLabels` writing each place with its field as a muted `ValueNote`; beneath, the points each race earned.", true, results),
             new("sleep", "hypnogram", "Last night's sleep stages", "A `ChartKind.Timeline`: one series per stage, each period a `ChartPoint.Span`, joined where the stage changes; the higher the HRV sits above its baseline, the more deep sleep.", true, hypnogram),
             new("sleep", "sleep-timing", "Sleep timing", "Bedtime to waking as `ChartKind.Range` bars on a reversed `ValueFormat.TimeOfDay` axis, its seconds running past 24 hours so a night never crosses zero.", false, timing),
             new("sleep", "heart-range", "Daily heart rate", "Each day's lowest and highest heart rate as `ChartPoint.Interval` range bars, the dot its average; today's highest is the run's.", false, heartRange)];

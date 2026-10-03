@@ -732,15 +732,15 @@ if (await sportsLink.CountAsync() > 0)
     var charts = sports.Locator(".lumen-chart");
     // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
-        return svgs.length === 19 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+        return svgs.length === 20 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
-    await Test("The Sports & performance page renders its nineteen training charts, each live and drawn at the width it is shown", async () =>
+    await Test("The Sports & performance page renders its twenty charts, each live and drawn at the width it is shown", async () =>
     {
-        Check(await charts.CountAsync() == 19, $"the page shows {await charts.CountAsync()} charts");
-        for (var i = 0; i < 19; i++)
+        Check(await charts.CountAsync() == 20, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 20; i++)
             Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
-        // Each chart's script adds its tooltip, so nineteen of them prove every chart is interactive.
-        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 19");
+        // Each chart's script adds its tooltip, so twenty of them prove every chart is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 20");
         await sports.WaitForFunctionAsync(drawnToFit);
     });
 
@@ -783,6 +783,38 @@ if (await sportsLink.CountAsync() > 0)
         Check(overflow[0] <= 375, $"the page is {overflow[0]} pixels wide");
         Check(overflow.Skip(1).All(extra => extra <= 0), $"a chart scrolls sideways: {string.Join(", ", overflow.Skip(1))}");
     });
+    // On a phone, with its overlay scrollbars, touch and a device scale of 2, the race results card is drawn at the width it is shown,
+    // every value label stands inside the drawing as the browser lays it out, and each race's place reads its field size and how it
+    // changed from the race before, in the words its colour stands for.
+    if (await sports.Locator("#race-results .lumen-chart").CountAsync() > 0)
+        await Test("On a 375-pixel phone no value label of the race results runs outside its drawing, and each place reads its field and its change", async () =>
+        {
+            await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+            var tab = await phone.NewPageAsync();
+            tab.SetDefaultTimeout(15_000);
+            await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+            await tab.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });
+            var card = tab.Locator("#race-results .lumen-chart");
+            await card.ScrollIntoViewIfNeededAsync();
+            await tab.WaitForFunctionAsync("c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'); return Number(s.getAttribute('viewBox').split(' ')[2]) === Math.max(320, v.clientWidth); }", await card.ElementHandleAsync());
+            var measured = await card.EvaluateAsync<double[]>(@"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'), box = s.getBoundingClientRect();
+                const labels = [...s.querySelectorAll(':scope > g.lumen-value > text')].map(t => t.getBoundingClientRect());
+                const outside = labels.filter(b => b.left < box.left - .5 || b.right > box.right + .5 || b.top < box.top - .5 || b.bottom > box.bottom + .5).length;
+                return [Number(s.getAttribute('viewBox').split(' ')[2]), box.width, labels.length, outside, v.scrollWidth - v.clientWidth, document.documentElement.scrollWidth]; }");
+            Check(measured[0] <= 375 && Math.Abs(measured[1] - measured[0]) < 1.5, $"drawn {measured[0]} wide and shown {measured[1]:0.#} wide");
+            Check(measured[2] == 20 && measured[3] == 0, $"{measured[3]} of the drawing's {measured[2]} value label texts run outside it");
+            Check(measured[4] <= 0 && measured[5] <= 375, $"the card scrolls by {measured[4]}, the page is {measured[5]} wide");
+            var names = await card.Locator(".lumen-datum[data-series='0']").EvaluateAllAsync<string[]>("ms => ms.map(m => m.getAttribute('aria-label'))");
+            Check(names.Length == 5 && names.All(n => System.Text.RegularExpressions.Regex.IsMatch(n, @"^Position: \d\d-\d\d-2026, \d+/\d+")), string.Join(" | ", names));
+            Check(names.Count(n => n.EndsWith(", better than the previous")) == 3 && names.Count(n => n.EndsWith(", worse than the previous")) == 1 && !names[0].Contains("previous"), string.Join(" | ", names));
+            // The tooltip a reader sees on a touch is the mark's name.
+            var mark = card.Locator(".lumen-datum[data-series='0'][data-point='2']");
+            await mark.FocusAsync();
+            var tip = card.Locator(".lumen-tooltip");
+            await tip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            Check(await tip.TextContentAsync() == await mark.GetAttributeAsync("aria-label") && (await tip.TextContentAsync())!.EndsWith("27/51, worse than the previous"), $"the tooltip reads {await tip.TextContentAsync()}");
+        });
+    else Console.WriteLine("SKIP race results phone check: this host's Sports & performance page has no race results");
     await sports.CloseAsync();
 }
 else Console.WriteLine("SKIP Sports & performance checks: this host has no Sports & performance page");
