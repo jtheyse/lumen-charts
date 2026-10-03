@@ -70,6 +70,8 @@ The gallery's Sports & performance page (`/sports`) shows the charts shipped so 
 
 ## Build order
 
+Every step below has shipped: the training metrics in 0.18.0, axis formats in 0.19.0, zones on charts in 0.20.0, several marks in one chart in 0.21.0 and 0.22.0, gauges and rings in 0.26.0, state timelines and range columns in 0.27.0, the calendar layout in 0.28.0 and variable-width blocks in 0.29.0.
+
 Cross-cutting work comes first, because each piece unlocks several charts. Each release is independently useful and is checked the same way as the rest of the library: executable assertions, the hashed rendering baseline, HTTP checks and the browser suite.
 
 1. **Training metrics** — normalized power, intensity factor, training stress, the fitness–fatigue–form model, time in zone, mean-maximal curves, the critical-power fit, rolling baselines, and a zone scale with Coggan's power and heart-rate levels. Computation only, tested against the values above. Shipped in 0.18.0.
@@ -79,6 +81,6 @@ Cross-cutting work comes first, because each piece unlocks several charts. Each 
 5. **Gauges and rings.** A score gauge on an open arc of any sweep from a semicircle to a full circle, its track tinted by zones and its score coloured by its zone, with a target tick; and Apple-style activity rings, each a value against its goal, running on over themselves past it. Shipped in 0.26.0.
 6. **State timelines and range columns** — hypnograms, intraday states, sleep timing and minimum–maximum bars. A state timeline with one lane per state, its spans joined where one ends as the next begins; floating range bars from a low to a high with a dot at the typical value, as a chart or beside other marks; and a time-of-day format that runs past midnight, for sleep timing on a reversed axis. Shipped in 0.27.0.
 7. **Calendar layout** — training calendars and streak grids. A calendar of one series of days, counted in the chart's time zone, laid out as a contribution grid of weeks by weekdays with the months named above, or as a small grid for each month; each day a rounded square, a dot or a bubble sized by its value, coloured by its zone or on a sequential ramp, a day without activity an empty cell, and an X annotation outlining a day such as today or a race. Shipped in 0.28.0.
-8. **Variable-width blocks** — laps sized by their length, and structured workout profiles.
+8. **Variable-width blocks** — laps sized by their length, and structured workout profiles. Each point a block from its X to its end along X, standing on the bottom edge of its plot and rising to its value: from zero on a power axis, as TrainingPeaks and Zwift draw a workout's steps coloured by Coggan's power levels with the executed power over them, and from past the slowest pace on a reversed axis, as Strava draws laps as wide as they are long with an average line. Neighbouring blocks are parted by a hairline and rounded at their far end, as a chart kind or as a series' own kind under lines. Shipped in 0.29.0.
 
 The moving average planned under regression families arrives with the rolling baselines in the first release.

@@ -1,6 +1,6 @@
 # Sports and training charts
 
-Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.28.0.
+Recipes for the charts endurance and wellness apps draw (TrainingPeaks, Strava, Garmin, WHOOP, Oura, Gentler Streak, Bevel). Each is a plain `ChartSpec`; put it in `<LumenChart Spec="…" />` or render it with `ChartSvg.Render`. They compile against Lumen.Charts 0.29.0.
 
 ## Conventions the numbers follow
 
@@ -135,6 +135,43 @@ var paceChart = new ChartSpec {
     Series = [new("Pace", splits.Select((s, k) => new ChartPoint(k + 1, s)).ToArray()) { Trend = true }]
 };
 ```
+
+## Laps, each as wide as it is long
+
+Strava's lap chart: one block per lap, its width the lap's distance and its height its pace on a reversed axis, so a faster lap stands higher, with the average pace across them.
+
+```csharp
+// lapLog: (double Km, double Seconds) for each lap of a run, in order — its length and the time it took
+var lapEnds = lapLog.Select((lap, i) => lapLog.Take(i + 1).Sum(l => l.Km)).ToArray();
+var lapChart = new ChartSpec {
+    Title = "Laps", Description = "Each lap's pace, as wide as the lap is long",
+    Kind = ChartKind.Blocks, YFormat = ValueFormat.Duration, YReversed = true, XLabel = "Distance (km)", YLabel = "Pace (/km)",
+    Annotations = [new ChartAnnotation(AnnotationAxis.Y, lapLog.Sum(l => l.Seconds) / lapLog.Sum(l => l.Km)) { Label = "Average" }],
+    Series = [new("Laps", lapLog.Select((lap, i) => ChartPoint.Block(i == 0 ? 0 : lapEnds[i - 1], lapEnds[i], Math.Round(lap.Seconds / lap.Km), $"Lap {i + 1}")).ToArray())]
+};
+```
+
+Each block runs exactly from its start to its end and stands on the bottom edge of the plot. The axis is fitted to the laps and then reaches past the slowest one until it stands a sixth of the plot high, so every lap has a height; set `YMax` (the bottom of a reversed axis) to choose that edge yourself. Laps that touch are a hairline apart. A lap reads `Lap 2: 1 to 2, 4:52` — the X axis's numbers carry no unit, so name it in `XLabel`. Blocks in one series must not overlap; they may touch.
+
+## Structured workout
+
+A TrainingPeaks or Zwift workout profile: each step a block as long as it lasts and as high as its target, coloured by Coggan's power levels, with the ride as executed over it to check how closely it was followed.
+
+```csharp
+// workoutSteps: (string Name, double Seconds, double Watts) for each step of the plan, in order; ftpWatts: the athlete's FTP;
+// executedWatts: the ride as it happened, one sample a second (leave the second series out for a plan alone)
+var stepEnds = workoutSteps.Select((step, i) => workoutSteps.Take(i + 1).Sum(s => s.Seconds)).ToArray();
+var workoutChart = new ChartSpec {
+    Title = "3 × 8 min at threshold", Description = "The plan in Coggan's power levels, the ride over it",
+    Kind = ChartKind.Blocks, XFormat = ValueFormat.Duration, IncludeZero = true, XLabel = "Elapsed time", YLabel = "Power (W)",
+    Annotations = [new ChartAnnotation(AnnotationAxis.Y, ftpWatts) { Label = "FTP" }],
+    Series = [
+        new("Plan", workoutSteps.Select((step, i) => ChartPoint.Block(i == 0 ? 0 : stepEnds[i - 1], stepEnds[i], step.Watts, step.Name)).ToArray()) { Zones = ZoneScale.CogganPower(ftpWatts) },
+        new("Power", executedWatts.Chunk(15).Select((chunk, i) => new ChartPoint(i * 15 + 7.5, Math.Round(chunk.Average()))).ToArray(), "#D36B84") { Kind = ChartKind.Line }]
+};
+```
+
+`IncludeZero = true` raises every step from zero, as the apps draw it. Each block takes the colour of the level its target falls in (a point's `Color` beats it), the legend keys the levels the plan uses, and a step reads `Interval 2: 27:00 to 35:00, 250, Lactate threshold`. Blocks draw under lines, so the executed power stands over the plan whatever the series order; give it a colour none of the plan's levels uses (`#D36B84` is `ChartStyle.Light.Series[4]`, clear of grey, blue, green and gold). For a run planned by distance, give each step the time its distance takes at its target pace. Blocks refuse `Trend` and `ProjectedFrom`; a planned week of workouts is blocks on a time axis.
 
 ## Elevation coloured by grade
 

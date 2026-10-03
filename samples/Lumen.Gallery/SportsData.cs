@@ -13,7 +13,15 @@ public sealed record Track(IReadOnlyList<double> HeartRate, IReadOnlyList<double
 /// <see cref="Training.TimeInZone"/> of its heart rate. A ride keeps its mean-maximal power; a run keeps its samples and the
 /// fastest 5 km inside it. Both keep the highest heart rate they recorded.</summary>
 public sealed record Session(DateOnly Day, Sport Sport, string Name, double Seconds, double Metres, double Stress,
-    IReadOnlyList<double> TimeInZone, IReadOnlyList<(double Seconds, double Value)> PowerCurve, double? Best5k, Track? Track, double PeakHeartRate);
+    IReadOnlyList<double> TimeInZone, IReadOnlyList<(double Seconds, double Value)> PowerCurve, double? Best5k, Track? Track, double PeakHeartRate)
+{
+    /// <summary>The steps the session was planned in, in order: how long each should take at its target, in seconds — a run's
+    /// length at threshold speed times its effort; its target power in watts, a ramp's at its average; and, on a run, which is
+    /// planned by distance, its length in metres.</summary>
+    public IReadOnlyList<(double Seconds, double Watts, double Metres)> Steps { get; init; } = [];
+    /// <summary>The threshold power the session was planned against, in watts: a ride's FTP, or a run's from its threshold pace.</summary>
+    public double Ftp { get; init; }
+}
 
 /// <summary>One night's sleep, named by the morning it ends. Bedtime and waking are seconds since the midnight before the
 /// night, so 22:48 is 82080 and 06:35 the next morning 110100, and so is each stage's start and end, in order from bedtime to
@@ -23,7 +31,11 @@ public sealed record Night(DateOnly Morning, double Bedtime, double Wake, IReadO
 /// <summary>The sessions trained, the stress planned after them, <see cref="Training.Load"/> over both, and one overnight HRV
 /// reading a night from four weeks before the season to its last day, so that the first night has a baseline.</summary>
 public sealed record Season(IReadOnlyList<Session> Sessions, IReadOnlyList<(DateOnly Day, double Stress)> Planned,
-    IReadOnlyList<LoadDay> Load, IReadOnlyList<double> Hrv);
+    IReadOnlyList<LoadDay> Load, IReadOnlyList<double> Hrv)
+{
+    /// <summary>The sessions planned after the season, in order, whose stress is <see cref="Planned"/>.</summary>
+    public IReadOnlyList<Session> Upcoming { get; init; } = [];
+}
 
 /// <summary>A chart on the Sports &amp; performance page, with the plain title above it and a one-line note, in which code is
 /// set between backticks.</summary>
@@ -108,7 +120,8 @@ public static class SportsData
                 }
             var np = Training.NormalizedPower(watts) ?? watts.Average();
             return new(day, Sport.Ride, name, total, 0, Math.Round(Training.StressScore(total, np, ftp)),
-                Training.TimeInZone(heart, HeartZones), Training.MeanMaximal(watts, Training.StandardDurations), null, null, heart.Max());
+                Training.TimeInZone(heart, HeartZones), Training.MeanMaximal(watts, Training.StandardDurations), null, null, heart.Max())
+            { Steps = plan.Select(step => (step.Seconds, ftp * (step.From + step.To) / 2, 0d)).ToArray(), Ftp = ftp };
         }
 
         // A run is planned by distance and recorded every ten seconds. A climb costs effort and pace both, and its stress comes
@@ -139,7 +152,8 @@ public static class SportsData
             var track = new Track(heart, pace, distance, elevation);
             metres = Math.Round(metres, 1);
             return new(day, Sport.Run, name, seconds, metres, Math.Round(Training.StressScore(seconds, np, ftp)),
-                Training.TimeInZone(heart, HeartZones, RunSample), [], Fastest(track, metres, 5000), track, heart.Max());
+                Training.TimeInZone(heart, HeartZones, RunSample), [], Fastest(track, metres, 5000), track, heart.Max())
+            { Steps = plan.Select(step => (step.Metres / (threshold * (step.From + step.To) / 2), ftp * (step.From + step.To) / 2, step.Metres)).ToArray(), Ftp = ftp };
         }
 
         static (double, double, double)[] Repeat(int count, (double, double, double)[] steps) => Enumerable.Repeat(steps, count).SelectMany(step => step).ToArray();
@@ -187,9 +201,10 @@ public static class SportsData
         double[] volumes = [.90, .96, 1.02, .60, .96, 1.02, 1.08, .60, 1.00, 1.06, 1.12, 1.18, .60, 1.08, 1.14, 1.20, .70, .45];
         var sessions = new List<Session>();
         var planned = new List<(DateOnly Day, double Stress)>();
+        var upcoming = new List<Session>();
         for (var week = 0; week < Weeks + PlannedWeeks; week++)
             foreach (var session in Week(week, volumes[week]))
-                if (week < Weeks) sessions.Add(session); else planned.Add((session.Day, session.Stress));
+                if (week < Weeks) sessions.Add(session); else { planned.Add((session.Day, session.Stress)); upcoming.Add(session); }
         // The first Monday is a rest day, entered so the load model starts on it. The athlete comes in at a typical daily stress
         // for both fitness and fatigue, which starts form at zero.
         var load = Training.Load(sessions.Select(s => (s.Day, s.Stress)).Prepend((Start, 0)).Concat(planned), SeedFitness, SeedFitness);
@@ -197,7 +212,7 @@ public static class SportsData
         var hrv = new List<double>();
         for (var night = -BaselineNights; night < Weeks * 7; night++)
             hrv.Add(Math.Round(64 + (night < 0 ? 0 : .3 * load[night].Form - (night > 0 && load[night - 1].Stress >= 150 ? 4 : 0)) + Noise(3.2)));
-        return new(sessions, planned, load, hrv);
+        return new(sessions, planned, load, hrv) { Upcoming = upcoming };
     }
 
     private static double Effort((double Metres, double From, double To)[] plan, double metres)
@@ -260,6 +275,40 @@ public static class SportsData
     /// <summary>The kilometre splits of a run, in seconds, whole kilometres only.</summary>
     public static IReadOnlyList<double> Splits(Session run) =>
         Enumerable.Range(1, (int)(run.Metres / 1000)).Select(k => Math.Round(TimeAt(run.Track!, run.Metres, k * 1000) - TimeAt(run.Track!, run.Metres, (k - 1) * 1000))).ToArray();
+
+    /// <summary>A run's laps, one for each step it was planned in, the last ending where the run did: each a block from where it
+    /// starts to where it ends, in kilometres, as high as its pace in seconds per kilometre, rounded to the second.</summary>
+    public static IReadOnlyList<ChartPoint> Laps(Session run)
+    {
+        var laps = new List<ChartPoint>();
+        var start = 0d;
+        for (var i = 0; i < run.Steps.Count; i++)
+        {
+            var end = i == run.Steps.Count - 1 ? run.Metres : start + run.Steps[i].Metres;
+            var seconds = TimeAt(run.Track!, run.Metres, end) - TimeAt(run.Track!, run.Metres, start);
+            laps.Add(ChartPoint.Block(start / 1000, Math.Round(end / 1000, 2), Math.Round(seconds / (end - start) * 1000), $"Lap {i + 1}"));
+            start = end;
+        }
+        return laps;
+    }
+
+    /// <summary>A planned session as a structured workout: each step a block from where it starts to where it ends, in whole seconds
+    /// at its target, as high as its target power in whole watts, named for its place in the session — the warm-up, each repeat at
+    /// or above threshold, the recoveries between them and the cool-down — and on a run for its length.</summary>
+    public static IReadOnlyList<ChartPoint> Workout(Session session)
+    {
+        var blocks = new List<ChartPoint>();
+        var (at, repeat) = (0d, 0);
+        for (var i = 0; i < session.Steps.Count; i++)
+        {
+            var (seconds, watts, metres) = session.Steps[i];
+            var name = i == 0 ? "Warm-up" : i == session.Steps.Count - 1 ? "Cool-down" : watts >= session.Ftp ? $"Repeat {++repeat}" : "Recovery";
+            if (session.Sport == Sport.Run) name += metres >= 1000 ? $", {Text(metres / 1000, "0.#")} km" : $", {Text(metres)} m";
+            blocks.Add(ChartPoint.Block(Math.Round(at), Math.Round(at + seconds), Math.Round(watts), name));
+            at += seconds;
+        }
+        return blocks;
+    }
 
     /// <summary>The best average power for each standard duration over every ride in a month.</summary>
     public static IReadOnlyList<(double Seconds, double Value)> MonthBest(Season season, int month) => Training.StandardDurations
@@ -493,6 +542,22 @@ public static class SportsData
                 ChartSeries.From("Daily stress", load, d => When(d.Day), d => d.Stress) with { Kind = ChartKind.Column, Color = zones[0] }]
         };
 
+        // The first session planned after today, as the structured workout it was planned as: each step as long as it should take
+        // and as high as its target power, in Coggan's levels at the threshold it is planned against, so its repeats stand out. Its
+        // stress is the column the performance chart projects for its day.
+        var next = season.Upcoming[0];
+        var steps = Workout(next);
+        var repeats = steps.Where(step => step.Label!.StartsWith("Repeat")).ToArray();
+        var workout = Chart(wide, 360) with
+        {
+            Kind = ChartKind.Blocks, XFormat = ValueFormat.Duration, IncludeZero = true,
+            Title = $"{next.Day.ToString("dddd", CultureInfo.InvariantCulture)}: {next.Name.ToLowerInvariant()}, stress {Text(next.Stress)}",
+            Description = $"{HoursMinutes(steps[^1].XEnd!.Value)} · {repeats.Length} × {(next.Sport == Sport.Run ? repeats[0].Label!.Split(", ")[1] : HoursMinutes(repeats[0].XEnd!.Value - repeats[0].X))} at {Text(repeats[0].Y!.Value)} W, threshold {Text(next.Ftp)} W",
+            XLabel = "Planned time", YLabel = "Target power (W)",
+            Annotations = [new(AnnotationAxis.Y, next.Ftp) { Label = "Threshold" }],
+            Series = [new("Plan", steps) { Zones = ZoneScale.CogganPower(next.Ftp) }]
+        };
+
         // Weekly load inside a band of 80 to 130 % of the four weeks before, the weeks before the season counted at the seed.
         var weekly = WeeklyLoad(season);
         double Prior(int week) => Enumerable.Range(week - 4, 4).Average(k => k < 0 ? SeedFitness * 7 : weekly[k]);
@@ -586,6 +651,19 @@ public static class SportsData
             XLabel = "Kilometre", YLabel = "Split (min per km)",
             Annotations = [new(AnnotationAxis.Y, GoalPace) { Label = "10 km goal pace" }],
             Series = [new("Split", splits.Select((split, k) => new ChartPoint(k + 1, split, $"km {k + 1}")).ToArray()) { Trend = true, Markers = MarkerStyle.Filled }]
+        };
+
+        // The same run in its laps, one for each step of the progression, ending where the stream marks the steps: each as wide as
+        // it is long and as high as its pace on a reversed axis, faster higher, with the run's average pace across them. It shares
+        // its distance axis with the elevation below it, so a slow lap can be read against its climb.
+        var laps = Laps(run);
+        var lapChart = Chart(wide, 300) with
+        {
+            Kind = ChartKind.Blocks, YFormat = ValueFormat.Duration, YReversed = true,
+            Title = $"{laps.Count} laps from {Clock(laps[0].Y!.Value)} to {Clock(laps[^1].Y!.Value)} per km", Description = "The same run, lap by lap, each as wide as it is long",
+            XLabel = "Distance (km)", YLabel = "Pace (min per km)",
+            Annotations = [new(AnnotationAxis.Y, run.Seconds / run.Metres * 1000) { Label = "Average" }],
+            Series = [new("Laps", laps)]
         };
 
         // The route every 100 m, each stretch in the colour of its grade: descending, level, climbing and steep. The fill is the
@@ -702,12 +780,14 @@ public static class SportsData
             new("today", "readiness", "Readiness", "An illustrative score, no vendor's: 60, plus 10 for each standard deviation last night's HRV sits above its 28-night baseline, plus half of today's form, on a `Gauge` whose `YZones` tint the track; the tick is the 28-day average.", false, readiness),
             new("today", "activity", "Today's activity", "The run's active calories at 1 kcal per kg per km, its minutes and its training stress, each a `Ring` series against its `Goal` — stress against fitness, the athlete's average day. Past 100 % a ring runs on over itself.", false, rings),
             new("load", "performance", "Performance management", "Daily stress as columns, fitness and fatigue as lines and form as an area on the right axis, all from `Training.Load`; `ProjectedFrom` dashes the planned weeks and `HighlightLast` rings race-day fitness.", true, performance),
+            new("load", "next-session", "Next session, as planned", "The first planned session as a `ChartKind.Blocks` workout: each step a `ChartPoint.Block` as long as it should take and as high as its target power, coloured by `ZoneScale.CogganPower` at the threshold it is planned against; its stress is the performance chart's projected column for its day.", true, workout),
             new("load", "weekly-load", "Weekly load against a target", "Each week's stress in capsule columns over a `Band` series from 80 to 130 % of the four weeks before, whose centre line is their average.", false, weeklyLoad),
             new("load", "weekly-zones", "Weekly zone distribution", "Every session's `Training.TimeInZone` added up by week and stacked in the zone colours.", false, distribution),
             new("load", "training-calendar", "Training calendar", "The season's daily stress as a `ChartKind.Calendar` contribution grid, each day in its tier from `YZones` — illustrative tiers, no vendor's — and this month's runs on a `CalendarLayout.Months` grid of `CalendarCell.Bubble` days sized by distance; an X annotation outlines today in both.", true, calendar) { Beside = month },
             new("session", "stream", "Activity stream", "Heart rate coloured by zone over its `YZones` bands, pace on a reversed duration axis and elevation as a faded area, in three `Panes` on one elapsed-time axis.", true, stream),
             new("session", "time-in-zone", "Time in zone", "`Training.TimeInZone` over the same heart-rate samples the stream draws, one bar per zone in its colour.", false, timeInZone),
             new("session", "splits", "Pace by kilometre", "Each kilometre's split on a reversed duration axis, with a `Trend` line and the race's goal pace.", false, pace),
+            new("session", "laps", "Laps", "One `ChartPoint.Block` per lap of the progression, as wide as the lap is long and as high as its pace on a reversed duration axis, with the run's average pace as a reference line; its distance axis is the elevation's below.", true, lapChart),
             new("session", "elevation", "Elevation coloured by grade", "The same route as an area, each 100 m segment taking a point `Color` from its grade band.", true, elevation),
             new("fitness", "power-curve", "Power–duration curve", "`Training.MeanMaximal` over this month's rides against last month's on a logarithmic duration axis, with the `Training.CriticalPower` fit as a reference line.", false, power),
             new("fitness", "records", "5 km record progression", "Each week's fastest 5 km inside a run, and the record as a `LineCurve.Step` envelope on a reversed axis, so faster is higher.", false, best),

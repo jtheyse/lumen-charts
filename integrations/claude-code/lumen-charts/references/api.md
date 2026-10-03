@@ -58,11 +58,11 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 | Member | Meaning |
 |---|---|
 | `Secondary` | Measure on the right-hand axis. At least one series per pane stays on the left. |
-| `Kind` | Override this series' mark: `Line`, `Area`, `Column`, `Scatter`, `Band` or `Range` (0.27.0). Allowed on line, area, scatter, bubble, band, range, column, candlestick and OHLC charts. |
+| `Kind` | Override this series' mark: `Line`, `Area`, `Column`, `Scatter`, `Band`, `Range` (0.27.0) or `Blocks` (0.29.0). Allowed on line, area, scatter, bubble, band, range, blocks, column, candlestick and OHLC charts; blocks are refused on a column chart. |
 | `Pane` | 0 is the main plot; *k* needs `ChartSpec.Panes[k − 1]`. |
 | `Trend` | Draw a least-squares line (line, area, scatter, bubble marks). |
 | `ProjectedFrom` | Dash a line or area from this X onward (planned values). |
-| `Zones` | Colour the series by the zone each value falls in (`ZoneScale`). |
+| `Zones` | Colour the series by the zone each value falls in (`ZoneScale`): lines, areas, scatter points, bubbles, columns, bars and blocks. |
 | `Summary` | A precomputed `BoxSummary` for a box chart (then `Points` must be empty). |
 | `StrokeWidth` | 0.5–12 px for line, area and band strokes. |
 | `Curve` | `LineCurve.Linear`, `Smooth` (monotone, never overshoots), `Step`. |
@@ -77,9 +77,9 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 
 ## ChartPoint
 
-`new ChartPoint(double X, double? Y, string? Label = null, double Size = 1)` — `Size` is bubble area. Init properties: `Open`, `High`, `Low`, `Close`, `Color` (this mark's colour; beats zone and series colour), and `XEnd` (0.27.0, timelines only: where a span ends, above `X`; Unix milliseconds on a time axis).
+`new ChartPoint(double X, double? Y, string? Label = null, double Size = 1)` — `Size` is bubble area. Init properties: `Open`, `High`, `Low`, `Close`, `Color` (this mark's colour; beats zone and series colour), and `XEnd` (0.27.0, timelines and, from 0.29.0, blocks only: where a span or block ends, above `X`; Unix milliseconds on a time axis).
 
-Factories: `ChartPoint.Candle(x, open, high, low, close, label?)`; `ChartPoint.Interval(x, y, low, high, label?)` for band and range points (`y` may be `null`; on a range it is the dot, and must lie between `low` and `high`); `ChartPoint.Span(start, end, label?)` (0.27.0) for a timeline span, with no `Y`; `ChartPoint.Observation(value)` for histogram, box and violin input.
+Factories: `ChartPoint.Candle(x, open, high, low, close, label?)`; `ChartPoint.Interval(x, y, low, high, label?)` for band and range points (`y` may be `null`; on a range it is the dot, and must lie between `low` and `high`); `ChartPoint.Span(start, end, label?)` (0.27.0) for a timeline span, with no `Y`; `ChartPoint.Block(start, end, height, label?)` (0.29.0) for a block from `start` to `end` rising to `height`; `ChartPoint.Observation(value)` for histogram, box and violin input.
 
 ## ChartPane
 
@@ -91,7 +91,7 @@ Init properties: `Label` (left axis title), `Weight` (height beside the main plo
 
 ## Enums
 
-`ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc, Gauge, Ring, Timeline, Range, Calendar }` · `CalendarLayout { Weeks, Months }` · `CalendarCell { Square, Dot, Bubble }` · `ChartTheme { Light, Dark }` · `AxisKind { Linear, Log, Time }` · `ValueFormat { Number, Duration, Compact, TimeOfDay }` · `LineCurve { Linear, Smooth, Step }` · `AreaFill { Flat, Fade }` · `MarkerStyle { Auto, None, Hollow, Filled }` · `AxisSide { Left, Right }` · `TickLabels { All, Ends }` · `GridLine { Solid, Dotted, Dashed, Hidden }` · `ChartFinish { Refined, Classic }` · `AnnotationAxis { X, Y }` · `GraphLayout { Circular, Layered }`.
+`ChartKind { Line, Area, Scatter, Bubble, Column, Bar, StackedColumn, Donut, Heatmap, Radar, Candlestick, Band, Histogram, Box, Violin, Ohlc, Gauge, Ring, Timeline, Range, Calendar, Blocks }` · `CalendarLayout { Weeks, Months }` · `CalendarCell { Square, Dot, Bubble }` · `ChartTheme { Light, Dark }` · `AxisKind { Linear, Log, Time }` · `ValueFormat { Number, Duration, Compact, TimeOfDay }` · `LineCurve { Linear, Smooth, Step }` · `AreaFill { Flat, Fade }` · `MarkerStyle { Auto, None, Hollow, Filled }` · `AxisSide { Left, Right }` · `TickLabels { All, Ends }` · `GridLine { Solid, Dotted, Dashed, Hidden }` · `ChartFinish { Refined, Classic }` · `AnnotationAxis { X, Y }` · `GraphLayout { Circular, Layered }`.
 
 ## ChartStyle
 
@@ -110,9 +110,10 @@ public static readonly ChartStyle Brand = new() {
 
 - `ChartSvg.Render(spec, includeLegend = true, includeTitles = true)` → SVG string. Throws `ArgumentException` for an invalid spec.
 - `ChartSvg.ResolveStyle(spec)`, `ChartSvg.SeriesColor(series, index, style)`, `ChartSvg.LegendKey(spec, index)` (a series' legend key as a small SVG) and `ChartSvg.LegendLabel(spec, index)` (what the legend writes: the name, and on a ring `Move: 540 of 600 kcal`, on a gauge `Recovery: 72 %`, on a timeline `REM 1:42, 22 %`).
-- `ChartExport.Csv(spec)` → CSV of the original observations (time charts add an ISO `XTime` column, band and range series `Low,High`, ring charts a `Goal` column, timelines an `XEnd` column; a calendar writes each original point, not each day's total).
+- `ChartExport.Csv(spec)` → CSV of the original observations (time charts add an ISO `XTime` column, band and range series `Low,High`, ring charts a `Goal` column, timelines and blocks an `XEnd` column; a calendar writes each original point, not each day's total).
 
 A calendar (`ChartKind.Calendar`, 0.28.0) takes one series on a time X axis. A point counts for the day its `X` falls on in `TimeZone`, and one day's points add up; a zero or null total is a rest day, drawn as an empty cell that takes no focus. Days run from the earliest point to the latest, or from `XMin` to `XMax`. Each day with activity is a focusable mark named `Tue 15 Sep 2026: 54, Moderate` (date, its points' labels, total in `YFormat`, zone); `PointSelected` reports the day's first point. With `YZones` a day takes its zone's colour; without, the style's `HeatmapLow`→`HeatmapHigh` ramp across the active days. An X annotation outlines its day and joins the key under the grid. Values must be nonnegative; `YMin`/`YMax` are refused, so the ramp cannot be pinned across charts.
+Blocks (`ChartKind.Blocks`, or a series' `Kind = ChartKind.Blocks` on a continuous chart, 0.29.0) draw each point made with `ChartPoint.Block(start, end, height, label?)` as a block exactly from `X` to `XEnd`, standing on the bottom edge of its plot (its pane's, on its series' own axis, left or right) and rising to `Y`. `IncludeZero = true` raises them from zero; otherwise an axis fitted to the data reaches below the lowest block — the slowest, on a reversed axis — until it stands a sixth of the plot, unless that end's bound is set. Blocks of one series that touch are parted by a 1-pixel hairline, half from each (a quarter of the width of a block under 2 pixels); the far end is rounded by `BarRadius`, or 4 pixels, at most 6; colour is the point's `Color`, else its zone in the series' `Zones`, else the series colour. They draw in the column layer, under lines and points. Each is a focusable mark named `Lap 2: 1 to 2, 4:52` or `Interval 2: 10:00 to 14:00, 275, Lactate threshold` (label, span in `XFormat`, height in the axis's format, zone), led by its series' name when it has no label or several series draw blocks. Refused: overlap within a series, a missing `XEnd` or `Y`, a log X axis, column charts, `Trend`, `ProjectedFrom`.
 - `ChartValidation.Validate(spec)` validates without rendering.
 
 ## Axes and time

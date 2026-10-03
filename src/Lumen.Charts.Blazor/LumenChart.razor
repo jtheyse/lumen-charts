@@ -73,7 +73,7 @@
     private bool fitting;
     private const int Narrowest=320, Widest=4096;
     private int Width => FitWidth && fitted is { } width ? width : Spec.Width;
-    private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline;
+    private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Blocks;
     private string Value(ChartSeries series,ChartPoint point)
     {
         var y=Measure(series);
@@ -83,6 +83,8 @@
             ChartKind.Ring when point.Y.HasValue=>$"{y.Format(point.Y.Value)} of {y.Format(series.Goal ?? 100)}",
             // A timeline span reads its start in the X column, and how long it runs to its end here.
             ChartKind.Timeline when point.XEnd is {} end=>$"to {xAxis.Format(end)}",
+            // A block reads its height and the span it covers.
+            ChartKind.Blocks when point.XEnd is {} end&&point.Y.HasValue=>$"{y.Format(point.Y.Value)} from {xAxis.Format(point.X)} to {xAxis.Format(end)}",
             ChartKind.Range when point.Y is null&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Low.Value)} to {y.Format(point.High.Value)}",
             _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Y.Value)} ({y.Format(point.Low.Value)} to {y.Format(point.High.Value)})",
             _=>point.Y.HasValue?y.Format(point.Y.Value):"Missing"
@@ -162,10 +164,12 @@
         var index=visible[series];if(point<0||point>=Spec.Series[index].Points.Count)return;
         var p=Spec.Series[index].Points[point];
         // A gauge's or a ring's one point reads as its legend does, with its unit and a ring's goal.
-        // A span reads from its start to its end, and a range bar from its low to its high and its typical value.
+        // A span reads from its start to its end, a block its label, its span and its height, and a range bar from its low to its
+        // high and its typical value.
         status=Spec.Kind is ChartKind.Gauge or ChartKind.Ring ? ChartSvg.LegendLabel(Spec,index)
             : Spec.Kind==ChartKind.Calendar ? Day(index,p)
-            : p.XEnd is {} end ? $"{Spec.Series[index].Name}: {xAxis.Format(p.X)} to {xAxis.Format(end)}"
+            : p.XEnd is {} end&&(Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Blocks&&p.Y is {} height ? $"{Spec.Series[index].Name}: {(p.Label is null ? "" : p.Label+", ")}{xAxis.Format(p.X)} to {xAxis.Format(end)} = {Measure(Spec.Series[index]).Format(height)}"
+            : p.XEnd is {} finish ? $"{Spec.Series[index].Name}: {xAxis.Format(p.X)} to {xAxis.Format(finish)}"
             : (Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Range&&p.Low is {} low&&p.High is {} high ? $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {Measure(Spec.Series[index]).Format(low)} to {Measure(Spec.Series[index]).Format(high)}{(p.Y is {} typical ? $", average {Measure(Spec.Series[index]).Format(typical)}" : "")}"
             : $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y) : "missing")}";
         await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);

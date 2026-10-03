@@ -570,6 +570,46 @@ if (await calendarTab.CountAsync() > 0)
 }
 else Console.WriteLine("SKIP calendar check: this host offers no calendar");
 
+// Blocks belong to the chart kinds a host offers too, so the suite finds them by the button that names them, and a host without them
+// says SKIP. A block takes focus with the focus ring, shows its tooltip and raises selection through Enter, which the status line
+// reads as the block's span and height; and zooming in halves the X axis about its middle, so a block there, which gives up half a
+// hairline to each neighbour, is drawn twice as wide with its hairlines kept, until the view is reset.
+var blocksTab = page.GetByRole(AriaRole.Button, new() { Name = "Blocks", Exact = true });
+if (await blocksTab.CountAsync() > 0)
+{
+    await Test("A block takes focus, shows its tooltip and raises selection, and zooming narrows X across the blocks", async () =>
+    {
+        await blocksTab.First.ClickAsync();
+        var mark = chart.Locator(".lumen-datum[data-series='0'][data-point='2']:has(path.lumen-block)");
+        await mark.WaitForAsync();
+        await Settled();
+        Check(await chart.Locator(".lumen-tools button[aria-label='Zoom in']").CountAsync() == 1, "the blocks offer no zoom");
+        var label = (await mark.GetAttributeAsync("aria-label"))!;
+        await mark.FocusAsync();
+        await tooltip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        Check(await tooltip.TextContentAsync() == label, $"the tooltip reads \"{await tooltip.TextContentAsync()}\", the block \"{label}\"");
+        var ring = await mark.EvaluateAsync<string>("g => getComputedStyle(g.querySelector('path.lumen-block')).strokeWidth");
+        Check(ring == "3px", $"the focused block's outline is {ring} wide");
+        await page.Keyboard.PressAsync("Enter");
+        await page.WaitForFunctionAsync("text => document.querySelector('.under-chart')?.textContent.includes(text)", "Selected series 1, observation 3");
+        await page.WaitForFunctionAsync("() => document.querySelector('.lumen-status')?.textContent.includes(' = ')");
+        // A block's name reads "Interval 1: 15:00 to 23:00, 250, Lactate threshold"; the status line its series, name, span and height.
+        var (name, rest) = (label.Split(": ")[0], label.Split(": ")[1].Split(", "));
+        var reported = (await status.TextContentAsync())!.Trim();
+        Check(reported.EndsWith($": {name}, {rest[0]} = {rest[1]}"), $"the status line reads \"{reported}\" for \"{label}\"");
+        await page.Keyboard.PressAsync("Escape");
+        const string middle = ".lumen-chart .lumen-datum[data-series='0'][data-point='2'] path.lumen-block";
+        async Task<double> Width() => double.Parse(await page.EvaluateAsync<string>("s => String(document.querySelector(s).getBBox().width)", middle), CultureInfo.InvariantCulture);
+        var before = await Width();
+        await chart.Locator(".lumen-tools button[aria-label='Zoom in']").ClickAsync();
+        await page.WaitForFunctionAsync("([s, w]) => document.querySelector(s)?.getBBox().width > w + 1", new object[] { middle, before });
+        var after = await Width();
+        Check(Math.Abs((after + 1) / (before + 1) - 2) < .01, $"zooming in drew a block {after} wide, {before} before");
+        await Tool("Reset view").ClickAsync();
+        await page.WaitForFunctionAsync("([s, w]) => Math.abs(document.querySelector(s)?.getBBox().width - w) < .01", new object[] { middle, before });
+    });
+}
+else Console.WriteLine("SKIP blocks check: this host offers no blocks");
 // The Sports & performance page belongs to the gallery, so the suite finds it as a visitor does, by the link that names it, and a
 // host without one says SKIP. It opens in a page of its own, so it starts in the light theme and the Lumen brand.
 var sportsLink = page.GetByRole(AriaRole.Link, new() { Name = "Sports & performance" });
@@ -583,15 +623,15 @@ if (await sportsLink.CountAsync() > 0)
     var charts = sports.Locator(".lumen-chart");
     // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
-        return svgs.length === 17 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+        return svgs.length === 19 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
-    await Test("The Sports & performance page renders its seventeen training charts, each live and drawn at the width it is shown", async () =>
+    await Test("The Sports & performance page renders its nineteen training charts, each live and drawn at the width it is shown", async () =>
     {
-        Check(await charts.CountAsync() == 17, $"the page shows {await charts.CountAsync()} charts");
-        for (var i = 0; i < 17; i++)
+        Check(await charts.CountAsync() == 19, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 19; i++)
             Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
-        // Each chart's script adds its tooltip, so seventeen of them prove every chart is interactive.
-        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 17");
+        // Each chart's script adds its tooltip, so nineteen of them prove every chart is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 19");
         await sports.WaitForFunctionAsync(drawnToFit);
     });
 

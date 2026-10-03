@@ -4,9 +4,9 @@ The state of Lumen.Charts and how work on it is done, for whoever picks it up ne
 
 ## Where things stand
 
-- **Released:** v0.28.0 (tag on `89a41e0`). GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
-- **In progress when this was written:** 0.29.0, *laps and workout blocks* (`ChartKind.Blocks`: variable-width blocks — Strava laps sized by distance, TrainingPeaks/Zwift structured workouts). It was being built by a delegated agent in the working tree. **Start by running `git status`:** uncommitted changes to `src/`, `samples/`, `tests/`, the docs and the skill are that work. Verify and release them with the ritual below, or discard them if they do not pass.
-- **Counts at v0.28.0:** 407 unit assertions, 158 HTTP checks, 39 browser checks on the gallery (20 on the WebAssembly host), 243 hashed renderings. Release build at 0 warnings.
+- **Released:** v0.29.0, *laps and workout blocks* (`ChartKind.Blocks`, `ChartPoint.Block`). GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
+- **In progress:** nothing. 0.29.0 finished the eight-step sports build order in `docs/FITNESS.md`; the next work comes from *What is left* below. Still start with `git status`: uncommitted changes to `src/`, `samples/`, `tests/`, the docs or the skill are a delegated agent's unreleased work.
+- **Counts at v0.29.0:** 421 unit assertions, 170 HTTP checks, 40 browser checks on the gallery (20 on the WebAssembly host), 256 hashed renderings. Release build at 0 warnings.
 - **NuGet:** not published. The owner chose "skip nuget for now"; packages ship as GitHub release assets, and the Claude Code skill's install scripts download them into a local feed.
 
 ## The map
@@ -21,7 +21,7 @@ The state of Lumen.Charts and how work on it is done, for whoever picks it up ne
 | `tests/Lumen.Charts.Tests` | Executable assertion suite (`Test`/`Check`/`Reject`), `dotnet run`. |
 | `tests/verify-api.ps1` | HTTP checks against a running gallery on port 5188. |
 | `tests/Lumen.Charts.BrowserTests` | Playwright suite (gallery on 5188, WebAssembly host on 5199), with axe sweeps in light, dark and Midnight. |
-| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.28.0 reference hashes. See its README. |
+| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.29.0 reference hashes. See its README. |
 | `integrations/claude-code/lumen-charts` | The Claude Code skill: `SKILL.md`, `references/` (API, sports recipes, HTTP), `scripts/install.sh` and `install.ps1`. |
 | `docs/FITNESS.md` | The sports-charts research and the eight-step build order this work has followed. |
 | `docs/RESEARCH.md` | The original roadmap. `docs/VERIFICATION.md` the verification record. `docs/PERFORMANCE.md` measured cost. |
@@ -70,7 +70,7 @@ If an agent stops on an API rate limit, resume it with `SendMessage` (it keeps i
 
 ## What is left
 
-- **0.29.0 laps and workout blocks** — in progress (see the top).
+- Blocks (0.29.0) leave out sloped ramps (a ramp is drawn at its average), stacked blocks and text on a block; reference lines sit behind blocks, as behind columns, so a lap chart's average line is hidden behind faster laps while its label stays on top.
 - Calendar colour ramp reads poorly on dark styles (Midnight's `HeatmapLow` is darker than an empty day's track); zones are fine.
 - `LumenGraph` does not support `FitWidth` (dragged node positions are held in drawing coordinates).
 - Screen-reader conformance (NVDA, JAWS, VoiceOver) — needs a person with the hardware; never run.

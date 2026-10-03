@@ -20,27 +20,28 @@ public static partial class ChartValidation
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");
         if (spec.Kind == ChartKind.Timeline) Timeline(spec);
         if (spec.Kind == ChartKind.Calendar) Calendar(spec);
-        if (spec.XAxis != AxisKind.Linear && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Calendar))
-            throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC, band and range charts, and a time axis to timelines and calendars; the other kinds index or derive their X values.");
-        if (spec.YAxis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Box or ChartKind.Violin))
-            throw new ArgumentException("Log Y axes require line, scatter, bubble, candlestick, OHLC, band, range, box or violin charts; magnitude, count and radial charts need a zero baseline.");
+        if (spec.XAxis != AxisKind.Linear && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Calendar or ChartKind.Blocks))
+            throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC, band and range charts, and a time axis to timelines, blocks and calendars; the other kinds index or derive their X values.");
+        Blocks(spec);
+        if (spec.YAxis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Box or ChartKind.Violin or ChartKind.Blocks))
+            throw new ArgumentException("Log Y axes require line, scatter, bubble, candlestick, OHLC, band, range, blocks, box or violin charts; magnitude, count and radial charts need a zero baseline.");
         if (!Enum.IsDefined(spec.Y2Axis) || spec.Y2Axis == AxisKind.Time) throw new ArgumentException("The secondary axis is numeric or logarithmic; time axes are supported on X only.");
-        if (spec.Y2Axis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range))
-            throw new ArgumentException("A logarithmic secondary axis requires line, scatter, bubble, band or range charts.");
+        if (spec.Y2Axis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Blocks))
+            throw new ArgumentException("A logarithmic secondary axis requires line, scatter, bubble, band, range or blocks charts.");
         if (!Enum.IsDefined(spec.XFormat) || !Enum.IsDefined(spec.YFormat) || !Enum.IsDefined(spec.Y2Format)) throw new ArgumentException("Unknown value format.");
         if (spec.XFormat == ValueFormat.TimeOfDay && spec.XAxis != AxisKind.Linear || spec.YFormat == ValueFormat.TimeOfDay && spec.YAxis != AxisKind.Linear
             || spec.Y2Format == ValueFormat.TimeOfDay && spec.Y2Axis != AxisKind.Linear)
             throw new ArgumentException(TimeOfDayAxes);
         if (spec.XAxis == AxisKind.Time && spec.XFormat != ValueFormat.Number)
             throw new ArgumentException("A time axis writes its own calendar; duration and compact formats apply to linear and log axes.");
-        if (spec.XFormat != ValueFormat.Number && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline))
-            throw new ArgumentException("An X format applies to line, area, scatter, bubble, candlestick, OHLC, band, range and timeline charts; the other kinds index or derive their X values.");
+        if (spec.XFormat != ValueFormat.Number && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Blocks))
+            throw new ArgumentException("An X format applies to line, area, scatter, bubble, candlestick, OHLC, band, range, timeline and blocks charts; the other kinds index or derive their X values.");
         if ((spec.YFormat != ValueFormat.Number || spec.Y2Format != ValueFormat.Number) && spec.Kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Histogram)
             throw new ArgumentException("A Y format applies to the values a Y axis measures; donut, heatmap and radar charts have no Y axis, and a histogram's counts observations.");
-        if ((spec.YReversed || spec.Y2Reversed) && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Box or ChartKind.Violin))
+        if ((spec.YReversed || spec.Y2Reversed) && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Box or ChartKind.Violin or ChartKind.Blocks))
             throw new ArgumentException(spec.Kind is ChartKind.Gauge or ChartKind.Ring
                 ? "A gauge or ring has no Y axis to reverse: its scale runs clockwise round its arc."
-                : "A reversed Y axis applies to line, scatter, bubble, band, range, candlestick, OHLC, box and violin charts. Column, bar, stacked column, area and histogram charts draw from a zero baseline, which a reversed axis would hang from the top, and donut, heatmap and radar charts have no Y axis.");
+                : "A reversed Y axis applies to line, scatter, bubble, band, range, blocks, candlestick, OHLC, box and violin charts. Column, bar, stacked column, area and histogram charts draw from a zero baseline, which a reversed axis would hang from the top, and donut, heatmap and radar charts have no Y axis.");
         var secondary = spec.Series?.Any(series => series?.Secondary == true) == true;
         if (!Enum.IsDefined(spec.YAxisSide) || !Enum.IsDefined(spec.YTickLabels)) throw new ArgumentException("Unknown Y axis side or tick labelling.");
         if (spec.YAxisSide == AxisSide.Right)
@@ -53,15 +54,15 @@ public static partial class ChartValidation
             throw new ArgumentException("Tick labels apply to a Y axis, which donut, heatmap, radar, gauge and ring charts do not have.");
         if (secondary)
         {
-            if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Band or ChartKind.Range))
-                throw new ArgumentException("A secondary axis applies to line, area, scatter, bubble, column, band and range charts; stacked, horizontal, candlestick, OHLC and radial charts cannot measure against two.");
+            if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Band or ChartKind.Range or ChartKind.Blocks))
+                throw new ArgumentException("A secondary axis applies to line, area, scatter, bubble, column, band, range and blocks charts; stacked, horizontal, candlestick, OHLC and radial charts cannot measure against two.");
             if (spec.Series!.Where(series => series is not null).GroupBy(series => series.Pane).Any(pane => pane.All(series => series.Secondary)))
                 throw new ArgumentException("A secondary axis needs at least one series on the left of its pane to measure against.");
         }
         if (spec.Panes is null || spec.Panes.Count > 3) throw new ArgumentException("A chart has at most four panes: the main plot and three more in Panes.");
         if ((spec.Panes.Count > 0 || spec.Series?.Any(series => series is not null && series.Pane != 0) == true)
-            && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc))
-            throw new ArgumentException("Panes share one continuous X axis, so they apply to line, area, scatter, bubble, band, range, candlestick and OHLC charts; column, bar and stacked column charts place their bars by category, and the other kinds derive their X or have none.");
+            && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Blocks or ChartKind.Candlestick or ChartKind.Ohlc))
+            throw new ArgumentException("Panes share one continuous X axis, so they apply to line, area, scatter, bubble, band, range, blocks, candlestick and OHLC charts; column, bar and stacked column charts place their bars by category, and the other kinds derive their X or have none.");
         Text(spec.Y2Label);
         if (spec.IncludeZero && (spec.XAxis == AxisKind.Log || spec.YAxis == AxisKind.Log)) throw new ArgumentException("Log axes cannot include zero.");
         Text(spec.Title); Text(spec.Description); Text(spec.Source); Text(spec.XLabel); Text(spec.YLabel);
@@ -164,13 +165,20 @@ public static partial class ChartValidation
             var measure = series.Secondary ? pane.Y2Axis : pane.YAxis;
             if (series.Kind is { } own)
             {
-                if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Column or ChartKind.Candlestick or ChartKind.Ohlc))
-                    throw new ArgumentException("A series' own kind applies to line, area, scatter, bubble, band, range, column, candlestick and OHLC charts; horizontal bar, stacked column, donut, heatmap, radar, histogram, box and violin charts draw every series one way.");
-                if (own is not (ChartKind.Line or ChartKind.Area or ChartKind.Column or ChartKind.Scatter or ChartKind.Band or ChartKind.Range))
-                    throw new ArgumentException("A series can be drawn as a line, area, column, scatter, band or range; bubbles share one size scale across a chart, and the other kinds lay out a whole chart rather than one series.");
+                if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Blocks or ChartKind.Column or ChartKind.Candlestick or ChartKind.Ohlc))
+                    throw new ArgumentException("A series' own kind applies to line, area, scatter, bubble, band, range, blocks, column, candlestick and OHLC charts; horizontal bar, stacked column, donut, heatmap, radar, histogram, box and violin charts draw every series one way.");
+                if (own is not (ChartKind.Line or ChartKind.Area or ChartKind.Column or ChartKind.Scatter or ChartKind.Band or ChartKind.Range or ChartKind.Blocks))
+                    throw new ArgumentException("A series can be drawn as a line, area, column, scatter, band, range or blocks; bubbles share one size scale across a chart, and the other kinds lay out a whole chart rather than one series.");
+                if (own == ChartKind.Blocks && spec.Kind == ChartKind.Column)
+                    throw new ArgumentException("Blocks run from their X to their XEnd along a continuous axis, and a column chart places its marks by category, where there is no slot a block could take; draw blocks on a line, area, scatter, bubble, band, range or blocks chart.");
             }
             // Everything a series carries is checked against the mark it draws, which is the chart's kind unless it names its own.
             var mark = ChartSvg.Mark(spec, series);
+            if (mark == ChartKind.Blocks)
+            {
+                if (series.Trend) throw new ArgumentException("A block series draws no trend line: its blocks are steps that hold a value across a span, not observations to fit; draw a trend through a line series beside them.");
+                if (series.ProjectedFrom is not null) throw new ArgumentException("Blocks take no projection, which dashes a stroke; a planned workout is drawn as blocks of its own, and a projected line beside them can take ProjectedFrom.");
+            }
             if (series.Trend && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble))
                 throw new ArgumentException("A trend line applies to series drawn as lines, areas, scatter points or bubbles; the other kinds place their marks by index or derive their own values.");
             if (series.Summary is not null) Summary(series, spec.Kind, spec.YAxis);
@@ -179,8 +187,8 @@ public static partial class ChartValidation
             {
                 if (mark == ChartKind.Range)
                     throw new ArgumentException("A range bar runs from its low to its high, which can lie in several zones, so a range series takes no zones; colour a bar with its point's Color instead.");
-                if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar))
-                    throw new ArgumentException("Series zones apply to series drawn as lines, areas, scatter points, bubbles, columns and bars; on the other kinds colour already says something else, such as direction, value, a stacked series or a distribution.");
+                if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Blocks))
+                    throw new ArgumentException("Series zones apply to series drawn as lines, areas, scatter points, bubbles, columns, bars and blocks; on the other kinds colour already says something else, such as direction, value, a stacked series or a distribution.");
                 Zones(series.Zones, style);
             }
             if (spec.DensityCells is not null && mark == ChartKind.Scatter && (series.Zones is not null || series.Points.Any(p => p?.Color is not null)))
@@ -202,15 +210,20 @@ public static partial class ChartValidation
                 if (p is null || !Finite(p.X) || (p.Y.HasValue && !Finite(p.Y.Value)) || !Finite(p.Size) || p.Size < 0)
                     throw new ArgumentException("Coordinates must be finite, magnitude <= 1e100; bubble sizes must be nonnegative.");
                 Text(p.Label); Color(p.Color);
-                if (p.Color is not null && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Range or ChartKind.Donut))
-                    throw new ArgumentException("Point colours apply to series drawn as lines, areas, scatter points, bubbles, columns, bars, ranges and donut slices; on the other kinds colour already says something else: direction on candlesticks and OHLC bars, value on a heatmap, the state a timeline's lane stands for, and the series or distribution a mark belongs to on stacked column, radar, band, histogram, box and violin charts.");
+                if (p.Color is not null && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Range or ChartKind.Blocks or ChartKind.Donut))
+                    throw new ArgumentException("Point colours apply to series drawn as lines, areas, scatter points, bubbles, columns, bars, ranges, blocks and donut slices; on the other kinds colour already says something else: direction on candlesticks and OHLC bars, value on a heatmap, the state a timeline's lane stands for, and the series or distribution a mark belongs to on stacked column, radar, band, histogram, box and violin charts.");
                 if (p.XEnd is { } end)
                 {
-                    if (spec.Kind != ChartKind.Timeline) throw new ArgumentException("XEnd ends a span, so it applies to timeline charts only.");
-                    if (!Finite(end) || end <= p.X) throw new ArgumentException("A timeline span ends after it starts: its XEnd must be finite and above its X.");
+                    if (spec.Kind != ChartKind.Timeline && mark != ChartKind.Blocks) throw new ArgumentException("XEnd ends a span or a block, so it applies to timeline charts and to series drawn as blocks.");
+                    if (!Finite(end) || end <= p.X) throw new ArgumentException(mark == ChartKind.Blocks
+                        ? "A block ends after it starts: its XEnd must be finite and above its X."
+                        : "A timeline span ends after it starts: its XEnd must be finite and above its X.");
                     if (spec.XAxis == AxisKind.Time && !TimeAxis.InRange(end)) throw new ArgumentException("Time X values must be Unix milliseconds between year 1 and year 9999.");
                 }
                 else if (spec.Kind == ChartKind.Timeline) throw new ArgumentException("Every point of a timeline is a span with an XEnd above its X; make one with ChartPoint.Span.");
+                else if (mark == ChartKind.Blocks) throw new ArgumentException("Every block runs from its X to an XEnd above it; make one with ChartPoint.Block(start, end, height).");
+                if (mark == ChartKind.Blocks && p.Y is null)
+                    throw new ArgumentException("A block's Y is its height, how far it rises from the bottom edge of its plot, so it cannot be missing; leave a gap between blocks instead.");
                 if (spec.XAxis == AxisKind.Log && p.X <= 0) throw new ArgumentException("Log X axes require positive X values.");
                 if (measure == AxisKind.Log && p.Y.HasValue && p.Y.Value <= 0)
                     throw new ArgumentException("Log Y axes require positive values; use a linear axis for zero or negative data.");
@@ -227,6 +240,13 @@ public static partial class ChartValidation
                 for (var i = 1; i < spans.Length; i++)
                     if (spans[i].X < spans[i - 1].XEnd)
                         throw new ArgumentException($"Spans in one lane cannot overlap, and two in {series.Name} do; spans in different lanes may.");
+            }
+            if (mark == ChartKind.Blocks)
+            {
+                var blocks = series.Points.OrderBy(p => p.X).ToArray();
+                for (var i = 1; i < blocks.Length; i++)
+                    if (blocks[i].X < blocks[i - 1].XEnd)
+                        throw new ArgumentException($"Blocks in one series cannot overlap, and two in {series.Name} do; they may touch, one ending where the next begins, and blocks in different series may overlap.");
             }
             if (mark is ChartKind.Line or ChartKind.Area or ChartKind.Band or ChartKind.Candlestick or ChartKind.Ohlc && series.Points.Zip(series.Points.Skip(1)).Any(p => p.First.X > p.Second.X))
                 throw new ArgumentException("Line, area, candlestick, OHLC and band points must be ordered by X.");
@@ -314,8 +334,8 @@ public static partial class ChartValidation
             throw new ArgumentException("A pane's axes are numeric or logarithmic; time axes are supported on X only.");
         if (pane.YAxis == AxisKind.Log && spec.Kind == ChartKind.Area)
             throw new ArgumentException("Log Y axes require line, scatter, bubble, candlestick, OHLC, band, box or violin charts; magnitude, count and radial charts need a zero baseline.");
-        if (pane.Y2Axis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range))
-            throw new ArgumentException("A logarithmic secondary axis requires line, scatter, bubble, band or range charts.");
+        if (pane.Y2Axis == AxisKind.Log && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Blocks))
+            throw new ArgumentException("A logarithmic secondary axis requires line, scatter, bubble, band, range or blocks charts.");
         if (!Enum.IsDefined(pane.YFormat) || !Enum.IsDefined(pane.Y2Format)) throw new ArgumentException("Unknown value format.");
         if (pane.YFormat == ValueFormat.TimeOfDay && pane.YAxis != AxisKind.Linear || pane.Y2Format == ValueFormat.TimeOfDay && pane.Y2Axis != AxisKind.Linear)
             throw new ArgumentException(TimeOfDayAxes);
@@ -442,7 +462,7 @@ public static partial class ChartValidation
 
     private static bool Annotated(ChartKind kind) => kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble
         or ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band
-        or ChartKind.Range or ChartKind.Timeline;
+        or ChartKind.Range or ChartKind.Timeline or ChartKind.Blocks;
 
     private const string TimeOfDayAxes = "A time-of-day format reads seconds since a midnight and wraps at 24 hours, so it applies to linear axes: a time axis writes its own calendar, and a logarithmic one has no clock to show.";
 
@@ -467,6 +487,15 @@ public static partial class ChartValidation
             throw new ArgumentException("A timeline draws no trend line: its spans are states, not values to fit.");
         if (spec.Annotations?.Any(annotation => annotation?.Axis == AnnotationAxis.Y) == true)
             throw new ArgumentException("A timeline marks moments, so it takes X annotations; it has no Y axis for a Y annotation.");
+    }
+
+    /// <summary>Blocks run along a continuous X axis from each point's X to its XEnd, drawn as the chart's kind or as a series'
+    /// own. Checked before the general rules, so the refusal gives the blocks' reason.</summary>
+    private static void Blocks(ChartSpec spec)
+    {
+        if (spec.Series?.Any(series => series is not null && ChartSvg.Mark(spec, series) == ChartKind.Blocks) != true) return;
+        if (spec.XAxis == AxisKind.Log)
+            throw new ArgumentException("Blocks run from their X to their XEnd along a linear or a time X axis; a logarithmic one would draw two blocks of one length at different widths, and a block's width is its length.");
     }
 
     private const string CalendarTime = "A calendar places each point on the day it falls on, so it needs a time X axis: XAxis = AxisKind.Time, with X in Unix milliseconds.";

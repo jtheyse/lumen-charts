@@ -39,6 +39,7 @@ ChartSpec Spec(ChartKind kind, ChartTheme theme) => kind switch
     ChartKind.Timeline => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("A", [ChartPoint.Span(0, 2), ChartPoint.Span(5, 7)]), new("B", [ChartPoint.Span(2, 5), ChartPoint.Span(7, 9, "Last")]), new("C", [ChartPoint.Span(9, 12)])] },
     ChartKind.Range => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("R", Enumerable.Range(0, 8).Select(i => ChartPoint.Interval(i, i % 3 == 0 ? null : 10 + i, 6 + i, 15 + i * 2, $"P{i}")).ToArray())] },
     ChartKind.Calendar => new() { Kind = kind, Theme = theme, XAxis = AxisKind.Time, Title = "Baseline", Description = "Default output", Series = [new("C", Enumerable.Range(0, 56).Select(i => new ChartPoint(1788825600000d + i * 86400000d, i % 7 == 0 ? 0 : 10 + i * 3 % 40)).ToArray())] },
+    ChartKind.Blocks => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("B", [ChartPoint.Block(0, 2, 5, "W"), ChartPoint.Block(2, 6, 9), ChartPoint.Block(6, 7, 7), ChartPoint.Block(8, 12, 3, "C")])] },
     _ => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("A", Points()), new("B", Points().Select(p => p with { Y = p.Y + 5 }).ToArray())] }
 };
 foreach (var kind in Enum.GetValues<ChartKind>())
@@ -402,6 +403,46 @@ ChartSpec Bubbles(ChartStyle? style) => new()
     ("calendar/months-midnight", Bubbles(ChartStyle.Midnight) with { YZones = new([new("Run", double.PositiveInfinity, ChartStyle.Midnight.Zones[1])]) }),
 ];
 foreach (var (name, spec) in calendars) lines.Add($"{name} {Hash(Render(spec))}");
+// 0.29.0: blocks. Six laps of a progression run on a reversed pace axis, each as wide as its distance, with the average pace; a
+// threshold workout's steps in Coggan's power levels with the executed power over them; blocks as a series' own kind beside a line;
+// blocks touching and apart, one too narrow for the hairline; blocks in a pane under a line, on a time axis in their own colours and
+// on a secondary axis; and Midnight versions.
+(double Km, double Pace)[] laps = [(2, 336), (2, 318), (1.5, 301), (1.5, 289), (1, 276), (.42, 262)];
+ChartSpec Laps(ChartStyle? style)
+{
+    var at = 0d;
+    var blocks = laps.Select((lap, i) => { var block = ChartPoint.Block(at, Math.Round(at + lap.Km, 2), lap.Pace, $"Lap {i + 1}"); at = Math.Round(at + lap.Km, 2); return block; }).ToArray();
+    return new() { Kind = ChartKind.Blocks, Style = style, Title = "8.4 km at 5:06 per km", Description = "Each lap's pace, as wide as the lap is long", Width = 540, Height = 360,
+        XLabel = "Distance (km)", YLabel = "Pace (/km)", YFormat = ValueFormat.Duration, YReversed = true, Annotations = [new(AnnotationAxis.Y, 306) { Label = "Average" }],
+        Series = [new("Laps", blocks)] };
+}
+const double ftp = 250;
+(string Name, double Minutes, double Fraction)[] workout = [("Warm-up", 10, .55), ("Build", 5, .75), ("Interval 1", 8, 1), ("Recovery", 4, .5), ("Interval 2", 8, 1.02),
+    ("Recovery", 4, .5), ("Interval 3", 8, 1.05), ("Cool-down", 6, .45)];
+ChartSpec Workout(ChartStyle? style)
+{
+    var at = 0d;
+    var plan = workout.Select(step => { var block = ChartPoint.Block(at, at + step.Minutes * 60, Math.Round(ftp * step.Fraction), step.Name); at += step.Minutes * 60; return block; }).ToArray();
+    var done = Enumerable.Range(0, (int)(at / 30)).Select(i => new ChartPoint(i * 30 + 15, plan.Last(b => b.X <= i * 30 + 15).Y!.Value + i * 37 % 23 - 11)).ToArray();
+    return new() { Kind = ChartKind.Blocks, Style = style, IncludeZero = true, XFormat = ValueFormat.Duration, Title = "3 × 8 min at threshold", Description = "The plan in Coggan's power levels, the ride over it",
+        XLabel = "Elapsed time", YLabel = "Power (W)", Annotations = [new(AnnotationAxis.Y, ftp) { Label = "FTP" }],
+        Series = [new("Plan", plan) { Zones = ZoneScale.CogganPower(ftp) }, new("Power", done) { Kind = ChartKind.Line }] };
+}
+ChartPoint[] Steps() => [ChartPoint.Block(0, 4, 20, "Easy"), ChartPoint.Block(4, 8, 35, "Hard"), ChartPoint.Block(8, 11, 25, "Steady")];
+var monday = TimeAxis.Value(new DateTimeOffset(2026, 8, 3, 0, 0, 0, TimeSpan.Zero));
+(string Name, ChartSpec Spec)[] blocked = [
+    ("blocks/laps-reversed-pace", Laps(null)),
+    ("blocks/workout-zoned-power", Workout(null)),
+    ("blocks/beside-line", line with { Title = "A plan beside the line", Series = [new("Plan", Steps()) { Kind = ChartKind.Blocks }, line.Series[0]] }),
+    ("blocks/touching-and-apart", new ChartSpec { Kind = ChartKind.Blocks, Title = "Touching and apart", Series = [new("A", [ChartPoint.Block(0, 1, 3), ChartPoint.Block(1, 2, 5), ChartPoint.Block(3, 4, 4), ChartPoint.Block(4, 4.004, 6), ChartPoint.Block(4.004, 5, 2)])] }),
+    ("blocks/pane", line with { Title = "Blocks in a pane", Panes = [new() { Label = "Plan" }], Series = [line.Series[0], new("Plan", Steps()) { Kind = ChartKind.Blocks, Pane = 1 }] }),
+    ("blocks/time-coloured", new ChartSpec { Kind = ChartKind.Blocks, XAxis = AxisKind.Time, Title = "Weekly volume", YLabel = "Stress per week", IncludeZero = true,
+        Series = [new("Weeks", Enumerable.Range(0, 6).Select(i => ChartPoint.Block(monday + i * 7 * 86400000d, monday + (i + 1) * 7 * 86400000d, 320 + i % 3 * 60, $"Week {i + 1}") with { Color = i == 3 ? "#DD4B45" : null }).ToArray())] }),
+    ("blocks/secondary", line with { Title = "Blocks on the right", Y2Label = "Plan", Series = [line.Series[0], new("Plan", Steps()) { Kind = ChartKind.Blocks, Secondary = true }] }),
+    ("blocks/laps-midnight", Laps(ChartStyle.Midnight)),
+    ("blocks/workout-midnight", Workout(ChartStyle.Midnight)),
+];
+foreach (var (name, spec) in blocked) lines.Add($"{name} {Hash(Render(spec))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

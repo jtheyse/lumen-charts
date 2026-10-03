@@ -9,7 +9,7 @@ dotnet run -c Release -- mine.txt          # any argument ending .txt names the 
 dotnet run -c Release -- svg-out <dir>     # also writes each rendering, for a contact sheet
 ```
 
-`reference/refined.txt` and `reference/classic.txt` are the hashes of **v0.28.0**, verified by running this harness against a checkout of that tag. Compare a new build with:
+`reference/refined.txt` and `reference/classic.txt` are the hashes of **v0.29.0**, recorded from the released commit; they add 0.29.0's 13 block rows to v0.28.0's 243, which reproduced exactly. Compare a new build with:
 
 ```bash
 diff <(tr -d '\r' < reference/refined.txt) <(tr -d '\r' < baseline.txt)

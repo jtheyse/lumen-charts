@@ -4,7 +4,8 @@ namespace Lumen.Charts;
 /// Line, area, scatter, bubble, band, range, candlestick and OHLC charts place points along a continuous X axis by their X;
 /// column, bar, stacked column, donut, heatmap and radar charts place them by category and show their labels; gauge and
 /// ring charts draw one value a series round an arc and have no X axis; a timeline draws spans along a continuous X axis,
-/// one lane a series; a calendar draws one series as a grid of days, each coloured by its value.</summary>
+/// one lane a series; a calendar draws one series as a grid of days, each coloured by its value; and blocks draw spans along a
+/// continuous X axis, each as wide as it runs and as tall as its value.</summary>
 public enum ChartKind
 {
     /// <summary>Each series as a line through its points in X order.</summary>
@@ -74,7 +75,16 @@ public enum ChartKind
     /// value's zone in <see cref="ChartSpec.YZones"/>, or else a colour on the style's ramp from
     /// <see cref="ChartStyle.HeatmapLow"/> to <see cref="ChartStyle.HeatmapHigh"/> across the days' values, and the key under the
     /// grid shows the zones or the ramp. An X annotation outlines its day's cell.</summary>
-    Calendar
+    Calendar,
+    /// <summary>Variable-width blocks, as Strava draws laps and TrainingPeaks and Zwift draw a structured workout: each point a
+    /// block from its X to its <see cref="ChartPoint.XEnd"/>, made with <see cref="ChartPoint.Block"/>, standing on the bottom edge
+    /// of its plot and rising to its Y. On an axis that includes zero a block rises from zero, as a workout's power target does; on
+    /// a reversed pace axis it rises from the slowest pace up to its own, as a lap does. An axis fitted to the data reaches a little
+    /// past the lowest block, so that block keeps a height. Neighbours that touch are parted by a hairline, the far end of each block
+    /// is rounded by the style's <see cref="ChartStyle.BarRadius"/> or 4 pixels, up to 6, and a block takes its point's colour, its
+    /// value's zone in <see cref="ChartSeries.Zones"/> or its series' colour. Blocks in one series cannot overlap. As a series' own
+    /// <see cref="ChartSeries.Kind"/> they draw in the column layer of a continuous chart, under its lines.</summary>
+    Blocks
 }
 /// <summary>How a calendar lays out its days.</summary>
 public enum CalendarLayout
@@ -176,12 +186,12 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     public double? High { get; init; }
     /// <summary>The lowest price, or the lower bound of a band point or a range bar.</summary>
     public double? Low { get; init; }
-    /// <summary>Timeline charts only: where this span ends along X, above <see cref="X"/>, where it starts. Unix milliseconds
-    /// on a time axis. Every other kind refuses it.</summary>
+    /// <summary>Timeline charts and blocks only: where this span or block ends along X, above <see cref="X"/>, where it starts.
+    /// Unix milliseconds on a time axis. Every other kind refuses it.</summary>
     public double? XEnd { get; init; }
     /// <summary>The closing price. A candle carries it as its Y too.</summary>
     public double? Close { get; init; }
-    /// <summary>This point's mark in its own colour, ahead of a zone colour and the series colour: a column, bar, range,
+    /// <summary>This point's mark in its own colour, ahead of a zone colour and the series colour: a column, bar, range, block,
     /// scatter or bubble mark, a donut slice, or a line or area marker together with the segment that starts from it.
     /// Kinds whose colours mean something else — direction, value, a state or a distribution — refuse it, as do stacked
     /// columns, whose colours tell the stacked series apart.</summary>
@@ -198,6 +208,11 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// that holds it. It has no Y. <paramref name="label"/>, if given, names it in its tooltip.</summary>
     public static ChartPoint Span(double start, double end, string? label = null) =>
         new(start, null, label) { XEnd = end };
+    /// <summary>A block from <paramref name="start"/> to <paramref name="end"/> along X, standing on the bottom edge of its plot
+    /// and rising to <paramref name="height"/> on its series' axis: a lap's pace, or a workout step's target. <paramref name="label"/>,
+    /// if given, names it in its tooltip, such as <c>Lap 3</c>.</summary>
+    public static ChartPoint Block(double start, double end, double height, string? label = null) =>
+        new(start, height, label) { XEnd = end };
     /// <summary>A raw observation for histogram and box charts, which read values from Y and ignore X.</summary>
     public static ChartPoint Observation(double value) => new(value, value);
 }
@@ -220,13 +235,13 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     public BoxSummary? Summary { get; init; }
     /// <summary>Colours this series by the zone each value falls in, and names the zone in each mark's label. A line or
     /// area stroke is split where it crosses a bound, so each piece changes colour exactly at the threshold; its fill
-    /// keeps the series colour. Applies to series drawn as lines, areas, scatter points, bubbles, columns and bars.</summary>
+    /// keeps the series colour. Applies to series drawn as lines, areas, scatter points, bubbles, columns, bars and blocks.</summary>
     public ZoneScale? Zones { get; init; }
-    /// <summary>Draws this series as a line, area, column, scatter, band or range instead of the chart's kind, so fitness
-    /// lines can stand over daily stress columns. The chart's kind still lays out X: line, area, scatter, bubble, band and
-    /// range charts place every series along a continuous axis, and column charts by category. A candlestick or OHLC chart
-    /// draws the one series that names no kind as candles or bars, and takes others beside it, such as a moving average or
-    /// volume. Null draws the chart's kind.</summary>
+    /// <summary>Draws this series as a line, area, column, scatter, band, range or blocks instead of the chart's kind, so
+    /// fitness lines can stand over daily stress columns and executed power over a workout's planned blocks. The chart's kind
+    /// still lays out X: line, area, scatter, bubble, band, range and blocks charts place every series along a continuous axis,
+    /// and column charts by category, where blocks cannot stand. A candlestick or OHLC chart draws the one series that names no
+    /// kind as candles or bars, and takes others beside it, such as a moving average or volume. Null draws the chart's kind.</summary>
     public ChartKind? Kind { get; init; }
     /// <summary>Dashes a line or area stroke from this X onward, such as planned workouts projected forward. The stroke is
     /// split exactly where it reaches the X, and each mark from there on is named projected; markers and fill are drawn
@@ -363,8 +378,8 @@ public sealed record ChartSpec
     public ZoneScale? YZones { get; init; }
     /// <summary>Plots stacked under the main one, sharing its X axis, each with Y axes of its own, such as volume under
     /// prices. The main plot is pane 0 and takes this spec's Y properties; <c>Panes[k - 1]</c> sets up pane k, which holds
-    /// the series whose <see cref="ChartSeries.Pane"/> is k. Line, area, scatter, bubble, band, range, candlestick and OHLC
-    /// charts take them, at most three. Empty draws one plot.</summary>
+    /// the series whose <see cref="ChartSeries.Pane"/> is k. Line, area, scatter, bubble, band, range, blocks, candlestick and
+    /// OHLC charts take them, at most three. Empty draws one plot.</summary>
     public IReadOnlyList<ChartPane> Panes { get; init; } = [];
     /// <summary>Gauge charts only: how far round the arc runs, in degrees, from 180, a semicircle, to 360, a full circle. The arc
     /// is centred at the top, so the default 270 leaves its opening at the bottom.</summary>

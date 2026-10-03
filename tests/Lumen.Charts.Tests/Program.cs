@@ -30,6 +30,7 @@ ChartSpec Sample(ChartKind kind)=>kind switch{
     ChartKind.Timeline=>Spec(kind) with{Series=[new("Awake",[ChartPoint.Span(0,10),ChartPoint.Span(60,65)]),new("Light",[ChartPoint.Span(10,40),ChartPoint.Span(50,60)]),new("Deep",[ChartPoint.Span(40,50)])]},
     ChartKind.Range=>Spec(kind) with{Series=[new("Heart rate",[ChartPoint.Interval(0,70,50,150,"A"),ChartPoint.Interval(1,null,55,130,"B"),ChartPoint.Interval(2,64,48,170,"C")])]},
     ChartKind.Calendar=>Spec(kind) with{XAxis=AxisKind.Time,Series=[new("Stress",[new(Utc(2026,9,14,12),40,"Easy run"),new(Utc(2026,9,15,12),0),new(Utc(2026,9,16,12),120)])]},
+    ChartKind.Blocks=>Spec(kind) with{Series=[new("Plan",[ChartPoint.Block(0,2,140,"Warm-up"),ChartPoint.Block(2,5,250,"Interval"),ChartPoint.Block(5,6,120,"Recovery")])]},
     _=>Spec(kind)};
 foreach(var kind in Enum.GetValues<ChartKind>())
 {
@@ -1858,7 +1859,7 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
     foreach(var kind in Enum.GetValues<ChartKind>())
     {
         var spec=Sample(kind);
-        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline)
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Blocks)
             ChartSvg.Render(spec with{XFormat=ValueFormat.Duration});
         else Check(Refusal(spec with{XFormat=ValueFormat.Duration}).Contains(kind==ChartKind.Calendar?"writes its own calendar":"X format"),$"{kind}: X format");
         if(kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Histogram)
@@ -2152,8 +2153,8 @@ Test("Zones and point colours are refused where colour already means something e
         var sample=Sample(kind);
         var zoned=sample with{Series=sample.Series.Select(s=>s with{Zones=Effort()}).ToArray()};
         var coloured=sample with{Series=sample.Series.Select(s=>s with{Points=s.Points.Select(p=>p with{Color="#ABCDEF"}).ToArray()}).ToArray()};
-        Check(Accepts(zoned)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar),$"zones on {kind}");
-        Check(Accepts(coloured)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Range or ChartKind.Donut),$"point colours on {kind}");
+        Check(Accepts(zoned)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Blocks),$"zones on {kind}");
+        Check(Accepts(coloured)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Range or ChartKind.Blocks or ChartKind.Donut),$"point colours on {kind}");
         // Zone bands go wherever a Y annotation goes, and nowhere else; a calendar's zones colour its days, and it has no Y axis
         // for a Y annotation.
         Check(Accepts(sample with{YZones=Effort()})==(kind==ChartKind.Calendar||Accepts(sample with{Annotations=[new(AnnotationAxis.Y,1)]})),$"zone bands on {kind}");
@@ -2418,13 +2419,16 @@ Test("Series kinds and projections are refused where they cannot draw, each with
     {
         var lined=Sample(kind) with{Series=Sample(kind).Series.Select(s=>s with{Kind=ChartKind.Line}).ToArray()};
         if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Column or ChartKind.Range) ChartSvg.Render(lined);
+        // A blocks chart's points end in XEnd, which a line refuses; a line beside the blocks is drawn.
+        else if(kind==ChartKind.Blocks) Check(Refusal(lined).Contains("XEnd ends a span or a block")&&ChartSvg.Render(Sample(kind) with{Series=[..Sample(kind).Series,Spec().Series[0] with{Kind=ChartKind.Line}]}).Length>0,$"{kind}: {Refusal(lined)}");
         else Check(Refusal(lined).Contains("own kind"),$"{kind}: {Refusal(lined)}");
     }
-    // A series can be a line, area, column, scatter, band or range, and nothing else; a range series is drawn from its bounds.
+    // A series can be a line, area, column, scatter, band, range or blocks, and nothing else; a range series is drawn from its
+    // bounds, and blocks from their spans.
     foreach(var mark in Enum.GetValues<ChartKind>().Append((ChartKind)99))
     {
-        var spec=Spec() with{Series=[new("S",mark==ChartKind.Range?[ChartPoint.Interval(0,1,0,2),ChartPoint.Interval(1,2,1,3)]:[new(0,1),new(1,2)]){Kind=mark}]};
-        if(mark is ChartKind.Line or ChartKind.Area or ChartKind.Column or ChartKind.Scatter or ChartKind.Band or ChartKind.Range) ChartSvg.Render(spec);
+        var spec=Spec() with{Series=[new("S",mark==ChartKind.Range?[ChartPoint.Interval(0,1,0,2),ChartPoint.Interval(1,2,1,3)]:mark==ChartKind.Blocks?[ChartPoint.Block(0,1,1),ChartPoint.Block(1,2,2)]:[new(0,1),new(1,2)]){Kind=mark}]};
+        if(mark is ChartKind.Line or ChartKind.Area or ChartKind.Column or ChartKind.Scatter or ChartKind.Band or ChartKind.Range or ChartKind.Blocks) ChartSvg.Render(spec);
         else Check(Refusal(spec).Contains("can be drawn as"),$"{mark}: {Refusal(spec)}");
     }
     // Columns and areas draw from zero, on whichever axis measures them; the other axis stays free.
@@ -2720,7 +2724,7 @@ Test("Panes are refused where they cannot be drawn, each with its reason",()=>{
     {
         var below=Sample(kind) with{Panes=[new()],Series=[..Sample(kind).Series,Sample(kind).Series[0] with{Name="Below",Pane=1,Kind=kind is ChartKind.Candlestick or ChartKind.Ohlc?ChartKind.Line:null}]};
         var pointed=Sample(kind) with{Series=[Sample(kind).Series[0] with{Pane=1}]};
-        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc)
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Blocks)
         {
             ChartSvg.Render(below);
             Check(Refusal(pointed).Contains("pane is 0"),$"{kind}: {Refusal(pointed)}");
@@ -2772,7 +2776,7 @@ Test("A chart that sets no panes draws in one plot, as before",()=>{
     {
         var sample=Sample(kind);
         var doc=Svg(sample);
-        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Band or ChartKind.Ohlc or ChartKind.Range)
+        if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Band or ChartKind.Ohlc or ChartKind.Range or ChartKind.Blocks)
             Check(PaneClips(doc).Select(PaneSpan).SequenceEqual([(78d,344d)])&&doc.Descendants(ns+"g").Where(g=>g.Attribute("data-series") is not null).All(g=>(string?)g.Attribute("data-series")=="0"),$"{kind} is not one plot");
         // A timeline's lanes share its one plot.
         else if(kind==ChartKind.Timeline) Check(PaneClips(doc).Select(PaneSpan).SequenceEqual([(78d,344d)]),$"{kind} is not one plot");
@@ -3692,8 +3696,8 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: seventeen charts in sixteen cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
-    Check(sports.Count==16&&sports.Select(card=>card.Id).Distinct().Count()==16&&sports.Count(card=>card.Beside is not null)==1,"the page should have seventeen charts in sixteen cards");
+Test("Sports page: nineteen charts in eighteen cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+    Check(sports.Count==18&&sports.Select(card=>card.Id).Distinct().Count()==18&&sports.Count(card=>card.Beside is not null)==1,"the page should have nineteen charts in eighteen cards");
     // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order.
     Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
     foreach(var (theme,style,zones) in new[]{(ChartTheme.Light,(ChartStyle?)null,ChartStyle.Light.Zones),(ChartTheme.Dark,null,ChartStyle.Light.Zones),(ChartTheme.Dark,ChartStyle.Midnight,ChartStyle.Midnight.Zones)})
@@ -4425,7 +4429,7 @@ Test("Timeline and range: what has no meaning on them is refused, each with its 
         (range with{Series=[range.Series[0] with{Points=[ChartPoint.Interval(0,70,50,150),ChartPoint.Interval(0,72,52,160)]}]},"unique X values"),
         (range with{Series=[range.Series[0] with{Curve=LineCurve.Smooth}]},"smooth or stepped"),(range with{Series=[range.Series[0] with{Markers=MarkerStyle.Filled}]},"Marker styles"),
         (Spec(ChartKind.Bar) with{Series=[new("S",[ChartPoint.Interval(0,2,1,3)]){Kind=ChartKind.Range}]},"own kind"),(Spec(ChartKind.Donut) with{Series=[new("S",[ChartPoint.Interval(0,2,1,3)]){Kind=ChartKind.Range}]},"own kind"),
-        (Spec() with{Series=[new("S",[new ChartPoint(0,1){XEnd=2},new(1,2)])]},"timeline charts only"),(range with{Series=[range.Series[0] with{Points=[ChartPoint.Interval(0,70,50,150) with{XEnd=1}]}]},"timeline charts only"),
+        (Spec() with{Series=[new("S",[new ChartPoint(0,1){XEnd=2},new(1,2)])]},"timeline charts and to series drawn as blocks"),(range with{Series=[range.Series[0] with{Points=[ChartPoint.Interval(0,70,50,150) with{XEnd=1}]}]},"timeline charts and to series drawn as blocks"),
         (Spec() with{TimelineConnectors=false},"only a timeline"),(range with{TimelineConnectors=false},"only a timeline"),
         (Spec() with{XAxis=AxisKind.Time,XFormat=ValueFormat.TimeOfDay,Series=[new("S",[new(Utc(2026,1,1),1)])]},"time-of-day"),(Spec() with{XAxis=AxisKind.Log,XFormat=ValueFormat.TimeOfDay,Series=[new("S",[new(1,1)])]},"time-of-day"),
         (Spec() with{YAxis=AxisKind.Log,YFormat=ValueFormat.TimeOfDay},"time-of-day"),(Spec() with{Y2Axis=AxisKind.Log,Y2Format=ValueFormat.TimeOfDay},"time-of-day"),
@@ -4819,6 +4823,308 @@ Test("Sports page: the training calendar's days are the performance chart's dail
         var both=SportsData.Cards(ChartTheme.Light,zones).Single(c=>c.Id=="training-calendar");
         var inks=both.Spec.YZones!.Zones.Concat(both.Beside!.YZones!.Zones).Select(z=>z.Color!).ToArray();
         Check(inks.All(ink=>zones.Contains(ink)&&Contrast(ink,style.Background)>=3),$"{style.Background}: {string.Join(", ",inks)}");
+    }
+});
+// 0.29.0: blocks. A plot runs from x 76 to 870 and y 78 to 344, so on an X axis from 0 to 10 a value x sits at BX(x), and with Y
+// held from 0 to 300 a height v at BY(v). A block's outline is read back from its path.
+double BX(double x)=>76+x*79.4;
+double BY(double v)=>344-v/300*266;
+XElement[] BlockPaths(XDocument doc,int series=0)=>doc.Descendants(ns+"path").Where(p=>(string?)p.Attribute("class")=="lumen-block"&&(string?)p.Parent!.Attribute("data-series")==series.ToString(CultureInfo.InvariantCulture)).ToArray();
+(double Left,double Right,double Top,double Bottom) BlockBox(XElement path)
+{
+    var at=Commands((string)path.Attribute("d")!).Where(c=>c.Op!='Z').Select(c=>c.Op=='A'?(X:c.Args[5],Y:c.Args[6]):(X:c.Args[0],Y:c.Args[1])).ToArray();
+    return (at.Min(p=>p.X),at.Max(p=>p.X),at.Min(p=>p.Y),at.Max(p=>p.Y));
+}
+ChartSpec Plan(params ChartPoint[] blocks)=>new(){Kind=ChartKind.Blocks,Title="Plan",IncludeZero=true,YMax=300,Series=[new("Plan",blocks)]};
+ChartSpec Laps(params double[] paces)=>new(){Kind=ChartKind.Blocks,Title="Laps",YFormat=ValueFormat.Duration,YReversed=true,
+    Series=[new("Laps",paces.Select((pace,i)=>ChartPoint.Block(i,i+1,pace,$"Lap {i+1}")).ToArray())]};
+Test("Blocks: each covers its X to its XEnd exactly, and neighbours that touch give up half a hairline each, or a quarter of a narrow block's width",()=>{
+    var doc=Svg(Plan(ChartPoint.Block(0,2,150),ChartPoint.Block(2,5,300),ChartPoint.Block(6,10,75)));
+    var boxes=BlockPaths(doc).Select(BlockBox).ToArray();
+    Check(boxes.Length==3,"three blocks were not drawn");
+    // The first starts at the plot's edge and ends half a pixel short of 2, where the second begins half a pixel past it; the
+    // second ends exactly at 5, a gap away from the third, which runs exactly from 6 to the plot's right edge at 10.
+    Check(Close(boxes[0].Left,BX(0))&&Close(boxes[0].Right,BX(2)-.5)&&Close(boxes[1].Left,BX(2)+.5)&&Close(boxes[1].Right,BX(5))&&Close(boxes[2].Left,BX(6))&&Close(boxes[2].Right,BX(10))&&Close(BX(10),870),
+        string.Join(" | ",boxes.Select(b=>$"{b.Left}-{b.Right}")));
+    Check(Close(boxes[1].Left-boxes[0].Right,1),"touching neighbours are not a hairline apart");
+    // A block narrower than two pixels gives up a quarter of its width at each end it touches, so it keeps half its width.
+    var narrow=Svg(Plan(ChartPoint.Block(0,4,100),ChartPoint.Block(4,4.01,200),ChartPoint.Block(4.01,10,150)));
+    var middle=BlockBox(BlockPaths(narrow)[1]);
+    Check(Close(middle.Left,BX(4)+.01*79.4/4)&&Close(middle.Right,BX(4.01)-.01*79.4/4)&&Close(BlockBox(BlockPaths(narrow)[0]).Right,BX(4)-.5)&&Close(BlockBox(BlockPaths(narrow)[2]).Left,BX(4.01)+.5),
+        $"{middle.Left}-{middle.Right}");
+    // Blocks of another series that touch these do not part them: the hairline belongs to a series' own steps.
+    var two=Svg(Plan(ChartPoint.Block(0,5,100)) with{Series=[new("A",[ChartPoint.Block(0,5,100)]),new("B",[ChartPoint.Block(5,10,200)])]});
+    Check(Close(BlockBox(BlockPaths(two,0)[0]).Right,BX(5))&&Close(BlockBox(BlockPaths(two,1)[0]).Left,BX(5)),"blocks of two series part each other");
+    // The X axis reaches the last block's end, and keeps its ticks under the blocks rather than their labels.
+    var laps=Svg(Laps(330,310,290) with{XLabel="Distance (km)"});
+    Check(Close(BlockBox(BlockPaths(laps)[2]).Right,870)&&Ticks(laps,"middle").Contains("3")&&!Ticks(laps,"middle").Any(t=>t.StartsWith("Lap")),string.Join(",",Ticks(laps,"middle")));
+});
+Test("Blocks: each stands on the bottom edge of its plot, from zero on an axis that includes it, from past the slowest pace on a reversed one, and in a lower pane",()=>{
+    // Power with zero included: every block stands on 344, the bottom, and rises to its value.
+    var power=BlockPaths(Svg(Plan(ChartPoint.Block(0,2,150),ChartPoint.Block(2,5,300),ChartPoint.Block(6,10,75)))).Select(BlockBox).ToArray();
+    Check(power.All(b=>Close(b.Bottom,344))&&Close(power[0].Top,BY(150))&&Close(power[1].Top,78)&&Close(power[2].Top,BY(75)),string.Join(" | ",power.Select(b=>$"{b.Top}-{b.Bottom}")));
+    // Pace on a reversed axis fitted to 4:20 to 5:00: its bottom moves out to 5:08, so the slowest lap stands a sixth of the plot,
+    // and the fastest reaches the top.
+    var laps=BlockPaths(Svg(Laps(300,280,260))).Select(BlockBox).ToArray();
+    Check(laps.All(b=>Close(b.Bottom,344))&&Close(344-laps[0].Top,266/6d)&&Close(laps[1].Top,78+20/48d*266)&&Close(laps[2].Top,78),string.Join(" | ",laps.Select(b=>$"{b.Top}")));
+    Check(Ticks(Svg(Laps(300,280,260)),"end").Contains("5:00")&&!Ticks(Svg(Laps(300,280,260)),"end").Contains("5:30"),"the axis reaches further than the slowest lap needs");
+    // A bottom that is set is kept, so the slowest lap there has no height; and so is one held at zero.
+    var held=BlockPaths(Svg(Laps(300,280,260) with{YMax=300})).Select(BlockBox).ToArray();
+    Check(Close(held[0].Top,344)&&Close(held[0].Bottom,344)&&Close(held[2].Top,78),"a bottom that is set moved");
+    // Without zero the bottom moves out below the lowest block the same way, by a fifth of the span, here from 150 to 130.
+    var plain=BlockPaths(Svg(new ChartSpec{Kind=ChartKind.Blocks,Series=[new("Plan",[ChartPoint.Block(0,1,150),ChartPoint.Block(1,2,200),ChartPoint.Block(2,3,250)])]})).Select(BlockBox).ToArray();
+    Check(Close(344-plain[0].Top,266/6d)&&Close(plain[1].Top,344-70/120d*266)&&Close(plain[2].Top,78),string.Join(" | ",plain.Select(b=>$"{b.Top}")));
+    // A line that already reaches below the lowest block leaves the axis where it was, from 100 to 250.
+    var beside=Svg(new ChartSpec{Kind=ChartKind.Blocks,Series=[new("Plan",[ChartPoint.Block(0,1,150),ChartPoint.Block(1,2,250)]),new("Done",[new(0,100),new(2,220)]){Kind=ChartKind.Line}]});
+    Check(Close(BlockBox(BlockPaths(beside)[0]).Top,344-50/150d*266),"a line below the blocks did not hold the axis");
+    // On a logarithmic axis the bottom moves out in decades: from 10 down to 10^0.6, so 100 stands 1.4 of 2.4 decades up.
+    var logged=BlockPaths(Svg(new ChartSpec{Kind=ChartKind.Blocks,YAxis=AxisKind.Log,Series=[new("Load",[ChartPoint.Block(0,1,10),ChartPoint.Block(1,2,100),ChartPoint.Block(2,3,1000)])]})).Select(BlockBox).ToArray();
+    Check(Close(344-logged[0].Top,266/6d)&&Math.Abs(logged[1].Top-(344-1.4/2.4*266))<1e-6&&Close(logged[2].Top,78),string.Join(" | ",logged.Select(b=>$"{b.Top}")));
+    // In a pane under a line, blocks stand on that pane's bottom edge and the tallest reaches its top.
+    var paned=Svg(new ChartSpec{Kind=ChartKind.Line,Height=600,IncludeZero=true,Panes=[new(){Label="Plan"}],
+        Series=[new("Power",[new(0,100),new(10,200)]),new("Plan",[ChartPoint.Block(0,4,140),ChartPoint.Block(4,10,280)]){Kind=ChartKind.Blocks,Pane=1}]});
+    var span=PaneSpan(PaneClips(paned)[1]);
+    var below=BlockPaths(paned,1).Select(BlockBox).ToArray();
+    Check(Close(span.Bottom,524)&&below.All(b=>Close(b.Bottom,span.Bottom))&&Close(below[1].Top,span.Top)&&Close(below[0].Top,span.Bottom-.5*(span.Bottom-span.Top)),$"{span} {string.Join(" | ",below.Select(b=>$"{b.Top}-{b.Bottom}"))}");
+    // On the right-hand axis they stand on the same edge and rise on their own axis: 10 and 20 from zero, the left one untouched.
+    var right=Svg(new ChartSpec{Kind=ChartKind.Line,IncludeZero=true,Y2Label="Plan",Series=[new("Power",[new(0,0),new(10,300)]),new("Plan",[ChartPoint.Block(0,5,10),ChartPoint.Block(5,10,20)]){Kind=ChartKind.Blocks,Secondary=true}]});
+    var lifted=BlockPaths(right,1).Select(BlockBox).ToArray();
+    Check(lifted.All(b=>Close(b.Bottom,344))&&Close(lifted[0].Top,211)&&Close(lifted[1].Top,78)&&Close(BlockBox(BlockPaths(right,1)[1]).Right,824),string.Join(" | ",lifted.Select(b=>$"{b.Top}-{b.Right}")));
+});
+Test("Blocks: only the far end is rounded, by the style's bar radius or 4 pixels, up to 6, clamped to half the width and to the height",()=>{
+    var spec=Plan(ChartPoint.Block(0,2,150),ChartPoint.Block(2,5,300),ChartPoint.Block(6,10,75));
+    // The second block runs from 235.3 to 473 and up to the top at 78: square at the bottom, a 4-pixel arc at each top corner.
+    Draws(BarOf(Svg(spec),0,1),M(235.3,344),L(235.3,82),A(4,239.3,78),L(469,78),A(4,473,82),L(473,344),Z());
+    Draws(BarOf(Svg(Classic(spec)),0,1),M(235.3,344),L(235.3,82),A(4,239.3,78),L(469,78),A(4,473,82),L(473,344),Z());
+    Draws(BarOf(Svg(spec with{Style=ChartStyle.Light with{BarRadius=2}}),0,1),M(235.3,344),L(235.3,80),A(2,237.3,78),L(471,78),A(2,473,80),L(473,344),Z());
+    // Midnight's capsule radius is held to 6 pixels, so a wide block is not domed; a radius of 0 draws a square block.
+    Draws(BarOf(Svg(spec with{Style=ChartStyle.Midnight}),0,1),M(235.3,344),L(235.3,84),A(6,241.3,78),L(467,78),A(6,473,84),L(473,344),Z());
+    Draws(BarOf(Svg(spec with{Style=ChartStyle.Light with{BarRadius=0}}),0,1),M(235.3,344),L(235.3,78),L(473,78),L(473,344),Z());
+    // A block 2.66 pixels high rounds by its height, and one 0.794 pixels wide by half its width.
+    var low=BarOf(Svg(Plan(ChartPoint.Block(0,5,3),ChartPoint.Block(6,10,300))),0,0);
+    Check(low.Where(c=>c.Op=='A').All(c=>Close(c.Args[0],2.66))&&low.Count(c=>c.Op=='A')==2,string.Join(" ",low.Select(c=>c.Op+string.Join(",",c.Args))));
+    var thin=BarOf(Svg(Plan(ChartPoint.Block(0,9,100),ChartPoint.Block(9.99,10,300))),0,1);
+    Check(thin.Where(c=>c.Op=='A').All(c=>Close(c.Args[0],.397))&&thin.Count(c=>c.Op=='A')==2,string.Join(" ",thin.Select(c=>c.Op+string.Join(",",c.Args))));
+});
+Test("Blocks: a point's colour beats its zone's, which beats the series', and zoned blocks are keyed by the zone colours they draw in",()=>{
+    var ftp=ZoneScale.CogganPower(250);
+    // 125 W is active recovery, 200 tempo, 250 threshold and 300, exactly 120 %, VO2max; the last carries a colour of its own.
+    ChartPoint[] steps=[ChartPoint.Block(0,1,125),ChartPoint.Block(1,2,200),ChartPoint.Block(2,3,250),ChartPoint.Block(3,4,300),ChartPoint.Block(4,5,125) with{Color="#123456"}];
+    var zoned=Plan(steps) with{Series=[new("Plan",steps){Zones=ftp}]};
+    string[] Fills(ChartSpec spec)=>BlockPaths(Svg(spec)).Select(p=>(string)p.Attribute("fill")!).ToArray();
+    var ramp=ChartStyle.Light.Zones;
+    Check(Fills(zoned).SequenceEqual([ramp[0],ramp[2],ramp[3],ramp[4],"#123456"]),string.Join(",",Fills(zoned)));
+    Check(Fills(zoned with{Style=ChartStyle.Midnight}).SequenceEqual([ChartStyle.Midnight.Zones[0],ChartStyle.Midnight.Zones[2],ChartStyle.Midnight.Zones[3],ChartStyle.Midnight.Zones[4],"#123456"]),"Midnight's ramp is not used");
+    Check(Fills(Plan(steps)).SequenceEqual([..Enumerable.Repeat(ChartStyle.Light.Series[0],4),"#123456"]),"without zones a block is not its series' colour");
+    Check(Fills(Plan(steps) with{Series=[new("Plan",steps,"#DD4B45")]}).Take(4).All(f=>f=="#DD4B45"),"the series' own colour is not used");
+    // The key: the first four colours the blocks draw in, in their order; one colour draws two steps, the second taller.
+    Check(XDocument.Parse(ChartSvg.LegendKey(zoned,0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual([ramp[0],ramp[2],ramp[3],ramp[4]]),ChartSvg.LegendKey(zoned,0));
+    var plain=XDocument.Parse(ChartSvg.LegendKey(Plan(steps),0)).Root!.Elements().ToArray();
+    Check(plain.Length==2&&plain.All(e=>(string?)e.Attribute("fill")==ChartStyle.Light.Series[0])&&Attr(plain[0],"height")<Attr(plain[1],"height")&&Close(Attr(plain[1],"x")-(Attr(plain[0],"x")+Attr(plain[0],"width")),1),ChartSvg.LegendKey(Plan(steps),0));
+    Check(Svg(zoned).Descendants(ns+"rect").Count(r=>(string?)r.Attribute("fill")==ramp[0])>=1,"the chart's own legend does not key the zones");
+    // A block names its zone, and a block below the plot's bottom edge, set by YMin, has no height rather than hanging below it.
+    Check(Labels(Svg(zoned))[0]=="Plan: 0 to 1, 125, Active recovery"&&Labels(Svg(zoned))[3]=="Plan: 3 to 4, 300, VO2max",string.Join(" | ",Labels(Svg(zoned))));
+    var under=BlockBox(BlockPaths(Svg(Plan(steps) with{IncludeZero=false,YMin=150}))[0]);
+    Check(Close(under.Top,344)&&Close(under.Bottom,344),"a block below the plot hangs from its bottom edge");
+});
+Test("Blocks: they draw in the column layer, over bands and areas and under lines and points, whatever the series order, with references behind",()=>{
+    ChartPoint[] plan=[ChartPoint.Block(0,4,150),ChartPoint.Block(4,8,250),ChartPoint.Block(8,10,120)];
+    var spec=new ChartSpec{Kind=ChartKind.Blocks,IncludeZero=true,Annotations=[new(AnnotationAxis.Y,200){Label="FTP"}],Series=[
+        new("Power",Enumerable.Range(0,11).Select(i=>new ChartPoint(i,140+i*10)).ToArray()){Kind=ChartKind.Line},
+        new("Dots",[new(1,100),new(5,200)]){Kind=ChartKind.Scatter},
+        new("Plan",plan),
+        new("Climb",Enumerable.Range(0,11).Select(i=>new ChartPoint(i,40+i)).ToArray()){Kind=ChartKind.Area},
+        new("Range",[ChartPoint.Interval(2,null,60,90),ChartPoint.Interval(6,null,50,80)]){Kind=ChartKind.Band}]};
+    var doc=Svg(spec);
+    var order=doc.Descendants().ToList();
+    int First(Func<XElement,bool> which)=>order.FindIndex(e=>which(e));
+    int Series(int index)=>First(e=>(string?)e.Attribute("data-series")==index.ToString(CultureInfo.InvariantCulture));
+    var band=First(e=>e.Name==ns+"path"&&(string?)e.Attribute("fill-opacity")==".16");
+    var area=First(e=>e.Name==ns+"path"&&(string?)e.Attribute("fill-opacity")==".12");
+    var blocks=First(e=>(string?)e.Attribute("class")=="lumen-block");
+    var line=First(e=>e.Name==ns+"path"&&(string?)e.Attribute("fill")=="none"&&(string?)e.Attribute("stroke")==ChartStyle.Light.Series[0]);
+    var reference=First(e=>e.Name==ns+"line"&&(string?)e.Attribute("stroke-dasharray")=="6 4");
+    Check(reference<band&&band<area&&area<blocks&&blocks<line&&line<Series(1)&&Series(2)<Series(0),$"reference {reference}, band {band}, area {area}, blocks {blocks}, line {line}, dots {Series(1)}");
+    // The reference runs across the whole plot, over the blocks' heights.
+    var across=order.Single(e=>e.Name==ns+"line"&&(string?)e.Attribute("stroke-dasharray")=="6 4");
+    Check(Attr(across,"x1")==76&&Attr(across,"x2")==870,"the reference does not run across the plot");
+    // As a series' own kind beside a line on a line chart, blocks still draw first, whatever their place in the list.
+    var mixed=Svg(new ChartSpec{Kind=ChartKind.Line,Series=[new("Power",[new(0,100),new(10,200)]),new("Plan",plan){Kind=ChartKind.Blocks}]}).Descendants().ToList();
+    Check(mixed.FindIndex(e=>(string?)e.Attribute("class")=="lumen-block")<mixed.FindIndex(e=>e.Name==ns+"path"&&(string?)e.Attribute("fill")=="none"),"blocks draw over the line");
+});
+Test("Blocks: each is a focusable button named with its label, its span in the X axis's format, its height in its own axis's and its zone",()=>{
+    var laps=new ChartSpec{Kind=ChartKind.Blocks,YFormat=ValueFormat.Duration,YReversed=true,XLabel="Distance (km)",
+        Series=[new("Laps",[ChartPoint.Block(0,1,301,"Lap 1"),ChartPoint.Block(1,2,292,"Lap 2"),ChartPoint.Block(2,3.6,284.4,"Lap 3")])]};
+    var doc=Svg(laps);
+    Check(Labels(doc).SequenceEqual(["Lap 1: 0 to 1, 5:01","Lap 2: 1 to 2, 4:52","Lap 3: 2 to 3.6, 4:44"]),string.Join(" | ",Labels(doc)));
+    var marks=doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).ToArray();
+    Check(marks.All(g=>(string?)g.Attribute("role")=="button"&&(string?)g.Attribute("tabindex")=="0"&&(string?)g.Attribute("data-series")=="0"&&g.Element(ns+"title")!.Value==(string)g.Attribute("aria-label")!)
+        &&marks.Select(g=>(string)g.Attribute("data-point")!).SequenceEqual(["0","1","2"]),"a block is not a labelled button");
+    // A workout on a duration axis in Coggan's levels at 270 W; a block without a label is led by its series' name.
+    var workout=new ChartSpec{Kind=ChartKind.Blocks,XFormat=ValueFormat.Duration,IncludeZero=true,
+        Series=[new("Plan",[ChartPoint.Block(0,600,150),ChartPoint.Block(600,840,275,"Interval 2"),ChartPoint.Block(840,1080,1200,"Sprint")]){Zones=ZoneScale.CogganPower(270)}]};
+    Check(Labels(Svg(workout)).SequenceEqual(["Plan: 0:00 to 10:00, 150, Endurance","Interval 2: 10:00 to 14:00, 275, Lactate threshold","Sprint: 14:00 to 18:00, 1200, Neuromuscular"]),string.Join(" | ",Labels(Svg(workout))));
+    // Where two series draw blocks each block is led by its series' name too.
+    var both=Svg(workout with{Series=[workout.Series[0],new("Done",[ChartPoint.Block(0,600,148,"Warm-up")])]});
+    Check(Labels(both)[1]=="Plan, Interval 2: 10:00 to 14:00, 275, Lactate threshold"&&Labels(both)[3]=="Done, Warm-up: 0:00 to 10:00, 148",string.Join(" | ",Labels(both)));
+    // On a time axis the span reads as dates; on the right-hand axis the height reads in its format.
+    var weeks=new ChartSpec{Kind=ChartKind.Blocks,XAxis=AxisKind.Time,Y2Format=ValueFormat.Compact,
+        Series=[new("Distance",[new(Utc(2026,8,3),30),new(Utc(2026,8,24),42)]){Kind=ChartKind.Line},new("Volume",[ChartPoint.Block(Utc(2026,8,3),Utc(2026,8,10),12500,"Week 1"),ChartPoint.Block(Utc(2026,8,10),Utc(2026,8,17),9800)]){Secondary=true}]};
+    Check(Labels(Svg(weeks)).Take(2).SequenceEqual(["Week 1: 3 Aug 2026 to 10 Aug 2026, 12.5k","Volume: 10 Aug 2026 to 17 Aug 2026, 9.8k"]),string.Join(" | ",Labels(Svg(weeks))));
+});
+Test("Blocks: what has no meaning for them is refused, each with its reason, and what does is accepted",()=>{
+    string Refusal(ChartSpec spec){try{ChartSvg.Render(spec);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
+    var spec=Plan(ChartPoint.Block(0,2,150,"A"),ChartPoint.Block(2,5,250,"B"));
+    ChartSpec With(Func<ChartSeries,ChartSeries> change)=>spec with{Series=[change(spec.Series[0])]};
+    ChartSpec Points(params ChartPoint[] points)=>With(s=>s with{Points=points});
+    var line=new ChartSeries("Power",[new(0,100),new(5,200)]);
+    foreach(var (bad,reason) in new (ChartSpec,string)[]{
+        (Points(new ChartPoint(0,150)),"Every block runs from its X to an XEnd"),(Points(ChartPoint.Block(2,2,150)),"A block ends after it starts"),(Points(ChartPoint.Block(2,1,150)),"A block ends after it starts"),
+        (Points(ChartPoint.Block(0,double.NaN,150)),"A block ends after it starts"),(Points(ChartPoint.Block(0,double.PositiveInfinity,150)),"A block ends after it starts"),
+        (Points(new ChartPoint(0,null){XEnd=2}),"cannot be missing"),(Points(ChartPoint.Block(0,3,150),ChartPoint.Block(2,5,250)),"Blocks in one series cannot overlap"),
+        (Points(ChartPoint.Block(0,5,150),ChartPoint.Block(1,2,250)),"cannot overlap"),(Points(ChartPoint.Block(3,5,150),ChartPoint.Block(0,4,250)),"cannot overlap"),
+        (spec with{Kind=ChartKind.Column,Series=[spec.Series[0] with{Kind=ChartKind.Blocks}]},"no slot a block could take"),
+        (spec with{XAxis=AxisKind.Log,Series=[With(s=>s with{Points=[ChartPoint.Block(1,2,150)]}).Series[0]]},"linear or a time X axis"),
+        (new ChartSpec{Kind=ChartKind.Line,XAxis=AxisKind.Log,Series=[new("Power",[new(1,100),new(5,200)]),new("Plan",[ChartPoint.Block(1,2,150)]){Kind=ChartKind.Blocks}]},"linear or a time X axis"),
+        (With(s=>s with{Trend=true}),"no trend line"),(With(s=>s with{ProjectedFrom=1}),"Blocks take no projection"),
+        (spec with{Series=[spec.Series[0],line with{Kind=ChartKind.Line,Points=[new(0,100){XEnd=1}]}]},"XEnd ends a span or a block"),(spec with{Series=[spec.Series[0],line with{Kind=ChartKind.Line,Points=[new(0,100){XEnd=1}]}]},"timeline charts and to series drawn as blocks"),
+        (spec with{XAxis=AxisKind.Time,Series=[With(s=>s with{Points=[ChartPoint.Block(Utc(2026,9,1),1e15,150)]}).Series[0]]},"Unix milliseconds"),
+        (With(s=>s with{StrokeWidth=2}),"stroke width"),(With(s=>s with{Curve=LineCurve.Step}),"smooth or stepped"),(With(s=>s with{Fill=AreaFill.Fade}),"faded fill"),
+        (With(s=>s with{Markers=MarkerStyle.Hollow}),"Marker styles"),(With(s=>s with{HighlightLast=true}),"Highlighting the last point"),(With(s=>s with{ValueLabels=true}),"Value labels"),
+        (With(s=>s with{Gradient=[new(100,"#3F87D9"),new(300,"#DD4B45")]}),"gradient"),(With(s=>s with{Goal=10}),"ring charts only"),
+        (spec with{IncludeZero=false,YMax=null,YAxis=AxisKind.Log,Series=[With(s=>s with{Points=[ChartPoint.Block(0,1,0)]}).Series[0]]},"positive values"),
+        (spec with{YMax=null,YAxis=AxisKind.Log},"Log axes cannot include zero"),
+        (new ChartSpec{Kind=ChartKind.Timeline,Series=[new("Light",[ChartPoint.Span(0,1)]),new("Plan",[ChartPoint.Block(0,1,1)]){Kind=ChartKind.Blocks}]},"does not apply to a timeline"),
+        (new ChartSpec{Kind=ChartKind.Bar,Series=[new("Plan",[ChartPoint.Block(0,1,1)]){Kind=ChartKind.Blocks}]},"own kind applies to"),
+        (new ChartSpec{Kind=ChartKind.Calendar,XAxis=AxisKind.Time,Series=[new("Plan",[ChartPoint.Block(Utc(2026,9,1),Utc(2026,9,2),1)]){Kind=ChartKind.Blocks}]},"own kind does not apply to a calendar"),
+        (spec with{DensityCells=20},"Density cells apply to scatter"),(spec with{CalendarCell=CalendarCell.Dot},"calendar charts only"),(spec with{TimelineConnectors=false},"only a timeline")})
+        Check(Refusal(bad).Contains(reason),$"\"{Refusal(bad)}\" does not say \"{reason}\"");
+    // Within the rules: touching, apart and unordered blocks; overlapping blocks of two series; a time axis, duration and time-of-day
+    // formats, a reversed or logarithmic axis, zones and point colours, a pane and its right-hand axis, annotations, an axis on the
+    // right labelled at its ends, blocks beside candles, and an empty series.
+    var candles=Sample(ChartKind.Candlestick);
+    foreach(var good in new[]{Points(ChartPoint.Block(3,4,1),ChartPoint.Block(0,1,2),ChartPoint.Block(1,3,3)),spec with{Series=[spec.Series[0],spec.Series[0] with{Name="Again"}]},
+        spec with{XAxis=AxisKind.Time,Series=[With(s=>s with{Points=[ChartPoint.Block(Utc(2026,9,1),Utc(2026,9,8),150)]}).Series[0]]},
+        spec with{XFormat=ValueFormat.TimeOfDay,YFormat=ValueFormat.Duration,YReversed=true,IncludeZero=false,YMax=null},spec with{XFormat=ValueFormat.Duration,YAxisSide=AxisSide.Right,YTickLabels=TickLabels.Ends},
+        spec with{IncludeZero=false,YMax=null,YAxis=AxisKind.Log,Y2Axis=AxisKind.Log,Series=[spec.Series[0],spec.Series[0] with{Name="Right",Secondary=true}]},
+        With(s=>s with{Zones=ZoneScale.CogganPower(250),Points=[s.Points[0] with{Color="#123456"},s.Points[1]]}) with{YZones=ZoneScale.CogganPower(250)},
+        spec with{Panes=[new(){Y2Axis=AxisKind.Log}],Series=[spec.Series[0],spec.Series[0] with{Name="Below",Pane=1},spec.Series[0] with{Name="Right",Pane=1,Secondary=true,Points=[ChartPoint.Block(0,1,10)]}]},
+        spec with{Annotations=[new(AnnotationAxis.Y,200){Label="FTP"},new(AnnotationAxis.X,1){To=3,Label="Main set"}]},
+        candles with{Series=[..candles.Series,new("Plan",[ChartPoint.Block(0,1,10)]){Kind=ChartKind.Blocks}]},spec with{Series=[new("Empty",[])]}})
+        Check(XDocument.Parse(ChartSvg.Render(good)).Root!.Name==ns+"svg");
+    Check(ChartSvg.Render(new ChartSpec{Kind=ChartKind.Blocks}).Contains("No data to display")&&ChartSvg.Render(spec with{Series=[new("Empty",[])]}).Contains("No data to display"),"an empty blocks chart does not draw its empty state");
+});
+Test("Blocks: a spec survives JSON as \"kind\":\"Blocks\" with each \"xEnd\", and CSV carries XEnd, every record ending CRLF",()=>{
+    var options=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web){Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}};
+    var spec=Plan(ChartPoint.Block(0,2,150,"Warm-up"),ChartPoint.Block(2,5,250,"Interval") with{Color="#123456"}) with{XFormat=ValueFormat.Duration,
+        Series=[new("Plan",[ChartPoint.Block(0,2,150,"Warm-up"),ChartPoint.Block(2,5,250,"Interval") with{Color="#123456"}]){Zones=ZoneScale.CogganPower(250)},new("Power",[new(1,140),new(4,255)]){Kind=ChartKind.Line}]};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,options);
+    Check(json.Contains("\"kind\":\"Blocks\"")&&json.Contains("\"xEnd\":2")&&json.Contains("\"xEnd\":5"),json);
+    Check(ChartSvg.Render(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,options)!)==ChartSvg.Render(spec),"the blocks changed in transit");
+    var request=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"yFormat\":\"Duration\",\"yReversed\":true,\"series\":[{\"name\":\"Laps\",\"kind\":\"Blocks\",\"points\":[{\"x\":0,\"xEnd\":1,\"y\":301,\"label\":\"Lap 1\"},{\"x\":1,\"xEnd\":2.5,\"y\":292}]}]}",options)!;
+    Check(request.Series[0].Kind==ChartKind.Blocks&&request.Series[0].Points[1].XEnd==2.5&&Labels(Svg(request)).SequenceEqual(["Lap 1: 0 to 1, 5:01","Laps: 1 to 2.5, 4:52"]),string.Join(" | ",Labels(Svg(request))));
+    // The file carries where each block ends; the line beside it has no end, and every record, the header included, ends CRLF.
+    var csv=ChartExport.Csv(spec);
+    Check(csv.StartsWith("Series,X,Y,Label,Size,XEnd\r\n")&&csv.Contains("\"Plan\",0,150,\"Warm-up\",1,2\r\n")&&csv.Contains("\"Plan\",2,250,\"Interval\",1,5\r\n")&&csv.Contains("\"Power\",4,255,\"\",1,\r\n"),csv);
+    Check(csv.Split("\r\n").Length==6&&csv.EndsWith("\r\n")&&!csv.Replace("\r\n","").Contains('\n'),"a record does not end CRLF");
+    var timed=ChartExport.Csv(new ChartSpec{Kind=ChartKind.Blocks,XAxis=AxisKind.Time,Series=[new("Week",[ChartPoint.Block(Utc(2026,8,3),Utc(2026,8,10),320)])]});
+    Check(timed==$"Series,X,XTime,Y,Label,Size,XEnd\r\n\"Week\",{Utc(2026,8,3).ToString(CultureInfo.InvariantCulture)},2026-08-03T00:00:00.000Z,320,\"\",1,{Utc(2026,8,10).ToString(CultureInfo.InvariantCulture)}\r\n",timed);
+});
+Test("Charts that use none of 0.29.0 draw byte for byte as 0.28.0 did, in both finishes, gradient IDs included, and blocks define no IDs",()=>{
+    // Five rows of the release baseline, hashed by 0.28.0: its own specs rebuilt here, refined and classic. They cover the paths
+    // blocks touch: the X axis, the labels under it, the Y axes of each pane, the column outline and its fade, and legend keys.
+    ChartPoint[] Points()=>Enumerable.Range(0,12).Select(i=>new ChartPoint(i,10+i*3+(i%3)*4,$"P{i}")).ToArray();
+    ChartPoint[] Signed()=>Points().Select((p,i)=>p with{Y=i%3==0?-p.Y/2:p.Y-20}).ToArray();
+    ChartSpec Base(ChartKind kind)=>new(){Kind=kind,Title="Baseline",Description="Default output",Series=[new("A",Points()),new("B",Points().Select(p=>p with{Y=p.Y+5}).ToArray())]};
+    var line=Base(ChartKind.Line);
+    (string Row,ChartSpec Spec,string Refined,string Classic)[] rows=[
+        ("Column/Light/True",Base(ChartKind.Column),"3B8FB1E4B8E95D71","874EE9ADD3323710"),
+        ("guard/time",line with{XAxis=AxisKind.Time,Series=line.Series.Select(s=>s with{Points=s.Points.Select(p=>p with{X=1767225600000d+p.X*86400000d,Label=null}).ToArray()}).ToArray()},"6F65F0C3788C47BD","48647563F4A154CE"),
+        ("guard/continuous-columns-negative",line with{Y2Label="Rate",Series=[new("Line",Points()),new("Signed",Signed()){Kind=ChartKind.Column},new("Rate",Signed().Select(p=>p with{Y=p.Y/4}).ToArray()){Kind=ChartKind.Column,Secondary=true}]},"61ED7B69CCD4230F","F49791902B33DC81"),
+        ("finish/capsule-value-labels",Base(ChartKind.Column) with{Title="Capsules",Style=ChartStyle.Light with{BarRadius=9999},Series=[new("Week",Signed()){ValueLabels=true,Fill=AreaFill.Fade},new("Last",Points().Select(p=>p with{Y=p.Y/2}).ToArray()){ValueLabels=true}]},"A48E1BFCC1A75412","08631EBEDF404578"),
+        ("finish/stacked-capsules",Base(ChartKind.StackedColumn) with{Title="Stacked capsules",Style=ChartStyle.Midnight,Series=[new("A",Signed()),new("B",Points()),new("C",Signed().Select(p=>p with{Y=p.Y<0?p.Y:null}).ToArray())]},"E8ED2DBF9D3045E1","61E456DA5633643A")];
+    foreach(var (row,spec,refined,classic) in rows)
+    {
+        Check(Hash16(ChartSvg.Render(spec))==refined,$"{row} is not 0.28.0's: {Hash16(ChartSvg.Render(spec))}");
+        Check(Hash16(ChartSvg.Render(Classic(spec)))==classic,$"{row} is not 0.28.0's in the classic finish: {Hash16(ChartSvg.Render(Classic(spec)))}");
+    }
+    // The capsules' fade is a gradient, so its ID, named after the spec's hash, is 0.28.0's too.
+    Check(ChartSvg.Render(rows[3].Spec).Contains("<linearGradient id='lumen-"),"the capsule row defines no gradient");
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight,ChartStyle.Light with{Finish=ChartFinish.Classic}})
+    {
+        var svg=ChartSvg.Render(Sample(ChartKind.Blocks) with{Style=style,Series=[Sample(ChartKind.Blocks).Series[0] with{Zones=ZoneScale.CogganPower(250)}]});
+        Check(!svg.Contains(" id=")&&!svg.Contains("<defs")&&!svg.Contains("url("),$"{style.Background}: blocks define an ID");
+    }
+});
+Test("Blocks: the component zooms their X, reads a block in its status line and data table, keys zoned blocks by their zones, and hides them",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    string Drawn(LumenChart chart)=>(string)typeof(LumenChart).GetField("svg",flags)!.GetValue(chart)!;
+    var spec=Plan(ChartPoint.Block(0,4,150,"Warm-up"),ChartPoint.Block(4.5,5.5,250,"Interval"),ChartPoint.Block(6,10,120,"Cool-down")) with{XFormat=ValueFormat.Duration,
+        Series=[new("Plan",[ChartPoint.Block(0,240,150,"Warm-up"),ChartPoint.Block(270,330,250,"Interval"),ChartPoint.Block(360,600,120,"Cool-down")]){Zones=ZoneScale.CogganPower(250)},new("Power",[new(0,140),new(600,130)]){Kind=ChartKind.Line}]};
+    var html=RenderInside(null,spec);
+    Check(html.Contains("aria-label=\"Zoom in\"")&&html.Contains(ChartSvg.LegendKey(spec,0))&&html.Contains("Interval: 4:30 to 5:30, 250, Lactate threshold"),"the component offers no zoom, or lost the key or the block");
+    double before=0,after=0;string hidden="";
+    var shown=Operate(spec,async chart=>{
+        typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);
+        double Width(string svg)=>BlockBox(BlockPaths(XDocument.Parse(svg))[1]) is var b?b.Right-b.Left:0;
+        before=Width(Drawn(chart));
+        // Zooming in halves the X axis about its middle, so the block in the middle, which touches no other, is twice as wide.
+        typeof(LumenChart).GetMethod("Zoom",flags)!.Invoke(chart,[.5]);
+        after=Width(Drawn(chart));
+        typeof(LumenChart).GetMethod("ResetView",flags)!.Invoke(chart,[]);
+        typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[0]);hidden=Drawn(chart);typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[0]);
+        await chart.SelectPoint(0,1);
+    });
+    Check(Close(before,79.4)&&Close(after,158.8),$"zooming drew the middle block {after} wide, {before} before");
+    Check(shown.Contains("Plan: Interval, 4:30 to 5:30 = 250</span>"),"the status line does not read the block");
+    Check(shown.Contains("<tr><td>Plan</td><td>Interval</td><td>250 from 4:30 to 5:30</td></tr>")&&shown.Contains("<tr><td>Power</td><td>10:00</td><td>130</td></tr>"),"the data table does not read the block");
+    Check(!hidden.Contains("lumen-block")&&hidden.Contains("data-series='0'"),"hiding the blocks hid the line, or left the blocks");
+});
+Test("Sports page: the laps are the stream's run split where the stream marks the steps of its progression, its pace lap by lap on the elevation's distance axis",()=>{
+    var card=sports.Single(c=>c.Id=="laps");var spec=card.Spec;var track=latest.Track!;
+    Check(card.Section=="session"&&card.Wide&&spec.Kind==ChartKind.Blocks&&spec.YReversed&&spec.YFormat==ValueFormat.Duration&&spec.XLabel==Sports("elevation").XLabel,"the laps are not blocks of pace on a reversed axis in kilometres");
+    var laps=spec.Series.Single().Points;
+    // Four laps of 4, 4, 3 and 3 km, touching, the last ending where the run did; the stream marks 4, 8 and 11 km, where they meet.
+    Check(laps.Select(p=>p.X).SequenceEqual([0d,4,8,11])&&laps.Select(p=>p.XEnd!.Value).SequenceEqual([4d,8,11,Math.Round(latest.Metres/1000,2)])&&latest.Steps.Select(s=>s.Metres).SequenceEqual([4000d,4000,3000,3000]),
+        string.Join(" | ",laps.Select(p=>$"{p.X}-{p.XEnd}")));
+    Check(Sports("stream").Annotations.Select(a=>a.From).SequenceEqual(laps.Skip(1).Select(p=>Math.Round(SportsData.TimeAt(track,latest.Metres,p.X*1000)))),"the stream's markers are not where the laps meet");
+    // Each lap's pace is its time over its length; the four add up to the run, and each lap is faster than the last.
+    var ends=laps.Select((p,i)=>i==laps.Count-1?latest.Metres:p.XEnd!.Value*1000).ToArray();
+    var times=laps.Select((p,i)=>SportsData.TimeAt(track,latest.Metres,ends[i])-SportsData.TimeAt(track,latest.Metres,p.X*1000)).ToArray();
+    Check(laps.Select((p,i)=>p.Y==Math.Round(times[i]/(ends[i]-p.X*1000)*1000)).All(ok=>ok)&&Math.Abs(times.Sum()-latest.Seconds)<1e-6,"a lap's pace is not its time over its length");
+    Check(laps.Zip(laps.Skip(1)).All(p=>p.Second.Y<p.First.Y),"the progression does not get faster lap by lap");
+    // The kilometre splits inside each lap add up to it, to their rounding.
+    var splits=SportsData.Splits(latest);
+    Check(laps.Take(3).All(l=>Math.Abs(splits.Skip((int)l.X).Take((int)(l.XEnd!.Value-l.X)).Sum()-l.Y!.Value*(l.XEnd!.Value-l.X))<=(l.XEnd!.Value-l.X)*.5+.5*(l.XEnd!.Value-l.X)),"the splits and the laps disagree");
+    // The average pace is the run's, as the session's summary writes it, and the title reads the first and last laps.
+    var average=spec.Annotations.Single();
+    Check(average.Label=="Average"&&average.From==latest.Seconds/latest.Metres*1000&&SportsData.SessionSummary().Contains($"{SportsData.Clock(average.From)} per km")&&spec.Title==$"4 laps from {SportsData.Clock(laps[0].Y!.Value)} to {SportsData.Clock(laps[^1].Y!.Value)} per km",spec.Title);
+    var names=Labels(Svg(spec));
+    Check(names.Length==4&&names[1]==$"Lap 2: 4 to 8, {SportsData.Clock(laps[1].Y!.Value)}",string.Join(" | ",names));
+});
+Test("Sports page: the next session is the first planned day's workout, in Coggan's levels at its threshold, its stress the performance chart's projected column",()=>{
+    var card=sports.Single(c=>c.Id=="next-session");var spec=card.Spec;var next=athlete.Upcoming[0];
+    Check(card.Section=="load"&&card.Wide&&spec.Kind==ChartKind.Blocks&&spec.XFormat==ValueFormat.Duration&&spec.IncludeZero,"the next session is not a workout of blocks over planned time");
+    Check(sports.SkipWhile(c=>c.Id!="performance").Skip(1).First().Id=="next-session","the next session does not follow the performance chart");
+    // It is the first planned day, the Tuesday after today, the Monday between a rest day; its stress is the day's projected column.
+    var daily=Sports("performance").Series.Single(s=>s.Name=="Daily stress").Points;
+    Check(next.Day==SportsData.Today.AddDays(2)&&athlete.Planned[0]==(next.Day,next.Stress)&&daily.Single(p=>DayOf(p.X)==SportsData.Today.AddDays(1)).Y==0&&daily.Single(p=>DayOf(p.X)==next.Day).Y==next.Stress,"the next session is not the first projected day");
+    Check(spec.Title==$"Tuesday: {next.Name.ToLowerInvariant()}, stress {next.Stress.ToString(CultureInfo.InvariantCulture)}"&&spec.Description==$"{SportsData.HoursMinutes(spec.Series[0].Points[^1].XEnd!.Value)} · 4 × 800 m at 324 W, threshold 300 W",spec.Title+" | "+spec.Description);
+    // Its steps: a 2 km warm-up, four 800 m repeats each followed by 400 m easy, and a 1.5 km cool-down, planned against the run's
+    // threshold of 300 W at the season's final threshold pace, each step as long as its length takes at its target.
+    var blocks=spec.Series.Single().Points;
+    Check(next.Sport==Sport.Run&&next.Ftp==75*1000/SportsData.PaceAfter&&spec.Series[0].Zones!.Zones.Select(z=>z.Upper).SequenceEqual(ZoneScale.CogganPower(300).Zones.Select(z=>z.Upper))&&spec.Annotations.Single().From==300,"the threshold is not the run's");
+    Check(blocks.Select(b=>b.Label).SequenceEqual(["Warm-up, 2 km","Repeat 1, 800 m","Recovery, 400 m","Repeat 2, 800 m","Recovery, 400 m","Repeat 3, 800 m","Recovery, 400 m","Repeat 4, 800 m","Recovery, 400 m","Cool-down, 1.5 km"]),string.Join(" | ",blocks.Select(b=>b.Label)));
+    Check(blocks[0].X==0&&blocks.Zip(blocks.Skip(1)).All(p=>p.First.XEnd==p.Second.X)&&blocks.Zip(next.Steps).All(p=>p.First.Y==Math.Round(p.Second.Watts)&&Math.Abs(p.First.XEnd!.Value-p.First.X-p.Second.Seconds)<=1)
+        &&next.Steps.Zip(blocks).All(p=>Math.Abs(p.First.Seconds-p.First.Metres/(1000/SportsData.PaceAfter*p.First.Watts/next.Ftp))<1e-9),"a step is not as long as its length takes at its target");
+    Check(Math.Abs(next.Steps.Sum(s=>s.Metres)-next.Metres)<50,"the plan is not the run simulated");
+    // The repeats are VO2max and the easy stretches endurance, so the blocks read the session at a glance in every brand's ramp.
+    var names=Labels(Svg(spec));
+    Check(names[1]==$"Repeat 1, 800 m: {SportsData.Clock(blocks[1].X)} to {SportsData.Clock(blocks[1].XEnd!.Value)}, 324, VO2max"&&names[2].EndsWith(", 186, Endurance")&&names[0].EndsWith(", 228, Tempo"),string.Join(" | ",names));
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight})
+    {
+        var fills=Svg(spec with{Style=style}).Descendants(ns+"path").Where(p=>(string?)p.Attribute("class")=="lumen-block").Select(p=>(string)p.Attribute("fill")!).ToArray();
+        Check(fills.Length==10&&fills.Distinct().SequenceEqual([style.Zones[2],style.Zones[4],style.Zones[1]])&&fills.All(f=>Contrast(f,style.Background)>=3),$"{style.Background}: {string.Join(", ",fills.Distinct())}");
     }
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");

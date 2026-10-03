@@ -221,11 +221,12 @@ public static class ChartSvg
     /// <summary>
     /// A refined legend key in the 14 × 9 box whose top left is (<paramref name="x"/>, <paramref name="y"/>), shaped like the
     /// series' mark: a short line for a line, dashed when the whole series is projected; a dot for scatter points and bubbles;
-    /// a rounded bar for a timeline's lane and an upright capsule for range bars; and a square for columns, bars, areas and
-    /// the rest. A key whose series draws in colours other than its own is split
-    /// into them, left to right: up to four of the point colours when every drawn point has one, as time-in-zone bars do, a
-    /// donut's slice colours, a gauge's zone or gradient colours, a heatmap row's low and high colours, a calendar's zone colours
-    /// or its ramp's low and high colours, and the rising and falling colours of candles and OHLC bars.
+    /// a rounded bar for a timeline's lane and an upright capsule for range bars; two steps, the second taller, for blocks; and a
+    /// square for columns, bars, areas and the rest. A key whose series draws in colours other than its own is split
+    /// into them, left to right: up to four of the point colours when every drawn point has one, as time-in-zone bars do, up to
+    /// four of the colours zoned blocks draw in, a donut's slice colours, a gauge's zone or gradient colours, a heatmap row's low
+    /// and high colours, a calendar's zone colours or its ramp's low and high colours, and the rising and falling colours of
+    /// candles and OHLC bars.
     /// </summary>
     internal static string Key(ChartSpec spec, int index, ChartStyle style, double x, double y)
     {
@@ -239,6 +240,8 @@ public static class ChartSvg
             : spec.Kind == ChartKind.Donut ? series.Points.Select((p, i) => (p, i)).Where(t => t.p.Y > 0).Select(t => t.p.Color ?? style.SeriesColor(t.i)).Distinct().Take(4).ToArray()
             : spec.Kind == ChartKind.Gauge && spec.YZones is { } zones ? zones.Zones.Select((zone, i) => zone.Color ?? style.Zones[i]).Distinct().Take(4).ToArray()
             : spec.Kind == ChartKind.Gauge && series.Gradient is { } stops ? stops.Select(stop => stop.Color).Distinct().Take(4).ToArray()
+            // Blocks coloured by zone are keyed by the zone colours they draw in, a point's own colour first.
+            : mark == ChartKind.Blocks && series.Zones is { } levels && drawn.Length > 0 ? drawn.Select(p => p.Color ?? ZoneColor(style, levels, levels.IndexOf(p.Y!.Value))).Distinct().Take(4).ToArray()
             : drawn.Length > 0 && drawn.All(p => p.Color is not null) ? drawn.Select(p => p.Color!).Distinct().Take(4).ToArray()
             : [SeriesColor(series, index, style)];
         if (inks.Count == 0) inks = [SeriesColor(series, index, style)];
@@ -255,6 +258,8 @@ public static class ChartSvg
         // A timeline's span is a rounded bar along X, and a range bar a capsule standing upright.
         if (mark == ChartKind.Timeline) return $"<rect x='{N(x)}' y='{N(y + 1.5)}' width='14' height='6' rx='3' fill='{inks[0]}'/>";
         if (mark == ChartKind.Range) return $"<rect x='{N(x + 4)}' y='{N(y)}' width='6' height='9' rx='3' fill='{inks[0]}'/>";
+        // Blocks are keyed by two steps side by side, the second taller, a hairline apart.
+        if (mark == ChartKind.Blocks) return $"<rect x='{N(x + 1)}' y='{N(y + 4)}' width='5.5' height='5' fill='{inks[0]}'/><rect x='{N(x + 7.5)}' y='{N(y)}' width='5.5' height='9' fill='{inks[0]}'/>";
         return mark is ChartKind.Scatter or ChartKind.Bubble
             ? $"<circle cx='{N(x + 7)}' cy='{middle}' r='4.5' fill='{inks[0]}'/>"
             : $"<rect x='{N(x + 2.5)}' y='{N(y)}' width='9' height='9' rx='2' fill='{inks[0]}'/>";
@@ -307,7 +312,8 @@ public static class ChartSvg
         var bubbles = s.Series.Where(x => Mark(s, x) == ChartKind.Bubble).SelectMany(x => x.Points).ToArray();
         var maxSize = bubbles.Length == 0 ? 0 : bubbles.Max(point => point.Size);
         var cats = points.Select(p => p.X).Distinct().Order().ToArray();
-        var xs = Axis.Create(s.XAxis, points.Select(p => p.X), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone),
+        // A block reaches to its XEnd, and only a block has one here.
+        var xs = Axis.Create(s.XAxis, points.Select(p => p.X).Concat(points.Where(p => p.XEnd.HasValue).Select(p => p.XEnd!.Value)), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone),
             weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null) with { ValueFormat = s.XFormat };
         var plots = Plots(s, cats, points);
         // A range bar stands centred on its X, so a continuous chart that draws range bars insets its X axis by half the slot
@@ -376,7 +382,9 @@ public static class ChartSvg
                 }
                 else
                 {
-                    var labels = points.Where(p => p.Label is not null && p.X >= xs.Min && p.X <= xs.Max).DistinctBy(p => p.X).OrderBy(p => p.X).ToArray();
+                    // A block's label names the block, not the moment it starts, so the axis keeps its ticks under blocks.
+                    var labels = s.Series.Where(series => Mark(s, series) != ChartKind.Blocks).SelectMany(series => series.Points)
+                        .Where(p => p.Label is not null && p.X >= xs.Min && p.X <= xs.Max).DistinctBy(p => p.X).OrderBy(p => p.X).ToArray();
                     if (labels.Length is > 0 and <= 24)
                     {
                         var step = Math.Max(1, (int)Math.Ceiling(labels.Length / 7d));
@@ -536,6 +544,27 @@ public static class ChartSvg
                         Datum(w, si, pi, RangeLabel(series, p, xs, scale, several), Capsule(w, from, share, At(low), At(high), p.Y is { } y ? At(y) : null, p.Color ?? color));
                     }
                 }
+                else if (mark == ChartKind.Blocks)
+                {
+                    // A block covers its X to its XEnd exactly and stands on the bottom edge of its pane, rising to its Y on its
+                    // series' own axis, so a reversed pace axis raises it from the slowest pace and one that includes zero from
+                    // zero. Where a block in the series ends as the next begins, each gives up half a hairline there, or a quarter
+                    // of its width when it is narrower than two, so the steps read as steps.
+                    var several = s.Series.Count(other => Mark(s, other) == ChartKind.Blocks) > 1;
+                    var starts = series.Points.Select(p => p.X).ToHashSet();
+                    var ends = series.Points.Select(p => p.XEnd!.Value).ToHashSet();
+                    var radius = Math.Min(w.Style.BarRadius ?? 4, 6);
+                    for (var pi = 0; pi < series.Points.Count; pi++)
+                    {
+                        var p = series.Points[pi]; var end = p.XEnd!.Value;
+                        double from = X(p.X), to = X(end);
+                        var gap = Math.Min(.5, (to - from) / 4);
+                        if (ends.Contains(p.X)) from += gap;
+                        if (starts.Contains(end)) to -= gap;
+                        var far = Math.Min(At(p.Y!.Value), bottom);
+                        Datum(w, si, pi, BlockLabel(series, p, xs, scale, several), Block(from, far, to - from, bottom - far, radius, Ink(p)));
+                    }
+                }
                 else for (var pi = 0; pi < series.Points.Count; pi++)
                 {
                     var p = series.Points[pi]; if (!p.Y.HasValue) continue;
@@ -686,17 +715,36 @@ public static class ChartSvg
         if (w.Style.BarRadius is not { } radius) return $"<rect x='{N(x)}' y='{N(y)}' width='{N(width)}' height='{N(height)}' rx='2' fill='{paint}'/>";
         var upright = end is End.Top or End.Bottom;
         var r = outermost ? Math.Min(radius, Math.Min((upright ? width : height) / 2, upright ? height : width)) : 0;
+        return $"<path d='{Outline(x, y, width, height, end, r)}' fill='{paint}'/>";
+    }
+
+    /// <summary>The outline of a bar whose far end is <paramref name="end"/>: that end's two corners rounded by
+    /// <paramref name="r"/>, already clamped, and its baseline end square.</summary>
+    private static string Outline(double x, double y, double width, double height, End end, double r)
+    {
         string Arc(double toX, double toY) => r > 0 ? $" A{N(r)},{N(r)} 0 0 1 {N(toX)},{N(toY)}" : "";
         double right = x + width, bottom = y + height;
-        var d = end switch
+        return end switch
         {
             End.Top => $"M{N(x)},{N(bottom)} L{N(x)},{N(y + r)}{Arc(x + r, y)} L{N(right - r)},{N(y)}{Arc(right, y + r)} L{N(right)},{N(bottom)} Z",
             End.Bottom => $"M{N(right)},{N(y)} L{N(right)},{N(bottom - r)}{Arc(right - r, bottom)} L{N(x + r)},{N(bottom)}{Arc(x, bottom - r)} L{N(x)},{N(y)} Z",
             End.Right => $"M{N(x)},{N(y)} L{N(right - r)},{N(y)}{Arc(right, y + r)} L{N(right)},{N(bottom - r)}{Arc(right - r, bottom)} L{N(x)},{N(bottom)} Z",
             _ => $"M{N(right)},{N(bottom)} L{N(x + r)},{N(bottom)}{Arc(x, bottom - r)} L{N(x)},{N(y + r)}{Arc(x + r, y)} L{N(right)},{N(y)} Z"
         };
-        return $"<path d='{d}' fill='{paint}'/>";
     }
+
+    /// <summary>A block from <paramref name="x"/> across <paramref name="width"/>, from its top at <paramref name="y"/> down to
+    /// the bottom edge of its plot, <paramref name="height"/> below. Its far end, the top, is rounded by <paramref name="radius"/>,
+    /// clamped to half its width and to its height, and the end it stands on is square.</summary>
+    private static string Block(double x, double y, double width, double height, double radius, string ink) =>
+        $"<path class='lumen-block' d='{Outline(x, y, width, height, End.Top, Math.Max(0, Math.Min(radius, Math.Min(width / 2, height))))}' fill='{ink}'/>";
+
+    /// <summary>A block's name: its label, its span in the X axis's format, its height in its own axis's and its zone where its
+    /// series has zones — <c>Lap 3: 1 to 2, 4:52</c> or <c>Interval 2: 10:00 to 14:00, 275, Lactate threshold</c>. A block
+    /// without a label is led by its series' name, and so is every block where several series draw blocks.</summary>
+    private static string BlockLabel(ChartSeries s, ChartPoint p, Axis x, Axis y, bool several) =>
+        $"{(p.Label is null ? s.Name : several ? $"{s.Name}, {p.Label}" : p.Label)}: {x.Format(p.X)} to {x.Format(p.XEnd!.Value)}, {y.Format(p.Y!.Value)}" +
+        (s.Zones is { } zones ? $", {zones.Zones[zones.IndexOf(p.Y.Value)].Name}" : "");
 
     /// <summary>A column's fade on its own box: its colour at the baseline, lighter towards the far end, up or down.</summary>
     private static string Lighter(string ink, End end)
@@ -800,6 +848,9 @@ public static class ChartSvg
         return (path.ToString(), traced.ToArray());
     }
 
+    /// <summary>How high the lowest block stands, as a fraction of its plot's height, on an axis fitted to the data.</summary>
+    private const double Rise = 1 / 6d;
+
     /// <summary>
     /// The main plot and the panes under it, top to bottom, each with the Y axes its own series are measured against. The
     /// height between the title and the X axis is shared out by weight, the main plot weighing 1, after a fixed gap
@@ -830,11 +881,25 @@ public static class ChartSvg
                 }
             // An axis that carries columns or an area measures them from zero, whatever kind the chart is.
             bool Filled(bool right) => mine.Any(x => x.Secondary == right && Mark(s, x) is ChartKind.Column or ChartKind.Area);
-            var ys = Axis.Create(pane.YAxis, values, zero || Filled(false), pane.YMin, pane.YMax) with { ValueFormat = pane.YFormat, Reversed = pane.YReversed };
+            // Blocks stand on the bottom edge of the plot, so an axis fitted to them would leave the lowest — the slowest, on a
+            // reversed axis — with no height. Unless the axis is held at zero or its bottom is set, its bottom moves out until
+            // that block stands a sixth of the plot's height, measured in the axis's own space.
+            Axis Footed(Axis axis, bool right, bool held, double? bottomBound)
+            {
+                if (held || bottomBound is not null) return axis;
+                var heights = mine.Where(x => x.Secondary == right && Mark(s, x) == ChartKind.Blocks).SelectMany(x => x.Points)
+                    .Where(p => p.Y.HasValue).Select(p => axis.Map(p.Y!.Value, 0, 1)).ToArray();
+                if (heights.Length == 0 || heights.Min() >= Rise) return axis;
+                var foot = axis.Invert((heights.Min() - Rise) / (1 - Rise), 0, 1);
+                return axis.Reversed ? axis with { Max = foot } : axis with { Min = foot };
+            }
+            var ys = Footed(Axis.Create(pane.YAxis, values, zero || Filled(false), pane.YMin, pane.YMax) with { ValueFormat = pane.YFormat, Reversed = pane.YReversed },
+                false, zero || Filled(false), pane.YReversed ? pane.YMax : pane.YMin);
             var paired = mine.Any(x => x.Secondary);
             var secondValues = mine.Where(x => x.Secondary).SelectMany(x => x.Points).Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();
             foreach (var p in Bounded(true)) { secondValues.Add(p.Low!.Value); secondValues.Add(p.High!.Value); }
-            var ys2 = paired ? Axis.Create(pane.Y2Axis, secondValues, zero || Filled(true), pane.Y2Min, pane.Y2Max) with { ValueFormat = pane.Y2Format, Reversed = pane.Y2Reversed } : ys;
+            var ys2 = paired ? Footed(Axis.Create(pane.Y2Axis, secondValues, zero || Filled(true), pane.Y2Min, pane.Y2Max) with { ValueFormat = pane.Y2Format, Reversed = pane.Y2Reversed },
+                true, zero || Filled(true), pane.Y2Reversed ? pane.Y2Max : pane.Y2Min) : ys;
             var below = k == plots.Length - 1 ? bottom : top + room * (pane.Weight / weight);
             plots[k] = (pane, top, below, ys, ys2, paired);
             top = below + gap;
@@ -915,7 +980,7 @@ public static class ChartSvg
             w.Add($"<path d='{path}' fill='none' stroke='{ink}' stroke-width='{N(width)}' stroke-linejoin='round'{(dashed ? $" stroke-dasharray='{dash}'" : "")}{Rounded(w)}/>");
     }
 
-    private static int Layer(ChartKind mark) => mark switch { ChartKind.Band => 0, ChartKind.Area => 1, ChartKind.Column or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc => 2, ChartKind.Line => 3, _ => 4 };
+    private static int Layer(ChartKind mark) => mark switch { ChartKind.Band => 0, ChartKind.Area => 1, ChartKind.Column or ChartKind.Range or ChartKind.Blocks or ChartKind.Candlestick or ChartKind.Ohlc => 2, ChartKind.Line => 3, _ => 4 };
 
     /// <summary>
     /// Each zone as a band on the value axis, drawn through the annotation path so it clips, pans and zooms as a Y

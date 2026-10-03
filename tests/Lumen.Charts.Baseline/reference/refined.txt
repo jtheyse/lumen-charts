@@ -82,6 +82,10 @@ Calendar/Light/True F3DE161110D7CE89
 Calendar/Light/False E8A60ED3A5C57B0D
 Calendar/Dark/True 62BD0B509A7518E5
 Calendar/Dark/False 04246375C38100C7
+Blocks/Light/True ED303664D2DE44C5
+Blocks/Light/False 9282128E17D5FED8
+Blocks/Dark/True C3463040973B7A76
+Blocks/Dark/False C15CEECD4D8BFF83
 density B8DA3510C58CDE6C
 annotated 90C7B27AF8A858FD
 branded 7F99370281B37B79
@@ -241,3 +245,12 @@ calendar/sunday-start 4F7A9661EEF2807F
 calendar/year-phone 46A8978408D251B2
 calendar/weeks-midnight 3E87293EB4152192
 calendar/months-midnight 0FE88072B7CC8733
+blocks/laps-reversed-pace 4E83D6259A1CDA12
+blocks/workout-zoned-power 5652CF60CFDFABCF
+blocks/beside-line F075E2E8AA38107A
+blocks/touching-and-apart 4360380D2AD90F35
+blocks/pane 666F3EACB16B0DAE
+blocks/time-coloured 693040265F9CBEE1
+blocks/secondary AD233C9487676002
+blocks/laps-midnight 72271E47D421C806
+blocks/workout-midnight 0C26D3C6A849CAA3

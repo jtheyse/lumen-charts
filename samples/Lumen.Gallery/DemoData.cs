@@ -173,6 +173,21 @@ public static class DemoData
             title="See a season at a glance";desc="Simulated daily training stress, in tiers";x="";y="";
             xKind=Lumen.Charts.AxisKind.Time;
         }
+        if(kind==Lumen.Charts.ChartKind.Blocks)
+        {
+            // A structured threshold ride at an FTP of 250 W: a warm-up, a build, three eight-minute intervals with four minutes
+            // between them and a cool-down, each step a block as long as it lasts and as high as its target. The ride over it is
+            // sampled every 15 seconds, closing most of the gap to each target and wandering a little about it.
+            const double ftp=250;
+            (string Name,double Minutes,double Fraction)[] steps=[("Warm-up",10,.55),("Build",5,.75),("Interval 1",8,1),("Recovery",4,.5),("Interval 2",8,1),("Recovery",4,.5),("Interval 3",8,1),("Cool-down",8,.45)];
+            var plan=new List<Lumen.Charts.ChartPoint>();var at=0d;
+            foreach(var (name,minutes,fraction) in steps){plan.Add(Lumen.Charts.ChartPoint.Block(at,at+minutes*60,Math.Round(ftp*fraction),name));at+=minutes*60;}
+            var ride=new List<Lumen.Charts.ChartPoint>();var watts=110d;
+            for(var t=0d;t<=at;t+=15){watts+=(plan.Last(step=>step.X<=t).Y!.Value-watts)*.45;ride.Add(new(t,Math.Round(watts+random.Next(-14,15))));}
+            // The ride is drawn in the palette's rose, which none of the levels a threshold workout reaches is drawn in.
+            series=[new("Plan",plan){Zones=Lumen.Charts.ZoneScale.CogganPower(ftp)},new("Power",ride,Lumen.Charts.ChartStyle.Light.Series[4]){Kind=Lumen.Charts.ChartKind.Line}];
+            title="Hold the plan";desc="A simulated threshold ride in Coggan's power levels";x="Elapsed time";y="Power (W)";
+        }
         if(kind==Lumen.Charts.ChartKind.Bar) {title="Compare plans without the clutter";x="Month";}
         if(kind==Lumen.Charts.ChartKind.Scatter || kind==Lumen.Charts.ChartKind.Bubble)
         {
@@ -181,6 +196,9 @@ public static class DemoData
         }
         var spec=new Lumen.Charts.ChartSpec{Kind=kind,Theme=theme,XAxis=xKind,SkipWeekends=weekends,TimeSkips=holidays,Title=title,Description=desc,Series=series,XLabel=x,YLabel=y,Source="Source: deterministic demo data · not real results",Height=height,Panes=panes};
         if(kind==Lumen.Charts.ChartKind.Timeline) spec=spec with{TimeZone="Africa/Johannesburg"};
+        // The workout's power rises from zero, as Zwift and TrainingPeaks draw it, and the threshold is a reference line.
+        if(kind==Lumen.Charts.ChartKind.Blocks)
+            spec=spec with{XFormat=Lumen.Charts.ValueFormat.Duration,IncludeZero=true,Annotations=[new(Lumen.Charts.AnnotationAxis.Y,250){Label="FTP"}]};
         // The tiers are the Sports & performance page's, in the zone ramp's blue, green, gold and red, and today is the last day.
         if(kind==Lumen.Charts.ChartKind.Calendar)
             spec=spec with{YZones=SportsData.StressTiers(palette),Annotations=[new(Lumen.Charts.AnnotationAxis.X,series[0].Points[^1].X){Label="Today"}]};

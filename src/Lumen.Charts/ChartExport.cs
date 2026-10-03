@@ -16,7 +16,7 @@ public static class ChartExport
         var band=!prices&&spec.Series.Any(s=>ChartSvg.Mark(spec,s) is ChartKind.Band or ChartKind.Range);
         // A ring is measured against its series' goal, which the file carries beside its value.
         var rings=spec.Kind==ChartKind.Ring;
-        // A timeline's spans carry where each ends.
+        // A timeline's spans and a series of blocks carry where each ends.
         var spans=spec.Series.Any(s=>s.Points.Any(p=>p.XEnd.HasValue));
         var columns=(prices?",Open,High,Low,Close":band?",Low,High":rings?",Goal":"")+(spans?",XEnd":"");
         var result=new StringBuilder($"Series,X,{(time?"XTime,":"")}Y,Label,Size{columns}\r\n");

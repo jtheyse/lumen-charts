@@ -7,11 +7,11 @@ foreach($path in @('/health','/_framework/blazor.web.js','/_content/Lumen.Charts
  Verify ($r.StatusCode -eq 200) "Asset/health $path"
 }
 $r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 17 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'")) 'The Sports & performance page answers 200 and prerenders its seventeen simulated charts, each set to fit its card, last night''s sleep stages and the training calendar among them'
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 19 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'") -and $r.Content.Contains('id="laps"') -and $r.Content.Contains('id="next-session"') -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 14) 'The Sports & performance page answers 200 and prerenders its nineteen simulated charts, each set to fit its card, last night''s sleep stages, the training calendar, the run''s four laps and the next session''s ten steps among them'
 $r=Invoke-WebRequest "$BaseUrl/" -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('class="lumen-chart lumen-fit"') -and $r.Content.Contains('<b>21</b><span>Chart types</span>') -and $r.Content.Contains('>Calendar</button>')) 'The home page answers 200, its chart explorer set to fit its card, with twenty-one chart types and a calendar among them'
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('class="lumen-chart lumen-fit"') -and $r.Content.Contains('<b>22</b><span>Chart types</span>') -and $r.Content.Contains('>Calendar</button>') -and $r.Content.Contains('>Blocks</button>')) 'The home page answers 200, its chart explorer set to fit its card, with twenty-two chart types and a calendar and blocks among them'
 $types=Invoke-RestMethod "$BaseUrl/api/charts/types"
-Verify ($types.Count -eq 21 -and $types -contains 'Gauge' -and $types -contains 'Ring' -and $types -contains 'Timeline' -and $types -contains 'Range' -and $types -contains 'Calendar') 'Twenty-one chart types, gauge, ring, timeline, range and calendar among them'
+Verify ($types.Count -eq 22 -and $types -contains 'Gauge' -and $types -contains 'Ring' -and $types -contains 'Timeline' -and $types -contains 'Range' -and $types -contains 'Calendar' -and $types -contains 'Blocks') 'Twenty-two chart types, gauge, ring, timeline, range, calendar and blocks among them'
 foreach($kind in @('Line','Area','Scatter','Bubble','Column','Bar','StackedColumn','Donut','Heatmap','Radar')){
  $spec=@{title='API test';kind=$kind;series=@(@{name='Sample';points=@(@{x=0;y=2;label='A'},@{x=1;y=4;label='B'},@{x=2;y=3;label='C'})})}
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body ($spec|ConvertTo-Json -Depth 10) -SkipHttpErrorCheck
@@ -33,7 +33,8 @@ $families=@(
  @{name='Ring';marker="class='lumen-ring-progress'";body='{"title":"Activity","kind":"Ring","series":[{"name":"Move","goal":600,"points":[{"x":0,"y":540,"label":"kcal"}]},{"name":"Exercise","goal":30,"points":[{"x":0,"y":47,"label":"min"}]},{"name":"Stand","goal":12,"points":[{"x":0,"y":9,"label":"h"}]}]}'},
  @{name='Timeline';marker="class='lumen-span'";body='{"title":"Night","kind":"Timeline","xFormat":"TimeOfDay","series":[{"name":"Light","points":[{"x":82800,"xEnd":84600}]},{"name":"REM","points":[{"x":84600,"xEnd":86220}]}]}'},
  @{name='Range';marker="class='lumen-range'";body='{"title":"Heart rate","kind":"Range","xAxis":"Time","series":[{"name":"Heart rate","points":[{"x":1789171200000,"y":74,"low":52,"high":168,"label":"12 Sep"},{"x":1789257600000,"y":70,"low":48,"high":150,"label":"13 Sep"},{"x":1789344000000,"low":50,"high":140,"label":"14 Sep"}]}]}'},
- @{name='Calendar';marker="class='lumen-day'";body='{"title":"Training","kind":"Calendar","xAxis":"Time","timeZone":"America/New_York","yZones":{"zones":[{"name":"Easy","upper":50},{"name":"Hard","upper":"Infinity"}]},"annotations":[{"axis":"X","from":1789387200000,"label":"Race"}],"series":[{"name":"Stress","points":[{"x":1789387200000,"y":40,"label":"Ride"},{"x":1789390800000,"y":30},{"x":1789473600000,"y":0},{"x":1789560000000,"y":20}]}]}'})
+ @{name='Calendar';marker="class='lumen-day'";body='{"title":"Training","kind":"Calendar","xAxis":"Time","timeZone":"America/New_York","yZones":{"zones":[{"name":"Easy","upper":50},{"name":"Hard","upper":"Infinity"}]},"annotations":[{"axis":"X","from":1789387200000,"label":"Race"}],"series":[{"name":"Stress","points":[{"x":1789387200000,"y":40,"label":"Ride"},{"x":1789390800000,"y":30},{"x":1789473600000,"y":0},{"x":1789560000000,"y":20}]}]}'},
+ @{name='Blocks';marker="class='lumen-block'";body='{"title":"Workout","kind":"Blocks","xFormat":"Duration","includeZero":true,"yMax":300,"series":[{"name":"Plan","zones":{"zones":[{"name":"Easy","upper":187.5},{"name":"Tempo","upper":225},{"name":"Threshold","upper":"Infinity"}]},"points":[{"x":0,"xEnd":600,"y":150,"label":"Warm-up"},{"x":600,"xEnd":1080,"y":250,"label":"Interval 1"},{"x":1080,"xEnd":1320,"y":125,"label":"Recovery"}]},{"name":"Power","kind":"Line","points":[{"x":0,"y":118},{"x":660,"y":252},{"x":1200,"y":130}]}]}'})
 foreach($family in $families){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $family.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.LocalName -eq 'svg') "$($family.name) SVG response"
@@ -79,7 +80,7 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,"class='lumen-range'")).Count -eq 2 -and $r.Content.Contains("aria-label='Resting: 1, 48'")) 'A range series beside a line posted as JSON draws both'
 foreach($bad in @(@{body='{"kind":"Timeline","series":[{"name":"Light","points":[{"x":0,"xEnd":10},{"x":5,"xEnd":15}]}]}';reason='cannot overlap';name='Overlapping spans in one lane'},
   @{body=$timeline.body.Replace('"xEnd":84600','"xEnd":82800');reason='above its X';name='A span that ends where it starts'},
-  @{body='{"kind":"Line","series":[{"name":"S","points":[{"x":0,"y":1,"xEnd":2}]}]}';reason='timeline charts only';name='XEnd on a line chart'},
+  @{body='{"kind":"Line","series":[{"name":"S","points":[{"x":0,"y":1,"xEnd":2}]}]}';reason='series drawn as blocks';name='XEnd on a line chart'},
   @{body='{"kind":"Line","timelineConnectors":false,"series":[{"name":"S","points":[{"x":0,"y":1}]}]}';reason='only a timeline';name='Connectors turned off on a line chart'},
   @{body=$timeline.body.Replace('"kind":"Timeline",','"kind":"Timeline","annotations":[{"axis":"Y","from":1}],');reason='X annotations';name='A Y annotation on a timeline'},
   @{body=$timeline.body.Replace('{"name":"REM",','{"name":"REM","secondary":true,');reason='secondary axis';name='A secondary series on a timeline'},
@@ -104,6 +105,28 @@ foreach($bad in @(@{body=$calendar.body.Replace('"xAxis":"Time",','');reason='ti
   @{body=$calendar.body.Replace('"y":40,','"y":40,"color":"#123456",');reason='colours of their own';name='A point colour on a calendar'},
   @{body=$calendar.body.Replace('"y":20}','"y":-5}');reason='negative';name='A negative day on a calendar'},
   @{body='{"kind":"Line","calendarLayout":"Months","series":[{"name":"S","points":[{"x":0,"y":1}]}]}';reason='calendar charts only';name='A calendar layout on a line chart'})){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
+}
+# Blocks stand on the bottom edge of their plot exactly from X to XEnd, each named with its label, span, height and zone and coloured by
+# its zone, under the line beside them; laps rise on a reversed pace axis from past the slowest; a series' own kind draws them on a line
+# chart; and CSV carries where each ends.
+$blocks=$families|Where-Object{$_.name -eq 'Blocks'}
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $blocks.body
+Verify ($r.Content.Contains("aria-label='Warm-up: 0:00 to 10:00, 150, Easy'") -and $r.Content.Contains("aria-label='Interval 1: 10:00 to 18:00, 250, Threshold'") -and $r.Content.Contains("aria-label='Recovery: 18:00 to 22:00, 125, Easy'") -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 3 -and $r.Content.Contains("<path class='lumen-block' d='M76,344 L76,215 A4,4 0 0 1 80,211 ") -and $r.Content.Contains("fill='#2E9B58'/></g>") -and $r.Content.IndexOf("class='lumen-block'") -lt $r.Content.IndexOf("fill='none' stroke=")) 'Blocks posted as JSON stand on the plot''s bottom edge from their start, rounded at the top, each named and coloured by its zone, under the line beside them'
+$laps='{"title":"Laps","kind":"Blocks","yFormat":"Duration","yReversed":true,"annotations":[{"axis":"Y","from":280,"label":"Average"}],"series":[{"name":"Laps","points":[{"x":0,"xEnd":1,"y":300,"label":"Lap 1"},{"x":1,"xEnd":2,"y":280,"label":"Lap 2"},{"x":2,"xEnd":3,"y":260,"label":"Lap 3"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $laps
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains("aria-label='Lap 1: 0 to 1, 5:00'") -and $r.Content.Contains("<path class='lumen-block' d='M76,344 L76,303.66666667 A4,4 0 0 1 80,299.66666667 L336.16666667,299.66666667 A4,4 0 0 1 340.16666667,303.66666667 L340.16666667,344 Z'") -and $r.Content.Contains("L870,344 Z'") -and $r.Content.Contains('>Average: 4:40<')) 'Laps posted as JSON rise on a reversed pace axis from past the slowest, which stands a sixth of the plot, the hairline between neighbours, the last ending at the plot''s edge'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"kind":"Line","series":[{"name":"Power","points":[{"x":0,"y":100},{"x":10,"y":200}]},{"name":"Plan","kind":"Blocks","points":[{"x":0,"xEnd":5,"y":120},{"x":5,"xEnd":10,"y":180}]}]}'
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 2 -and $r.Content.Contains("aria-label='Plan: 5 to 10, 180'") -and $r.Content.Contains("aria-label='Power: 10, 200'")) 'Blocks as a series'' own kind beside a line posted as JSON draw both'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $blocks.body
+Verify ($r.Content.StartsWith("Series,X,Y,Label,Size,XEnd`r`n") -and $r.Content.Contains("`"Plan`",600,250,`"Interval 1`",1,1080`r`n") -and $r.Content.Contains("`"Power`",660,252,`"`",1,`r`n")) 'Blocks CSV carries where each block ends'
+foreach($bad in @(@{body='{"kind":"Blocks","series":[{"name":"Plan","points":[{"x":0,"xEnd":5,"y":1},{"x":4,"xEnd":6,"y":2}]}]}';reason='cannot overlap';name='Overlapping blocks in one series'},
+  @{body='{"kind":"Blocks","series":[{"name":"Plan","points":[{"x":0,"y":1}]}]}';reason='an XEnd above it';name='A block without an end'},
+  @{body='{"kind":"Blocks","series":[{"name":"Plan","points":[{"x":0,"xEnd":1}]}]}';reason='cannot be missing';name='A block without a height'},
+  @{body='{"kind":"Column","series":[{"name":"Plan","kind":"Blocks","points":[{"x":0,"xEnd":1,"y":1}]}]}';reason='no slot';name='Blocks on a column chart'},
+  @{body='{"kind":"Blocks","xAxis":"Log","series":[{"name":"Plan","points":[{"x":1,"xEnd":2,"y":1}]}]}';reason='linear or a time X axis';name='Blocks on a logarithmic X axis'},
+  @{body='{"kind":"Blocks","series":[{"name":"Plan","trend":true,"points":[{"x":0,"xEnd":1,"y":1},{"x":1,"xEnd":2,"y":2}]}]}';reason='no trend line';name='A trend through blocks'})){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
 }
