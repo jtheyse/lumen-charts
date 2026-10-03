@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Rendering-hash harness: hashes every baseline rendering so a release can prove which renderings moved. Kept out of the solution. -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><IsPackable>false</IsPackable></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/Lumen.Charts/Lumen.Charts.csproj" /></ItemGroup>
+</Project>

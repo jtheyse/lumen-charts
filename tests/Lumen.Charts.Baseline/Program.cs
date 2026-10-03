@@ -1,0 +1,434 @@
+using System.Security.Cryptography;
+using System.Text;
+using Lumen.Charts;
+
+if (args.FirstOrDefault() == "probe") { Probe.Run(); return; }
+
+// "classic" draws every row in the classic finish, set on the style each chart draws with, and writes classic.txt.
+// The property is looked up by name: code without it — anything before 0.24.0 — draws every spec exactly as given, so
+// on that code this mode reproduces the plain run. "svg-out <dir>" also writes each rendering there, for a contact sheet.
+var classicMode = args.Contains("classic");
+var svgOut = Array.IndexOf(args, "svg-out") is var svgAt and >= 0 ? args[svgAt + 1] : null;
+var finishProperty = typeof(ChartStyle).GetProperty("Finish");
+ChartStyle? Finished(ChartStyle? style, ChartTheme theme)
+{
+    if (!classicMode || finishProperty is null) return style;
+    var classic = (style ?? (theme == ChartTheme.Dark ? ChartStyle.Dark : ChartStyle.Light)) with { };
+    finishProperty.SetValue(classic, Enum.Parse(finishProperty.PropertyType, "Classic"));
+    return classic;
+}
+string Render(ChartSpec spec, bool includeTitles = true) => ChartSvg.Render(spec with { Style = Finished(spec.Style, spec.Theme) }, includeTitles: includeTitles);
+string Graph(GraphSpec spec) => GraphEngine.Render(spec with { Style = Finished(spec.Style, spec.Theme) });
+var svgs = new List<string>();
+
+// Hashes one representative rendering per chart kind and theme, plus annotations, a density scatter,
+// a branded chart and both graph layouts, so a refactor can prove nothing moved that should not.
+var lines = new List<string>();
+ChartPoint[] Points() => Enumerable.Range(0, 12).Select(i => new ChartPoint(i, 10 + i * 3 + (i % 3) * 4, $"P{i}")).ToArray();
+ChartSpec Spec(ChartKind kind, ChartTheme theme) => kind switch
+{
+    ChartKind.Candlestick or ChartKind.Ohlc => new() { Kind = kind, Theme = theme, Series = [new("P", Enumerable.Range(0, 8).Select(i => ChartPoint.Candle(i, 10 + i, 14 + i, 8 + i, 11 + i + (i % 2 == 0 ? 1 : -2))).ToArray())] },
+    ChartKind.Band => new() { Kind = kind, Theme = theme, Series = [new("F", Enumerable.Range(0, 8).Select(i => ChartPoint.Interval(i, 10 + i, 8 + i, 13 + i)).ToArray())] },
+    ChartKind.Histogram => new() { Kind = kind, Theme = theme, Series = [new("S", Enumerable.Range(0, 60).Select(i => new ChartPoint(i, i % 13 + (i == 7 ? 40 : 0))).ToArray())] },
+    ChartKind.Box => new() { Kind = kind, Theme = theme, Series = [new("S", Enumerable.Range(0, 60).Select(i => new ChartPoint(i, i % 13 + (i == 7 ? 40 : 0))).ToArray()), new("T", Enumerable.Range(0, 40).Select(i => new ChartPoint(i, i % 9 + 3)).ToArray())] },
+    ChartKind.Donut => new() { Kind = kind, Theme = theme, Series = [new("D", [new(0, 4, "A"), new(1, 3, "B"), new(2, 2, "C")])] },
+    ChartKind.Radar => new() { Kind = kind, Theme = theme, Series = [new("R", [new(0, 4, "A"), new(1, 3, "B"), new(2, 5, "C"), new(3, 2, "D")]), new("Q", [new(0, 2, "A"), new(1, 4, "B"), new(2, 3, "C"), new(3, 4, "D")])] },
+    ChartKind.Heatmap => new() { Kind = kind, Theme = theme, Series = Enumerable.Range(0, 3).Select(r => new ChartSeries($"Row {r}", Enumerable.Range(0, 6).Select(c => new ChartPoint(c, (r * 7 + c * 5) % 17, $"C{c}")).ToArray())).ToArray() },
+    ChartKind.Gauge => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("Score", [new(0, 72, "Score")])] },
+    ChartKind.Ring => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("Move", [new(0, 540, "kcal")]) { Goal = 600 }, new("Exercise", [new(0, 47, "min")]) { Goal = 30 }, new("Stand", [new(0, 9, "h")]) { Goal = 12 }] },
+    ChartKind.Timeline => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("A", [ChartPoint.Span(0, 2), ChartPoint.Span(5, 7)]), new("B", [ChartPoint.Span(2, 5), ChartPoint.Span(7, 9, "Last")]), new("C", [ChartPoint.Span(9, 12)])] },
+    ChartKind.Range => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("R", Enumerable.Range(0, 8).Select(i => ChartPoint.Interval(i, i % 3 == 0 ? null : 10 + i, 6 + i, 15 + i * 2, $"P{i}")).ToArray())] },
+    ChartKind.Calendar => new() { Kind = kind, Theme = theme, XAxis = AxisKind.Time, Title = "Baseline", Description = "Default output", Series = [new("C", Enumerable.Range(0, 56).Select(i => new ChartPoint(1788825600000d + i * 86400000d, i % 7 == 0 ? 0 : 10 + i * 3 % 40)).ToArray())] },
+    _ => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("A", Points()), new("B", Points().Select(p => p with { Y = p.Y + 5 }).ToArray())] }
+};
+foreach (var kind in Enum.GetValues<ChartKind>())
+    foreach (var theme in Enum.GetValues<ChartTheme>())
+        foreach (var titles in new[] { true, false })
+            lines.Add($"{kind}/{theme}/{titles} {Hash(Render(Spec(kind, theme), includeTitles: titles))}");
+lines.Add($"density {Hash(Render(new ChartSpec { Kind = ChartKind.Scatter, DensityCells = 20, Series = [new("S", Enumerable.Range(0, 400).Select(i => new ChartPoint(i % 37, i % 23)).ToArray())] }))}");
+lines.Add($"annotated {Hash(Render(Spec(ChartKind.Line, ChartTheme.Light) with { Annotations = [new(AnnotationAxis.Y, 25) { Label = "Target" }, new(AnnotationAxis.X, 3) { To = 6, Label = "Window" }] }))}");
+lines.Add($"branded {Hash(Render(Spec(ChartKind.Area, ChartTheme.Light) with { Style = ChartStyle.Light with { Background = "#F6F3EE", Series = ["#1D4E89", "#B03A2E"], FontFamily = "Georgia,serif" } }))}");
+var graph = new GraphSpec { Nodes = [new("a", "A"), new("b", "B"), new("c", "C"), new("d", "D")], Edges = [new("a", "b"), new("b", "c"), new("a", "c", "long"), new("c", "d"), new("d", "d")] };
+foreach (var layout in Enum.GetValues<GraphLayout>())
+    foreach (var theme in Enum.GetValues<ChartTheme>())
+        lines.Add($"graph/{layout}/{theme} {Hash(Graph(graph with { Layout = layout, Theme = theme }))}");
+var box = Spec(ChartKind.Box, ChartTheme.Light);
+lines.Add($"box-summary {Hash(Render(box with { Series = [.. box.Series, new("U", []) { Summary = new(4, 6, 9, 1, 14, [20, .5]) }] }))}");
+var histogram = Spec(ChartKind.Histogram, ChartTheme.Light);
+lines.Add($"histogram-two {Hash(Render(histogram with { Series = [.. histogram.Series, new("T", Enumerable.Range(0, 40).Select(i => new ChartPoint(i, i % 9 + 3)).ToArray())] }))}");
+// Guards for the axis code 0.19.0 touches: log, time and secondary axes, minor grids and trends.
+var line = Spec(ChartKind.Line, ChartTheme.Light);
+ChartSeries[] Unlabelled(Func<double, double> x) => line.Series.Select(s => s with { Points = s.Points.Select(p => p with { X = x(p.X), Label = null }).ToArray() }).ToArray();
+lines.Add($"guard/log-y-minor {Hash(Render(line with { YAxis = AxisKind.Log, MinorGridlines = true }))}");
+lines.Add($"guard/log-x-minor {Hash(Render(line with { XAxis = AxisKind.Log, MinorGridlines = true, Series = Unlabelled(x => Math.Pow(2, x)) }))}");
+lines.Add($"guard/linear-minor {Hash(Render(line with { MinorGridlines = true, Series = Unlabelled(x => x * 7.5) }))}");
+lines.Add($"guard/time {Hash(Render(line with { XAxis = AxisKind.Time, Series = Unlabelled(x => 1767225600000d + x * 86400000d) }))}");
+lines.Add($"guard/secondary {Hash(Render(line with { Series = [line.Series[0], line.Series[1] with { Secondary = true, Points = line.Series[1].Points.Select(p => p with { Y = p.Y / 10 }).ToArray() }], Y2Label = "Rate" }))}");
+var scatter = Spec(ChartKind.Scatter, ChartTheme.Light);
+lines.Add($"guard/trend {Hash(Render(scatter with { Series = [.. scatter.Series.Select((s, i) => s with { Trend = true, Points = s.Points.Select(p => p with { Y = i == 0 ? p.Y : 60 - p.Y }).ToArray() })] }))}");
+var violin = Spec(ChartKind.Box, ChartTheme.Light) with { Kind = ChartKind.Violin, YAxis = AxisKind.Log, MinorGridlines = true };
+lines.Add($"guard/violin-log {Hash(Render(violin with { Series = [.. violin.Series.Select(s => s with { Points = s.Points.Select(p => p with { Y = p.Y + 1 }).ToArray() })] }))}");
+// 0.19.0: durations on a linear and a logarithmic axis, a reversed pace axis and compact numbers.
+lines.Add($"duration-line {Hash(Render(line with { XFormat = ValueFormat.Duration, MinorGridlines = true, Series = Unlabelled(x => x * 300) }))}");
+var ride = Enumerable.Range(0, 3600).Select(t => t % 600 < 15 ? 900d : t >= 1200 && t < 2400 ? 280 : 190 + t % 7).ToArray();
+lines.Add($"power-curve {Hash(Render(line with { XAxis = AxisKind.Log, XFormat = ValueFormat.Duration, Series = [ChartSeries.From("Best", Training.MeanMaximal(ride, Training.StandardDurations), p => p.Seconds, p => (double?)Math.Round(p.Value, 1))] }))}");
+lines.Add($"pace-reversed {Hash(Render(line with { YFormat = ValueFormat.Duration, YReversed = true, Annotations = [new(AnnotationAxis.Y, 300) { Label = "Target" }],
+    Series = [new("Pace", Enumerable.Range(0, 12).Select(i => new ChartPoint(i, 330 - i * 4 + i % 3 * 5)).ToArray()) { Trend = true }] }))}");
+lines.Add($"compact-column {Hash(Render(Spec(ChartKind.Column, ChartTheme.Light) with { YFormat = ValueFormat.Compact, Series = [new("Views", Enumerable.Range(0, 6).Select(i => new ChartPoint(i, 1500 + i * i * 240_000, $"W{i}")).ToArray())] }))}");
+// Guards for the paths 0.20.0 touches: sampled lines and areas, markers, category bars, donuts and Y annotations.
+var longRun = Enumerable.Range(0, 6000).Select(i => new ChartPoint(i, i % 997 == 500 ? null : Math.Round(100 + 40 * Math.Sin(i / 90.0) + i % 13, 1))).ToArray();
+lines.Add($"guard/sampled-line {Hash(Render(line with { Series = [new("Long", longRun), new("Echo", longRun.Select(p => p with { Y = p.Y + 9 }).ToArray())] }))}");
+lines.Add($"guard/sampled-area {Hash(Render(line with { Kind = ChartKind.Area, Theme = ChartTheme.Dark, Series = [new("Long", longRun)] }, includeTitles: false))}");
+lines.Add($"guard/area-gaps {Hash(Render(Spec(ChartKind.Area, ChartTheme.Light) with { Series = [new("A", Points().Select((p, i) => p with { Y = i is 4 or 9 ? null : p.Y }).ToArray(), "#123456")] }))}");
+lines.Add($"guard/markers {Hash(Render(scatter with { Series = [.. scatter.Series, new("Gaps", Points().Select((p, i) => p with { Y = i % 4 == 0 ? null : p.Y - 3 }).ToArray(), "#123456")] }))}");
+lines.Add($"guard/bubble-dark {Hash(Render(Spec(ChartKind.Bubble, ChartTheme.Dark) with { Series = [new("B", Points().Select((p, i) => p with { Size = 1 + i * i }).ToArray())] }, includeTitles: false))}");
+lines.Add($"guard/donut-many {Hash(Render(Spec(ChartKind.Donut, ChartTheme.Light) with { Series = [new("D", Enumerable.Range(0, 12).Select(i => new ChartPoint(i, 1 + i % 5, $"Slice {i}")).ToArray())] }))}");
+ChartAnnotation[] YRefs(double at, double from, double to) => [new(AnnotationAxis.Y, at) { Label = "Line" }, new(AnnotationAxis.Y, from) { To = to, Label = "Band", Color = "#B03A2E" }];
+foreach (var kind in new[] { ChartKind.Line, ChartKind.Area, ChartKind.Scatter, ChartKind.Column, ChartKind.Bar, ChartKind.StackedColumn, ChartKind.Band })
+    lines.Add($"guard/y-annotations-{kind} {Hash(Render(Spec(kind, ChartTheme.Dark) with { Annotations = YRefs(25, 30, 40) }))}");
+lines.Add($"guard/y-annotations-candles {Hash(Render(Spec(ChartKind.Candlestick, ChartTheme.Light) with { Annotations = YRefs(12, 14, 16) }))}");
+lines.Add($"guard/y-annotations-log {Hash(Render(line with { YAxis = AxisKind.Log, Annotations = YRefs(25, 30, 40) }))}");
+lines.Add($"guard/y-annotations-reversed {Hash(Render(line with { YReversed = true, Annotations = YRefs(25, 30, 40) }, includeTitles: false))}");
+// 0.20.0: a zone-coloured line crossing several bounds over its bands, time in zone, grade colours and zone-coloured scatter.
+var heart = ZoneScale.CogganHeartRate(170);
+var stream = Enumerable.Range(0, 2400).Select(t => Math.Round(95 + 85 * (1 - Math.Exp(-t / 400.0)) + 12 * Math.Sin(t / 70.0) + t % 5, 1)).ToArray();
+lines.Add($"zones/stream {Hash(Render(line with { XFormat = ValueFormat.Duration, YZones = heart, Series = [new("Heart rate", stream.Select((v, t) => new ChartPoint(t, v)).ToArray()) { Zones = heart }] }))}");
+lines.Add($"zones/stream-dark {Hash(Render(line with { Theme = ChartTheme.Dark, YZones = heart, Annotations = [new(AnnotationAxis.Y, 150) { Label = "Target" }], Series = [new("Heart rate", stream.Take(300).Select((v, t) => new ChartPoint(t, v)).ToArray()) { Zones = heart }] }, includeTitles: false))}");
+var seconds = Training.TimeInZone(stream, heart);
+lines.Add($"zones/time-in-zone {Hash(Render(Spec(ChartKind.Bar, ChartTheme.Light) with { YFormat = ValueFormat.Duration, Series = [new("Time in zone", heart.Zones.Select((z, i) => new ChartPoint(i, seconds[i], z.Name) { Color = ChartStyle.Light.Zones[i] }).ToArray())] }))}");
+double[] grade = [0, 1.5, 3, 6, 9, 7, 4, 1, -2, -5, -3, 0];
+string Grade(double g) => g >= 6 ? "#DD4B45" : g >= 3 ? "#DB6A1F" : g >= 1 ? "#A88200" : "#2E9B58";
+lines.Add($"zones/grade-area {Hash(Render(Spec(ChartKind.Area, ChartTheme.Light) with { Series = [new("Elevation", grade.Select((g, i) => new ChartPoint(i * 500, 300 + grade.Take(i).Sum() * 5) { Color = Grade(g) }).ToArray())] }))}");
+lines.Add($"zones/scatter {Hash(Render(scatter with { YZones = new([new("Low", 25), new("Middle", 40, "#123456"), new("High", double.PositiveInfinity)]), Series = [.. scatter.Series.Select(s => s with { Zones = new([new("Low", 25), new("Middle", 40, "#123456"), new("High", double.PositiveInfinity)]) })] }))}");
+// 0.20.1: zone bands on a horizontal bar chart share the annotation path the bar-chart fix touches, so they must not move.
+lines.Add($"guard/bar-zone-bands {Hash(Render(Spec(ChartKind.Bar, ChartTheme.Dark) with { YZones = new([new("Low", 20), new("Middle", 40, "#123456"), new("High", double.PositiveInfinity)]) }))}");
+// Guards for the paths 0.21.0 touches: the series loop and its order, each axis's zero, category slots, band extents,
+// bubble sizes, trends beside a secondary series and a density note over two series.
+var band = Spec(ChartKind.Band, ChartTheme.Light);
+lines.Add($"guard/band-secondary {Hash(Render(band with { Y2Label = "Rate", Series = [band.Series[0],
+    new("G", Enumerable.Range(0, 8).Select(i => ChartPoint.Interval(i, i % 3 == 1 ? null : 2 + i * .1, 1 + i * .1, 3 + i * .2)).ToArray()) { Secondary = true },
+    new("H", Enumerable.Range(0, 8).Select(i => i == 4 ? new ChartPoint(i, 12) : ChartPoint.Interval(i, 12 + i, 11 + i, 14 + i)).ToArray())] }))}");
+lines.Add($"guard/band-dark {Hash(Render(band with { Theme = ChartTheme.Dark, Series = [band.Series[0], new("H", Enumerable.Range(0, 8).Select(i => ChartPoint.Interval(i, 30 - i, 25 - i, 31 - i)).ToArray())] }, includeTitles: false))}");
+var column = Spec(ChartKind.Column, ChartTheme.Light);
+lines.Add($"guard/column-secondary {Hash(Render(column with { Y2Label = "Rate", Series = [.. column.Series, new("C", Points().Select((p, i) => p with { Y = i == 3 ? null : (p.Y - 20) / 10 }).ToArray()) { Secondary = true }] }))}");
+lines.Add($"guard/column-three {Hash(Render(column with { Theme = ChartTheme.Dark, Series = [.. column.Series, new("C", Points().Select((p, i) => p with { Y = i % 4 == 0 ? null : 20 - p.Y }).ToArray(), "#123456")] }, includeTitles: false))}");
+lines.Add($"guard/column-zones {Hash(Render(column with { Series = [column.Series[0] with { Zones = new([new("Low", 25), new("High", double.PositiveInfinity)]) }, column.Series[1] with { Points = column.Series[1].Points.Select((p, i) => i == 2 ? p with { Color = "#123456" } : p).ToArray() }] }))}");
+lines.Add($"guard/stacked-signed {Hash(Render(Spec(ChartKind.StackedColumn, ChartTheme.Light) with { Series = [new("A", Points()), new("B", Points().Select(p => p with { Y = -p.Y / 2 }).ToArray()), new("C", Points().Select(p => p with { Y = p.Y % 7 - 3 }).ToArray())] }))}");
+var bar = Spec(ChartKind.Bar, ChartTheme.Light);
+lines.Add($"guard/bar-three {Hash(Render(bar with { Series = [.. bar.Series, new("C", Points().Select(p => p with { Y = p.Y - 25 }).ToArray())] }))}");
+var area = Spec(ChartKind.Area, ChartTheme.Light);
+lines.Add($"guard/area-secondary {Hash(Render(area with { Y2Label = "Rate", Series = [area.Series[0], new("R", Points().Select(p => p with { Y = 40 - p.Y }).ToArray()) { Secondary = true }] }))}");
+lines.Add($"guard/line-intervals {Hash(Render(line with { Series = [new("I", Enumerable.Range(0, 8).Select(i => ChartPoint.Interval(i, 10 + i, -50, 90)).ToArray())] }))}");
+lines.Add($"guard/bubble-small {Hash(Render(Spec(ChartKind.Bubble, ChartTheme.Light) with { Series = [new("S", Points().Select((p, i) => p with { Size = .01 + i * .02 }).ToArray()), new("T", Points().Select(p => p with { Y = p.Y + 3, Size = .5 }).ToArray())] }))}");
+lines.Add($"guard/scatter-secondary-zero {Hash(Render(scatter with { IncludeZero = true, Series = [scatter.Series[0], scatter.Series[1] with { Secondary = true }] }))}");
+lines.Add($"guard/line-order {Hash(Render(line with { Y2Label = "Half", Series = [new("A", Points()) { Trend = true }, new("B", Points().Select(p => p with { Y = 50 - p.Y }).ToArray()) { Trend = true }, new("C", Points().Select(p => p with { Y = p.Y / 2 }).ToArray()) { Secondary = true }] }))}");
+lines.Add($"guard/density-two {Hash(Render(new ChartSpec { Kind = ChartKind.Scatter, DensityCells = 12, Series = [new("S", Enumerable.Range(0, 300).Select(i => new ChartPoint(i % 31, i % 17)).ToArray()), new("T", Enumerable.Range(0, 200).Select(i => new ChartPoint(i % 13 + 9, i % 11 + 4)).ToArray())] }))}");
+// 0.21.0: several marks in one chart. Twelve weeks of simulated training and two planned, through the load model.
+var first = new DateOnly(2026, 6, 1);
+double Day(DateOnly day) => TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+var load = Training.Load(Enumerable.Range(0, 98).Select(i => (first.AddDays(i), (double)((i % 7) switch { 0 => 0, 1 => 70 + i % 5 * 6, 2 => 55, 3 => 90 + i / 7 * 3, 4 => i % 14 == 4 ? 0 : 45, 5 => 140 + i % 3 * 12, _ => 100 }))), 55, 55);
+var planned = Day(first.AddDays(84));
+ChartSpec Performance(ChartTheme theme) => new()
+{
+    Kind = ChartKind.Line, Theme = theme, XAxis = AxisKind.Time, Title = "Performance management", Description = "Fitness, fatigue and form", YLabel = "Training stress", Y2Label = "Form",
+    Annotations = [new(AnnotationAxis.X, planned) { To = Day(first.AddDays(97)), Label = "Planned" }],
+    Series = [ChartSeries.From("Fitness", load, d => Day(d.Day), d => Math.Round(d.Fitness, 1)) with { ProjectedFrom = planned },
+        ChartSeries.From("Fatigue", load, d => Day(d.Day), d => Math.Round(d.Fatigue, 1)) with { ProjectedFrom = planned },
+        ChartSeries.From("Form", load, d => Day(d.Day), d => Math.Round(d.Form, 1)) with { Kind = ChartKind.Area, Secondary = true, ProjectedFrom = planned },
+        ChartSeries.From("Daily stress", load, d => Day(d.Day), d => d.Stress) with { Kind = ChartKind.Column }]
+};
+var weeks = Enumerable.Range(0, 12).Select(i => Day(first.AddDays(i * 7))).ToArray();
+ChartSpec Target(ChartTheme theme) => new()
+{
+    Kind = ChartKind.Band, Theme = theme, XAxis = AxisKind.Time, Title = "Load against target", YLabel = "Weekly stress",
+    Series = [new("Target", weeks.Select((x, i) => ChartPoint.Interval(x, 400 + i * 20, 340 + i * 17, 460 + i * 23)).ToArray()),
+        new("Weekly load", weeks.Select((x, i) => new ChartPoint(x, 420 + i * 18 + (i % 4 == 3 ? -160 : i % 3 * 35))).ToArray()) { Kind = ChartKind.Column }]
+};
+double[] volume = [6.5, 7.2, 8.1, 5.0, 7.9, 8.8, 9.4, 5.6, 9.1, 10.2, 10.8, 6.0];
+var rolling = Statistics.Rolling(volume.Select(v => (double?)v).ToArray(), 4, 1);
+ChartSpec Weekly(ChartTheme theme) => new()
+{
+    Kind = ChartKind.Column, Theme = theme, Title = "Weekly volume", YLabel = "Hours",
+    Series = [new("Volume", volume.Select((v, i) => new ChartPoint(i, v, $"W{i + 1}")).ToArray()),
+        new("Four-week average", rolling.Select((r, i) => new ChartPoint(i, Math.Round(r!.Mean, 2), $"W{i + 1}")).ToArray()) { Kind = ChartKind.Line }]
+};
+lines.Add($"mixed/performance {Hash(Render(Performance(ChartTheme.Light)))}");
+lines.Add($"mixed/performance-dark {Hash(Render(Performance(ChartTheme.Dark), includeTitles: false))}");
+lines.Add($"mixed/target {Hash(Render(Target(ChartTheme.Light)))}");
+lines.Add($"mixed/weekly-average {Hash(Render(Weekly(ChartTheme.Light)))}");
+lines.Add($"mixed/weekly-two-columns {Hash(Render(Weekly(ChartTheme.Dark) with { Series = [.. Weekly(ChartTheme.Dark).Series, new("Last year", volume.Select((v, i) => new ChartPoint(i, v - 1.5, $"W{i + 1}")).ToArray())] }))}");
+// Guards for the paths 0.22.0 touches: the frame, X labels and titles, the clip with its zones and annotations, column
+// slots, and candles and bars on trading axes, each drawn once per pane from now on.
+var opening = new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero);
+var sessions = Enumerable.Range(0, 45).Select(i => opening.AddDays(i)).Where(d => d.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) && d.Date != new DateTime(2026, 4, 3)).Take(28).ToArray();
+ChartPoint[] Prices() => sessions.Select((d, i) => ChartPoint.Candle(TimeAxis.Value(d), 100 + i, 104 + i + i % 3, 97 + i, 101 + i + (i % 2 == 0 ? 2 : -2))).ToArray();
+ChartAnnotation[] Marked(double y) => [new(AnnotationAxis.X, TimeAxis.Value(sessions[5])) { To = TimeAxis.Value(sessions[9]), Label = "Window" }, new(AnnotationAxis.Y, y) { Label = "Level" }, new(AnnotationAxis.X, TimeAxis.Value(sessions[20])) { Label = "Event" }];
+ChartSpec Trading(ChartKind kind, ChartTheme theme) => new() { Kind = kind, Theme = theme, Title = "Trading", XAxis = AxisKind.Time, SkipWeekends = true, TimeSkips = [TimeAxis.Day(new DateTime(2026, 4, 3))], XLabel = "Day", YLabel = "Price", Series = [new("P", Prices())] };
+lines.Add($"guard/candles-trading {Hash(Render(Trading(ChartKind.Candlestick, ChartTheme.Light) with { MinorGridlines = true, Annotations = Marked(112), YZones = new([new("Low", 105), new("High", double.PositiveInfinity)]) }))}");
+lines.Add($"guard/candles-log-reversed {Hash(Render(Trading(ChartKind.Candlestick, ChartTheme.Dark) with { YAxis = AxisKind.Log, YReversed = true, MinorGridlines = true, TimeZone = "America/New_York" }, includeTitles: false))}");
+lines.Add($"guard/ohlc-trading {Hash(Render(Trading(ChartKind.Ohlc, ChartTheme.Light) with { Annotations = Marked(118), YFormat = ValueFormat.Compact }))}");
+lines.Add($"guard/ohlc-zone-dark {Hash(Render(Trading(ChartKind.Ohlc, ChartTheme.Dark) with { TimeZone = "Asia/Kolkata", YReversed = true, Annotations = Marked(110) }, includeTitles: false))}");
+ChartSeries[] Rated(bool trend) => [line.Series[0] with { Trend = trend }, line.Series[1] with { Secondary = true, Trend = trend, Points = line.Series[1].Points.Select(p => p with { Y = p.Y * 40 }).ToArray() }];
+lines.Add($"guard/secondary-annotated {Hash(Render(line with { Y2Label = "Rate", MinorGridlines = true, Y2Format = ValueFormat.Compact, YZones = new([new("Low", 20), new("High", double.PositiveInfinity)]),
+    Annotations = [new(AnnotationAxis.Y, 30) { Label = "Target" }, new(AnnotationAxis.X, 2) { To = 4, Label = "Window" }, new(AnnotationAxis.X, 9) { Label = "Launch", Dashed = false }], Series = Rated(true) }))}");
+lines.Add($"guard/secondary-log-reversed {Hash(Render(line with { Theme = ChartTheme.Dark, Y2Label = "Rate", Y2Axis = AxisKind.Log, Y2Reversed = true, YReversed = true, MinorGridlines = true, Annotations = YRefs(25, 30, 40), Series = Rated(false) }, includeTitles: false))}");
+lines.Add($"guard/duration-secondary {Hash(Render(line with { XFormat = ValueFormat.Duration, YFormat = ValueFormat.Duration, YReversed = true, Y2Format = ValueFormat.Duration, MinorGridlines = true, Y2Label = "Moving time",
+    Annotations = [new(AnnotationAxis.Y, 300) { Label = "Target" }, new(AnnotationAxis.X, 1200) { To = 1800, Label = "Climb" }],
+    Series = [new("Pace", Enumerable.Range(0, 12).Select(i => new ChartPoint(i * 300, 330 - i * 4 + i % 3 * 5)).ToArray()) { Trend = true }, new("Moving", Enumerable.Range(0, 12).Select(i => new ChartPoint(i * 300, i * 290d)).ToArray()) { Secondary = true, ProjectedFrom = 2400 }] }))}");
+lines.Add($"guard/bar-minor {Hash(Render(bar with { MinorGridlines = true, XLabel = "Plan", YLabel = "Accounts", Annotations = YRefs(25, 30, 40), YZones = new([new("Low", 20), new("High", double.PositiveInfinity)]) }))}");
+lines.Add($"guard/column-minor-secondary {Hash(Render(column with { MinorGridlines = true, Y2Label = "Rate", XLabel = "Month", YLabel = "Volume", Annotations = YRefs(25, 30, 40), Series = [.. column.Series, new("C", Points().Select(p => p with { Y = p.Y / 10 }).ToArray()) { Secondary = true, Kind = ChartKind.Line }] }))}");
+lines.Add($"guard/density-secondary {Hash(Render(new ChartSpec { Kind = ChartKind.Scatter, DensityCells = 16, Y2Label = "Other", MinorGridlines = true, Series = [new("S", Enumerable.Range(0, 300).Select(i => new ChartPoint(i % 31, i % 17)).ToArray()), new("T", Enumerable.Range(0, 200).Select(i => new ChartPoint(i % 13 + 9, i % 11 * 40)).ToArray()) { Secondary = true }] }))}");
+lines.Add($"guard/time-columns {Hash(Render(new ChartSpec { Kind = ChartKind.Line, XAxis = AxisKind.Time, SkipWeekends = true, Title = "Volume", MinorGridlines = true, Annotations = Marked(150),
+    Series = [new("Close", Prices().Select(p => new ChartPoint(p.X, p.Close)).ToArray()), new("Volume", Prices().Select((p, i) => new ChartPoint(p.X, 80 + i * 7 % 50)).ToArray()) { Kind = ChartKind.Column }, new("Band", Prices().Select(p => ChartPoint.Interval(p.X, p.Close, p.Low!.Value, p.High!.Value)).ToArray()) { Kind = ChartKind.Band }] }))}");
+lines.Add($"guard/area-zones-dark {Hash(Render(Spec(ChartKind.Area, ChartTheme.Dark) with { MinorGridlines = true, XLabel = "Month", YLabel = "Accounts", YZones = new([new("Low", 20), new("Middle", 40, "#123456"), new("High", double.PositiveInfinity)]), Annotations = [new(AnnotationAxis.X, 0) { To = 2 }, new(AnnotationAxis.X, 11) { Label = "End" }] }, includeTitles: false))}");
+// 0.22.0: panes sharing one X axis. Candles with a five-day average and a volume pane on a trading axis, in both kinds and themes.
+var traded = Prices();
+var fiveDay = Statistics.Rolling(traded.Select(p => p.Close).ToArray(), 5);
+ChartSpec Market(ChartKind kind, ChartTheme theme) => Trading(kind, theme) with
+{
+    Height = 520, Annotations = Marked(112), Panes = [new() { Label = "Volume", Weight = .4, YFormat = ValueFormat.Compact }],
+    Series = [new("P", traded), new("Volume", traded.Select((p, i) => new ChartPoint(p.X, 1_200_000 + i * 370_000 % 900_000)).ToArray()) { Kind = ChartKind.Column, Pane = 1 },
+        new("Five-day average", traded.Select((p, i) => new ChartPoint(p.X, fiveDay[i] is { } r ? Math.Round(r.Mean, 2) : null)).ToArray()) { Kind = ChartKind.Line }]
+};
+// An hour's interval run every 10 seconds: heart rate over its zones, pace on a reversed duration axis, and the climb as an area.
+var effort = Enumerable.Range(0, 361).Select(i => i * 10).Select(t => t < 600 ? .3 + t / 2000d : t < 3000 ? (t - 600) % 420 < 240 ? 1 : .35 : .2).ToArray();
+double[] beats = new double[361], paces = new double[361];
+for (double i = 0, heartNow = 96, paceNow = 390; i < 361; i++)
+{
+    heartNow += (100 + 85 * effort[(int)i] - heartNow) * .2; paceNow += (400 - 160 * effort[(int)i] - paceNow) * .5;
+    beats[(int)i] = Math.Round(heartNow + i % 5 - 2); paces[(int)i] = Math.Round(paceNow + i % 7 - 3);
+}
+var heartZones = ZoneScale.CogganHeartRate(170);
+ChartSpec Stream(ChartTheme theme) => new()
+{
+    Kind = ChartKind.Line, Theme = theme, Title = "Activity stream", Description = "Heart rate, pace and climb", Height = 640, XFormat = ValueFormat.Duration, XLabel = "Elapsed time",
+    YLabel = "Heart rate (bpm)", YZones = heartZones, MinorGridlines = true,
+    Annotations = [new(AnnotationAxis.X, 600) { To = 840, Label = "First interval" }, new(AnnotationAxis.Y, 160) { Label = "Ceiling" }, new(AnnotationAxis.X, 3000) { Label = "Cool-down" }],
+    Panes = [new() { Label = "Pace (min/km)", Weight = .6, YFormat = ValueFormat.Duration, YReversed = true }, new() { Label = "Climb (m)" }],
+    Series = [new("Heart rate", beats.Select((b, i) => new ChartPoint(i * 10, b)).ToArray()) { Zones = heartZones },
+        new("Pace", paces.Select((p, i) => new ChartPoint(i * 10, p)).ToArray()) { Pane = 1, Trend = true },
+        new("Climb", Enumerable.Range(0, 361).Select(i => new ChartPoint(i * 10, Math.Round(24 + 16 * Math.Sin(i / 52d) + 6 * Math.Sin(i / 17d), 1))).ToArray()) { Pane = 2, Kind = ChartKind.Area }]
+};
+// A pane with a right-hand axis of its own under a main plot without one, and a logarithmic main plot over columns in a pane.
+ChartSpec Paired(ChartTheme theme) => line with
+{
+    Theme = theme, Title = "Two axes in a pane", Height = 540, MinorGridlines = true, Annotations = [new(AnnotationAxis.X, 3) { To = 5, Label = "Window" }],
+    Panes = [new() { Label = "Cadence (rpm)", Y2Label = "Power (W)", Y2Format = ValueFormat.Compact, Weight = .8, YZones = new([new("Low", 80), new("High", double.PositiveInfinity)]) }],
+    Series = [line.Series[0], new("Cadence", Points().Select(p => p with { Y = 70 + p.Y / 2, Label = null }).ToArray()) { Pane = 1 },
+        new("Power", Points().Select((p, i) => p with { Y = 1500 + i * 120, Label = null }).ToArray()) { Pane = 1, Secondary = true, ProjectedFrom = 8 }]
+};
+ChartSpec Logged() => line with
+{
+    YAxis = AxisKind.Log, Height = 480, Panes = [new() { Label = "Count", Weight = .7 }],
+    Series = [line.Series[0], new("Count", Points().Select((p, i) => p with { Y = i % 4 * 3 + 1 }).ToArray()) { Kind = ChartKind.Column, Pane = 1 }]
+};
+lines.Add($"panes/candles-volume {Hash(Render(Market(ChartKind.Candlestick, ChartTheme.Light)))}");
+lines.Add($"panes/candles-volume-dark {Hash(Render(Market(ChartKind.Candlestick, ChartTheme.Dark), includeTitles: false))}");
+lines.Add($"panes/ohlc-volume {Hash(Render(Market(ChartKind.Ohlc, ChartTheme.Light)))}");
+lines.Add($"panes/activity-stream {Hash(Render(Stream(ChartTheme.Light)))}");
+lines.Add($"panes/activity-stream-dark {Hash(Render(Stream(ChartTheme.Dark), includeTitles: false))}");
+lines.Add($"panes/secondary-in-pane {Hash(Render(Paired(ChartTheme.Light)))}");
+lines.Add($"panes/log-over-columns {Hash(Render(Logged()))}");
+// Guards for the paths 0.23.0 touches: the stylesheet in each preset and a brand, columns and bars with negative values on
+// category and continuous axes, stacked ends, scatter and line markers, every gridline with its minor lines, the frame
+// the statistical kinds share, areas below zero, secondary columns and panes.
+var harbour = new ChartStyle { Background = "#F6F3EE", Text = "#1F2A37", Muted = "#4B5563", Grid = "#E5DED3", Edge = "#6B7280", Series = ["#1D4E89", "#B03A2E", "#2E7D5B", "#9A6A12"], FontFamily = "Georgia,Cambria,serif" };
+foreach (var (name, style) in new[] { ("light", ChartStyle.Light), ("dark", ChartStyle.Dark), ("brand", harbour) })
+{
+    lines.Add($"guard/style-{name}-line {Hash(Render(line with { Style = style, MinorGridlines = true, Annotations = YRefs(25, 30, 40) }))}");
+    lines.Add($"guard/style-{name}-column {Hash(Render(column with { Style = style, Series = [.. column.Series, new("N", Points().Select(p => p with { Y = 12 - p.Y }).ToArray())] }, includeTitles: false))}");
+    lines.Add($"guard/style-{name}-graph {Hash(Graph(graph with { Style = style }))}");
+}
+ChartPoint[] Signed() => Points().Select((p, i) => p with { Y = i % 3 == 0 ? -p.Y / 2 : p.Y - 20 }).ToArray();
+lines.Add($"guard/column-negative {Hash(Render(column with { Series = [new("A", Signed()), new("B", Signed().Select(p => p with { Y = -p.Y }).ToArray()) { Zones = new([new("Low", 0), new("High", double.PositiveInfinity)]) }] }))}");
+lines.Add($"guard/column-negative-dark {Hash(Render(column with { Theme = ChartTheme.Dark, YFormat = ValueFormat.Compact, Series = [new("A", Signed().Select(p => p with { Y = p.Y * 1000 }).ToArray())] }, includeTitles: false))}");
+lines.Add($"guard/bar-negative {Hash(Render(bar with { Series = [new("A", Signed()), new("B", Signed().Select((p, i) => p with { Y = p.Y / 2, Color = i == 4 ? "#123456" : null }).ToArray())] }))}");
+lines.Add($"guard/bar-negative-dark {Hash(Render(bar with { Theme = ChartTheme.Dark, YFormat = ValueFormat.Duration, Series = [new("A", Signed().Select(p => p with { Y = p.Y * 60 }).ToArray())] }, includeTitles: false))}");
+lines.Add($"guard/stacked-ends {Hash(Render(Spec(ChartKind.StackedColumn, ChartTheme.Dark) with { Series = [new("A", Signed()), new("B", Points()), new("C", Signed().Select(p => p with { Y = p.Y < 0 ? p.Y : null }).ToArray())] }))}");
+lines.Add($"guard/continuous-columns-negative {Hash(Render(line with { Y2Label = "Rate", Series = [new("Line", Points()), new("Signed", Signed()) { Kind = ChartKind.Column }, new("Rate", Signed().Select(p => p with { Y = p.Y / 4 }).ToArray()) { Kind = ChartKind.Column, Secondary = true }] }))}");
+lines.Add($"guard/scatter-markers {Hash(Render(scatter with { Theme = ChartTheme.Dark, Series = [scatter.Series[0] with { Points = scatter.Series[0].Points.Select((p, i) => p with { Color = i % 4 == 0 ? "#123456" : null, Y = i == 5 ? null : p.Y }).ToArray() }, scatter.Series[1] with { Secondary = true, Zones = new([new("Low", 25), new("High", double.PositiveInfinity)]) }] }, includeTitles: false))}");
+lines.Add($"guard/line-markers {Hash(Render(line with { Series = [new("A", Points().Select((p, i) => p with { Color = i == 3 ? "#123456" : null, Y = i == 7 ? null : p.Y }).ToArray()), new("B", Points()) { Zones = new([new("Low", 25), new("High", double.PositiveInfinity)]), ProjectedFrom = 8 }] }))}");
+lines.Add($"guard/area-negative {Hash(Render(Spec(ChartKind.Area, ChartTheme.Dark) with { MinorGridlines = true, Series = [new("A", Signed()), new("B", Signed().Select(p => p with { Y = p.Y / 3 }).ToArray()) { ProjectedFrom = 7.5 }] }))}");
+lines.Add($"guard/area-negative-only {Hash(Render(Spec(ChartKind.Area, ChartTheme.Light) with { Series = [new("A", Points().Select(p => p with { Y = -p.Y }).ToArray())] }, includeTitles: false))}");
+foreach (var kind in new[] { ChartKind.Histogram, ChartKind.Box, ChartKind.Violin })
+{
+    var framed = Spec(kind, ChartTheme.Light) with { MinorGridlines = true, XLabel = "Value", YLabel = "Count" };
+    lines.Add($"guard/frame-minor-{kind} {Hash(Render(framed))}");
+    lines.Add($"guard/frame-dark-{kind} {Hash(Render(framed with { Theme = ChartTheme.Dark, MinorGridlines = false, YFormat = kind == ChartKind.Histogram ? ValueFormat.Number : ValueFormat.Compact }, includeTitles: false))}");
+}
+lines.Add($"guard/radar-dark {Hash(Render(Spec(ChartKind.Radar, ChartTheme.Dark) with { MinorGridlines = true }))}");
+lines.Add($"guard/grid-minor-time-dark {Hash(Render(line with { Theme = ChartTheme.Dark, XAxis = AxisKind.Time, MinorGridlines = true, Series = Unlabelled(x => 1767225600000d + x * 86400000d) }, includeTitles: false))}");
+lines.Add($"guard/grid-minor-column-bar {Hash(Render(bar with { MinorGridlines = true, YFormat = ValueFormat.Compact, Theme = ChartTheme.Dark }))}");
+lines.Add($"guard/panes-markers {Hash(Render(line with { Height = 560, MinorGridlines = true, Panes = [new() { Label = "Below", Weight = .7, Y2Label = "Rate" }, new() { Label = "Signed", Weight = .5 }],
+    Series = [new("A", Points()) { Trend = true }, new("Area", Points().Select(p => p with { Y = p.Y / 2 }).ToArray()) { Pane = 1, Kind = ChartKind.Area }, new("Rate", Points().Select(p => p with { Y = 100 - p.Y }).ToArray()) { Pane = 1, Secondary = true, ProjectedFrom = 6 },
+        new("Columns", Signed()) { Pane = 2, Kind = ChartKind.Column }, new("Dots", Signed().Select(p => p with { Y = p.Y + 3 }).ToArray()) { Pane = 2, Kind = ChartKind.Scatter }] }))}");
+lines.Add($"guard/panes-markers-dark {Hash(Render(Stream(ChartTheme.Dark) with { MinorGridlines = false, Annotations = [] }))}");
+// 0.23.0: the finish of a fitness app. Curves, fades, gradients, markers, capsules, value labels, grids, axis sides and Midnight.
+var climb = Enumerable.Range(0, 120).Select(i => new ChartPoint(i * 30, Math.Round(24 + 16 * Math.Sin(i / 9d) + 6 * Math.Sin(i / 3.1), 1))).ToArray();
+ChartSpec[] finish =
+[
+    new() { Kind = ChartKind.Area, Title = "Smooth fade", XFormat = ValueFormat.Duration, Series = [new("Climb", climb) { Curve = LineCurve.Smooth, Fill = AreaFill.Fade, StrokeWidth = 2, Markers = MarkerStyle.None }] },
+    line with { Title = "Step", Series = [new("Record", Points().Select((p, i) => p with { Y = 40 - i / 3 * 4 - (i == 7 ? 2 : 0) }).ToArray()) { Curve = LineCurve.Step }, new("Gaps", Points().Select((p, i) => p with { Y = i is 5 ? null : p.Y / 2 }).ToArray()) { Curve = LineCurve.Step, Markers = MarkerStyle.Hollow }] },
+    line with { Title = "Gradient on a log axis", YAxis = AxisKind.Log, MinorGridlines = true, Series = [new("Load", Points().Select((p, i) => p with { Y = Math.Pow(10, i * .3) }).ToArray()) { Gradient = [new(1, "#2E9B58"), new(30, "#A88200"), new(1000, "#DD4B45")], StrokeWidth = 3 }] },
+    column with { Title = "Capsules", Style = ChartStyle.Light with { BarRadius = 9999 }, Series = [new("Week", Signed()) { ValueLabels = true, Fill = AreaFill.Fade }, new("Last", Points().Select(p => p with { Y = p.Y / 2 }).ToArray()) { ValueLabels = true }] },
+    line with { Title = "Hidden markers", Series = [new("A", Points()) { Markers = MarkerStyle.None, StrokeWidth = 1.5 }, new("B", Points().Select(p => p with { Y = p.Y + 6 }).ToArray()) { Markers = MarkerStyle.Hollow, Curve = LineCurve.Smooth }] },
+    line with { Title = "Latest reading", Theme = ChartTheme.Dark, Series = [new("Resting heart rate", Points().Select((p, i) => p with { Y = 52 - i % 4 + i / 5 }).ToArray()) { Markers = MarkerStyle.None, HighlightLast = true, Curve = LineCurve.Smooth, StrokeWidth = 3 }, new("Area", Points().Select((p, i) => p with { Y = 30 + i % 3 }).ToArray()) { Kind = ChartKind.Area, HighlightLast = true, Fill = AreaFill.Fade }] },
+    line with { Title = "Phone axis", YAxisSide = AxisSide.Right, YTickLabels = TickLabels.Ends, YLabel = "bpm", MinorGridlines = true, Style = ChartStyle.Light with { Gridlines = GridLine.Dotted } },
+    line with { Title = "Smooth zones", XFormat = ValueFormat.Duration, YZones = heartZones, Series = [new("Heart rate", beats.Take(120).Select((b, i) => new ChartPoint(i * 10, b)).ToArray()) { Zones = heartZones, Curve = LineCurve.Smooth, ProjectedFrom = 905, Markers = MarkerStyle.None }] },
+    Performance(ChartTheme.Light) with { Style = ChartStyle.Midnight, Series = [.. Performance(ChartTheme.Light).Series.Select(s => s.Name == "Fitness" ? s with { HighlightLast = true, Curve = LineCurve.Smooth } : s.Name == "Form" ? s with { Fill = AreaFill.Fade, Curve = LineCurve.Smooth } : s)] },
+    Weekly(ChartTheme.Light) with { Style = ChartStyle.Midnight, Series = [Weekly(ChartTheme.Light).Series[0] with { ValueLabels = true }, Weekly(ChartTheme.Light).Series[1] with { Curve = LineCurve.Smooth, Markers = MarkerStyle.Hollow }] },
+    bar with { Title = "Bars", Style = ChartStyle.Light with { BarRadius = 6, Gridlines = GridLine.Dashed }, YTickLabels = TickLabels.Ends, Series = [new("A", Signed()) { ValueLabels = true }] },
+    Spec(ChartKind.StackedColumn, ChartTheme.Light) with { Title = "Stacked capsules", Style = ChartStyle.Midnight, Series = [new("A", Signed()), new("B", Points()), new("C", Signed().Select(p => p with { Y = p.Y < 0 ? p.Y : null }).ToArray())] },
+    Spec(ChartKind.Box, ChartTheme.Light) with { Title = "Box on the right", YAxisSide = AxisSide.Right, YTickLabels = TickLabels.Ends, YLabel = "Value", Style = ChartStyle.Light with { Gridlines = GridLine.Hidden } },
+    line with { Title = "Reversed gradient", YReversed = true, YFormat = ValueFormat.Duration, Series = [new("Pace", Enumerable.Range(0, 30).Select(i => new ChartPoint(i, 330 - i * 3 + i % 4 * 6)).ToArray()) { Gradient = [new(260, "#DD4B45"), new(300, "#A88200"), new(340, "#3F87D9")], Curve = LineCurve.Smooth, HighlightLast = true }] },
+    Stream(ChartTheme.Dark) with { Style = ChartStyle.Midnight, Series = [Stream(ChartTheme.Dark).Series[0] with { Zones = null, Gradient = [new(115, "#4C9DFF"), new(145, "#36D27A"), new(165, "#F5C518"), new(180, "#FF5A5A")], Markers = MarkerStyle.None }, Stream(ChartTheme.Dark).Series[1] with { Curve = LineCurve.Smooth, Markers = MarkerStyle.None }, Stream(ChartTheme.Dark).Series[2] with { Curve = LineCurve.Smooth, Fill = AreaFill.Fade, Markers = MarkerStyle.None }] },
+    scatter with { Title = "Scatter markers", Style = ChartStyle.Midnight, Series = [scatter.Series[0] with { Markers = MarkerStyle.Filled }, scatter.Series[1] with { Markers = MarkerStyle.Hollow }] },
+];
+string[] names = ["smooth-fade-area", "step-line", "gradient-log", "capsule-value-labels", "hidden-markers", "highlight-last", "dotted-right-ends", "smooth-zones",
+    "midnight-mixed", "midnight-weekly", "bars-dashed-ends", "stacked-capsules", "box-right-hidden", "gradient-reversed", "midnight-stream", "scatter-markers"];
+for (var i = 0; i < finish.Length; i++) lines.Add($"finish/{names[i]} {Hash(Render(finish[i]))}");
+// 0.26.0: gauges and rings. A zoned 270-degree recovery gauge with a target, a semicircle, a duration gauge, a full circle
+// with a gradient, three rings with one past its goal and one capped at three laps, and Midnight versions.
+var recovery = new ZoneScale([new("Low", 33, "#DD4B45"), new("Moderate", 66, "#A88200"), new("Good", double.PositiveInfinity, "#2E9B58")]);
+var gauge = new ChartSpec { Kind = ChartKind.Gauge, Title = "Recovery", Description = "Today's recovery score", YLabel = "%", YZones = recovery,
+    Annotations = [new(AnnotationAxis.Y, 60) { Label = "Average" }], Series = [new("Recovery", [new(0, 72, "Recovery")])] };
+var rings = new ChartSpec { Kind = ChartKind.Ring, Title = "Activity", Description = "Move, exercise and stand", Width = 540, Height = 360,
+    Series = [new("Move", [new(0, 540, "kcal")], "#DD4B45") { Goal = 600 }, new("Exercise", [new(0, 47, "min")], "#2E9B58") { Goal = 30 }, new("Stand", [new(0, 9, "h")], "#3F87D9") { Goal = 12 }] };
+(string Name, ChartSpec Spec)[] radial = [
+    ("gauge-recovery-270", gauge),
+    ("gauge-recovery-dark", gauge with { Theme = ChartTheme.Dark, Series = [new("Recovery", [new(0, 24, "Recovery")])] }),
+    ("gauge-semicircle-180", gauge with { GaugeSweep = 180, Width = 540, Height = 320, Annotations = [], Series = [new("Recovery", [new(0, 48, "Recovery")])] }),
+    ("gauge-duration", new ChartSpec { Kind = ChartKind.Gauge, Title = "Sleep", Description = "Time asleep against eight hours", YFormat = ValueFormat.Duration, YMin = 0, YMax = 36000,
+        Annotations = [new(AnnotationAxis.Y, 28800) { Label = "Goal" }], Series = [new("Sleep", [new(0, 25740, "Asleep")])] }),
+    ("gauge-full-gradient", new ChartSpec { Kind = ChartKind.Gauge, Title = "Strain", Description = "Day strain on WHOOP's 0 to 21 scale", GaugeSweep = 360, YMin = 0, YMax = 21, Width = 400, Height = 360,
+        Series = [new("Strain", [new(0, 14.2, "Strain")]) { Gradient = [new(0, "#3F87D9"), new(10, "#A88200"), new(21, "#DD4B45")] }] }),
+    ("gauge-clamped", gauge with { Annotations = [], Series = [new("Recovery", [new(0, 104, "Recovery")])] }),
+    ("rings-overflow", rings),
+    ("rings-capped", rings with { Series = [rings.Series[0], rings.Series[1] with { Points = [new(0, 130, "min")] }, rings.Series[2] with { Points = [new(0, 0, "h")] }] }),
+    ("rings-one-phone", rings with { Width = 337, Series = [rings.Series[1]] }),
+    ("rings-six", rings with { Series = [.. Enumerable.Range(0, 6).Select(i => new ChartSeries($"R{i}", [new(0, 20 + i * 30)]))] }),
+    ("gauge-midnight", gauge with { Style = ChartStyle.Midnight, YZones = new([new("Low", 33, ChartStyle.Midnight.Zones[5]), new("Moderate", 66, ChartStyle.Midnight.Zones[3]), new("Good", double.PositiveInfinity, ChartStyle.Midnight.Zones[2])]) }),
+    ("rings-midnight", rings with { Style = ChartStyle.Midnight, Series = [.. rings.Series.Select((s, i) => s with { Color = ChartStyle.Midnight.Zones[new[] { 5, 2, 1 }[i]] })] }),
+];
+foreach (var (name, spec) in radial) lines.Add($"radial/{name} {Hash(Render(spec))}");
+// 0.27.0: state timelines and range bars. A night's hypnogram on a time axis in a zone with an event marked, an intraday state
+// timeline without connectors, daily heart-rate ranges with their averages, sleep timing on a reversed time-of-day axis, a range
+// series beside a line and in a column chart's slots, and Midnight versions.
+var evening = TimeAxis.Value(new DateTimeOffset(2026, 9, 26, 22, 46, 0, TimeSpan.FromHours(2)));
+(string Stage, int Minutes)[] stages = [("Awake", 13), ("Light", 29), ("Deep", 25), ("Light", 24), ("REM", 9), ("Awake", 3), ("Light", 29), ("Deep", 18), ("Light", 24), ("REM", 13),
+    ("Light", 30), ("Deep", 11), ("Light", 25), ("REM", 22), ("Light", 31), ("Deep", 4), ("Light", 25), ("REM", 27), ("Awake", 1), ("Light", 53), ("REM", 33), ("Awake", 9)];
+string[] lanes = ["Awake", "REM", "Light", "Deep"];
+var night = lanes.ToDictionary(lane => lane, _ => new List<ChartPoint>());
+var clock = evening;
+foreach (var (stage, minutes) in stages) { night[stage].Add(ChartPoint.Span(clock, clock + minutes * 60_000d)); clock += minutes * 60_000d; }
+ChartSpec Hypnogram(ChartStyle? style, IReadOnlyList<string> zones) => new()
+{
+    Kind = ChartKind.Timeline, Style = style, XAxis = AxisKind.Time, TimeZone = "Africa/Johannesburg", Title = "7 h 12 min asleep, 58 min deep", Description = "Into Sunday 27 September",
+    XLabel = "Time (Johannesburg)", Width = 1100, Height = 360, Source = "Source: simulated night", Annotations = [new(AnnotationAxis.X, evening + 200 * 60_000d) { Label = "Alarm" }],
+    Series = lanes.Select((lane, i) => new ChartSeries(lane, night[lane], zones[new[] { 4, 1, 0, 6 }[i]])).ToArray()
+};
+var morning = TimeAxis.Value(new DateTimeOffset(2026, 9, 28, 0, 0, 0, TimeSpan.Zero));
+ChartSpec Intraday(ChartTheme theme) => new()
+{
+    Kind = ChartKind.Timeline, Theme = theme, XAxis = AxisKind.Time, TimelineConnectors = false, Title = "A working day", Width = 900, Height = 300, YAxisSide = AxisSide.Right,
+    Series = [new("Rest", [ChartPoint.Span(morning + 6 * 3600e3, morning + 8 * 3600e3), ChartPoint.Span(morning + 12 * 3600e3, morning + 13 * 3600e3)]),
+        new("Stress", [ChartPoint.Span(morning + 8 * 3600e3, morning + 11 * 3600e3, "Meetings"), ChartPoint.Span(morning + 15 * 3600e3, morning + 17 * 3600e3)]),
+        new("Activity", [ChartPoint.Span(morning + 10.5 * 3600e3, morning + 11.5 * 3600e3, "Walk"), ChartPoint.Span(morning + 17.5 * 3600e3, morning + 18.5 * 3600e3, "Run")])]
+};
+var fortnight = Enumerable.Range(0, 14).Select(d => new DateOnly(2026, 9, 14).AddDays(d)).ToArray();
+double Morning(DateOnly day) => TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+string Short(DateOnly day) => day.ToString("d MMM", System.Globalization.CultureInfo.InvariantCulture);
+var heartRates = fortnight.Select((day, d) => (Day: day, Low: 46d + d % 5, High: d % 7 is 1 or 3 or 5 ? 150d + d * 2 : 105d + d % 4 * 5, Average: 66d + d % 6)).ToArray();
+ChartSpec Heart(ChartStyle? style, string ink) => new()
+{
+    Kind = ChartKind.Range, Style = style, XAxis = AxisKind.Time, Title = "52 to 174 bpm today", Description = "Each day's lowest and highest heart rate, the dot its average",
+    Width = 540, Height = 360, YLabel = "Heart rate (bpm)", Series = [new("Heart rate", heartRates.Select(r => ChartPoint.Interval(Morning(r.Day), r.Average, r.Low, r.High, Short(r.Day))).ToArray(), ink)]
+};
+ChartSpec Timing(ChartTheme theme) => new()
+{
+    Kind = ChartKind.Range, Theme = theme, XAxis = AxisKind.Time, YFormat = ValueFormat.TimeOfDay, YReversed = true, YMin = 75600, YMax = 118800, Title = "In bed at 22:52 on average",
+    Width = 540, Height = 360, YLabel = "Clock time", MinorGridlines = true, Annotations = [new(AnnotationAxis.Y, 82800) { Label = "Target bedtime" }],
+    Series = [new("Sleep", fortnight.Select((day, d) => ChartPoint.Interval(Morning(day), null, 81000 + d * 397 % 3600, 109800 + d * 613 % 2700, Short(day))).ToArray())]
+};
+(string Name, ChartSpec Spec)[] spans = [
+    ("timeline/hypnogram-zone", Hypnogram(null, ChartStyle.Light.Zones)),
+    ("timeline/no-connectors", Intraday(ChartTheme.Light)),
+    ("timeline/no-connectors-dark", Intraday(ChartTheme.Dark)),
+    ("timeline/hypnogram-phone", Hypnogram(ChartStyle.Dark, ChartStyle.Light.Zones) with { Width = 337 }),
+    ("range/heart-rate", Heart(null, ChartStyle.Light.Zones[5])),
+    ("range/sleep-timing-reversed", Timing(ChartTheme.Light)),
+    ("range/sleep-timing-dark", Timing(ChartTheme.Dark)),
+    ("range/beside-line", line with { XAxis = AxisKind.Time, Title = "Resting heart rate and the day's range", YLabel = "bpm",
+        Series = [new("Range", Heart(null, "#DD4B45").Series[0].Points) { Kind = ChartKind.Range }, new("Resting", heartRates.Select(r => new ChartPoint(Morning(r.Day), r.Low)).ToArray()) { HighlightLast = true, Curve = LineCurve.Smooth }] }),
+    ("range/column-slots", column with { Series = [column.Series[0], new("Spread", Points().Select(p => ChartPoint.Interval(p.X, p.Y, p.Y!.Value - 6, p.Y.Value + 4, p.Label)).ToArray()) { Kind = ChartKind.Range }] }),
+    ("range/log-reversed", line with { Kind = ChartKind.Range, YAxis = AxisKind.Log, YReversed = true, Series = [new("Load", Points().Select((p, i) => ChartPoint.Interval(p.X, Math.Pow(10, 1 + i * .2), Math.Pow(10, .8 + i * .2), Math.Pow(10, 1.3 + i * .2), p.Label)).ToArray())] }),
+    ("timeline/hypnogram-midnight", Hypnogram(ChartStyle.Midnight, ChartStyle.Midnight.Zones)),
+    ("range/heart-rate-midnight", Heart(ChartStyle.Midnight, ChartStyle.Midnight.Zones[5])),
+];
+foreach (var (name, spec) in spans) lines.Add($"{name} {Hash(Render(spec))}");
+// 0.28.0: calendars. Sixteen weeks of daily stress as a contribution grid in tiers, read in New York, with today outlined; three
+// months of runs as bubbles on the ramp; dots; the ramp without zones and a duration format; a race outlined in its own colour;
+// Sunday as the week start; a year across New Year at a phone's width; and Midnight versions.
+var june = new DateOnly(2026, 6, 8);
+double At(DateOnly day, double hours = 0) => TimeAxis.Value(new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)) + hours * 3600e3;
+var season = Enumerable.Range(0, 112).Select(d => (Day: june.AddDays(d), Stress: d % 7 == 0 ? 0d : (d * 37 % 11) * 21 + (d % 7 == 5 ? 90 : 12))).ToArray();
+ZoneScale Tiers(IReadOnlyList<string> zones) => new([new("Easy", 50, zones[1]), new("Moderate", 100, zones[2]), new("Hard", 150, zones[3]), new("Very hard", double.PositiveInfinity, zones[5])]);
+// Each day's stress is logged at 02:00 UTC, which is the evening before in New York.
+ChartSpec Weeks(ChartStyle? style, IReadOnlyList<string> zones) => new()
+{
+    Kind = ChartKind.Calendar, Style = style, XAxis = AxisKind.Time, TimeZone = "America/New_York", Title = "93 days trained in 16 weeks", Description = "Each day's training stress, in tiers",
+    Width = 540, Height = 360, Source = "Source: simulated season", YZones = Tiers(zones), Annotations = [new(AnnotationAxis.X, At(june.AddDays(111), 14)) { Label = "Today" }],
+    Series = [new("Training stress", season.Select(d => new ChartPoint(At(d.Day, 26), d.Stress)).ToArray())]
+};
+var runs = Enumerable.Range(0, 92).Where(d => d % 7 is 1 or 3 or 6).Select(d => (Day: new DateOnly(2026, 7, 1).AddDays(d), Km: Math.Round(5 + d * 17 % 12 + (d % 7 == 6 ? 6 : 0) + .4, 1))).ToArray();
+ChartSpec Bubbles(ChartStyle? style) => new()
+{
+    Kind = ChartKind.Calendar, Style = style, XAxis = AxisKind.Time, CalendarLayout = CalendarLayout.Months, CalendarCell = CalendarCell.Bubble, Title = "Running, July to September",
+    Description = "Each run's distance, the longest filling its day", Width = 900, Height = 420, XMax = At(new DateOnly(2026, 9, 30)),
+    Series = [new("Distance (km)", runs.Select(r => new ChartPoint(At(r.Day, 7), r.Km, r.Km > 15 ? "Long run" : null)).ToArray())]
+};
+(string Name, ChartSpec Spec)[] calendars = [
+    ("calendar/weeks-zones-new-york", Weeks(null, ChartStyle.Light.Zones)),
+    ("calendar/weeks-zones-dark", Weeks(ChartStyle.Dark, ChartStyle.Light.Zones)),
+    ("calendar/months-bubbles", Bubbles(null)),
+    ("calendar/dots", Weeks(null, ChartStyle.Light.Zones) with { CalendarCell = CalendarCell.Dot, TimeZone = null }),
+    ("calendar/ramp-duration", Weeks(null, ChartStyle.Light.Zones) with { YZones = null, YFormat = ValueFormat.Duration, Annotations = [],
+        Series = [new("Time", season.Select(d => new ChartPoint(At(d.Day, 12), d.Stress * 30)).ToArray())] }),
+    ("calendar/race-outlined", Weeks(null, ChartStyle.Light.Zones) with { Annotations = [new(AnnotationAxis.X, At(june.AddDays(97), 9)) { Label = "10 km race", Color = "#DD4B45" }, new(AnnotationAxis.X, At(june.AddDays(111), 14))] }),
+    ("calendar/sunday-start", Weeks(null, ChartStyle.Light.Zones) with { WeekStart = DayOfWeek.Sunday, CalendarLayout = CalendarLayout.Months, Width = 900, Height = 420 }),
+    ("calendar/year-phone", new ChartSpec { Kind = ChartKind.Calendar, XAxis = AxisKind.Time, TimeZone = "Africa/Johannesburg", Title = "A year of commits", Width = 337, Height = 300,
+        Series = [new("Commits", Enumerable.Range(0, 365).Select(i => new ChartPoint(At(new DateOnly(2025, 10, 1).AddDays(i), 21.5), i * 7 % 11 < 4 ? null : i * 13 % 9)).ToArray())] }),
+    ("calendar/weeks-midnight", Weeks(ChartStyle.Midnight, ChartStyle.Midnight.Zones)),
+    ("calendar/months-midnight", Bubbles(ChartStyle.Midnight) with { YZones = new([new("Run", double.PositiveInfinity, ChartStyle.Midnight.Zones[1])]) }),
+];
+foreach (var (name, spec) in calendars) lines.Add($"{name} {Hash(Render(spec))}");
+if (args.FirstOrDefault() == "dump-finish")
+{
+    Directory.CreateDirectory(args[1]);
+    for (var i = 0; i < finish.Length; i++) File.WriteAllText(Path.Combine(args[1], $"{i}.html"), $"<html><body style='margin:0;background:#888'><div style='width:900px;margin:8px'>{Render(finish[i])}</div></body></html>");
+    return;
+}
+if (args.FirstOrDefault() == "dump-panes")
+{
+    ChartSpec[] shown = [Market(ChartKind.Candlestick, ChartTheme.Light), Market(ChartKind.Candlestick, ChartTheme.Dark), Market(ChartKind.Ohlc, ChartTheme.Light),
+        Stream(ChartTheme.Light), Stream(ChartTheme.Dark), Paired(ChartTheme.Light), Paired(ChartTheme.Dark), Logged()];
+    File.WriteAllText(args[1], "<html><body style='margin:0;background:#888'>" + string.Join("", shown.Select(s => $"<div style='width:900px;margin:8px'>{Render(s)}</div>")) + "</body></html>");
+    return;
+}
+if (args.FirstOrDefault() == "dump")
+{
+    ChartSpec[] shown = [Performance(ChartTheme.Light), Performance(ChartTheme.Dark), Target(ChartTheme.Light), Target(ChartTheme.Dark), Weekly(ChartTheme.Light),
+        Weekly(ChartTheme.Light) with { Series = [.. Weekly(ChartTheme.Light).Series, new("Last year", volume.Select((v, i) => new ChartPoint(i, v - 1.5, $"W{i + 1}")).ToArray())] }];
+    File.WriteAllText(args[1], "<html><body style='margin:0;background:#888'>" + string.Join("", shown.Select(s => $"<div style='width:900px;margin:8px'>{Render(s)}</div>")) + "</body></html>");
+    return;
+}
+var output = args.FirstOrDefault(a => a.EndsWith(".txt")) ?? (classicMode ? "classic.txt" : "baseline.txt");
+File.WriteAllLines(output, lines);
+Console.WriteLine($"{lines.Count} renderings hashed to {output}{(classicMode ? $" in the classic finish{(finishProperty is null ? ", which this code does not have, so as given" : "")}" : "")}");
+if (svgOut is not null)
+{
+    Directory.CreateDirectory(svgOut);
+    for (var i = 0; i < lines.Count; i++) File.WriteAllText(Path.Combine(svgOut, $"{i:000}.svg"), svgs[i]);
+    File.WriteAllLines(Path.Combine(svgOut, "names.txt"), lines.Select(l => l[..l.LastIndexOf(' ')]));
+}
+string Hash(string svg) { svgs.Add(svg); return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(svg)))[..16]; }
