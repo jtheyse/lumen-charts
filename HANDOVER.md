@@ -1,4 +1,4 @@
-# Handover
+﻿# Handover
 
 The state of Lumen.Charts and how work on it is done, for whoever picks it up next — a person or a new Claude Code session. Updated 4 October 2026, evening. The THEBRAIN brain `@LumenCharts` holds the same state plus every design in detail: recall it first (`brain_recall`, intent `current_state`).
 
@@ -45,9 +45,10 @@ Where it stands (4 October 2026):
 | #7 ride channels | 0.37.0 | live (same deploy) |
 | #9 season arc, #10 gap to the leader | 0.38.0 | live (same deploy) |
 | #12 effort zones, #14 score bars | 0.39.0 | live (same deploy) |
-| #11 best efforts, #13 heart rate per lap | 0.40.0 | committed in RaceSenseNet (6c8deccd, on Lumen 0.41.0 with `FitHeight` on #14, `AverageOf` on #7 and `PaintBackground` on the raised cards), not yet deployed |
-| #15 team rider share | 0.42.0 | committed in RaceSenseNet (15006397), not yet deployed |
+| #11 best efforts, #13 heart rate per lap | 0.40.0 | live on production API and Web (c39bfa83, 4 Oct 2026 22:14, Lumen 0.42); Perform's FitLab still on 0.39 until the owner deploys Perform |
+| #15 team rider share | 0.42.0 | live on production Web (c39bfa83, 4 Oct 2026 22:14) |
 | #16–#20 (P3) | from 0.43.0 | — |
+Production Race Face API and Web run Lumen 0.42 (c39bfa83); Perform runs 0.39 until the owner says "deploy Perform".
 
 **After each release** the owner wants the Claude session **"RACEFACE RUNNING EXPANSION 2"** told to upgrade: `SendMessage` to that name (check `ListAgents` first). The message gives the release URL, what it adds for which charts, and steps:
 1. Refresh the skill: `git -C "D:/CHATGPT/.NET GRAPH API" archive vX.Y.Z integrations/claude-code/lumen-charts | tar -x --strip-components=2 -C ~/.claude/skills`.
