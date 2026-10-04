@@ -3277,7 +3277,7 @@ Test("Each finishing touch refuses the marks and values it cannot apply to",()=>
     Yes(ChartKind.Line,s with{ValueLabels=true});Yes(ChartKind.Scatter,s with{ValueLabels=true});
     No(ChartKind.Line,s with{Curve=(LineCurve)7});No(ChartKind.Area,s with{Fill=(AreaFill)3});No(ChartKind.Line,s with{Markers=(MarkerStyle)9});
     ColorStop[] two=[new(1,"#2E9B58"),new(3,"#DD4B45")];
-    foreach(var kind in new[]{ChartKind.Scatter,ChartKind.Column,ChartKind.Band}) No(kind,s with{Gradient=two});
+    foreach(var kind in new[]{ChartKind.Scatter,ChartKind.Band,ChartKind.StackedColumn}) No(kind,s with{Gradient=two});
     No(ChartKind.Line,s with{Gradient=two,Zones=new([new("Low",2),new("High",double.PositiveInfinity)])});
     foreach(var stops in new ColorStop[][]{[],[new(1,"#2E9B58")],[new(1,"#2E9B58"),new(1,"#DD4B45")],[new(3,"#2E9B58"),new(1,"#DD4B45")],[new(1,"red"),new(3,"#DD4B45")],
         [new(1,"#2E9B58"),null!],[new(1,null!),new(3,"#DD4B45")],[new(double.NaN,"#2E9B58"),new(3,"#DD4B45")],[new(1,"#2E9B58"),new(1e101,"#DD4B45")],
@@ -3707,12 +3707,13 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: twenty-nine charts in twenty-six cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+Test("Sports page: thirty-one charts in twenty-eight cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
     // 0.34.0's Getting faster? card draws three sparklines in place of one chart; they are checked on their own below. 0.35.0 adds
     // How the field finished to the Racing section, 0.37.0 Ride channels in a Long ride section of its own, and 0.38.0 Season arc and Gap to
-    // the leader to the Racing section, and 0.39.0 Time in zone, as shares, and Session scores to the Latest session section.
-    Check(sports.Count==26&&sports.Select(card=>card.Id).Distinct().Count()==26&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
-        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==29,"the page should have twenty-nine charts in twenty-six cards");
+    // the leader to the Racing section, 0.39.0 Time in zone, as shares, and Session scores to the Latest session section, and 0.40.0
+    // Heart rate by lap to the Latest session section and Best efforts to the Fitness section.
+    Check(sports.Count==28&&sports.Select(card=>card.Id).Distinct().Count()==28&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
+        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==31,"the page should have thirty-one charts in twenty-eight cards");
     // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order; 0.33.0's Racing section stands
     // before it.
     Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
@@ -6529,7 +6530,7 @@ Test("Sports page: Getting faster? rings each time faster than all before it, fr
             Check(!Svg(line.Spec with{Style=style}).Descendants(ns+"text").Any(),$"{line.Name} wrote a word");
         }
     // The page draws each at its own size beside its words, and its sparklines and charts number twenty-four.
-    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==29,"the page's count");
+    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==31,"the page's count");
 });
 // 0.35.0: how the field finished, and text that fits. Blocks keep a visible height; an annotation can draw its label without its value
 // and stand over the data; an X axis chooses which of its labels it writes, and either axis can label just its two ends; and a chart's
@@ -7801,7 +7802,7 @@ Test("Bar tracks, drawn titles and strips round-trip through the HTTP API's JSON
 });
 Test("Sports page: the latest session's time in zone as a strip of its five zones, adding up to the run's time, and three illustrative scores on tracks, the scores' title kept as its name but not drawn",()=>{
     var ids=sports.Where(card=>card.Section=="session").Select(card=>card.Id).ToArray();
-    Check(ids.SequenceEqual(["stream","time-in-zone","zone-strip","scores","splits","laps","elevation"]),string.Join(",",ids));
+    Check(ids.SequenceEqual(["stream","time-in-zone","zone-strip","scores","splits","laps","lap-heart","elevation"]),string.Join(",",ids));
     var strip=Sports("zone-strip");var bars=Sports("time-in-zone");
     Check(strip.Kind==ChartKind.Strip&&strip.Series[0].Points.Select(p=>p.Y).SequenceEqual(bars.Series[0].Points.Select(p=>p.Y))&&strip.Series[0].Points.Select(p=>p.Color).SequenceEqual(bars.Series[0].Points.Select(p=>p.Color))
         &&strip.Series[0].Points.Select(p=>p.Label).SequenceEqual(SportsData.HeartZones.Zones.Select(z=>z.Name)),"the strip is not the time-in-zone bars' data");
@@ -7821,6 +7822,235 @@ Test("Sports page: the latest session's time in zone as a strip of its five zone
     foreach(var (zones,background) in new[]{(ChartStyle.Light.Zones,"#FFFFFF"),(ChartStyle.Light.Zones,ChartStyle.Dark.Background),(ChartStyle.Midnight.Zones,ChartStyle.Midnight.Background),(DemoData.Harbour.Zones,DemoData.Harbour.Background)})
         Check(zones.Take(5).All(z=>Lumen.Charts.Contrast.Ratio(z,background)>=3),$"a zone on {background}");
 });
+// 0.40.0: lap columns and best efforts. Columns and bars filled by a gradient along their value axis, a second line under a category's
+// name, a strip part that says its share once, and end labels that give up their note before their label. Every example is invented.
+XElement[] Gradients40(XDocument doc)=>doc.Descendants(ns+"linearGradient").ToArray();
+XElement Bar40(XElement mark)=>mark.Elements().First(e=>e.Name==ns+"rect"||e.Name==ns+"path");
+ChartSpec Laps40(params (string Label,double Bpm,string? Sub)[] laps)=>new(){Title="Heart rate per lap",Description="Average heart rate in each lap",Kind=ChartKind.Column,Width=600,Height=300,
+    Series=[new("Heart rate",laps.Select((l,i)=>new ChartPoint(i,l.Bpm,l.Label){SubLabel=l.Sub}).ToArray())]};
+// The category names and sub-labels written along the bottom: every middle-anchored muted text under the plot.
+XElement[] Under40(XDocument doc)=>doc.Root!.Elements(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="middle"&&(string?)t.Attribute("class")=="lumen-muted"&&Attr(t,"y")>PaneSpan(PaneClips(doc)[0]).Bottom&&t.Value.Length>0).ToArray();
+double Wide40(string text)=>Broad38(text)*11/12;
+Test("A gradient fills columns along the value axis: one userSpaceOnUse gradient, each stop at its value's height, every column painting with it so a taller column reaches further, a point's colour flat, labels in the text colour, the key its stops",()=>{
+    var spec=Laps40(("L1",50,null),("L2",100,null),("L3",150,null)) with{Series=[new("Heart rate",[new(0,50,"L1"),new(1,100,"L2"),new(2,150,"L3")]){ValueLabels=true,Gradient=[new(50,"#A88200"),new(150,"#DD4B45")]}]};
+    var doc=Svg(spec);var defs=Gradients40(doc);var bars=Datums(doc,0).Select(Bar40).ToArray();
+    Check(defs.Length==1&&(string?)defs[0].Attribute("gradientUnits")=="userSpaceOnUse"&&defs[0].Attribute("x1")!.Value=="0"&&defs[0].Attribute("x2")!.Value=="0",defs.Length>0?defs[0].ToString():"no gradient");
+    var id=defs[0].Attribute("id")!.Value;
+    Check(bars.All(b=>b.Attribute("fill")!.Value==$"url(#{id})"),"a column is not filled by the gradient");
+    // The first stop stands at the top of the column of 50, the last at the top of the column of 150: the stops are laid along the axis.
+    Check(Close(Attr(defs[0],"y1"),Attr(bars[0],"y"))&&Close(Attr(defs[0],"y2"),Attr(bars[2],"y")),$"{Attr(defs[0],"y1")} {Attr(defs[0],"y2")} against {Attr(bars[0],"y")} {Attr(bars[2],"y")}");
+    Check(defs[0].Elements(ns+"stop").Select(s=>s.Attribute("stop-color")!.Value).SequenceEqual(["#A88200","#DD4B45"]),"the stops");
+    // Every column shares the bottom and the gradient, so the taller reaches further along it.
+    Check(bars.All(b=>Close(Attr(b,"y")+Attr(b,"height"),Attr(bars[0],"y")+Attr(bars[0],"height")))&&Attr(bars[2],"y")<Attr(bars[1],"y")&&Attr(bars[1],"y")<Attr(bars[0],"y"),"the heights");
+    // Value labels stay in the text colour: they carry no fill of their own.
+    var labels=doc.Root!.Elements(ns+"text").Where(t=>(string?)t.Attribute("font-size")=="11"&&t.Value is "50" or "100" or "150").ToArray();
+    Check(labels.Length==3&&labels.All(t=>t.Attribute("fill") is null),"the value labels");
+    // A point's own colour fills its column flat.
+    var own=Svg(spec with{Series=[spec.Series[0] with{Points=[spec.Series[0].Points[0],spec.Series[0].Points[1] with{Color="#123456"},spec.Series[0].Points[2]]}]});
+    Check(Datums(own,0).Select(Bar40).Select(b=>b.Attribute("fill")!.Value).ElementAt(1)=="#123456"&&Datums(own,0).Select(Bar40).First().Attribute("fill")!.Value.StartsWith("url(#"),"a point's colour");
+    // The legend key shows the stops' colours, in the chart's legend and the component's.
+    Check(ChartSvg.LegendKey(spec,0).Contains("#A88200")&&ChartSvg.LegendKey(spec,0).Contains("#DD4B45")&&ChartSvg.Render(spec).Contains("fill='#A88200'"),ChartSvg.LegendKey(spec,0));
+    // The classic finish draws the same gradient on the same columns.
+    var classic=Svg(Classic(spec));
+    Check(Gradients40(classic).Length==1&&Close(Attr(Gradients40(classic)[0],"y1"),Attr(Datums(classic,0).Select(Bar40).First(),"y"))&&Datums(classic,0).Select(Bar40).All(b=>b.Attribute("fill")!.Value.StartsWith("url(#")),"classic");
+    // A bar radius keeps its path, filled the same way; a column series on a line chart, and one on the right-hand axis, take it too.
+    Check(Datums(Svg(spec with{Style=ChartStyle.Midnight}),0).Select(Bar40).All(b=>b.Name==ns+"path"&&b.Attribute("fill")!.Value.StartsWith("url(#")),"rounded columns");
+    var mixed=Svg(new ChartSpec{Title="Mixed",Kind=ChartKind.Line,Series=[new("L",[new(0,5),new(10,9)]),new("C",[new(0,3),new(5,6),new(10,8)]){Kind=ChartKind.Column,Gradient=[new(3,"#A88200"),new(8,"#DD4B45")]}]});
+    Check(Datums(mixed,1).Select(Bar40).All(b=>b.Attribute("fill")!.Value.StartsWith("url(#"))&&Gradients40(mixed).Length==1,"a column series on a line chart");
+    var right=Svg(new ChartSpec{Title="Right",Kind=ChartKind.Column,Series=[new("A",[new(0,5,"A"),new(1,9,"B")]),new("B",[new(0,300,"A"),new(1,600,"B")]){Secondary=true,Gradient=[new(300,"#A88200"),new(600,"#DD4B45")]}]});
+    Check(Close(Attr(Gradients40(right)[0],"y1"),Attr(Datums(right,1).Select(Bar40).First(),"y"))&&Close(Attr(Gradients40(right)[0],"y2"),Attr(Datums(right,1).Select(Bar40).Last(),"y")),"a column on the right-hand axis");
+    // Stops beyond the data carry on: a gradient wider than the axis still paints every column.
+    Check(Datums(Svg(spec with{Series=[spec.Series[0] with{Gradient=[new(-1000,"#A88200"),new(1000,"#DD4B45")]}]}),0).Select(Bar40).All(b=>b.Attribute("fill")!.Value.StartsWith("url(#")),"wide stops");
+});
+Test("A gradient fills a bar chart's bars across the plot, along X, on tracks too",()=>{
+    var spec=new ChartSpec{Title="Bars",Kind=ChartKind.Bar,Width=600,Height=300,Series=[new("Power",[new(0,100,"A"),new(1,200,"B"),new(2,300,"C")]){Gradient=[new(100,"#A88200"),new(300,"#DD4B45")]}]};
+    var doc=Svg(spec);var defs=Gradients40(doc);var bars=Datums(doc,0).Select(Bar40).ToArray();
+    Check(defs.Length==1&&defs[0].Attribute("y1")!.Value=="0"&&defs[0].Attribute("y2")!.Value=="0"&&(string?)defs[0].Attribute("gradientUnits")=="userSpaceOnUse",defs[0].ToString());
+    Check(Close(Attr(defs[0],"x1"),Attr(bars[0],"x")+Attr(bars[0],"width"))&&Close(Attr(defs[0],"x2"),Attr(bars[2],"x")+Attr(bars[2],"width"))&&Attr(defs[0],"x2")>Attr(defs[0],"x1"),$"{defs[0]}");
+    Check(bars.All(b=>b.Attribute("fill")!.Value==$"url(#{defs[0].Attribute("id")!.Value})"),"a bar is not filled by the gradient");
+    var tracked=Svg(spec with{YMax=400,BarTrack=true});
+    Check(Datums(tracked,0).Select(Bar40).All(b=>b.Attribute("fill")!.Value.StartsWith("url(#"))&&Tracks39(tracked).All(t=>t.Attribute("fill")!.Value==ChartStyle.Light.Grid),"bars on tracks");
+});
+Test("A gradient is refused on stacked columns, beside a faded fill or zones, and on the marks it cannot colour, each with its reason; columns' log and reversed axes stay refused",()=>{
+    var stops=new ColorStop[]{new(1,"#A88200"),new(9,"#DD4B45")};
+    var columns=new ChartSpec{Title="C",Kind=ChartKind.Column,Series=[new("S",[new(0,3,"A"),new(1,6,"B")]){Gradient=stops}]};
+    Check(Svg(columns) is not null,"columns");
+    Check(Refused(columns with{Kind=ChartKind.StackedColumn}).StartsWith("A stacked column's colours tell its stacked series apart"),Refused(columns with{Kind=ChartKind.StackedColumn}));
+    Check(Refused(columns with{Series=[columns.Series[0] with{Fill=AreaFill.Fade}]}).StartsWith("A faded column fades its own colour"),"a fade");
+    Check(Refused(columns with{Series=[columns.Series[0] with{Zones=new([new("Low",4),new("High",double.PositiveInfinity)])}]}).StartsWith("Zones colour a series in steps"),"zones");
+    Check(Refused(columns with{Kind=ChartKind.Scatter}).StartsWith("A gradient colours a series by its value, so it applies to series drawn as lines, areas, columns"),"scatter");
+    Check(Refused(columns with{YReversed=true}).StartsWith("A reversed Y axis applies")&&Refused(columns with{YAxis=AxisKind.Log}).StartsWith("Log Y axes require"),"reversed or log");
+    Check(Refused(columns with{Series=[columns.Series[0] with{Gradient=[new(1,"#A88200")]}]}).StartsWith("A gradient needs between 2 and 32")&&Refused(columns with{Series=[columns.Series[0] with{Gradient=[new(5,"#A88200"),new(1,"#DD4B45")]}]}).StartsWith("Colour stop values must rise"),"the stops");
+});
+Test("A sub-label is a second line 14 under each column's name at 11 px in the muted colour; the floor grows 14 only when one is set, the axis title moves down with it, and a chart without any draws as before",()=>{
+    var plain=Laps40(("L1",152,null),("L2",161,null),("L3",168,null),("L4",174,null)) with{XLabel="Lap"};
+    var subbed=Laps40(("L1",152,"152 bpm"),("L2",161,"161 bpm"),("L3",168,"168 bpm"),("L4",174,"174 bpm")) with{XLabel="Lap"};
+    XDocument a=Svg(plain),b=Svg(subbed);
+    var (top,bottom)=PaneSpan(PaneClips(b)[0]);
+    Check(Close(PaneSpan(PaneClips(a)[0]).Bottom-bottom,14)&&Close(PaneSpan(PaneClips(a)[0]).Top,top),$"{PaneSpan(PaneClips(a)[0]).Bottom} {bottom}");
+    var under=Under40(b);
+    var names=under.Where(t=>Close(Attr(t,"y"),bottom+21)).ToArray();var subs=under.Where(t=>Close(Attr(t,"y"),bottom+35)).ToArray();
+    Check(names.Select(t=>t.Value).SequenceEqual(["L1","L2","L3","L4"])&&subs.Select(t=>t.Value).SequenceEqual(["152 bpm","161 bpm","168 bpm","174 bpm"]),string.Join("|",under.Select(t=>$"{t.Value}@{Attr(t,"y")}")));
+    Check(subs.All(t=>(string?)t.Attribute("font-size")=="11")&&names.All(t=>t.Attribute("font-size") is null)&&names.Zip(subs).All(p=>Close(Attr(p.First,"x"),Attr(p.Second,"x"))),"sizes and places");
+    Check(under.Any(t=>t.Value=="Lap"&&Close(Attr(t,"y"),bottom+58))&&Under40(a).Any(t=>t.Value=="Lap"&&Close(Attr(t,"y"),PaneSpan(PaneClips(a)[0]).Bottom+44)),"the axis title");
+    // A chart whose points carry no sub-label, set or written out as null, draws byte for byte as before.
+    Check(ChartSvg.Render(plain)==ChartSvg.Render(plain with{Series=[plain.Series[0] with{Points=plain.Series[0].Points.Select(p=>p with{SubLabel=null}).ToArray()}]}),"null sub-labels");
+    // The muted colour clears 4.5:1 in every preset.
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight,DemoData.Harbour})
+        Check(Lumen.Charts.Contrast.Ratio(style.Muted,style.Background)>=4.5,$"{style.Muted} on {style.Background}");
+    // A sub-label longer than 12 characters is cut as its name is.
+    Check(Under40(Svg(Laps40(("L1",152,"0123456789abcdef"),("L2",160,null)))).Any(t=>t.Value=="0123456789a…"),"a long sub-label");
+    // Stacked columns write them the same way, and the classic finish too.
+    var stacked=Svg(subbed with{Kind=ChartKind.StackedColumn,Series=[..subbed.Series,new("More",[new(0,10,"L1"),new(1,12,"L2"),new(2,9,"L3"),new(3,11,"L4")])]});
+    Check(Under40(stacked).Count(t=>t.Value.EndsWith(" bpm"))==4&&Under40(Svg(Classic(subbed))).Count(t=>t.Value.EndsWith(" bpm"))==4,"stacked or classic");
+});
+Test("Sub-labels are thinned with their names by the room their words take, in either finish, so names and sub-labels never touch; a chart without them keeps its 65-unit rule",()=>{
+    double Width40(XElement t)=>(string?)t.Attribute("font-size")=="11"?Wide40(t.Value):Broad38(t.Value);
+    foreach(var (count,width) in new[]{(4,340),(6,340),(12,340),(12,900),(30,600)})
+        foreach(var finish in new Func<ChartSpec,ChartSpec>[]{s=>s,Classic})
+        {
+            var spec=finish(Laps40(Enumerable.Range(0,count).Select(i=>($"L{i+1}",150d+i,(string?)$"{150+i} bpm")).ToArray()) with{Width=width});
+            var doc=Svg(spec);var bottom=PaneSpan(PaneClips(doc)[0]).Bottom;var under=Under40(doc);
+            var names=under.Where(t=>Close(Attr(t,"y"),bottom+21)).ToArray();var subs=under.Where(t=>Close(Attr(t,"y"),bottom+35)).ToArray();
+            Check(names.Length==subs.Length&&names.Length>=1&&names.Zip(subs).All(p=>Close(Attr(p.First,"x"),Attr(p.Second,"x"))),$"{count} at {width}: {names.Length} names, {subs.Length} sub-labels");
+            // Each column's words keep 8 units from the next column's, by the wider of its two lines.
+            var widths=names.Zip(subs).Select(p=>(X:Attr(p.First,"x"),W:Math.Max(Width40(p.First),Width40(p.Second)))).ToArray();
+            Check(widths.Zip(widths.Skip(1)).All(p=>p.Second.X-p.First.X>=(p.First.W+p.Second.W)/2+8-1e-6),$"{count} at {width}: touching");
+        }
+    // Four laps at 340 keep every name and its sub-label; twelve leave some out.
+    Check(Under40(Svg(Laps40(Enumerable.Range(0,4).Select(i=>($"L{i+1}",150d+i,(string?)$"{150+i} bpm")).ToArray()) with{Width=340})).Length==8,"four laps at 340");
+    Check(Under40(Svg(Laps40(Enumerable.Range(0,12).Select(i=>($"L{i+1}",150d+i,(string?)$"{150+i} bpm")).ToArray()) with{Width=340})).Length<24,"twelve laps at 340");
+    // Without sub-labels four columns at 340 keep the 65-unit rule, one name in two.
+    Check(Under40(Svg(Laps40(Enumerable.Range(0,4).Select(i=>($"L{i+1}",150d+i,(string?)null)).ToArray()) with{Width=340})).Length==2,"the old rule");
+});
+Test("On a bar chart a sub-label stands under the category's name beside the bar, the two lines centred on it; rows thin for two lines, and a track's margin fits the wider",()=>{
+    var spec=new ChartSpec{Title="Bars",Kind=ChartKind.Bar,Width=600,Height=300,Series=[new("Power",[new(0,780,"5s"){SubLabel="15.0 W/kg"},new(1,420,"1m"),new(2,290,"5m"){SubLabel="5.6 W/kg"}])]};
+    var doc=Svg(spec);var (top,bottom)=PaneSpan(PaneClips(doc)[0]);var band=(bottom-top)/3;
+    var side=doc.Root!.Elements(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="end"&&(string?)t.Attribute("class")=="lumen-muted").ToArray();
+    double Row(int i)=>top+(i+.5)*band+4;
+    (string,double)[] expected=[("5s",Row(0)-7),("15.0 W/kg",Row(0)+7),("1m",Row(1)),("5m",Row(2)-7),("5.6 W/kg",Row(2)+7)];
+    Check(side.Length==5&&side.Zip(expected).All(p=>p.First.Value==p.Second.Item1&&Close(Attr(p.First,"y"),p.Second.Item2)),string.Join("|",side.Select(t=>$"{t.Value}@{Attr(t,"y")}")));
+    Check(side.Where(t=>t.Value.EndsWith("W/kg")).All(t=>(string?)t.Attribute("font-size")=="11"),"the size");
+    // Twelve rows in 300 units leave room for some names alone; with sub-labels each row needs 38.
+    var many=spec with{Series=[new("P",Enumerable.Range(0,12).Select(i=>new ChartPoint(i,100+i,$"R{i}"){SubLabel=$"sub {i}"}).ToArray())]};
+    var mdoc=Svg(many);var mspan=PaneSpan(PaneClips(mdoc)[0]);
+    var written=mdoc.Root!.Elements(ns+"text").Count(t=>(string?)t.Attribute("text-anchor")=="end"&&t.Value.StartsWith("R"));
+    var every=(int)Math.Ceiling(12/((mspan.Bottom-mspan.Top)/38));
+    Check(written==(12+every-1)/every&&every>1,$"{written} rows written");
+    // On tracks the left margin fits the wider of a name and its sub-label.
+    var tracked=Scores39() with{Series=[new("Score",[new(0,82,"Ex"){SubLabel="A long sub-label"},new(1,64,"Im")])]};
+    Check(Close(Attr(Tracks39(Svg(tracked))[0],"x"),Math.Ceiling(Wide40("A long sub-label"))+24),$"{Attr(Tracks39(Svg(tracked))[0],"x")}");
+});
+Test("A sub-label is said after its category's name in every mark's name and tooltip, a category's first given to every series in it, and in the component's status line and data table",()=>{
+    var spec=Laps40(("L1",152,"152 bpm"),("L2",161,null)) with{Series=[new("Heart rate",[new(0,152,"L1"){SubLabel="152 bpm"},new(1,161,"L2")]),new("Last race",[new(0,150,"L1"),new(1,158,"L2"){SubLabel="161 bpm"}]),new("Average",[new(0,151),new(1,159)]){Kind=ChartKind.Line}]};
+    var doc=Svg(spec);
+    Check(Names37(doc,0).SequenceEqual(["Heart rate: L1 · 152 bpm, 152","Heart rate: L2 · 161 bpm, 161"])&&Names37(doc,1).SequenceEqual(["Last race: L1 · 152 bpm, 150","Last race: L2 · 161 bpm, 158"]),string.Join("|",Names37(doc,0).Concat(Names37(doc,1))));
+    Check(Names37(doc,2)[0]=="Average: 0 · 152 bpm, 151"&&Datums(doc,0)[0].Element(ns+"title")!.Value=="Heart rate: L1 · 152 bpm, 152",string.Join("|",Names37(doc,2)));
+    // A range series on a column chart says it too.
+    var range=Svg(spec with{Series=[spec.Series[0],new("Spread",[ChartPoint.Interval(0,152,140,170,"L1"),ChartPoint.Interval(1,null,145,175,"L2")]){Kind=ChartKind.Range}]});
+    Check(Names37(range,1)[0].StartsWith("L1 · 152 bpm: 140 to 170"),Names37(range,1)[0]);
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;var status="";
+    var html=Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(1,1);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    Check(status=="Last race: L2 · 161 bpm = 158",status);
+    Check(html.Contains("<tr><td>Heart rate</td><td>L1 &#xB7; 152 bpm</td><td>152</td></tr>")&&html.Contains("<tr><td>Last race</td><td>L2 &#xB7; 161 bpm</td><td>158</td></tr>"),"the data table");
+    // Without sub-labels the status line and the table read as before.
+    var plain=Operate(Spec(ChartKind.Column),async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,1);});
+    Check(plain.Contains("<tr><td>Series</td><td>B</td><td>5</td></tr>")&&plain.Contains("Series: B = 5</span>"),"a chart without sub-labels");
+});
+Test("A sub-label is refused off column, bar and stacked column charts, on a sparkline, blank, past 16 characters, across lines, and where two series give one category different ones, each with its reason",()=>{
+    ChartSpec With(ChartKind kind,string sub)=>new(){Title="S",Kind=kind,Series=[new("S",[new(0,1,"A"){SubLabel=sub},new(1,2,"B")])]};
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Scatter,ChartKind.Area,ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar})
+        Check(Refused(With(kind,"x")).StartsWith("A sub-label is a second line under a category's name, so it applies to column, bar and stacked column charts"),$"{kind}: {Refused(With(kind,"x"))}");
+    Check(Refused(Spark(ChartKind.Column) with{Series=[new("S",[new(0,1){SubLabel="x"},new(1,2)])]}).StartsWith("A sparkline draws its data alone, with no words, so its points take no sub-labels"),"a sparkline");
+    Check(Refused(With(ChartKind.Column," ")).StartsWith("A sub-label is written under its category's name, so it needs words"),"blank");
+    Check(Refused(With(ChartKind.Column,new string('x',17))).StartsWith("A sub-label is one short line")&&Refused(With(ChartKind.Bar,"one\ntwo")).StartsWith("A sub-label is one short line")&&Svg(With(ChartKind.Column,new string('x',16))) is not null,"long or two lines");
+    var two=new ChartSpec{Title="T",Kind=ChartKind.Column,Series=[new("A",[new(0,1,"L1"){SubLabel="152"}]),new("B",[new(0,2,"L1"){SubLabel="153"}])]};
+    Check(Refused(two).StartsWith("A category's sub-label is written once under its name"),"different sub-labels");
+    Check(Svg(two with{Series=[two.Series[0],new("B",[new(0,2,"L1"){SubLabel="152"}])]}) is not null,"the same one twice");
+    Check(Svg(With(ChartKind.StackedColumn,"x")) is not null&&Svg(With(ChartKind.Bar,"x")) is not null,"stacked and bars");
+});
+Test("A strip part whose amount writes as its share says it once; one that differs, or in another format, keeps both",()=>{
+    var shares=new ChartSpec{Title="Zones",Kind=ChartKind.Strip,Width=340,YUnit="%",Series=[new("Zones",[new(0,30,"Easy"),new(1,40,"Moderate"),new(2,30,"Hard"){ValueNote=" n"}])]};
+    Check(Names37(Svg(shares)).SequenceEqual(["Easy: 30%","Moderate: 40%","Hard: 30% n"])&&ChartSvg.PartLabel(shares,1)=="Moderate: 40%",string.Join("|",Names37(Svg(shares))));
+    // Shares rounded by the app that add up to 99 are shared out over their total: the last takes 34 and keeps its amount beside it.
+    var rounded=shares with{Series=[new("Zones",[new(0,33,"A"),new(1,33,"B"),new(2,33,"C")])]};
+    Check(Names37(Svg(rounded)).SequenceEqual(["A: 33%","B: 33%","C: 34%, 33%"])&&Keys39(Svg(rounded)).SequenceEqual(["A 33%","B 33%","C 34%"]),string.Join("|",Names37(Svg(rounded))));
+    // Seconds, and a number without the unit, keep their amounts.
+    Check(Names37(Svg(Zones39()))[0]=="Easy: 24%, 12:20"&&ChartSvg.PartLabel(shares with{YUnit=null},0)=="Easy: 30%, 30","other formats");
+});
+Test("An end label that does not fit with its note gives up the note first, cut and then left out, and is cut itself only where it does not fit alone; its whole stays its name and tooltip",()=>{
+    var (noteCut,noteDropped,labelCut)=(0,0,0);
+    foreach(var width in new[]{320,340,360})
+        foreach(var length in Enumerable.Range(3,22))
+        {
+            var label=new string('n',length-2)+" X";
+            var spec=new ChartSpec{Title="Ends",Kind=ChartKind.Line,Width=width,Series=[new("S",[new(0,1),new(1,2)]){EndLabel=label,EndNote="+12.3s"}]};
+            var end=Ends38(Svg(spec)).Single();var words=Words38(end);var text=Text38(end);var room=width-4-Attr(words,"x");
+            var whole=label+" +12.3s";
+            if(text==whole){Check(words.Attribute("role") is null,"uncut, yet named apart");continue;}
+            Check((string?)words.Attribute("role")=="img"&&words.Attribute("aria-label")!.Value==whole&&words.Element(ns+"title")!.Value==whole,$"{label} at {width}: its whole");
+            if(Broad38(label)<=room+1e-6)
+            {
+                // The label fits: it stands whole, its note cut or left out.
+                Check(text==label||text.StartsWith(label+" ")&&text.EndsWith("…"),$"{label} at {width}: {text}");
+                if(text==label)noteDropped++;else noteCut++;
+            }
+            else{Check(text.EndsWith("…")&&!words.Elements(ns+"tspan").Any()&&Broad38(text)<=room+1e-6,$"{label} at {width}: {text}");labelCut++;}
+        }
+    Check(noteCut>0&&noteDropped>0&&labelCut>0,$"{noteCut} notes cut, {noteDropped} left out, {labelCut} labels cut");
+});
+Test("Gradients on columns and sub-labels round-trip through the HTTP API's JSON, defaults stay out of the gradient hash, and every kind draws byte for byte as before with them written out",()=>{
+    var spec=Laps40(("L1",152,"152 bpm"),("L2",174,"174 bpm")) with{Series=[new("Heart rate",[new(0,152,"L1"){SubLabel="152 bpm"},new(1,174,"L2"){SubLabel="174 bpm"}]){Gradient=[new(152,"#f59e0b"),new(174,"#f87171")]}]};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,finishJson);
+    Check(json.Contains("\"subLabel\":\"152 bpm\"")&&json.Contains("\"gradient\":[{\"value\":152,\"color\":\"#f59e0b\"}"),json);
+    var back=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,finishJson)!;
+    Check(back.Series[0].Points[1].SubLabel=="174 bpm"&&ChartSvg.Render(back)==ChartSvg.Render(spec),"the spec changed in transit");
+    var written="{\"title\":\"Laps\",\"kind\":\"Column\",\"series\":[{\"name\":\"HR\",\"gradient\":[{\"value\":1,\"color\":\"#A88200\"},{\"value\":2,\"color\":\"#DD4B45\"}],\"points\":[{\"x\":0,\"y\":1,\"label\":\"L1\",\"subLabel\":\"1 bpm\"},{\"x\":1,\"y\":2,\"label\":\"L2\"}]}]}";
+    var drawn=Svg(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,finishJson)!);
+    Check(Names37(drawn)[0]=="HR: L1 · 1 bpm, 1"&&Gradients40(drawn).Length==1,"a spec written by hand");
+    Check(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Column\",\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",finishJson)!.Series[0].Points[0].SubLabel is null,"the default");
+    string GradientId(ChartSpec s)=>System.Text.RegularExpressions.Regex.Match(ChartSvg.Render(s),"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}],Annotations=[new(AnnotationAxis.Y,2){Label="T"}]};
+    Check(GradientId(faded)=="lumen-4bce89394b87"&&GradientId(faded with{Series=[faded.Series[0] with{Points=faded.Series[0].Points.Select(p=>p with{SubLabel=null}).ToArray()}]})=="lumen-4bce89394b87",GradientId(faded));
+    var fadedColumns=Spec(ChartKind.Column) with{Series=[new("S",[new(0,1,"A"),new(1,3,"B")]){Fill=AreaFill.Fade}]};
+    Check(GradientId(fadedColumns)!=GradientId(fadedColumns with{Series=[fadedColumns.Series[0] with{Points=[fadedColumns.Series[0].Points[0] with{SubLabel="x"},fadedColumns.Series[0].Points[1]]}]}),"a sub-label kept a gradient's name");
+    foreach(var kind in Enum.GetValues<ChartKind>())
+        Check(ChartSvg.Render(Sample(kind))==ChartSvg.Render(Sample(kind) with{Series=Sample(kind).Series.Select(s=>s with{Points=s.Points.Select(p=>p with{SubLabel=null}).ToArray()}).ToArray()}),$"{kind}");
+});
+Test("Sports page: heart rate by lap closes the Latest session section as gradient-filled columns of the laps' heart rates with their paces under them, and best efforts follow the power curve, their watts per kilogram under each",()=>{
+    var ids=sports.Where(card=>card.Section=="fitness").Select(card=>card.Id).ToArray();
+    Check(ids.SequenceEqual(["power-curve","best-efforts","records","getting-faster","hrv"]),string.Join(",",ids));
+    var laps=Sports("laps");var heart=Sports("lap-heart");var hearts=SportsData.LapHeartRates(latest);
+    Check(heart.Kind==ChartKind.Column&&heart.Series.Count==1&&heart.Series[0].Points.Select(p=>p.Y!.Value).SequenceEqual(hearts)&&hearts.Count==laps.Series[0].Points.Count,"the laps' heart rates");
+    Check(heart.Series[0].Points.Select(p=>p.SubLabel).SequenceEqual(laps.Series[0].Points.Select(p=>SportsData.Clock(p.Y!.Value)))&&heart.Series[0].Points.Select(p=>p.Label).SequenceEqual(laps.Series[0].Points.Select(p=>p.Label)),"the paces");
+    Check(heart.Series[0].Gradient!.Select(s=>(s.Value,s.Color)).SequenceEqual([(0d,ChartStyle.Light.Zones[3]),(hearts.Max(),ChartStyle.Light.Zones[5])]),"the stops");
+    // Every lap's average lies between its stream's lowest and highest heart rate, and the progression's laps rise.
+    Check(hearts.All(h=>h>=latest.Track!.HeartRate.Min()&&h<=latest.Track!.HeartRate.Max())&&hearts.Zip(hearts.Skip(1)).All(p=>p.Second>p.First),string.Join(",",hearts));
+    var efforts=Sports("best-efforts");var month=SportsData.MonthBest(athlete,9);
+    Check(efforts.Kind==ChartKind.Column&&efforts.Series[0].Points.Select(p=>p.Label).SequenceEqual(["5s","1m","5m","20m","60m"])
+        &&efforts.Series[0].Points.Select(p=>p.Y!.Value).SequenceEqual(new double[]{5,60,300,1200,3600}.Select(d=>month.Single(m=>m.Seconds==d).Value)),string.Join(",",efforts.Series[0].Points.Select(p=>p.Label)));
+    Check(efforts.Series[0].Points.All(p=>p.SubLabel==(p.Y!.Value/SportsData.BodyMass).ToString("0.0",CultureInfo.InvariantCulture))&&efforts.Series[0].ValueLabels,"the watts per kilogram");
+    // At a phone's width every lap and every effort keeps its name and its sub-label, and each mark says it.
+    foreach(var spec in new[]{heart,efforts})
+        foreach(var width in new[]{322,340,1100})
+        {
+            var doc=Svg(spec with{Width=width});
+            Check(Under40(doc).Count(t=>(string?)t.Attribute("font-size")=="11")==spec.Series[0].Points.Count&&Names37(doc).All(n=>n.Contains(" · ")),$"{spec.Title} at {width}");
+        }
+    // The gradient's stops clear 3:1 on every brand's background, as do their blends, and the sub-labels' muted colour 4.5:1.
+    foreach(var (zones,style) in new[]{(ChartStyle.Light.Zones,ChartStyle.Light),(ChartStyle.Light.Zones,ChartStyle.Dark),(ChartStyle.Midnight.Zones,ChartStyle.Midnight),(ChartStyle.Light.Zones,DemoData.Harbour)})
+    {
+        for(var t=0;t<=20;t++)
+            Check(Lumen.Charts.Contrast.Ratio(Blend40(zones[3],zones[5],t/20d),style.Background)>=3,$"{zones[3]}–{zones[5]} at {t}/20 on {style.Background}");
+        Check(Lumen.Charts.Contrast.Ratio(style.Muted,style.Background)>=4.5&&Lumen.Charts.Contrast.Ratio(style.SeriesColor(0),style.Background)>=3,$"{style.Background}");
+    }
+});
+Test("Race Face recipes: the lap columns' amber to red and the best efforts' sky blue clear 3:1 on the card at every stop and blend, and the sub-labels' low grey 4.5:1",()=>{
+    for(var t=0;t<=20;t++) Check(Lumen.Charts.Contrast.Ratio(Blend40("#f59e0b","#f87171",t/20d),"#161618")>=3,$"blend {t}");
+    Check(Lumen.Charts.Contrast.Ratio("#38bdf8","#161618")>=3&&Lumen.Charts.Contrast.Ratio("#80858E","#161618")>=4.5&&Lumen.Charts.Contrast.Ratio("#F5F6F7","#161618")>=4.5,"the card");
+});
+// A colour a fraction of the way from one to another, channel by channel, as the library blends a gradient.
+string Blend40(string from,string to,double t){int C(string h,int at)=>int.Parse(h.AsSpan(at,2),NumberStyles.HexNumber,CultureInfo.InvariantCulture);return "#"+string.Concat(new[]{1,3,5}.Select(at=>((int)(C(from,at)+(C(to,at)-C(from,at))*t)).ToString("X2",CultureInfo.InvariantCulture)));}
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

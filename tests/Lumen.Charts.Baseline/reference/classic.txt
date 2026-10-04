@@ -349,3 +349,12 @@ scores/340-light 00BEC0FB3B14FBDD
 scores/340-midnight A8D89B0606475A22
 track/columns B4438AF6E53A87EF
 titles/undrawn 019DD1425C1D810F
+gradient/columns-light E2881CAE893CEDDB
+gradient/columns-midnight C8479B2A4FF0DFA0
+gradient/bars A981DD40C4BB2215
+sublabel/columns 57563C204FB9725C
+sublabel/bars BC9142E64FB2DAEE
+recipe/lap-heart-340 E22B64D15042A769
+recipe/best-efforts-340 E915FDE5E19F1A41
+strip/shares-once 041119F748F5D234
+ends/note-first 8CAA551D43E86C28

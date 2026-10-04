@@ -319,7 +319,8 @@ public static partial class ChartSvg
     /// a rounded bar for a timeline's lane and an upright capsule for range bars; two steps, the second taller, for blocks; and a
     /// square for columns, bars, areas and the rest. A key whose series draws in colours other than its own is split
     /// into them, left to right: up to four of the point colours when every drawn point has one, as time-in-zone bars do, up to
-    /// four of the colours zoned blocks draw in, a donut's slice colours, a gauge's zone or gradient colours, a heatmap row's low
+    /// four of the colours zoned blocks draw in, a donut's slice colours, a gauge's zone or gradient colours, up to four of the gradient
+    /// colours of columns and bars filled by value, a heatmap row's low
     /// and high colours, a calendar's zone colours or its ramp's low and high colours, and the rising and falling colours of
     /// candles and OHLC bars.
     /// </summary>
@@ -338,6 +339,8 @@ public static partial class ChartSvg
             // Blocks coloured by zone are keyed by the zone colours they draw in, a point's own colour first.
             : mark == ChartKind.Blocks && series.Zones is { } levels && drawn.Length > 0 ? drawn.Select(p => p.Color ?? ZoneColor(style, levels, levels.IndexOf(p.Y!.Value))).Distinct().Take(4).ToArray()
             : drawn.Length > 0 && drawn.All(p => p.Color is not null) ? drawn.Select(p => p.Color!).Distinct().Take(4).ToArray()
+            // Columns and bars filled by value are keyed by their gradient's colours, as a gauge's are.
+            : mark is ChartKind.Column or ChartKind.Bar && series.Gradient is { } filled ? filled.Select(stop => stop.Color).Distinct().Take(4).ToArray()
             : [SeriesColor(series, index, style)];
         if (inks.Count == 0) inks = [SeriesColor(series, index, style)];
         var middle = N(y + 4.5);
@@ -479,14 +482,16 @@ public static partial class ChartSvg
         w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-series='{series}' data-point='{index}' aria-label='{SvgWriter.E(label)}'{attributes}>{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}{shape}</g>");
     }
     private static string PointLabel(ChartSeries s, ChartPoint p) => $"{s.Name}: {p.Label ?? LinearScale.Label(p.X)}, {(p.Y.HasValue ? LinearScale.Label(p.Y.Value) + p.ValueNote : "missing")}";
-    /// <summary>A mark's name: its series, its label or X, its value and the value's note, then what colours it — its zone, or how it
-    /// changed from the point before — whether it is projected, and a band's bounds.</summary>
-    private static string PointLabel(ChartSeries s, ChartPoint p, Axis x, Axis y, int? change = null) =>
-        $"{s.Name}: {p.Label ?? x.Format(p.X)}, {(p.Y.HasValue ? y.Format(p.Y.Value) + p.ValueNote : "missing")}" +
+    /// <summary>A mark's name: its series, its label or X and its category's sub-label, its value and the value's note, then what colours it
+    /// — its zone, or how it changed from the point before — whether it is projected, and a band's bounds.</summary>
+    private static string PointLabel(ChartSeries s, ChartPoint p, Axis x, Axis y, int? change = null, string? sub = null) =>
+        $"{s.Name}: {p.Label ?? x.Format(p.X)}{Under(sub)}, {(p.Y.HasValue ? y.Format(p.Y.Value) + p.ValueNote : "missing")}" +
         (s.Zones is { } zones && p.Y is { } value ? $", {zones.Zones[zones.IndexOf(value)].Name}" : "") +
         change switch { > 0 => ", better than the previous", < 0 => ", worse than the previous", 0 => ", level with the previous", _ => "" } +
         (s.ProjectedFrom is { } from && p.X >= from ? ", projected" : "") +
         (p.Low.HasValue && p.High.HasValue ? $" (band {y.Format(p.Low.Value)} to {y.Format(p.High.Value)})" : "");
+    /// <summary>What a category's sub-label adds after its name where it is said: <c> · 152 bpm</c>, or nothing.</summary>
+    private static string Under(string? sub) => sub is null ? "" : " · " + sub;
     private static string ZoneColor(ChartStyle style, ZoneScale zones, int index) => zones.Zones[index].Color ?? style.Zones[index];
     /// <summary>How each point of a series with change colours moved from the nearest earlier point that has a value: 1 better, −1
     /// worse and 0 level, by the series' own sense of better; null for a missing value, for the first value, and for every point of a
@@ -552,6 +557,13 @@ public static partial class ChartSvg
 
     /// <summary>The thickest a bar on a track is drawn, and how far its value label stands past the track's end.</summary>
     private const double TrackThick = 18, TrackGap = 6;
+    /// <summary>How far a category's sub-label stands under its name, and the least height a horizontal bar chart's row takes for the two
+    /// lines before the names are thinned.</summary>
+    private const double SubLine = 14, SubRow = 38;
+    /// <summary>Whether a column or stacked column chart writes sub-labels under its categories' names, which takes a line more under the plot.</summary>
+    private static bool Subbed(ChartSpec s) => s.Kind is ChartKind.Column or ChartKind.StackedColumn && s.Series.Any(series => series.Points.Any(p => p.SubLabel is not null));
+    /// <summary>The sub-label a horizontal bar chart writes under a category's name: the first any series gives it, cut to 21 characters.</summary>
+    private static string? SubCategory(ChartSpec s, double x) => s.Series.SelectMany(series => series.Points).FirstOrDefault(p => p.X == x && p.SubLabel is not null)?.SubLabel is { } sub ? Short(sub, 21) : null;
     /// <summary>A horizontal bar chart's category name as it is written beside its bar: its name, or its X, cut to 21 characters.</summary>
     private static string Category(ChartSpec s, double x) => Short(s.Series.SelectMany(series => series.Points).First(p => p.X == x).Label ?? LinearScale.Label(x), 21);
     /// <summary>The room a horizontal bar chart on tracks keeps beside the plot for its category names: 12 units from the plot, and 12 from
@@ -563,7 +575,7 @@ public static partial class ChartSvg
     private static (double Left, double Right) Tracked(ChartSpec s)
     {
         var cats = s.Series.SelectMany(series => series.Points).Select(p => p.X).Distinct().ToArray();
-        var widest = cats.Length == 0 ? 0 : cats.Max(x => Broad(Category(s, x)));
+        var widest = cats.Length == 0 ? 0 : cats.Max(x => Math.Max(Broad(Category(s, x)), SubCategory(s, x) is { } sub ? Wide(sub) : 0));
         var left = Math.Min(Math.Ceiling(widest) + Aside(s), Math.Floor(s.Width * .45));
         var words = new Axis(AxisKind.Linear, 0, 1) { ValueFormat = s.YFormat, Unit = s.YUnit };
         var labels = s.Series.Where(series => series.ValueLabels).SelectMany(series => series.Points).Where(p => p.Y.HasValue).Select(p => Wide(words.Format(p.Y!.Value) + p.ValueNote)).ToArray();
@@ -587,6 +599,10 @@ public static partial class ChartSvg
         var bubbles = s.Series.Where(x => Mark(s, x) == ChartKind.Bubble).SelectMany(x => x.Points).ToArray();
         var maxSize = bubbles.Length == 0 ? 0 : bubbles.Max(point => point.Size);
         double X(double x) => frame.X(x);
+        // Each category's sub-label: the first any series gives it, so every mark in the category says the same words.
+        var subs = new Dictionary<double, string>();
+        if (category) foreach (var p in points) if (p.SubLabel is { } given) subs.TryAdd(p.X, given);
+        string? Sub(double x) => subs.GetValueOrDefault(x);
         var (xCount, xTicks) = category ? (5, []) : Spaced(w, xs, right - left - 2 * inset, across: true, count: s.XAxis == AxisKind.Time ? 6 : 5);
         // A sparkline draws no axes: no gridlines, ticks or axis titles.
         for (var k = 0; k < plots.Length && !s.Sparkline; k++)
@@ -637,15 +653,32 @@ public static partial class ChartSvg
             {
                 if (category)
                 {
-                    var step = Math.Max(1, (int)Math.Ceiling(cats.Length / (horizontal ? (bottom - top) / 24 : (right - left) / 65)));
+                    // A bar's name with a sub-label under it takes two lines, so the rows it can be written in are taller. Columns with
+                    // sub-labels are thinned by the room their words take, in either finish, rather than by a fixed 65 units a name.
+                    var measured = subs.Count > 0 && !horizontal;
+                    var step = measured ? 1 : Math.Max(1, (int)Math.Ceiling(cats.Length / (horizontal ? (bottom - top) / (subs.Count > 0 ? SubRow : 24) : (right - left) / 65)));
                     string Name(int i) => points.First(p => p.X == cats[i]).Label ?? LinearScale.Label(cats[i]);
-                    if (w.Refined && !horizontal)
-                        while (step < cats.Length && !Apart(Enumerable.Range(0, cats.Length).Where(i => i % step == 0).Select(i => (X(cats[i]), Short(Name(i), 12))))) step++;
+                    // A sub-label is thinned with its name: the wider of the two keeps the columns' names apart.
+                    double Widest(int i) => Math.Max(Broad(Short(Name(i), 12)), Sub(cats[i]) is { } under ? Wide(Short(under, 12)) : 0);
+                    if ((w.Refined || measured) && !horizontal)
+                        while (step < cats.Length && !Clear(Enumerable.Range(0, cats.Length).Where(i => i % step == 0).Select(i => (X(cats[i]), Widest(i))))) step++;
+                    string Side(string text) => s.BarTrack ? Fitted(Short(text, 21), left - Aside(s)) : Short(text, 21);
                     for (var i = 0; i < cats.Length; i += step)
                     {
                         var label = Name(i);
-                        if (horizontal) w.Text(left - 12, top + (i + .5) / cats.Length * (bottom - top) + 4, s.BarTrack ? Fitted(Short(label, 21), left - Aside(s)) : Short(label, 21), "text-anchor='end' class='lumen-muted'");
-                        else w.Text(X(cats[i]), bottom + 21, Short(label, 12), "text-anchor='middle' class='lumen-muted'");
+                        var under = Sub(cats[i]);
+                        if (horizontal)
+                        {
+                            // With a sub-label the name moves up half a line and the sub-label stands half a line under the bar's centre.
+                            var y = top + (i + .5) / cats.Length * (bottom - top) + 4;
+                            w.Text(left - 12, under is null ? y : y - SubLine / 2, Side(label), "text-anchor='end' class='lumen-muted'");
+                            if (under is not null) w.Text(left - 12, y + SubLine / 2, Side(under), "text-anchor='end' class='lumen-muted' font-size='11'");
+                        }
+                        else
+                        {
+                            w.Text(X(cats[i]), bottom + 21, Short(label, 12), "text-anchor='middle' class='lumen-muted'");
+                            if (under is not null) w.Text(X(cats[i]), bottom + 21 + SubLine, Short(under, 12), "text-anchor='middle' class='lumen-muted' font-size='11'");
+                        }
                     }
                 }
                 else
@@ -677,7 +710,8 @@ public static partial class ChartSvg
                         for (var i = 0; i < xTicks.Count; i++)
                             if (Written(s.XTickLabels, i, xTicks.Count)) w.Text(X(xTicks[i].Value), bottom + 21, xTicks[i].Label, "text-anchor='middle' class='lumen-muted'");
                 }
-                w.Text((left + right) / 2, bottom + 44, horizontal ? s.YLabel : s.XLabel, "text-anchor='middle' class='lumen-muted'");
+                // Under columns' sub-labels the axis title moves down a line, into the room the floor keeps for them.
+                w.Text((left + right) / 2, bottom + 44 + (!horizontal && subs.Count > 0 ? SubLine : 0), horizontal ? s.YLabel : s.XLabel, "text-anchor='middle' class='lumen-muted'");
             }
             // Named above, a plot's header stands on one line over its left edge, cut to the plot's width.
             if (s.PaneTitles == PaneTitlePlacement.Above)
@@ -797,7 +831,8 @@ public static partial class ChartSvg
                 // Each series is measured against its own axis from here on.
                 var scale = series.Secondary ? ys2 : ys;
                 double At(double y) => scale.Map(y, bottom, top);
-                var paint = series.Gradient is { } stops ? $"url(#{w.Gradient(ByValue(stops, At))})" : color;
+                // A horizontal bar chart measures its bars along X, so their gradient runs across the plot rather than up it.
+                var paint = series.Gradient is { } stops ? $"url(#{w.Gradient(mark == ChartKind.Bar ? ByValue(stops, v => scale.Map(v, left, right), across: true) : ByValue(stops, At))})" : color;
                 // A point's own colour beats its zone's, which beats the series colour or gradient.
                 string Ink(ChartPoint p) => p.Color ?? (series.Zones is { } zones ? ZoneColor(w.Style, zones, zones.IndexOf(p.Y!.Value)) : paint);
                 // A change colour stands for a point that did better or worse than the one before; a level one keeps the series colour.
@@ -873,7 +908,7 @@ public static partial class ChartSvg
                                     _ => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", "")
                                 };
                             var followed = ending is { } e && e.Index == d.Index && e.Count == d.Count && e.Point.X == p.X;
-                            Datum(w, si, d.Index, PointLabel(series, p, xs, scale, d.Count > 1 ? null : changes[d.Index]) + Averaged(d.Count) + (followed ? Said(series) : ""), shape, attributes);
+                            Datum(w, si, d.Index, PointLabel(series, p, xs, scale, d.Count > 1 ? null : changes[d.Index], Sub(p.X)) + Averaged(d.Count) + (followed ? Said(series) : ""), shape, attributes);
                             if (followed) endings.Add(new(X(p.X), At(p.Y!.Value), series, color, d.Index == last && d.Count == 1 ? 10 : p.Highlight is not null ? Highlighted + 1 : series.Markers == MarkerStyle.Hollow ? 5 : 4));
                             if (series.ValueLabels) Over(X(p.X), At(p.Y!.Value), d.Index == last && d.Count == 1 || p.Highlight is not null ? Highlighted : run.Length > 80 ? 2 : 4, scale.Format(p.Y!.Value), p.ValueNote, Lettered(MovedOf(d), p));
                         }
@@ -900,7 +935,7 @@ public static partial class ChartSvg
                             share = slot / columns.Length;
                             from = X(p.X) - slot / 2 + place * share;
                         }
-                        Datum(w, si, pi, RangeLabel(series, p, xs, scale, several), Capsule(w, from, share, At(low), At(high), p.Y is { } y ? At(y) : null, p.Color ?? color));
+                        Datum(w, si, pi, RangeLabel(series, p, xs, scale, several, Sub(p.X)), Capsule(w, from, share, At(low), At(high), p.Y is { } y ? At(y) : null, p.Color ?? color));
                     }
                 }
                 else if (mark == ChartKind.Blocks)
@@ -965,7 +1000,7 @@ public static partial class ChartSvg
                             w.Add(track.Insert(5, " class='lumen-bar-track'"));
                         }
                         var over = given > y ? $", above the scale, drawn at {scale.Format(y)}" : "";
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale) + over, Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost));
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + over, Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost));
                         if (series.ValueLabels)
                         {
                             // On a track the value stands past the track's end, in the margin kept for it, or above a column's track.
@@ -980,7 +1015,7 @@ public static partial class ChartSvg
                         // Centred on its X within the slot, rising from zero on the series' own axis.
                         var width = slot / columns.Length;
                         var x = X(p.X) - slot / 2 + place * width;
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale), Bar(w, x, Math.Min(At(0), At(y)), width, Math.Abs(At(y) - At(0)), y >= 0 ? End.Top : End.Bottom, Ink(p), series.Fill));
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)), Bar(w, x, Math.Min(At(0), At(y)), width, Math.Abs(At(y) - At(0)), y >= 0 ? End.Top : End.Bottom, Ink(p), series.Fill));
                         if (series.ValueLabels) Above(x, width, At(y), y >= 0, scale.Format(y), p.ValueNote);
                     }
                     else
@@ -995,7 +1030,7 @@ public static partial class ChartSvg
                             MarkerStyle.Hollow => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{w.Style.Background}'{w.Fixed}/>", $" stroke='{ink}' stroke-width='2'"),
                             _ => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'{w.Fixed}/>", "")
                         };
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale,changes[pi]) + (pi == endPoint ? Said(series) : ""), shape, attributes);
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale,changes[pi],Sub(p.X)) + (pi == endPoint ? Said(series) : ""), shape, attributes);
                         if (pi == endPoint) endings.Add(new(X(p.X), At(y), series, color, p.Highlight is null ? radius + (series.Markers == MarkerStyle.Hollow ? 1 : 0) : Highlighted + 1));
                         if (series.ValueLabels) Over(X(p.X), At(y), p.Highlight is null ? radius : Highlighted, scale.Format(y), p.ValueNote, Lettered(Moved(pi), p));
                     }
@@ -1072,8 +1107,8 @@ public static partial class ChartSvg
     }
     /// <summary>
     /// A pane's end labels, as <see cref="ChartSeries.EndLabel"/> describes them: each just right of its series' last point, centred on it,
-    /// in its series' colour where that clears 4.5:1 and in the text colour where it does not, its note after it in the muted colour, cut
-    /// with <c>…</c> where the drawing's edge comes first. Labels whose spans across the drawing overlap are set apart from the top down,
+    /// in its series' colour where that clears 4.5:1 and in the text colour where it does not, its note after it in the muted colour; where
+    /// the drawing's edge comes first the note is cut with <c>…</c>, or left out, before the label is cut. Labels whose spans across the drawing overlap are set apart from the top down,
     /// <see cref="EndLine"/> a line, or <see cref="EndTight"/> where that does not fit, within the plot and 8 units past it, the lowest left
     /// out where even that does not; one moved more than 3 units from its point steps right and is joined to it by a thin line. Each is
     /// written over a copy of itself stroked in the background colour, as a value label is, so a line or a gridline under it never cuts it.
@@ -1115,23 +1150,28 @@ public static partial class ChartSvg
                 var x = from + (moved ? EndShift : 0);
                 // Cut where the drawing's edge comes first, which it does only where the margin met its cap or the label moved.
                 var room = s.Width - EndPad - x;
-                var shown = Broad(full) <= room + 1e-6 ? full : Clipped(full, room);
                 if (moved)
                     w.Line(end.X + end.Reach + 1, end.Y, x - 2, centre, $"stroke='{(Contrast.Ratio(end.Color, ground) >= 3 ? end.Color : style.Muted)}' stroke-width='1' stroke-linecap='round'{w.Fixed} aria-hidden='true'");
-                // The words shown, split into the label and the note after it; a cut that reaches no further than the label drops the note.
+                // The label names the series and the note only adds to it, so where the two do not fit the note is cut first, then left out,
+                // and only then is the label cut.
                 var label = end.Series.EndLabel!;
                 string? note = end.Series.EndNote;
-                if (shown != full)
+                var cut = Broad(full) > room + 1e-6;
+                if (cut)
                 {
-                    var kept = shown[..^1];
-                    (label, note) = kept.Length <= label.Length ? (kept + "…", null) : (label, kept[(label.Length + 1)..] + "…");
+                    if (note is not null && Broad($"{label} {note[..1]}…") <= room + 1e-6) note = Clipped(note, room - Broad(label + " "));
+                    else
+                    {
+                        note = null;
+                        if (Broad(label) > room + 1e-6) label = Clipped(label, room);
+                    }
                 }
                 var ink = Contrast.Ratio(end.Color, ground) >= 4.5 ? end.Color : style.Text;
                 var at = $"x='{N(x)}' y='{N(centre + 4)}'";
                 var halo = SvgWriter.E(label) + (note is null ? "" : $"<tspan font-weight='400'> {SvgWriter.E(note)}</tspan>");
                 var words = SvgWriter.E(label) + (note is null ? "" : $"<tspan font-weight='400'{noted}> {SvgWriter.E(note)}</tspan>");
                 w.Add($"<g class='lumen-end' font-size='12' font-weight='600'><text {at} fill='{ground}' stroke='{ground}' stroke-width='3' stroke-linejoin='round' aria-hidden='true' pointer-events='none'>{halo}</text>" +
-                    (shown == full ? $"<text {at} fill='{ink}'>{words}</text>"
+                    (!cut ? $"<text {at} fill='{ink}'>{words}</text>"
                         : $"<text {at} fill='{ink}' role='img' aria-label='{SvgWriter.E(full)}'><title>{SvgWriter.E(full)}</title>{words}</text>") + "</g>");
             }
         }
@@ -1256,12 +1296,14 @@ public static partial class ChartSvg
     }
 
     /// <summary>Whether labels set along the bottom, each centred on its own position, all leave each other room.</summary>
-    private static bool Apart(IEnumerable<(double At, string Text)> labels)
+    private static bool Apart(IEnumerable<(double At, string Text)> labels) => Clear(labels.Select(label => (label.At, Broad(label.Text))));
+    /// <summary>Whether labels of the given widths set along the bottom, each centred on its own position, all leave each other 8 units.</summary>
+    private static bool Clear(IEnumerable<(double At, double Width)> labels)
     {
-        (double At, string Text)? last = null;
+        (double At, double Width)? last = null;
         foreach (var label in labels.OrderBy(label => label.At))
         {
-            if (last is { } before && label.At - before.At < (Broad(before.Text) + Broad(label.Text)) / 2 + 8) return false;
+            if (last is { } before && label.At - before.At < (before.Width + label.Width) / 2 + 8) return false;
             last = label;
         }
         return true;
@@ -1337,15 +1379,17 @@ public static partial class ChartSvg
 
     /// <summary>
     /// A gradient by value, laid out in the plot's own coordinates up the series' axis, so each stop sits at the height its
-    /// value is drawn at, on a logarithmic or reversed axis too. Past the first and last stops their colours carry on.
+    /// value is drawn at, on a logarithmic or reversed axis too, or <paramref name="across"/> the plot where a horizontal bar chart
+    /// measures along X. Past the first and last stops their colours carry on.
     /// </summary>
-    private static string ByValue(IReadOnlyList<ColorStop> stops, Func<double, double> at)
+    private static string ByValue(IReadOnlyList<ColorStop> stops, Func<double, double> at, bool across = false)
     {
         double from = at(stops[0].Value), to = at(stops[^1].Value);
         // Stops a rounding error apart can land on one pixel row, where only the last colour can show.
         var span = to - from;
         var body = string.Concat(stops.Select(stop => $"<stop offset='{N(span == 0 ? 1 : (at(stop.Value) - from) / span)}' stop-color='{stop.Color}'/>"));
-        return $"<linearGradient gradientUnits='userSpaceOnUse' x1='0' y1='{N(from)}' x2='0' y2='{N(to)}'>{body}</linearGradient>";
+        return across ? $"<linearGradient gradientUnits='userSpaceOnUse' x1='{N(from)}' y1='0' x2='{N(to)}' y2='0'>{body}</linearGradient>"
+            : $"<linearGradient gradientUnits='userSpaceOnUse' x1='0' y1='{N(from)}' x2='0' y2='{N(to)}'>{body}</linearGradient>";
     }
 
     private readonly record struct Vertex(double X, double Y, double Value, string? Color);
@@ -1550,10 +1594,11 @@ public static partial class ChartSvg
         return label[..(cut.Length - 1)] + "…";
     }
 
-    /// <summary>The room under a chart's plots for its X axis's labels and title: 76 units, or, on a horizontal bar chart on tracks that writes
-    /// neither its value axis's tick labels nor its title, 24, or 36 above a source line.</summary>
+    /// <summary>The room under a chart's plots for its X axis's labels and title: 76 units, or 90 where columns write sub-labels under their
+    /// names, or, on a horizontal bar chart on tracks that writes neither its value axis's tick labels nor its title, 24, or 36 above a source
+    /// line.</summary>
     private static double Floor(ChartSpec s) => s.Kind == ChartKind.Bar && s.BarTrack && s.YTickLabels == TickLabels.None && string.IsNullOrWhiteSpace(s.YLabel)
-        ? string.IsNullOrWhiteSpace(s.Source) ? 24 : 36 : 76;
+        ? string.IsNullOrWhiteSpace(s.Source) ? 24 : 36 : Subbed(s) ? 76 + SubLine : 76;
 
     /// <summary>Whether nothing is written up the left of a chart's plots: each plot is named above it, the Y axis stands on the left,
     /// and no left-hand axis writes a tick label.</summary>
@@ -2062,8 +2107,8 @@ public static partial class ChartSvg
 
     /// <summary>A range bar's name: its category or X, its two ends in the axis's format and its typical value, as
     /// <c>12 Sep: 52 to 168, average 74</c>, led by its series' name where several series draw ranges.</summary>
-    private static string RangeLabel(ChartSeries s, ChartPoint p, Axis x, Axis y, bool named) =>
-        $"{(named ? s.Name + ", " : "")}{p.Label ?? x.Format(p.X)}: {y.Format(p.Low!.Value)} to {y.Format(p.High!.Value)}{(p.Y is { } value ? $", average {y.Format(value)}" : "")}";
+    private static string RangeLabel(ChartSeries s, ChartPoint p, Axis x, Axis y, bool named, string? sub = null) =>
+        $"{(named ? s.Name + ", " : "")}{p.Label ?? x.Format(p.X)}{Under(sub)}: {y.Format(p.Low!.Value)} to {y.Format(p.High!.Value)}{(p.Y is { } value ? $", average {y.Format(value)}" : "")}";
 
     /// <summary>
     /// A state timeline: one lane per series, top to bottom in series order, named on the side the Y axis would stand. Each
@@ -2831,7 +2876,10 @@ public static partial class ChartSvg
 
     /// <summary>What a strip's part <paramref name="index"/> says, as its mark is named: its name, its whole percentage of the strip, and
     /// its amount in <see cref="ChartSpec.YFormat"/> and <see cref="ChartSpec.YUnit"/>, with its <see cref="ChartPoint.ValueNote"/> after it:
-    /// <c>Easy: 34%, 12:20</c>. The component's status line reads the same words.</summary>
+    /// <c>Easy: 34%, 12:20</c>. From 0.40.0 an amount that writes exactly as its share does, an amount of 30 with the unit <c>%</c> beside a
+    /// share of 30 %, is said once: <c>Moderate: 30%</c>. The share is of the strip's total, in whole percentages that add up to 100, so
+    /// amounts that are themselves rounded shares and add up to 99 or 101 can differ from it by a point, and both are said. The component's
+    /// status line reads the same words.</summary>
     public static string PartLabel(ChartSpec spec, int index)
     {
         ArgumentNullException.ThrowIfNull(spec);
@@ -2841,7 +2889,9 @@ public static partial class ChartSvg
         var shares = Percentages(parts.Select(p => p.Y ?? 0).ToArray());
         var words = new Axis(AxisKind.Linear, 0, 1) { ValueFormat = spec.YFormat, Unit = spec.YUnit };
         var p = parts[index];
-        return string.Create(CultureInfo.InvariantCulture, $"{p.Label}: {shares[index]}%, {words.Format(p.Y ?? 0)}{p.ValueNote}");
+        var share = string.Create(CultureInfo.InvariantCulture, $"{shares[index]}%");
+        var amount = words.Format(p.Y ?? 0);
+        return amount == share ? $"{p.Label}: {share}{p.ValueNote}" : $"{p.Label}: {share}, {amount}{p.ValueNote}";
     }
 
     /// <summary>

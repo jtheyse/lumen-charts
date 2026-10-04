@@ -315,6 +315,18 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// <see cref="ValueNote"/> that says why, such as <c>" · PB"</c>, which its tooltip and accessible name read after its value.
     /// Areas and every other mark refuse it, as does a density scatter, which shades cells rather than points.</summary>
     public string? Highlight { get; init; }
+    /// <summary>A second line under this point's category name, at most 16 characters on one line, such as <c>152 bpm</c> under a lap's
+    /// <c>L3</c> or <c>13.0 W/kg</c> under a best effort's <c>5s</c>, in the muted colour at 11 px: on a column or stacked column chart
+    /// 14 units under the name, cut with <c>…</c> past 12 characters as the name is, the plot giving up 14 units at its foot for it only
+    /// when some point has one; on a horizontal bar chart under the name beside the bar, the two lines centred on the bar together. It is
+    /// thinned with its name, the wider of the two keeping neighbouring columns 8 units apart, by the room their words take, in either
+    /// finish, rather than by the 65 units a column chart's names otherwise keep each, so at 340 units about four columns keep a sub-label
+    /// as wide as <c>152 bpm</c> each, and more leave every other category's words out; a number alone, <c>152</c>, fits about eight. It is
+    /// said after the name in the mark's tooltip and accessible name, <c>Heart rate: L3 · 152 bpm, 152</c>, and in the component's
+    /// status line and data table. A category takes the first sub-label any series gives it, so every mark in it says the same words;
+    /// series may repeat it or leave it null, but two different sub-labels for one category are refused. Continuous X axes write tick labels
+    /// rather than categories, so every kind but column, bar and stacked column charts refuses it, as does a sparkline.</summary>
+    public string? SubLabel { get; init; }
 
     /// <summary>A candle or OHLC bar, its Y the close. High must be the highest of the four prices and low the lowest.</summary>
     public static ChartPoint Candle(double x, double open, double high, double low, double close, string? label = null) =>
@@ -390,7 +402,14 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// <summary>Colours a line or area stroke and its markers continuously by value, each stop landing at its value's height
     /// on the series' own axis, logarithmic or reversed included. Stops rise strictly, at least two of them; a series takes
     /// this or <see cref="Zones"/>, not both. Labels are unchanged, because they already read the value. On a gauge it colours
-    /// the arc along its length instead, each stop at its value's angle; a gauge takes this or <see cref="ChartSpec.YZones"/>.</summary>
+    /// the arc along its length instead, each stop at its value's angle; a gauge takes this or <see cref="ChartSpec.YZones"/>.
+    /// From 0.40.0 it also fills columns, on a column chart or as a column series, and the bars of a horizontal bar chart: one
+    /// gradient laid along the value axis in the plot's own coordinates, up for columns and across for bars, so each column takes at
+    /// each height the colour of the value drawn there and a taller column reaches further along it; past the first and last stops
+    /// their colours carry on. A point's own <see cref="ChartPoint.Color"/> still fills its column flat. Value labels stay in the text
+    /// colour, and the legend key shows up to four of the stops' colours. A faded <see cref="Fill"/> and stacked columns, whose colours
+    /// tell the stacked series apart, refuse it. The colours meet no contrast rule of their own: pick stops that each clear 3:1
+    /// against the background, as a filled mark needs.</summary>
     public IReadOnlyList<ColorStop>? Gradient { get; init; }
     /// <summary>The markers on a line, area or scatter series.</summary>
     public MarkerStyle Markers { get; init; }
@@ -425,7 +444,8 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// 4.5:1 against the background and in the style's text colour where it does not, followed on the same line by <see cref="EndNote"/>
     /// in the muted colour. At most 24 characters. The right margin grows to hold the widest label and note, but never past the point
     /// where the plot would keep less than half the drawing's width; a label wider than that is cut with <c>…</c>, its whole kept as its
-    /// tooltip and accessible name. Labels whose spans across the drawing overlap never overlap each other: each set is sorted by the height
+    /// tooltip and accessible name. From 0.40.0 the note gives way first: it is cut, or left out where not even its first letter fits, and
+    /// the label itself is cut only where it does not fit alone. Labels whose spans across the drawing overlap never overlap each other: each set is sorted by the height
     /// of its points and moved apart up or down as little as it can be, 14 units a line, within its plot and 8 units past its top and
     /// bottom; a label moved more than 3 units from its point is joined to it by a short line in the series colour, or in the muted
     /// colour where the series colour does not clear 3:1. Where even 12 units a line do not fit, the lowest labels are left out. The label

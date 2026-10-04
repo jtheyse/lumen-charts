@@ -732,6 +732,45 @@ lines.Add($"scores/340-midnight {Hash(Unlegended(Scores(ChartStyle.Midnight)))}"
 lines.Add($"track/columns {Hash(Render(new ChartSpec { Kind = ChartKind.Column, Title = "Columns on tracks", YMax = 100, BarTrack = true,
     Series = [new("Score", [new(0, 82, "A"), new(1, 64, "B"), new(2, 105, "C")]) { ValueLabels = true }, new("Last", [new(0, 70, "A"), new(1, 50, "B"), new(2, 90, "C")])] }))}");
 lines.Add($"titles/undrawn {Hash(Render(line with { Title = "Not drawn", Description = "Named, not written", DrawTitles = false }))}");
+// 0.40.0: lap columns and best efforts. Columns filled by a gradient along their value axis in light and Midnight, and bars filled across
+// the plot; a second line under each category's name on columns and on bars; the lap and best-efforts recipes at 340 on the Race Face card;
+// a strip whose shares are its amounts, said once; and an end label that gives up its note before its name.
+ChartSpec Laps40(ChartStyle style, string low, string high, bool subs) => new()
+{
+    Kind = ChartKind.Column, Style = style, Width = 340, Height = 260, Title = "Heart rate per lap", Description = "Average heart rate in each lap", XLabel = "Lap",
+    Series = [new("Heart rate", new[] { 152, 161, 168, 174 }.Select((bpm, i) => new ChartPoint(i, bpm, $"L{i + 1}") { SubLabel = subs ? bpm + " bpm" : null }).ToArray())
+        { ValueLabels = !subs, Gradient = [new(152, low), new(174, high)] }]
+};
+lines.Add($"gradient/columns-light {Hash(Unlegended(Laps40(ChartStyle.Light, "#A88200", "#DD4B45", false)))}");
+lines.Add($"gradient/columns-midnight {Hash(Unlegended(Laps40(ChartStyle.Midnight, "#F5C518", "#FF5A5A", false)))}");
+lines.Add($"gradient/bars {Hash(Render(new ChartSpec { Kind = ChartKind.Bar, Title = "Best efforts", Description = "Watts at four durations",
+    Series = [new("Power", [new(0, 780, "5s"), new(1, 420, "1m"), new(2, 290, "5m"), new(3, 240, "20m")]) { ValueLabels = true, Gradient = [new(240, "#3F87D9"), new(780, "#DD4B45")] }] }))}");
+lines.Add($"sublabel/columns {Hash(Unlegended(Laps40(ChartStyle.Light, "#A88200", "#DD4B45", true)))}");
+lines.Add($"sublabel/bars {Hash(Render(new ChartSpec { Kind = ChartKind.Bar, Title = "Best efforts", Description = "Watts, and watts per kilogram",
+    Series = [new("Power", [new(0, 780, "5s") { SubLabel = "15.0 W/kg" }, new(1, 420, "1m") { SubLabel = "8.1 W/kg" }, new(2, 290, "5m"), new(3, 240, "20m") { SubLabel = "4.6 W/kg" }]) { ValueLabels = true }] }))}");
+var raceFace40 = new ChartStyle
+{
+    Background = "#161618", Text = "#F5F6F7", Muted = "#80858E", Grid = "#2D2D2F", Edge = "#80858E",
+    Series = ["#FF5A54", "#D7DDE5", "#F5B642", "#3FD17A", "#C2C6D2", "#CD7F46"], Zones = ["#80858E", "#D7DDE5", "#3FD17A", "#F5B642", "#F2545B"],
+    Rising = "#34d399", Falling = "#f87171", HeatmapLow = "#1E1F22", HeatmapHigh = "#E30613", FontFamily = "Inter, Segoe UI, Arial, sans-serif"
+};
+double[] lapHeart40 = [152, 161, 168, 174];
+lines.Add($"recipe/lap-heart-340 {Hash(Unlegended(new ChartSpec { Title = "Heart rate per lap", Description = "Average heart rate in each lap, from 152 to 174 bpm",
+    Kind = ChartKind.Column, Width = 340, Height = 260, Style = raceFace40 with { Gridlines = GridLine.Hidden }, DrawTitles = false, YTickLabels = TickLabels.None,
+    Series = [new("Heart rate", lapHeart40.Select((bpm, lap) => new ChartPoint(lap, bpm, $"L{lap + 1}") { SubLabel = (int)bpm + " bpm" }).ToArray())
+        { Gradient = [new(0, "#f59e0b"), new(lapHeart40.Max(), "#f87171")] }] }))}");
+var effortWatts40 = Enumerable.Range(0, 5400).Select(t => Math.Round(t % 600 < 5 ? 640 + t / 30.0 : t is >= 900 and < 960 ? 420 : t is >= 1500 and < 1800 ? 290
+    : t is >= 2400 and < 3600 ? 238 + 6 * Math.Sin(t / 90.0) : 170 + 25 * Math.Sin(t / 300.0) + 10 * Math.Sin(t / 23.0))).ToArray();
+(double Seconds, string Name)[] effortDurations40 = [(5, "5s"), (60, "1m"), (300, "5m"), (1200, "20m"), (3600, "60m")];
+lines.Add($"recipe/best-efforts-340 {Hash(Unlegended(new ChartSpec { Title = "Best efforts", Description = "Best average power at five durations, in watts, with watts per kilogram under each",
+    Kind = ChartKind.Column, Width = 340, Height = 260, Style = raceFace40 with { BarRadius = 3, Gridlines = GridLine.Hidden }, DrawTitles = false,
+    YTickLabels = TickLabels.None, XLabel = "W/kg under each duration",
+    Series = [new("Best power", Training.MeanMaximal(effortWatts40, effortDurations40.Select(d => d.Seconds)).Select((effort, i) => new ChartPoint(i, Math.Round(effort.Value), effortDurations40[i].Name)
+        { SubLabel = (effort.Value / 52).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) }).ToArray(), "#38bdf8") { ValueLabels = true }] }))}");
+lines.Add($"strip/shares-once {Hash(Render(new ChartSpec { Kind = ChartKind.Strip, Width = 340, Title = "Effort zones", Description = "Shares the app worked out", YUnit = "%",
+    Series = [new("Zones", [new(0, 33, "Easy"), new(1, 33, "Moderate"), new(2, 33, "Hard")])] }))}");
+lines.Add($"ends/note-first {Hash(Unlegended(new ChartSpec { Kind = ChartKind.Line, Width = 340, Height = 260, Title = "Gap", Description = "A name that fits without its note",
+    Series = [new("Rider", [new(0, 0), new(1, 4)]) { EndLabel = "Rider name", EndNote = "+12.3s" }] }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

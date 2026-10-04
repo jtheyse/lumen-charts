@@ -1095,15 +1095,15 @@ if (await sportsLink.CountAsync() > 0)
     var charts = sports.Locator(".lumen-chart");
     // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
-        return svgs.length === 29 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+        return svgs.length === 31 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
-    await Test("The Sports & performance page renders its twenty-nine charts, each live and drawn at the width it is shown", async () =>
+    await Test("The Sports & performance page renders its thirty-one charts, each live and drawn at the width it is shown", async () =>
     {
-        Check(await charts.CountAsync() == 29, $"the page shows {await charts.CountAsync()} charts");
-        for (var i = 0; i < 29; i++)
+        Check(await charts.CountAsync() == 31, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 31; i++)
             Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
-        // Each chart's script adds its tooltip, so twenty-nine of them prove every chart, sparklines included, is interactive.
-        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 29");
+        // Each chart's script adds its tooltip, so thirty-one of them prove every chart, sparklines included, is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31");
         await sports.WaitForFunctionAsync(drawnToFit);
     });
 
@@ -1151,7 +1151,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 29", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31", null, new() { Timeout = 120_000 });
             await Sparklines(tab, "phone");
         });
     }
@@ -1174,7 +1174,7 @@ if (await sportsLink.CountAsync() > 0)
                 var tab = await context.NewPageAsync();
                 tab.SetDefaultTimeout(15_000);
                 await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 29", null, new() { Timeout = 120_000 });
+                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31", null, new() { Timeout = 120_000 });
                 await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
                 const string inside = @"(s, texts) => { const box = s.getBoundingClientRect();
                     return texts.filter(t => { const b = t.getBoundingClientRect(); return b.width === 0 || b.left < box.left - .5 || b.right > box.right + .5 || b.top < box.top - .5 || b.bottom > box.bottom + .5; }).length; }";
@@ -1192,6 +1192,63 @@ if (await sportsLink.CountAsync() > 0)
                 Check(measured[0] == 3 && measured[1] == 0 && measured[2] == 0 && measured[3] == 1 && measured[4] == 0 && measured[5] <= width, string.Join(", ", measured));
             });
     else Console.WriteLine("SKIP time in zone and session scores checks: this host's Sports & performance page has no such cards");
+
+    // 0.40.0: the laps' heart rates as columns filled by value and the best efforts with their watts per kilogram, each lap's or effort's name
+    // and its sub-label inside its drawing on a phone and on a desktop, the sub-labels clearing 4.5:1 and every column 3:1 at its fill's ends,
+    // and a mark chosen with the keys reading its sub-label in the status line.
+    if (await sports.Locator("#lap-heart .lumen-chart").CountAsync() > 0 && await sports.Locator("#best-efforts .lumen-chart").CountAsync() > 0)
+    {
+        foreach (var (width, phone) in new[] { (375, true), (1280, false) })
+            await Test($"Heart rate by lap and Best efforts at {width} pixels{(phone ? ", on a phone" : "")}: every name and sub-label stands inside its drawing, the columns filled by one gradient or one colour", async () =>
+            {
+                await using var context = await browser.NewContextAsync(phone ? new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 }
+                    : new() { ViewportSize = new() { Width = width, Height = 900 } });
+                var tab = await context.NewPageAsync();
+                tab.SetDefaultTimeout(15_000);
+                await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31", null, new() { Timeout = 120_000 });
+                await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
+                foreach (var (id, count) in new[] { ("#lap-heart", 4), ("#best-efforts", 5) })
+                {
+                    var card = tab.Locator($"{id} .lumen-chart");
+                    await card.ScrollIntoViewIfNeededAsync();
+                    var measured = await card.EvaluateAsync<double[]>(@"c => {
+                        const rgb = s => s.match(/[\d.]+/g).slice(0, 3).map(Number), lum = v => { const [r, g, b] = v.map(x => { x /= 255; return x <= .03928 ? x / 12.92 : Math.pow((x + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * g + .0722 * b; };
+                        const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+                        const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+                        const s = c.querySelector(':scope > .lumen-viewport > svg'), box = s.getBoundingClientRect(), ground = rgb(getComputedStyle(s).backgroundColor);
+                        const under = [...s.querySelectorAll(':scope > text[text-anchor=""middle""].lumen-muted')].filter(t => t.textContent.length > 0 && Number(t.getAttribute('y')) > 0);
+                        const subs = under.filter(t => t.getAttribute('font-size') === '11');
+                        const outside = under.filter(t => { const b = t.getBoundingClientRect(); return b.width === 0 || b.left < box.left - .5 || b.right > box.right + .5 || b.top < box.top - .5 || b.bottom > box.bottom + .5; }).length;
+                        const fills = [...s.querySelectorAll('.lumen-datum[data-point] > rect, .lumen-datum[data-point] > path')].map(r => r.getAttribute('fill'));
+                        const stops = [...s.querySelectorAll('linearGradient stop')].map(t => hex(t.getAttribute('stop-color')));
+                        const fill = getComputedStyle(s.querySelector('.lumen-datum[data-point] > rect, .lumen-datum[data-point] > path')).fill;
+                        const inks = stops.length ? stops : [rgb(fill)];
+                        return [subs.length, outside, Math.min(...subs.map(t => ratio(rgb(getComputedStyle(t).fill), ground))), new Set(fills).size, fills[0]?.startsWith('url(') ? 1 : 0,
+                            Math.min(...inks.map(i => ratio(i, ground))), document.documentElement.scrollWidth, Number(s.getAttribute('viewBox').split(' ')[2]), box.width]; }");
+                    var gradient = id == "#lap-heart";
+                    Check(measured[0] == count && measured[1] == 0 && measured[2] >= 4.5 && measured[3] == 1 && measured[4] == (gradient ? 1 : 0) && measured[5] >= 3 && measured[6] <= width
+                        && Math.Abs(measured[7] - measured[8]) < 1.5, $"{id}: {string.Join(", ", measured.Select(m => m.ToString("0.##", CultureInfo.InvariantCulture)))}");
+                }
+            });
+        await Test("Heart rate by lap: a lap chosen with the keys reads its pace after its name in the status line, as its mark's name does", async () =>
+        {
+            var card = sports.Locator("#lap-heart .lumen-chart");
+            await card.ScrollIntoViewIfNeededAsync();
+            var marks = card.Locator(".lumen-datum[data-point]");
+            await marks.First.FocusAsync();
+            await sports.Keyboard.PressAsync("ArrowRight");
+            var second = (await marks.Nth(1).GetAttributeAsync("aria-label"))!;
+            await sports.WaitForFunctionAsync("n => document.activeElement?.getAttribute('aria-label') === n", second);
+            await sports.Keyboard.PressAsync("Enter");
+            var line = card.Locator(".lumen-status");
+            await sports.WaitForFunctionAsync("s => s.textContent.includes(' · ')", await line.ElementHandleAsync());
+            var read = (await line.TextContentAsync())!;
+            Check(Regex.IsMatch(second, @"^Heart rate: Lap 2 · \d+:\d\d, \d+$") && read.StartsWith(second[..second.LastIndexOf(',')] + " = "), $"the mark \"{second}\", the status line \"{read}\"");
+            await sports.Keyboard.PressAsync("Escape");
+        });
+    }
+    else Console.WriteLine("SKIP heart rate by lap and best efforts checks: this host's Sports & performance page has no such cards");
 
     // 0.37.0: the Ride channels card reads six channels at once, zooms by a drag through all six panes, takes a tap on a phone as the
     // readout, never a band, and keeps every word inside its drawing there.
@@ -1221,7 +1278,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 29", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31", null, new() { Timeout = 120_000 });
             await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
             var card = tab.Locator("#ride-channels .lumen-chart");
             await card.ScrollIntoViewIfNeededAsync();
@@ -1323,7 +1380,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 29", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31", null, new() { Timeout = 120_000 });
             await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
             var card = tab.Locator("#field .lumen-chart");
             await card.ScrollIntoViewIfNeededAsync();
@@ -1339,7 +1396,7 @@ if (await sportsLink.CountAsync() > 0)
             Check(measured[0] > 10 && measured[1] == 0, $"{measured[1]} of the card's {measured[0]} texts run outside its drawing");
             // Its title, its description and its source on two lines, the card drawn at the width it is shown and the page not scrolling sideways.
             Check(measured[2] == 4 && measured[6] <= 375 && Math.Abs(measured[7] - measured[6]) < 1.5 && measured[8] <= 375, $"{measured[2]} lines written from the left, drawn {measured[6]} wide and shown {measured[7]:0.#}, the page {measured[8]} wide");
-            Check(measured[3] == 26 && measured[4] >= 76 && measured[5] == 0, $"{measured[5]} of the {measured[4]} titles, descriptions and sources of {measured[3]} charts run outside their drawings");
+            Check(measured[3] == 28 && measured[4] >= 82 && measured[5] == 0, $"{measured[5]} of the {measured[4]} titles, descriptions and sources of {measured[3]} charts run outside their drawings");
         });
     else Console.WriteLine("SKIP field phone check: this host's Sports & performance page has no How the field finished");
     await sports.CloseAsync();

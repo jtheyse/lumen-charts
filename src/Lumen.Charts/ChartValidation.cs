@@ -243,6 +243,7 @@ public static partial class ChartValidation
                 if (p is null || !Finite(p.X) || (p.Y.HasValue && !Finite(p.Y.Value)) || !Finite(p.Size) || p.Size < 0)
                     throw new ArgumentException("Coordinates must be finite, magnitude <= 1e100; bubble sizes must be nonnegative.");
                 Text(p.Label); Color(p.Color); Text(p.ValueNote); Color(p.Highlight);
+                if (p.SubLabel is not null) SubLabel(spec, p.SubLabel);
                 if (p.Highlight is not null)
                 {
                     if (mark is not (ChartKind.Line or ChartKind.Scatter))
@@ -324,6 +325,8 @@ public static partial class ChartValidation
                 if (s.Points.Select(p => p.X).Distinct().Count() != s.Points.Count) throw new ArgumentException("Category X values must be unique within each series.");
             if (spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count() > 100)
                 throw new ArgumentException("Category charts support at most 100 categories; aggregate first.");
+            if (spec.Series.SelectMany(s => s.Points).Where(p => p.SubLabel is not null).GroupBy(p => p.X).Any(category => category.Select(p => p.SubLabel).Distinct().Count() > 1))
+                throw new ArgumentException("A category's sub-label is written once under its name, so the points of several series in one category may repeat it or leave it null, but not give different ones.");
         }
         if (spec.Kind == ChartKind.Donut && count > 100) throw new ArgumentException("Donut charts support at most 100 slices.");
         if (spec.Kind is ChartKind.Bar or ChartKind.Column or ChartKind.StackedColumn or ChartKind.Area or ChartKind.Histogram)
@@ -600,6 +603,24 @@ public static partial class ChartValidation
             throw new ArgumentException("End labels are written in the margin right of the plot, which a right-hand axis takes for its tick labels, so a chart with a secondary series or its Y axis on the right takes none; name its series in the legend.");
     }
 
+    /// <summary>The most characters a point's sub-label takes.</summary>
+    private const int MaxSubLabel = 16;
+
+    /// <summary>A sub-label is a second line under a category's name, so it needs a chart that names categories along an axis, words on one
+    /// short line, and room to write them.</summary>
+    private static void SubLabel(ChartSpec spec, string sub)
+    {
+        Text(sub);
+        if (spec.Kind is not (ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn))
+            throw new ArgumentException("A sub-label is a second line under a category's name, so it applies to column, bar and stacked column charts; the other kinds write tick labels along a continuous X axis, or no category names at all, so name the point in its Label or ValueNote.");
+        if (spec.Sparkline)
+            throw new ArgumentException("A sparkline draws its data alone, with no words, so its points take no sub-labels; write them in the words beside it.");
+        if (string.IsNullOrWhiteSpace(sub))
+            throw new ArgumentException("A sub-label is written under its category's name, so it needs words; leave SubLabel null to write none.");
+        if (sub.Length > MaxSubLabel || sub.Any(c => c is '\n' or '\r' or '\t'))
+            throw new ArgumentException($"A sub-label is one short line under its category's name, at most {MaxSubLabel} characters and no line breaks, such as 152 bpm or 13.0 W/kg.");
+    }
+
     /// <summary>Each finishing touch applies to the marks that can show it.</summary>
     private static void Finish(ChartSeries series, ChartKind mark, AxisKind axis)
     {
@@ -624,10 +645,14 @@ public static partial class ChartValidation
         if (series.ValueLabels && mark is not (ChartKind.Column or ChartKind.Bar or ChartKind.Line or ChartKind.Scatter))
             throw new ArgumentException("Value labels apply to series drawn as columns, bars, lines or scatter points.");
         if (series.Gradient is not { } stops) return;
-        if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Gauge))
-            throw new ArgumentException("A gradient colours a stroke and its markers, so it applies to series drawn as lines or areas, and to a gauge's arc.");
+        if (mark == ChartKind.StackedColumn)
+            throw new ArgumentException("A stacked column's colours tell its stacked series apart, so a gradient by value would hide which series each piece is; draw one series of columns, or a column chart, to colour by value.");
+        if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Gauge or ChartKind.Column or ChartKind.Bar))
+            throw new ArgumentException("A gradient colours a series by its value, so it applies to series drawn as lines, areas, columns or the bars of a bar chart, and to a gauge's arc.");
+        if (mark is ChartKind.Column && series.Fill != AreaFill.Flat)
+            throw new ArgumentException("A faded column fades its own colour towards its end, and a gradient colours it by value, so a column series takes one or the other.");
         if (series.Zones is not null)
-            throw new ArgumentException("Zones colour a stroke in steps and a gradient colours it continuously, so a series takes one or the other.");
+            throw new ArgumentException("Zones colour a series in steps and a gradient colours it continuously, so a series takes one or the other.");
         if (stops.Count is < 2 or > 32) throw new ArgumentException("A gradient needs between 2 and 32 colour stops.");
         for (var i = 0; i < stops.Count; i++)
         {

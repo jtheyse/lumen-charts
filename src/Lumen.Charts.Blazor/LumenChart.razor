@@ -44,7 +44,7 @@ else
         @foreach(var series in Spec.Series)
         {
             @foreach(var point in series.Points.Take(500))
-            { <tr><td>@series.Name</td><td>@(point.Label ?? xAxis.Format(point.X))</td><td>@Value(series,point)</td></tr> }
+            { <tr><td>@series.Name</td><td>@Category(point)</td><td>@Value(series,point)</td></tr> }
         }
         </tbody></table><p>Table shows up to 500 observations per series. CSV contains all original observations.</p></div>
     }
@@ -127,6 +127,10 @@ else
             _=>point.Y.HasValue?y.Format(point.Y.Value)+point.ValueNote:"Missing"
         };
     }
+    // A point's category or X as its mark's name says it: its label, and on a category chart its category's sub-label after it, the first
+    // any series gives it.
+    private string Category(ChartPoint point)=>(point.Label ?? xAxis.Format(point.X))
+        +(Spec.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn&&Spec.Series.SelectMany(s=>s.Points).FirstOrDefault(p=>p.X==point.X&&p.SubLabel is not null)?.SubLabel is {} sub?" · "+sub:"");
     // How a value reads depends only on the axis kind and format, so the bounds here are nominal. A series in a pane below
     // the main plot reads through that pane's axes.
     private Axis Measure(ChartSeries series)
@@ -246,8 +250,8 @@ else
             : Spec.Kind==ChartKind.Calendar ? Day(index,p)
             : p.XEnd is {} end&&(Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Blocks&&p.Y is {} height ? $"{Spec.Series[index].Name}: {(p.Label is null ? "" : p.Label+", ")}{xAxis.Format(p.X)} to {xAxis.Format(end)} = {Measure(Spec.Series[index]).Format(height)}{p.ValueNote}"
             : p.XEnd is {} finish ? $"{Spec.Series[index].Name}: {xAxis.Format(p.X)} to {xAxis.Format(finish)}"
-            : (Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Range&&p.Low is {} low&&p.High is {} high ? $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {Measure(Spec.Series[index]).Format(low)} to {Measure(Spec.Series[index]).Format(high)}{(p.Y is {} typical ? $", average {Measure(Spec.Series[index]).Format(typical)}" : "")}"
-            : $"{Spec.Series[index].Name}: {p.Label ?? xAxis.Format(p.X)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y)+p.ValueNote : "missing")}";
+            : (Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Range&&p.Low is {} low&&p.High is {} high ? $"{Spec.Series[index].Name}: {Category(p)} = {Measure(Spec.Series[index]).Format(low)} to {Measure(Spec.Series[index]).Format(high)}{(p.Y is {} typical ? $", average {Measure(Spec.Series[index]).Format(typical)}" : "")}"
+            : $"{Spec.Series[index].Name}: {Category(p)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y)+p.ValueNote : "missing")}";
         await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
     }
     /// <summary>Called by the component's script when a reader drags across the plots with a mouse or a pen and lets go, with the drag's

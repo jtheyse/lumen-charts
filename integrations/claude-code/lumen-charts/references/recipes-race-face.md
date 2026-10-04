@@ -1,6 +1,6 @@
 # Race results recipes
 
-Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields, a race's gaps to the leader, a ride's effort zones as a strip of shares and a race's scores on meter bars, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.39.0, together with the recipes in `sports.md`.
+Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields, a race's gaps to the leader, a ride's effort zones as a strip of shares, a race's scores on meter bars, a ride's best efforts and a race's heart rate lap by lap, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.40.0, together with the recipes in `sports.md`.
 
 ```csharp
 using System.Globalization;
@@ -510,6 +510,7 @@ string effortSvg = ChartSvg.Render(effortStrip);
 - **The key.** Under the bar each zone is written with its swatch and its share, `Easy 32%`, in whole percentages that add up to exactly 100: each share is rounded down, and the points left over go to the largest remainders, so a ride of three equal thirds reads 33, 33 and 34, never 99 or 101. The entries flow left to right and wrap where the card is too narrow: at 340 the four take two rows. A zone with no time keeps its entry, `Hard 0%`, and draws no part.
 - **Height.** A strip is drawn as tall as its content, the bar 18 units thick and 20 units a row of the key, so `Height` is not used; with `DrawTitles = false` the bar stands 14 units from the top and two rows of the key make the drawing 92 units tall. With its title and description drawn it is 50 units taller.
 - **The words a part says.** Each part drawn is a focusable mark named, and tooltipped, `Moderate: 44%, 26:15`: its share, and its seconds in `YFormat`, `ValueFormat.Duration`. The arrow keys step from part to part. A zone of no time has no mark; its key entry names it.
+- **Pass amounts, not shares.** The key's share is of the strip's total, rounded to whole percentages that add up to exactly 100, so pass the raw amounts, the seconds, rather than shares the app has already rounded. Rounded shares that add up to 99 or 101, such as 33, 33 and 33, are shared out again over their own total and can differ from the amounts by a point: the key reads `34%` where the amount said 33. Where amounts are shares that add up to 100, `YUnit = "%"` with `YFormat` left as a number, a part whose amount writes exactly as its share is named once, `Moderate: 30%`, not `Moderate: 30%, 30%` (0.40.0); one that differs keeps both, `Hard: 34%, 33%`.
 - **Never colour alone.** Neighbouring zones stand close in lightness, Easy `#3FD17A` against Moderate `#D7DDE5` 1.45:1, Moderate against Hard `#F5B642` 1.32:1 and Hard against Very hard `#E30613` 2.71:1, so each part is parted from the next by a 2-unit gap in the card colour, against which every zone clears 3:1: Easy 9.13:1, Moderate 13.22:1, Hard 10.03:1, and Very hard 3.70:1, which a filled part needs but small text would not, so the red is a fill only. The key names every zone in words, in the text colour, `hi` `#F5F6F7` 16.70:1, and each part's name says its zone.
 - **The heading.** `DrawTitles = false` (0.39.0) draws neither the title nor the description, and the bar moves up into their room; both stay the drawing's `<title>`, `<desc>` and accessible name, so the page's own heading and the chart agree. `Render`'s `includeTitles: false` is something else: it leaves out the native tooltip in each mark.
 - **The ends.** Both outer ends are rounded by the style's `BarRadius`, or 6 units unless the style sets one, clamped to half the bar's thickness, so `BarRadius = 9999` draws a capsule.
@@ -551,6 +552,80 @@ string scoreSvg = ChartSvg.Render(scoreBars, includeLegend: false);
 - **Layout.** A bar on a track is at most 18 units thick, centred in its row. The left margin fits the widest name, `Improvement` here, rather than the fixed 160 a bar chart keeps, up to 45 % of the width; a longer name is cut with `…`, its whole in its bar's name. The right margin grows to hold the widest value label. `YTickLabels = TickLabels.None` with no `YLabel` writes nothing under the plot, so its bottom margin narrows from 76 to 24, and `DrawTitles = false` moves the plot up 50 units, so the four rows share most of the 240.
 - **Never colour alone.** Every bar is the steel `data` token, `#D7DDE5`, 10.05:1 against its track, so the fill's end reads plainly; the track stands only 1.31:1 on the card, which is fine, since it only shows how far the scale runs and the value written past its end says the number. The value labels are written in the text colour, `hi`, 16.70:1. A score that is good or bad is said by its name and number; colour it only beside words that say why, as a personal best's ring is paired with ` · PB`.
 - **Columns.** On a `ChartKind.Column` chart the tracks stand upright, from zero to the top of the plot, and each value label stands above its track.
+
+## Best efforts
+
+A ride's best average power at five durations, 5 seconds to an hour, as columns: each its watts above it and its watts per kilogram on a second line under its duration (0.40.0). It is the power–duration curve read at five points; the curve itself is "Power–duration curve with critical power" in `sports.md`, and a Race Face version of it follows.
+
+```csharp
+// The app's power samples for one ride, one a second, and the rider's weight in kilograms. An invented ride of an hour and a half:
+// steady riding with a sprint every ten minutes, a one-minute and a five-minute effort, and a twenty-minute block.
+const double bestEffortKg = 52;
+var bestEffortWatts = Enumerable.Range(0, 5400).Select(t => Math.Round(
+    t % 600 < 5 ? 640 + t / 30.0                              // a sprint every ten minutes, the last the strongest
+    : t is >= 900 and < 960 ? 420                              // one minute hard
+    : t is >= 1500 and < 1800 ? 290                            // five minutes
+    : t is >= 2400 and < 3600 ? 238 + 6 * Math.Sin(t / 90.0)   // twenty minutes at threshold
+    : 170 + 25 * Math.Sin(t / 300.0) + 10 * Math.Sin(t / 23.0))).ToArray();
+// The durations the card shows, with the names written under each column.
+(double Seconds, string Name)[] bestEffortDurations = [(5, "5s"), (60, "1m"), (300, "5m"), (1200, "20m"), (3600, "60m")];
+var bestEffortCurve = Training.MeanMaximal(bestEffortWatts, bestEffortDurations.Select(d => d.Seconds));   // a ride shorter than an hour leaves 60m out
+var bestEfforts = new ChartSpec {
+    Title = "Best efforts", Description = "Best average power at five durations, in watts, with watts per kilogram under each",
+    Kind = ChartKind.Column, Width = 340, Height = 260, Style = raceFace with { BarRadius = 3, Gridlines = GridLine.Hidden }, DrawTitles = false,
+    YTickLabels = TickLabels.None, XLabel = "W/kg under each duration",
+    Series = [new("Best power", bestEffortCurve.Select((effort, i) => new ChartPoint(i, Math.Round(effort.Value), bestEffortDurations.First(d => d.Seconds == effort.Seconds).Name)
+        { SubLabel = (effort.Value / bestEffortKg).ToString("0.0", CultureInfo.InvariantCulture) }).ToArray(), "#38bdf8") { ValueLabels = true }]
+};
+string bestEffortsSvg = ChartSvg.Render(bestEfforts, includeLegend: false);
+// Interactive: <LumenChart Spec="bestEfforts" FitWidth="true" ShowLegend="false" />
+```
+
+- **The numbers.** `Training.MeanMaximal` finds, for each duration, the best average over any stretch of the ride that long, so `5s` is the best sprint and `20m` the twenty-minute block. Pass the durations the card shows; a duration longer than the ride is left out of the curve, which is why each point finds its name by its seconds rather than by its place. When the app already stores its best efforts, draw those instead, so the card and the app agree.
+- **Sub-labels.** `ChartPoint.SubLabel` (0.40.0) writes a second line under each column's name, at 11 px in the muted colour, `low` `#80858E` 4.87:1 on the card, and each mark's name and tooltip read it after the name: `Best power: 5s · 15.4, 800`. A sub-label is thinned with its name, the wider of the two keeping neighbouring columns apart, and at 340 five columns stand about 47 units apart, room for a number such as `15.4` but not for `15.4 W/kg`, which would leave every other column's words out. So the unit is written once, in the axis title `W/kg under each duration`, and the description says it for a screen reader. Three columns or fewer keep `15.4 W/kg` whole.
+- **Columns.** The columns are the dashboard's sky blue, `#38bdf8`, 8.44:1 on the card, and `BarRadius = 3` rounds their tops by 3 units. `ValueLabels = true` writes each column's watts above it in the text colour, `hi`, 16.70:1; a label wider than its column is left out, its value kept in the mark's name, so a sprint over 999 W still fits at 340, four digits standing 27 units wide in a column 34 wide.
+- **Axis.** A column's length is its value, so a column chart's axis always starts at zero: `YMin` above zero is refused. With the values written on the columns, `YTickLabels = TickLabels.None` and hidden gridlines leave the plot to the columns.
+- **Never colour alone.** One colour for every column: the duration under it and the number on it say which is which.
+
+The same efforts as a curve on a logarithmic duration axis, every standard duration from a second to the ride's length, in the same style:
+
+```csharp
+var bestEffortCurveChart = new ChartSpec {
+    Title = "Power–duration curve", Description = "Best average power for every duration, 1 second to 90 minutes",
+    Kind = ChartKind.Line, Width = 340, Height = 260, Style = raceFace, DrawTitles = false,
+    XAxis = AxisKind.Log, XFormat = ValueFormat.Duration, YLabel = "Power (W)",
+    Series = [new("Best power", Training.MeanMaximal(bestEffortWatts, Training.StandardDurations)
+        .Select(effort => new ChartPoint(effort.Seconds, Math.Round(effort.Value))).ToArray(), "#38bdf8") { Markers = MarkerStyle.Filled }]
+};
+string bestEffortCurveSvg = ChartSvg.Render(bestEffortCurveChart, includeLegend: false);
+```
+
+The ticks read `1s`, `10s`, `1m`, `10m` and `1h`, a decade apart, so the sprint and the hour each get room. Add `Training.CriticalPower` as a reference line where the ride has efforts of 3 to 20 minutes, as `sports.md` does.
+
+## Heart rate per lap
+
+An invented race's laps as columns of their average heart rate, each filled by value from amber at its base towards red, the hardest lap reaching full red, its lap's name under it and its heart rate under that (0.40.0).
+
+```csharp
+// The app's laps for one race: each lap's average heart rate in whole bpm. An invented race of four laps:
+double[] raceLapHeart = [152, 161, 168, 174];
+var lapHeartColumns = new ChartSpec {
+    Title = "Heart rate per lap", Description = "Average heart rate in each lap, from 152 to 174 bpm",
+    Kind = ChartKind.Column, Width = 340, Height = 260, Style = raceFace with { Gridlines = GridLine.Hidden }, DrawTitles = false,
+    YTickLabels = TickLabels.None,
+    Series = [new("Heart rate", raceLapHeart.Select((bpm, lap) => new ChartPoint(lap, bpm, $"L{lap + 1}")
+        { SubLabel = bpm.ToString("0", CultureInfo.InvariantCulture) + " bpm" }).ToArray())
+        { Gradient = [new(0, "#f59e0b"), new(raceLapHeart.Max(), "#f87171")] }]
+};
+string lapHeartSvg = ChartSvg.Render(lapHeartColumns, includeLegend: false);
+// Interactive: <LumenChart Spec="lapHeartColumns" FitWidth="true" ShowLegend="false" />
+```
+
+- **Filled by value.** `ChartSeries.Gradient` (0.40.0, on columns) lays one gradient along the value axis, shared by every column: its first stop, amber `#f59e0b`, stands at 0, the columns' base, and its last, red `#f87171`, at 174, the hardest lap, and past either end the stop's colour carries on. So each column takes, at each height, the colour of the heart rate drawn there: every column shades from amber at its base towards red all the way up, the hardest lap reaching full red at its top and the gentlest stopping short of it, a little more orange, so a taller column reaches further along the colours as it does along the axis. Put the first stop at 0, where the columns stand: a first stop above 0, at the gentlest lap say, leaves every column's lower part one flat colour, here amber up to 152 bpm, and the change only in a thin cap at the top, which reads as a rendering fault rather than as effort. Put the last stop at the hardest lap, worked out from the laps as here, or at a heart rate that means something, such as the top of the rider's zones; the stops must rise strictly, so the hardest lap must be above 0.
+- **From zero.** A column's length is its value, so a column chart's axis starts at zero, and `YMin` above zero is refused: 152 and 174 bpm differ by 14 %, and the columns show that. An axis from 140 would draw the hardest lap nearly three times as tall as the gentlest, which is what a truncated axis does. The colour and the `bpm` under each lap say which laps were hard without misstating how much harder.
+- **Two lines under each lap.** `L1` is the point's `Label`; `SubLabel` writes `152 bpm` under it, in the muted colour at 11 px, `low` `#80858E`, 4.87:1 on the card. The plot gives up 14 units at its foot for the second line. At 340 four laps keep `152 bpm` whole; a race of more laps leaves every other lap's words out where two would touch, so write the number alone, `152`, which fits about eight, and say `bpm` in the description.
+- **Never colour alone.** The colour repeats what the height and the words say: each mark's name and tooltip read `Heart rate: L3 · 168 bpm, 168`. Against the card the amber stands 8.41:1 and the red 6.53:1, and every blend between them at least 6.53:1, well past the 3:1 a filled mark needs. On a white card take darker stops, `ChartStyle.Light`'s zone gold `#A88200` (3.58:1) and red `#DD4B45` (4.06:1).
+- **No value labels.** The sub-labels already write each lap's heart rate, so `ValueLabels` is left off and `YTickLabels = TickLabels.None` with hidden gridlines leaves the plot to the columns. With value labels on, each would be written above its column in the text colour.
 
 ## Rendering notes
 

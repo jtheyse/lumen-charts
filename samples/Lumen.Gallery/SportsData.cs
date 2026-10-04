@@ -396,6 +396,18 @@ public static class SportsData
         return laps;
     }
 
+    /// <summary>A run's average heart rate in each of its laps, the laps <see cref="Laps"/> draws, in whole bpm: the mean of the samples
+    /// recorded from where the lap starts to where it ends.</summary>
+    public static IReadOnlyList<double> LapHeartRates(Session run)
+    {
+        var track = run.Track!;
+        return Laps(run).Select(lap =>
+        {
+            double from = TimeAt(track, run.Metres, lap.X * 1000), to = TimeAt(track, run.Metres, lap.XEnd!.Value * 1000);
+            return Math.Round(Enumerable.Range(0, track.HeartRate.Count).Where(i => i * RunSample >= from && i * RunSample < to).Average(i => track.HeartRate[i]));
+        }).ToArray();
+    }
+
     /// <summary>A planned session as a structured workout: each step a block from where it starts to where it ends, in whole seconds
     /// at its target, as high as its target power in whole watts, named for its place in the session — the warm-up, each repeat at
     /// or above threshold, the recoveries between them and the cool-down — and on a run for its length.</summary>
@@ -812,6 +824,18 @@ public static class SportsData
             Series = [new("Laps", laps)]
         };
 
+        // The same laps as columns of their average heart rate, filled by value from the ramp's gold at their base to its red at the hardest
+        // lap, so each column shades towards red as it rises and the hardest reaches it; each lap's pace is written under its name.
+        var lapHearts = LapHeartRates(run);
+        var lapColumns = Chart(half, 360) with
+        {
+            Kind = ChartKind.Column,
+            Title = $"{Text(lapHearts[0])} to {Text(lapHearts[^1])} bpm over {laps.Count} laps", Description = "The same run, lap by lap, each lap's pace under its name",
+            XLabel = "Lap, its pace per km under it", YLabel = "Average heart rate (bpm)",
+            Series = [new("Heart rate", lapHearts.Select((bpm, i) => new ChartPoint(i, bpm, $"Lap {i + 1}") { SubLabel = Clock(laps[i].Y!.Value) }).ToArray())
+                { ValueLabels = true, Gradient = [new(0, zones[3]), new(lapHearts.Max(), zones[5])] }]
+        };
+
         // The route every 100 m, each stretch in the colour of its grade: descending, level, climbing and steep. The fill is the
         // ramp's neutral grey, so it is not read as a grade.
         var marks = Enumerable.Range(0, (int)(run.Metres / 100) + 1).Select(k => k * 100d).ToArray();
@@ -873,6 +897,19 @@ public static class SportsData
             XLabel = "Duration (log scale)", YLabel = "Power (W)",
             Annotations = [new(AnnotationAxis.Y, Math.Round(fit.CriticalPower)) { Label = "Critical power" }],
             Series = [Curve("September", september), Curve("August", august)]
+        };
+
+        // This month's best efforts at five durations as columns, each its watts above it and its watts per kilogram of the athlete's body
+        // mass under its name: the power curve's points read one by one.
+        string Lasting(double seconds) => seconds < 60 ? $"{Text(seconds)}s" : $"{Text(seconds / 60)}m";
+        var efforts = september.Where(p => p.Seconds is 5 or 60 or 300 or 1200 or 3600).ToArray();
+        var twenty = efforts.Single(p => p.Seconds == 1200).Value;
+        var bestEfforts = Chart(half, 360) with
+        {
+            Kind = ChartKind.Column,
+            Title = $"{Text(twenty)} W for 20 min, {Text(twenty / BodyMass, "0.0")} W/kg", Description = "September's best average power at five durations, watts per kilogram under each",
+            XLabel = "Duration, W/kg under it", YLabel = "Power (W)",
+            Series = [new("Best power", efforts.Select((p, i) => new ChartPoint(i, p.Value, Lasting(p.Seconds)) { SubLabel = Text(p.Value / BodyMass, "0.0") }).ToArray()) { ValueLabels = true }]
         };
 
         // The 5 km record as a step held until it falls, over each week's fastest 5 km inside a run, on the day it was run.
@@ -1066,9 +1103,11 @@ public static class SportsData
             new("session", "scores", "Session scores", "Three illustrative scores, no vendor's, out of 100 on `BarTrack` meters: each bar stands on a track to `YMax`, its value past the track's end, its name beside it, and an empty `YTickValues` with `TickLabels.None` leaves out the gridlines and ticks. `DrawTitles = false` leaves the heading to this card, the chart's title still its accessible name.", false, sessionScores) { ShowLegend = false },
             new("session", "splits", "Pace by kilometre", "Each kilometre's split on a reversed duration axis, with a `Trend` line and the race's goal pace.", false, pace),
             new("session", "laps", "Laps", "One `ChartPoint.Block` per lap of the progression, as wide as the lap is long and as high as its pace on a reversed duration axis, with the run's average pace as a reference line; its distance axis is the elevation's below.", true, lapChart),
+            new("session", "lap-heart", "Heart rate by lap", "The same laps as columns of their average heart rate, each filled by a `Gradient` laid along the value axis from gold at 0, the columns' base, to red at the hardest lap, so every column shades towards red as it rises and a taller one reaches further into it; each lap's pace is its `SubLabel`, a second line under its name, said in its tooltip too.", false, lapColumns),
             new("session", "elevation", "Elevation coloured by grade", "The same route as an area, each 100 m segment taking a point `Color` from its grade band.", true, elevation),
             new("ride", "ride-channels", "Ride channels", "Six `Panes` of equal height on one elapsed-time axis, each named above its plot by `PaneTitles.Above` with its average, high and low, and no tick labels up the side, `TickLabels.None`; `SamplingMethod.Average` draws each channel's 7,200 seconds as 600 averages, the heart-rate strap's dropout stays a gap, and `SharedReadout` reads all six at the second under the pointer. Drag across the plots to zoom in on a stretch; Reset view draws the whole ride.", true, channels),
             new("fitness", "power-curve", "Power–duration curve", "`Training.MeanMaximal` over this month's rides against last month's on a logarithmic duration axis, with the `Training.CriticalPower` fit as a reference line.", false, power),
+            new("fitness", "best-efforts", "Best efforts", "The power curve read at five durations, 5 seconds to an hour, as columns with their watts above them and each one's watts per kilogram as its `SubLabel` under its duration, said in its tooltip after the duration.", false, bestEfforts),
             new("fitness", "records", "5 km record progression", "Each week's fastest 5 km inside a run, and the record as a `LineCurve.Step` envelope on a reversed axis, so faster is higher.", false, best),
             new("fitness", "getting-faster", "Getting faster?", "Word-sized `Sparkline` charts, no axes, beside the numbers they draw: each week's fastest 5 km and each session's fastest kilometre, faster higher, every time faster than all before it ringed by a `Highlight` and noted `· PB` so its tooltip says why; and an invented weekly weigh-in in grey alone, its axis held at least 8 kg tall by `YMinSpan` so a few hundred grams read as steady.", true, fiveK.Spec)
                 { Lines = [fiveK, kilometre, weighed] },
