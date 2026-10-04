@@ -46,7 +46,7 @@ Where it stands (4 October 2026):
 | #9 season arc, #10 gap to the leader | 0.38.0 | live (same deploy) |
 | #12 effort zones, #14 score bars | 0.39.0 | live (same deploy) |
 | #11 best efforts, #13 heart rate per lap | 0.40.0 | committed in RaceSenseNet (6c8deccd, on Lumen 0.41.0 with `FitHeight` on #14, `AverageOf` on #7 and `PaintBackground` on the raised cards), not yet deployed |
-| #15 team rider share | 0.42.0 | 0.42.0 upgrade request sent; Race Face will do it when the owner OKs |
+| #15 team rider share | 0.42.0 | committed in RaceSenseNet (15006397), not yet deployed |
 | #16–#20 (P3) | from 0.43.0 | — |
 
 **After each release** the owner wants the Claude session **"RACEFACE RUNNING EXPANSION 2"** told to upgrade: `SendMessage` to that name (check `ListAgents` first). The message gives the release URL, what it adds for which charts, and steps:
@@ -64,6 +64,7 @@ Race Face feedback still open (the brain's "Race Face feedback" tasks hold the d
 - **keys (0.36.0)**: an interactive chart has two tab stops, the scrolling viewport and the roving point (the docs say so from 0.37.0); consider dropping the viewport's stop when nothing scrolls. Static `Render` output keeps one stop per mark (363 for a 90-day chart);
 - **end labels (0.38.0)**: real surnames with a gap note run past the margin at 320 px; since 0.40.0 the note is cut before the name. A second line for the note, or a wider margin when only one or two labels would be cut, is still open;
 - **annotation labels (0.41.0)**: a reference's label ("CP: 255") can sit on markers near the line's end at 340, since annotation labels don't avoid marks;
+- **height floor (0.42.0)**: a small fixed-axis line chart with its titles undrawn (220 tall) is refused by the 240 floor; consider a lower floor for line charts with `DrawTitles = false`;
 - **legend**: short entries stack one per row in the static legend (four rows, ~90 px under a 300 px chart at 340); lay short names out in one row. Long series names are truncated ("…MTB Le…"); consider wrapping them;
 - **recipe and doc notes**:
   - use the app's own PB flag and bins where it has them;
@@ -71,6 +72,7 @@ Race Face feedback still open (the brain's "Race Face feedback" tasks hold the d
   - Lumen writes single-quoted attributes;
   - put a description's key fact first, since the two-line cut can hide its end;
   - per-lap heart rate arrives with 0 for a lap without one: map it to null (a gap); past four laps write the sub-label's number alone; an app that stores its own power-curve durations should draw those, not `MeanMaximal` (0.41.0 feedback);
+  - team rider: a round ridden but not rateable (no field size, or a place past the field) is a plain null gap with no `GapLabel`, so "absent" never says a child didn't ride; a share that arrives as 0–1 is scaled ×100; host CSS that targets `svg text[font-size]` also restyles Lumen's text (0.42.0 feedback);
   - the 1080×1350 card needs an SVG rasteriser on the server, which Lumen does not ship (Race Face's API draws its PNGs with ImageSharp).
 
 ## How a release is done
