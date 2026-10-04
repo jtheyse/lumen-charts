@@ -43,7 +43,7 @@ Where it stands (3 October 2026):
 | #5 finish-time histogram | 0.35.0 | committed in RaceSenseNet (5f69ee7d), not yet deployed |
 | #8 fitness & form | 0.36.0 | committed in RaceSenseNet (e24e7d1d), not yet deployed |
 | #7 ride channels | 0.37.0 | committed in RaceSenseNet (6ba3169e), not yet deployed |
-| #9 season arc, #10 gap to the leader | 0.38.0 | Race Face told to upgrade and swap them (4 Oct 2026); awaiting its report |
+| #9 season arc, #10 gap to the leader | 0.38.0 | committed in RaceSenseNet (fb30f341), not yet deployed |
 | #11–#14 (P2) | 0.39.0–0.40.0, planned in the brain (task "Race Face P2 plan") | — |
 | #15–#20 (P3) | after P2 | — |
 
@@ -64,12 +64,14 @@ Race Face feedback still open (the brain's "Race Face feedback" tasks hold the d
   - a way to keep the title, and perhaps the description, as the accessible name without drawing it, for pages that own their heading (and docs saying exactly what `Render`'s `includeTitles` covers);
   - a way to say that points are already averages (of 12 s, say), so the readout keeps its "average of" note when the app buckets its own channels (0.37.0);
 - **keys (0.36.0)**: an interactive chart has two tab stops, the scrolling viewport and the roving point (the docs say so from 0.37.0); consider dropping the viewport's stop when nothing scrolls. Static `Render` output keeps one stop per mark (363 for a 90-day chart);
-- **legend**: long series names are truncated ("…MTB Le…"); consider wrapping them;
+- **end labels (0.38.0)**: real surnames with a gap note run past the margin at 320 px and are cut; let the note wrap under the label, or let the margin pass half the width when only one or two labels would be cut;
+- **legend**: short entries stack one per row in the static legend (four rows, ~90 px under a 300 px chart at 340); lay short names out in one row. Long series names are truncated ("…MTB Le…"); consider wrapping them;
 - **recipe and doc notes**:
   - use the app's own PB flag and bins where it has them;
   - a sparkline's root is `role='group'` named by title and description;
   - Lumen writes single-quoted attributes;
   - put a description's key fact first, since the two-line cut can hide its end;
+  - gap chart: riders who stop mid-race end early with their label at their last point; with a moving lead, the readout's 0s rider at a lap is not the eventual winner; the readout uses series names, so tag "(you)" there if wanted;
   - the 1080×1350 card needs an SVG rasteriser on the server, which Lumen does not ship (Race Face's API draws its PNGs with ImageSharp).
 
 ## How a release is done
