@@ -4,9 +4,9 @@ The state of Lumen.Charts and how work on it is done, for whoever picks it up ne
 
 ## Where things stand
 
-- **Released:** v0.40.0, *lap columns and best efforts* (Race Face charts #11 and #13): `ChartSeries.Gradient` on columns and bars (filled by value along the value axis), `ChartPoint.SubLabel` (a second line under a category's name), and two fixes from Race Face's 0.39.0 report (a strip part whose amount is its share says it once; an end label's note is cut before its name). With it, Race Face's P2 charts (#7–#14) are all covered. Before it: v0.39.0 strips, tracks and undrawn titles (#12, #14), v0.38.0 set ticks, units and end labels (#9, #10), v0.37.0 ride channels (#7), v0.36.0 arrow keys and the shared readout (#8). GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
-- **Next:** a choice for the owner. Either **P3** (#15–#20, from the brain's task "Race Face P2 plan (charts #7–#14)", whose last paragraph lists P3: text markers at an X without a value ("absent"), heatmap cells with secondary text and a "not rated" state, cell strips, fixed-width scrolling bars with two-level date ticks, a light-paper preset, a course profile), or a release that folds the open Race Face feedback below (meter height floor, one-row legend for short names, unpainted background, pre-averaged points, end-label notes on a second line) and the library's band-label contrast. Run an Explore pass first. Start with `git status`: uncommitted changes to `src/`, `samples/`, `tests/`, the docs or the skill are a delegated agent's unreleased work.
-- **Counts at v0.40.0:** 539 unit assertions, 262 HTTP checks, 73 browser checks on the gallery (36 on the WebAssembly host), 360 hashed renderings, 37 recipe charts. Release build at 0 warnings.
+- **Released:** v0.41.0, *fits a card* (Race Face feedback, the owner's choice after P2): `ChartSpec.PaintBackground`/`GraphSpec.PaintBackground` (leave the background to the page), `ChartSeries.AverageOf` (the app's points are already averages; the readout says so once), `ChartSpec.FitHeight` (a bar chart as tall as its rows). No existing rendering moved. Before it: v0.40.0 gradient columns and sub-labels (#11, #13), v0.39.0 strips, tracks and undrawn titles (#12, #14), v0.38.0 set ticks, units and end labels (#9, #10), v0.37.0 ride channels (#7), v0.36.0 arrow keys and the shared readout (#8). GitHub: https://github.com/jtheyse/lumen-charts — public, MIT. Every release carries the three `.nupkg` files.
+- **Next:** **P3**, from the brain's task "Race Face P3 plan (charts #15–#20)": 0.42.0 a text marker at an X with no value ("absent", #15), 0.43.0 heatmap cells with secondary text and a "not rated" state (#16), 0.44.0 fixed-width scrolling bars with two-level date labels (#18); #17 likely stays HTML; #19 needs the owner's word on a raster/PDF package; #20 is a recipe. Still open for the owner: the band-label contrast fix would move renderings in Classic too (the "Classic reproduces 0.23.0" promise). Run an Explore pass first. Start with `git status`: uncommitted changes to `src/`, `samples/`, `tests/`, the docs or the skill are a delegated agent's unreleased work.
+- **Counts at v0.41.0:** 547 unit assertions, 277 HTTP checks, 78 browser checks on the gallery (36 on the WebAssembly host), 368 hashed renderings, 37 recipe charts. Release build at 0 warnings.
 - **NuGet:** not published. The owner chose "skip nuget for now"; packages ship as GitHub release assets, and the Claude Code skill's install scripts download them into a local feed.
 
 ## The map
@@ -21,7 +21,7 @@ The state of Lumen.Charts and how work on it is done, for whoever picks it up ne
 | `tests/Lumen.Charts.Tests` | Executable assertion suite (`Test`/`Check`/`Reject`), `dotnet run`. |
 | `tests/verify-api.ps1` | HTTP checks against a running gallery on port 5188. |
 | `tests/Lumen.Charts.BrowserTests` | Playwright suite (gallery on 5188, WebAssembly host on 5199), with axe sweeps in light, dark and Midnight. |
-| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.40.0 reference hashes (360 rows). See its README. |
+| `tests/Lumen.Charts.Baseline` | The rendering-hash harness and the v0.41.0 reference hashes (368 rows). See its README. |
 | `tests/Lumen.Charts.Recipes` | Compiles every recipe in the skill's `sports.md` and `recipes-race-face.md` together, as written, and renders each chart (`python check.py`, then `dotnet run -c Release`). See its README. |
 | `integrations/claude-code/lumen-charts` | The Claude Code skill: `SKILL.md`, `references/` (API, sports recipes, HTTP), `scripts/install.sh` and `install.ps1`. |
 | `docs/FITNESS.md` | The sports-charts research and the eight-step build order this work has followed. |
@@ -45,7 +45,7 @@ Where it stands (3 October 2026):
 | #7 ride channels | 0.37.0 | live (same deploy) |
 | #9 season arc, #10 gap to the leader | 0.38.0 | live (same deploy) |
 | #12 effort zones, #14 score bars | 0.39.0 | live (same deploy) |
-| #11 best efforts, #13 heart rate per lap | 0.40.0 | Race Face has the request; queued behind the owner's Mission 021 in that session |
+| #11 best efforts, #13 heart rate per lap | 0.40.0 | one combined request to upgrade to 0.41.0 sent; queued behind the owner's Mission 021 in that session |
 | #15–#20 (P3) | after P2 | — |
 
 **After each release** the owner wants the Claude session **"RACEFACE RUNNING EXPANSION 2"** told to upgrade: `SendMessage` to that name (check `ListAgents` first). The message gives the release URL, what it adds for which charts, and steps:
@@ -60,11 +60,8 @@ Where it stands (3 October 2026):
 That session replies with what changed and where the recipes missed real data. Record its findings in the brain and fold them into the next release.
 
 Race Face feedback still open (the brain's "Race Face feedback" tasks hold the detail):
-- **meters (0.39.0)**: bars on tracks keep the 240 height floor, so a three-row card has a lot of air; give them a lower floor or a content-sized height like the strip's;
 - **features**:
-  - a way to leave a chart's background unpainted, for cards on another surface colour (contrast is still checked against `Background`);
-  - a way to say that points are already averages (of 12 s, say), so the readout keeps its "average of" note when the app buckets its own channels (0.37.0);
-- **keys (0.36.0)**: an interactive chart has two tab stops, the scrolling viewport and the roving point (the docs say so from 0.37.0); consider dropping the viewport's stop when nothing scrolls. Static `Render` output keeps one stop per mark (363 for a 90-day chart);
+  - **keys (0.36.0)**: an interactive chart has two tab stops, the scrolling viewport and the roving point (the docs say so from 0.37.0); consider dropping the viewport's stop when nothing scrolls. Static `Render` output keeps one stop per mark (363 for a 90-day chart);
 - **end labels (0.38.0)**: real surnames with a gap note run past the margin at 320 px; since 0.40.0 the note is cut before the name. A second line for the note, or a wider margin when only one or two labels would be cut, is still open;
 - **legend**: short entries stack one per row in the static legend (four rows, ~90 px under a 300 px chart at 340); lay short names out in one row. Long series names are truncated ("…MTB Le…"); consider wrapping them;
 - **recipe and doc notes**:
@@ -147,6 +144,7 @@ If an agent stops on an API rate limit, resume it with `SendMessage` (it keeps i
 - On the default Light and Dark presets `Rising` and `Falling` are the same colours as palette series 2 and 5, so a chart using `ChangeColors` should pick its other series' colours to avoid them (the gallery's race points are grey). X-axis tick labels are not moved in from the plot's edges, as value labels are: index charts set `XMin = -0.5` and `XMax = count - 0.5`. The component's status line shows a point's note but not its change words (the mark's name and tooltip carry them). Lumen keeps a fixed bottom margin, which leaves empty space under a short chart's axis at phone sizes.
 - Sparklines (0.34.0) refuse panes, value labels, bands, ranges and blocks; at 60×16 a `HighlightLast` ring is clipped at the edge. `YMinSpan` applies to the left-hand axis only.
 - Range-annotation labels (an X annotation with `To`, drawn as a band) are written in the muted colour over the band fill, 4.24:1 in Light. This predates 0.36.0. The gallery's *Planned* band keeps its label undrawn until the library is fixed; the fix moves hash rows, and Classic's byte-for-byte promise needs a decision first.
+- Fits a card (0.41.0): `FitHeight` is for horizontal bars only, with a fixed row pitch; `PaintBackground` can't detect the surface (set `Style.Background` to it); `AverageOf` is words only, and Lumen's own averaging wording wins where it averaged.
 - Lap columns (0.40.0): column charts without sub-labels still thin names one per 65 units (four columns at 340 show two names); columns stand on zero, so a gradient's first stop belongs at 0; gradient stops have no contrast check; sub-labels are cut past 12 characters under columns and don't reach CSV.
 - Strips and meters (0.39.0): a strip holds one whole, at most 24 parts, an 18-unit bar with no setting; tracks run 0 to `YMax` with no target tick; at the 240-unit floor three or four meters leave large row gaps; `DrawTitles` shifts the body a fixed 50 units and graphs always draw their title.
 - End labels (0.38.0): about 10 characters fit at 340 px; the lowest labels drop from the drawing when even tight rows don't fit; they don't avoid value or reference labels inside the plot; refused beside a right-hand axis. Hand-set ticks aren't thinned. Histogram, box and violin take neither set ticks nor a unit.
