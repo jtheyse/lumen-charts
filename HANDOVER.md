@@ -45,8 +45,8 @@ Where it stands (4 October 2026):
 | #7 ride channels | 0.37.0 | live (same deploy) |
 | #9 season arc, #10 gap to the leader | 0.38.0 | live (same deploy) |
 | #12 effort zones, #14 score bars | 0.39.0 | live (same deploy) |
-| #11 best efforts, #13 heart rate per lap | 0.40.0 | part of the one combined upgrade request to 0.42.0 (replacing the 0.41.0 one), with `FitHeight` on #14, `AverageOf` on #7 and `PaintBackground` where needed; queued behind the owner's Mission 021 in that session |
-| #15 team rider share | 0.42.0 | one combined upgrade request to 0.42.0 sent; awaiting report |
+| #11 best efforts, #13 heart rate per lap | 0.40.0 | committed in RaceSenseNet (6c8deccd, on Lumen 0.41.0 with `FitHeight` on #14, `AverageOf` on #7 and `PaintBackground` on the raised cards), not yet deployed |
+| #15 team rider share | 0.42.0 | 0.42.0 upgrade request sent; Race Face will do it when the owner OKs |
 | #16–#20 (P3) | from 0.43.0 | — |
 
 **After each release** the owner wants the Claude session **"RACEFACE RUNNING EXPANSION 2"** told to upgrade: `SendMessage` to that name (check `ListAgents` first). The message gives the release URL, what it adds for which charts, and steps:
@@ -61,7 +61,7 @@ Where it stands (4 October 2026):
 That session replies with what changed and where the recipes missed real data. Record its findings in the brain and fold them into the next release.
 
 Race Face feedback still open (the brain's "Race Face feedback" tasks hold the detail):
-- **keys (0.36.0)**: an interactive chart had two tab stops, the scrolling viewport and the roving point; 0.42.0 drops the viewport's stop while nothing scrolls. Static `Render` output keeps one stop per mark (363 for a 90-day chart);
+- **keys (0.36.0)**: an interactive chart has two tab stops, the scrolling viewport and the roving point (the docs say so from 0.37.0); consider dropping the viewport's stop when nothing scrolls. Static `Render` output keeps one stop per mark (363 for a 90-day chart);
 - **end labels (0.38.0)**: real surnames with a gap note run past the margin at 320 px; since 0.40.0 the note is cut before the name. A second line for the note, or a wider margin when only one or two labels would be cut, is still open;
 - **legend**: short entries stack one per row in the static legend (four rows, ~90 px under a 300 px chart at 340); lay short names out in one row. Long series names are truncated ("…MTB Le…"); consider wrapping them;
 - **recipe and doc notes**:
