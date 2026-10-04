@@ -46,7 +46,6 @@ Where it stands (3 October 2026):
 | #9 season arc, #10 gap to the leader | 0.38.0 | committed in RaceSenseNet (fb30f341), not yet deployed |
 | #12 effort zones, #14 score bars | 0.39.0 | committed in RaceSenseNet (edd8d77d), not yet deployed |
 | #11 best efforts, #13 heart rate per lap | 0.40.0 | Race Face told to upgrade and swap them (4 Oct 2026); awaiting its report |
-| (P2 plan) | done with 0.40.0; planned in the brain (task "Race Face P2 plan") | — |
 | #15–#20 (P3) | after P2 | — |
 
 **After each release** the owner wants the Claude session **"RACEFACE RUNNING EXPANSION 2"** told to upgrade: `SendMessage` to that name (check `ListAgents` first). The message gives the release URL, what it adds for which charts, and steps:
