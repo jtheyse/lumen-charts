@@ -68,7 +68,6 @@ Race Face feedback still open (the brain's "Race Face feedback" tasks hold the d
   - a sparkline's root is `role='group'` named by title and description;
   - Lumen writes single-quoted attributes;
   - put a description's key fact first, since the two-line cut can hide its end;
-  - gap chart: riders who stop mid-race end early with their label at their last point; with a moving lead, the readout's 0s rider at a lap is not the eventual winner; the readout uses series names, so tag "(you)" there if wanted;
   - the 1080×1350 card needs an SVG rasteriser on the server, which Lumen does not ship (Race Face's API draws its PNGs with ImageSharp).
 
 ## How a release is done
