@@ -1,6 +1,6 @@
 # Race results recipes
 
-Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields and a race's gaps to the leader, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.38.0, together with the recipes in `sports.md`.
+Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields, a race's gaps to the leader, a ride's effort zones as a strip of shares and a race's scores on meter bars, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.39.0, together with the recipes in `sports.md`.
 
 ```csharp
 using System.Globalization;
@@ -10,7 +10,7 @@ using Lumen.Charts;
 ## What every chart here meets
 
 - **Static output is complete.** `ChartSvg.Render` writes every label, colour, tooltip (`<title>`) and accessible name into the SVG; nothing needs JavaScript, and nothing is fetched from a CDN.
-- **Phone width.** For SVG rendered on the server set `Width` to the width the card shows it at, `Width = 340` here: drawn at the width it is shown, every label is 11 px or larger (axis ticks 12, value labels and notes 11, the title 17), and none needs the 8 to 9 px text a stretched 340-unit viewBox gives. A card a little narrower, 320 px, still shows 10.4 px. On an interactive page `FitWidth="true"` redraws the chart at its card's width instead. A chart is at least 240 units tall (a sparkline at least 60 wide and 16 tall), and keeps its `Height` at any width, so choose a height that reads at a phone's width.
+- **Phone width.** For SVG rendered on the server set `Width` to the width the card shows it at, `Width = 340` here: drawn at the width it is shown, every label is 11 px or larger (axis ticks 12, value labels and notes 11, the title 17), and none needs the 8 to 9 px text a stretched 340-unit viewBox gives. A card a little narrower, 320 px, still shows 10.4 px. On an interactive page `FitWidth="true"` redraws the chart at its card's width instead. A chart is at least 240 units tall (a sparkline at least 60 wide and 16 tall), and keeps its `Height` at any width, so choose a height that reads at a phone's width; a strip (0.39.0) is drawn as tall as its bar and key instead.
 - **Text that fits.** From 0.35.0 a description or a source too wide for the card, by the library's generous estimate of its width, goes on over a second line, between its ` · ` clauses where both lines then fit and otherwise as evenly as its words allow, and the plot gives up 14 units for it; past two lines the second ends in `…`. A title stays one line, cut at a word with `…`. The whole of each stays in the drawing's `<title>`, `<desc>` and accessible name, so a long description written for a desktop no longer runs off a 340-pixel card.
 - **Accessible.** `Title` and `Description` are the drawing's accessible name; each mark is focusable and named, `Position: 16-05-2026, 24/48, better than the previous`, and the same words are its tooltip.
 - **Missing data is a gap, never a zero.** A race without a position or without points is a `null` Y: its line breaks there and no mark is drawn. A race without a field size writes its place alone.
@@ -477,6 +477,80 @@ var gapLive = gapToLeader with { SharedReadout = true };
 - **End labels instead of a legend.** `EndLabel` and `EndNote` (0.38.0) write each rider's name and gap just right of the line's last point, in the line's colour where it clears 4.5:1 on the card and in the text colour where it does not, the note in the muted colour, `low` `#80858E` 4.87:1. Labels whose points end close together are moved apart, as little as they can be, 14 units a line, and a label moved off its point is joined to it by a short line in its colour. The right margin grows to hold the widest, up to half the drawing: at 340 that is about 10 characters, so the labels here are the riders' letters and "You", and a longer one is cut with `…`, its whole kept as its tooltip and accessible name. Each label and note is also said in its line's last point's name, `You: Lap 6, +8.7s, labelled You · +8.7s`. With every line labelled, `includeLegend: false` drops the legend; in the component, `ShowLegend="false"`.
 - **Never colour alone.** The other riders are greys from `#D7DDE5` (13.22:1) down to `low` `#80858E` (4.87:1), which only tell the lines apart; "You" is the token `improved` `#34d399`, 9.40:1, and 3.2 units wide to their 2, and it is named "You" at its end and in every point's name, so neither the colour nor the width carries it alone. On a white card take `ChartStyle.Light`'s first series colour for "You" and its zone grey for the others.
 - **Interactive.** `SharedReadout = true` reads all eight riders at the lap under a finger, the pointer or the focused point, `Lap 3 · Rider A 0s · Rider B +5.2s · … · You +18s`, and the arrow keys step lap by lap. `ShowLegend="false"` leaves out the component's legend of toggle buttons; with it, a reader can no longer hide a rider.
+- **The readout uses series names.** The shared readout, the tooltips and each point's name read a rider by the series' `Name`, not its end label: name the reader's own series `"You"`, or tag it, `"Sam (you)"`, so the readout says whose line it is. The end label can still say just `You`.
+- **Riders who stop mid-race.** A rider who did not finish has fewer laps: give that series only the laps they rode, rather than `null` for the rest. The line ends early, and its end label stands at its last point, mid-plot, moved apart only from labels whose lines end close by; its last point's name says the label, so the reader hears where it stopped.
+- **A moving lead.** Each lap's gaps are measured from whoever led that lap, so the rider at `0s` at a lap is that lap's leader, who need not be the eventual winner: Rider B leads after lap 1 above and finishes behind Rider A. Say so where the page names a winner, and write the winner's own note, `leader` here, from the last lap only.
+
+## Effort zones
+
+An invented ride's time in four heart-rate zones, counted from its samples by the share of the rider's maximum heart rate each falls in, drawn as one strip of shares: each zone as long as its share of the ride, a gap in the card colour between each two, and a key under the bar of every zone and its whole percentage (0.39.0). The card writes its own heading, so the chart draws neither its title nor its description, which stay its accessible name.
+
+```csharp
+// The app's heart-rate samples for one ride, one a second (NaN where the strap dropped out), and the rider's maximum heart rate. An
+// invented hour, worked out from sines so it is the same on every run:
+const double effortMaxHeart = 192;
+var effortHeart = Enumerable.Range(0, 3600).Select(t => t is >= 2100 and < 2130 ? double.NaN
+    : Math.Round(118 + 28 * Math.Sin(t / 600.0 - 1.4) + 38 * Math.Pow(Math.Max(0, Math.Sin(t / 280.0)), 3) + 5 * Math.Sin(t / 37.0))).ToArray();
+// Zones by the share of the maximum: Easy below 60 %, Moderate 60–74 %, Hard 74–87 % and Very hard from 87 %. Heart rate is in whole
+// beats, so each zone holds every beat below its upper share: Easy to 115 at a maximum of 192, Moderate to 142, Hard to 167.
+double BelowShare(double share) => Math.Ceiling(share * effortMaxHeart) - 1;
+var effortZones = new ZoneScale([new("Easy", BelowShare(.60), "#3FD17A"), new("Moderate", BelowShare(.74), "#D7DDE5"),
+    new("Hard", BelowShare(.87), "#F5B642"), new("Very hard", double.PositiveInfinity, "#E30613")]);
+var effortSeconds = Training.TimeInZone(effortHeart, effortZones);          // seconds in each zone; the dropout counts in none
+var effortStrip = new ChartSpec {
+    Title = "Effort zones", Description = "Time in each heart-rate zone, by the share of your maximum",
+    Kind = ChartKind.Strip, Width = 340, Style = raceFace, DrawTitles = false, YFormat = ValueFormat.Duration,
+    Series = [new("Time in zone", effortZones.Zones.Select((zone, i) => new ChartPoint(i, effortSeconds[i], zone.Name) { Color = zone.Color }).ToArray())]
+};
+string effortSvg = ChartSvg.Render(effortStrip);
+// Interactive: <LumenChart Spec="effortStrip" FitWidth="true" />
+```
+
+- **One whole.** `ChartKind.Strip` takes one series whose points are the parts in order: each point's `Label` names its zone and its `Y` is its seconds, zero or more. X is only their order. Each zone is as long as its share of the total, so the strip always runs the card's width less 24 units each side, the four zones together.
+- **The key.** Under the bar each zone is written with its swatch and its share, `Easy 32%`, in whole percentages that add up to exactly 100: each share is rounded down, and the points left over go to the largest remainders, so a ride of three equal thirds reads 33, 33 and 34, never 99 or 101. The entries flow left to right and wrap where the card is too narrow: at 340 the four take two rows. A zone with no time keeps its entry, `Hard 0%`, and draws no part.
+- **Height.** A strip is drawn as tall as its content, the bar 18 units thick and 20 units a row of the key, so `Height` is not used; with `DrawTitles = false` the bar stands 14 units from the top and two rows of the key make the drawing 92 units tall. With its title and description drawn it is 50 units taller.
+- **The words a part says.** Each part drawn is a focusable mark named, and tooltipped, `Moderate: 44%, 26:15`: its share, and its seconds in `YFormat`, `ValueFormat.Duration`. The arrow keys step from part to part. A zone of no time has no mark; its key entry names it.
+- **Never colour alone.** Neighbouring zones stand close in lightness, Easy `#3FD17A` against Moderate `#D7DDE5` 1.45:1, Moderate against Hard `#F5B642` 1.32:1 and Hard against Very hard `#E30613` 2.71:1, so each part is parted from the next by a 2-unit gap in the card colour, against which every zone clears 3:1: Easy 9.13:1, Moderate 13.22:1, Hard 10.03:1, and Very hard 3.70:1, which a filled part needs but small text would not, so the red is a fill only. The key names every zone in words, in the text colour, `hi` `#F5F6F7` 16.70:1, and each part's name says its zone.
+- **The heading.** `DrawTitles = false` (0.39.0) draws neither the title nor the description, and the bar moves up into their room; both stay the drawing's `<title>`, `<desc>` and accessible name, so the page's own heading and the chart agree. `Render`'s `includeTitles: false` is something else: it leaves out the native tooltip in each mark.
+- **The ends.** Both outer ends are rounded by the style's `BarRadius`, or 6 units unless the style sets one, clamped to half the bar's thickness, so `BarRadius = 9999` draws a capsule.
+
+A cadence split is the same strip of two parts: the seconds pedalling, cadence above zero, and the seconds coasting.
+
+```csharp
+// The app's cadence samples for the same ride, one a second, 0 while coasting. Invented: coasting on every descent of the road.
+var effortCadence = Enumerable.Range(0, 3600).Select(t => Math.Sin(t / 210.0) < -0.55 ? 0 : Math.Round(86 + 6 * Math.Sin(t / 47.0))).ToArray();
+var cadenceSplit = new ChartSpec {
+    Title = "Cadence split", Description = "Time pedalling and time coasting",
+    Kind = ChartKind.Strip, Width = 340, Style = raceFace, DrawTitles = false, YFormat = ValueFormat.Duration,
+    Series = [new("Cadence", [new(0, effortCadence.Count(rpm => rpm > 0), "Pedalling") { Color = "#D7DDE5" },
+        new(1, effortCadence.Count(rpm => rpm == 0), "Coasting") { Color = "#80858E" }])]
+};
+string cadenceSvg = ChartSvg.Render(cadenceSplit);
+```
+
+Pedalling is the steel `data` token, 13.22:1 on the card, and coasting the `low` grey, 4.87:1; the two stand 2.71:1 apart, and the gap between them parts them.
+
+## Score bars
+
+Four invented scores out of 100, each a bar on a track that runs to 100, its value written just past the track's end, as a meter reads (0.39.0). What each score means is in its name and its number; the bars are all one colour.
+
+```csharp
+// The app's scores for one race, each out of 100. Invented:
+(string Name, double Score)[] raceScores = [("Execution", 82), ("Improvement", 64), ("Effort", 91), ("Consistency", 58)];
+var scoreBars = new ChartSpec {
+    Title = "Race scores", Description = "Execution, improvement, effort and consistency, each out of 100",
+    Kind = ChartKind.Bar, Width = 340, Height = 240, Style = raceFace with { Gridlines = GridLine.Hidden }, DrawTitles = false,
+    YMin = 0, YMax = 100, BarTrack = true, YTickLabels = TickLabels.None,
+    Series = [new("Score", raceScores.Select((s, i) => new ChartPoint(i, s.Score, s.Name)).ToArray(), "#D7DDE5") { ValueLabels = true }]
+};
+string scoreSvg = ChartSvg.Render(scoreBars, includeLegend: false);
+// Interactive: <LumenChart Spec="scoreBars" FitWidth="true" ShowLegend="false" />
+```
+
+- **Tracks.** `BarTrack = true` (0.39.0) draws a track behind each bar from zero to `YMax`, in the style's `Grid` colour, `#2D2D2F`, rounded as the bar is, so 64 reads as a bar filled 64 % of the way along its track. It needs `YMax`, an axis from zero (`YMin` unset or 0, no value below zero) and every series on the left-hand axis; a score above `YMax` is drawn at the track's end and its name says so, `Score: Effort, 104, above the scale, drawn at 100`.
+- **Layout.** A bar on a track is at most 18 units thick, centred in its row. The left margin fits the widest name, `Improvement` here, rather than the fixed 160 a bar chart keeps, up to 45 % of the width; a longer name is cut with `…`, its whole in its bar's name. The right margin grows to hold the widest value label. `YTickLabels = TickLabels.None` with no `YLabel` writes nothing under the plot, so its bottom margin narrows from 76 to 24, and `DrawTitles = false` moves the plot up 50 units, so the four rows share most of the 240.
+- **Never colour alone.** Every bar is the steel `data` token, `#D7DDE5`, 10.05:1 against its track, so the fill's end reads plainly; the track stands only 1.31:1 on the card, which is fine, since it only shows how far the scale runs and the value written past its end says the number. The value labels are written in the text colour, `hi`, 16.70:1. A score that is good or bad is said by its name and number; colour it only beside words that say why, as a personal best's ring is paired with ` · PB`.
+- **Columns.** On a `ChartKind.Column` chart the tracks stand upright, from zero to the top of the plot, and each value label stands above its track.
 
 ## Rendering notes
 

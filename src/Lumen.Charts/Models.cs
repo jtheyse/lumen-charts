@@ -5,7 +5,7 @@ namespace Lumen.Charts;
 /// column, bar, stacked column, donut, heatmap and radar charts place them by category and show their labels; gauge and
 /// ring charts draw one value a series round an arc and have no X axis; a timeline draws spans along a continuous X axis,
 /// one lane a series; a calendar draws one series as a grid of days, each coloured by its value; and blocks draw spans along a
-/// continuous X axis, each as wide as it runs and as tall as its value.</summary>
+/// continuous X axis, each as wide as it runs and as tall as its value; and a strip draws one series' parts as shares of one bar.</summary>
 public enum ChartKind
 {
     /// <summary>Each series as a line through its points in X order.</summary>
@@ -87,7 +87,20 @@ public enum ChartKind
     /// is drawn at least 2 pixels tall, so a bin of one among hundreds still shows; one at the bottom, such as a count of none, draws
     /// nothing visible but keeps its name and its focus. Blocks in one series cannot overlap. As a series' own
     /// <see cref="ChartSeries.Kind"/> they draw in the column layer of a continuous chart, under its lines.</summary>
-    Blocks
+    Blocks,
+    /// <summary>A proportion strip, as time in each heart-rate zone is drawn in a training app: one series whose points are the parts of a
+    /// whole in order, each point's <see cref="ChartPoint.Label"/> the part's name and its Y, zero or more, its amount, in its own
+    /// <see cref="ChartPoint.Color"/> or else the style's series colours in order; X is only their order. The parts are drawn as one bar
+    /// 18 units thick across the drawing, each as long as its share of the total, both outer ends rounded by the style's
+    /// <see cref="ChartStyle.BarRadius"/> or 6 units, clamped to half the bar's thickness, and each part parted from the next by a 2-unit gap
+    /// in the background colour, so neighbours never rely on their colours to be told apart; a part of zero draws nothing. Under the bar a
+    /// key names every part in order with its swatch and its whole percentage, <c>Easy 34%</c>, the percentages adding up to exactly 100
+    /// (largest remainders, ties to the part listed later), flowing left to right and wrapping onto rows as the width allows; a part of
+    /// zero keeps its entry, <c>0%</c>. Each part drawn is a focusable mark named <c>Easy: 34%, 12:20</c>, its amount in
+    /// <see cref="ChartSpec.YFormat"/> and <see cref="ChartSpec.YUnit"/>. It draws no axes, ticks or gridlines, and is drawn as tall as its
+    /// content, its title and description if drawn, the bar and the key's rows: <see cref="ChartSpec.Height"/> is not used. At most 24
+    /// parts.</summary>
+    Strip
 }
 /// <summary>How a calendar lays out its days.</summary>
 public enum CalendarLayout
@@ -652,6 +665,29 @@ public sealed record ChartSpec
     /// sparkline, read beside words, and the kinds without a continuous X axis refuse it.
     /// </summary>
     public bool SharedReadout { get; init; }
+    /// <summary>
+    /// Draws a track behind each bar of a <see cref="ChartKind.Bar"/> or <see cref="ChartKind.Column"/> chart, as a meter does: from the
+    /// value axis's minimum, zero, to its maximum, <see cref="YMax"/>, in the style's <see cref="ChartStyle.Grid"/> colour and rounded as
+    /// the bar is, so a score of 72 out of 100 reads as a bar filled 72 % of the way along its track. It needs <see cref="YMax"/>, an axis
+    /// from zero (<see cref="YMin"/> unset or 0, and no value below zero), and every series on the left-hand axis. A value above
+    /// <see cref="YMax"/> is drawn at the track's end and its name says so. On a horizontal bar chart a bar on a track is at most 18 units
+    /// thick, centred in its row; its value label, with <see cref="ChartSeries.ValueLabels"/>, stands just past the track's end, the right
+    /// margin growing to hold the widest; the left margin fits the widest category label instead of the fixed 160, up to 45 % of the
+    /// width, a label too long for it cut with <c>…</c>; and where nothing is written under the plot, <see cref="YTickLabels"/>
+    /// <see cref="TickLabels.None"/> and no <see cref="YLabel"/>, the bottom margin narrows from 76 to 24. On a column chart the value
+    /// label stands above the track's top. The tracks are drawn with the data, over zone bands and references behind it: draw a target
+    /// <see cref="ChartAnnotation.InFront"/>. Off by default; other kinds, stacked columns included, refuse it.
+    /// </summary>
+    public bool BarTrack { get; init; }
+    /// <summary>
+    /// Draws the <see cref="Title"/> and <see cref="Description"/> at the top of the chart, the default. Off, neither is drawn and the body
+    /// moves up into their space, 50 units, for a page that writes its own heading over the chart; both stay the drawing's
+    /// <c>&lt;title&gt;</c>, <c>&lt;desc&gt;</c> and accessible name. Every chart kind takes it, a strip included, whose drawing is then
+    /// that much shorter. A sparkline draws neither in any case. Network graphs (<see cref="GraphSpec"/>) always draw their title. It is
+    /// not what <see cref="ChartSvg.Render"/>'s <c>includeTitles</c> controls: that writes or leaves out the native tooltip, the
+    /// <c>&lt;title&gt;</c>, in each mark.
+    /// </summary>
+    public bool DrawTitles { get; init; } = true;
 }
 
 /// <summary>

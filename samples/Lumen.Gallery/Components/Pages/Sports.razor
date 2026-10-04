@@ -7,10 +7,10 @@
     <aside class="sidebar">
         <a class="brand" href="/"><span class="brand-icon">◒</span> lumen<span class="brand-dot">.</span></a>
         <div class="workspace">VISUALIZATION LIBRARY <span>0.1</span></div>
-        <a class="nav-item" href="/#playground"><span>▦</span> Chart explorer <b>22</b></a>
+        <a class="nav-item" href="/#playground"><span>▦</span> Chart explorer <b>23</b></a>
         <a class="nav-item" href="/#network"><span>⌘</span> Network graphs <b>2</b></a>
         <a class="nav-item" href="/#integration"><span>⌁</span> Developer API</a>
-        <a class="nav-item active" href="sports" aria-current="page"><span>∿</span> Sports &amp; performance <b>27</b></a>
+        <a class="nav-item active" href="sports" aria-current="page"><span>∿</span> Sports &amp; performance <b>29</b></a>
         <div class="nav-label">ON THIS PAGE</div>
         @foreach (var section in Sections)
         { <a class="purpose" href="sports#@section.Id">@section.Name<span>↓</span></a> }
@@ -100,8 +100,11 @@
     };
     // As on the home page, bar ends belong to a brand: the Lumen brand draws the weekly load as capsules, Midnight draws every
     // bar that way, and Harbour and the page's CSS keep their square ends.
+    // The session scores' bars take the brand's first series colour, which clears 3:1 against its track in every brand but the Lumen brand's
+    // dark preset, where its blue stands 2.73:1 on the grid colour; there they take the palette's sixth colour, 3.27:1.
     private ChartSpec Spec(SportsCard card) => card.Id == "weekly-load" && Look.Brand == BrandDemo.Lumen
-        ? card.Spec with { Style = ChartSvg.ResolveStyle(card.Spec) with { BarRadius = 9999 } } : card.Spec;
+        ? card.Spec with { Style = ChartSvg.ResolveStyle(card.Spec) with { BarRadius = 9999 } }
+        : card.Id == "scores" && Look.Brand == BrandDemo.Lumen && Look.Dark ? card.Spec with { Series = [card.Spec.Series[0] with { Color = ChartStyle.Dark.Series[5] }] } : card.Spec;
     private RenderFragment Branded(RenderFragment content) => Look.Brand switch
     {
         BrandDemo.Midnight => @<CascadingValue Value="ChartStyle.Midnight">@content</CascadingValue>,

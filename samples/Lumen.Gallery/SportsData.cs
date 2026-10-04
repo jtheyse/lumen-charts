@@ -470,6 +470,17 @@ public static class SportsData
         }).ToArray();
     }
 
+    /// <summary>Three illustrative scores for a run, no vendor's, each out of 100 and rounded: pacing, 100 less twice the spread of its
+    /// kilometre splits as a percentage of their mean; effort, 100 less its training stress's distance from 60, the stress the progression is
+    /// planned at; and steadiness, 100 less twice the spread of its heart rate as a percentage of its mean.</summary>
+    public static IReadOnlyList<(string Name, double Score)> SessionScores(Session run)
+    {
+        static double Spread(IReadOnlyList<double> values) { var mean = values.Average(); return Math.Sqrt(values.Average(v => (v - mean) * (v - mean))) / mean * 100; }
+        static double Score(double value) => Math.Round(Math.Clamp(value, 0, 100));
+        var splits = Splits(run);
+        return [("Pacing", Score(100 - 2 * Spread(splits))), ("Effort", Score(100 - Math.Abs(run.Stress - 60))), ("Steadiness", Score(100 - 2 * Spread(run.Track!.HeartRate)))];
+    }
+
     /// <summary>Readiness in three tiers, as WHOOP colours recovery: low to 33, moderate to 66 and good above, in the red, gold
     /// and green of <paramref name="zones"/>, a brand's zone ramp.</summary>
     public static ZoneScale ReadinessZones(IReadOnlyList<string> zones) =>
@@ -758,6 +769,25 @@ public static class SportsData
             Series = [new("Time in zone", HeartZones.Zones.Select((_, z) => new ChartPoint(z, seconds[z], Range(z)) { Color = zones[z] }).ToArray()) { ValueLabels = true }]
         };
 
+        // The same time in zone as one strip of shares, each zone in its colour with its whole percentage in the key under it.
+        var zoneStrip = Chart(half, 360) with
+        {
+            Kind = ChartKind.Strip, YFormat = ValueFormat.Duration,
+            Title = $"{Text(seconds[most] / run.Seconds * 100)} % in {HeartZones.Zones[most].Name.ToLowerInvariant()}", Description = "The same run's heart rate, as shares of its time",
+            Series = [new("Time in zone", HeartZones.Zones.Select((zone, z) => new ChartPoint(z, seconds[z], zone.Name) { Color = zones[z] }).ToArray())]
+        };
+
+        // Three illustrative scores for the same run, no vendor's, each out of 100 on a track: how evenly it was paced, how close it ran
+        // to its plan's effort, and how steadily the heart rate held within each step.
+        var scored = SessionScores(run);
+        var sessionScores = Chart(half, 240) with
+        {
+            // No ticks, so no gridlines cross the tracks in any brand, and nothing written under the plot.
+            Kind = ChartKind.Bar, YMin = 0, YMax = 100, BarTrack = true, YTickLabels = TickLabels.None, YTickValues = [], DrawTitles = false,
+            Title = $"Session scores: {string.Join(", ", scored.Select(s => $"{s.Name.ToLowerInvariant()} {Text(s.Score)}"))}", Description = "Illustrative scores for the same run, each out of 100",
+            Series = [new("Score", scored.Select((s, i) => new ChartPoint(i, s.Score, s.Name)).ToArray()) { ValueLabels = true }]
+        };
+
         // Kilometre splits, faster higher.
         var splits = Splits(run);
         var pace = Chart(half, 360) with
@@ -1032,6 +1062,8 @@ public static class SportsData
             new("load", "training-calendar", "Training calendar", "The season's daily stress as a `ChartKind.Calendar` contribution grid, each day in its tier from `YZones` — illustrative tiers, no vendor's — and this month's runs on a `CalendarLayout.Months` grid of `CalendarCell.Bubble` days sized by distance; an X annotation outlines today in both.", true, calendar) { Beside = month },
             new("session", "stream", "Activity stream", "Heart rate coloured by zone over its `YZones` bands, pace on a reversed duration axis and elevation as a faded area, in three `Panes` on one elapsed-time axis.", true, stream),
             new("session", "time-in-zone", "Time in zone", "`Training.TimeInZone` over the same heart-rate samples the stream draws, one bar per zone in its colour.", false, timeInZone),
+            new("session", "zone-strip", "Time in zone, as shares", "The same `Training.TimeInZone` as a `ChartKind.Strip`: one bar whose parts are the zones, each as long as its share of the run and parted by a gap, with a key under it of every zone and its whole percentage, adding up to exactly 100.", false, zoneStrip),
+            new("session", "scores", "Session scores", "Three illustrative scores, no vendor's, out of 100 on `BarTrack` meters: each bar stands on a track to `YMax`, its value past the track's end, its name beside it, and an empty `YTickValues` with `TickLabels.None` leaves out the gridlines and ticks. `DrawTitles = false` leaves the heading to this card, the chart's title still its accessible name.", false, sessionScores) { ShowLegend = false },
             new("session", "splits", "Pace by kilometre", "Each kilometre's split on a reversed duration axis, with a `Trend` line and the race's goal pace.", false, pace),
             new("session", "laps", "Laps", "One `ChartPoint.Block` per lap of the progression, as wide as the lap is long and as high as its pace on a reversed duration axis, with the run's average pace as a reference line; its distance axis is the elevation's below.", true, lapChart),
             new("session", "elevation", "Elevation coloured by grade", "The same route as an area, each 100 m segment taking a point `Color` from its grade band.", true, elevation),

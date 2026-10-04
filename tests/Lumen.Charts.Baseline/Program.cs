@@ -40,6 +40,7 @@ ChartSpec Spec(ChartKind kind, ChartTheme theme) => kind switch
     ChartKind.Range => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("R", Enumerable.Range(0, 8).Select(i => ChartPoint.Interval(i, i % 3 == 0 ? null : 10 + i, 6 + i, 15 + i * 2, $"P{i}")).ToArray())] },
     ChartKind.Calendar => new() { Kind = kind, Theme = theme, XAxis = AxisKind.Time, Title = "Baseline", Description = "Default output", Series = [new("C", Enumerable.Range(0, 56).Select(i => new ChartPoint(1788825600000d + i * 86400000d, i % 7 == 0 ? 0 : 10 + i * 3 % 40)).ToArray())] },
     ChartKind.Blocks => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("B", [ChartPoint.Block(0, 2, 5, "W"), ChartPoint.Block(2, 6, 9), ChartPoint.Block(6, 7, 7), ChartPoint.Block(8, 12, 3, "C")])] },
+    ChartKind.Strip => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("Parts", [new(0, 4, "A"), new(1, 3, "B"), new(2, 2, "C"), new(3, 1, "D")])] },
     _ => new() { Kind = kind, Theme = theme, Title = "Baseline", Description = "Default output", Series = [new("A", Points()), new("B", Points().Select(p => p with { Y = p.Y + 5 }).ToArray())] }
 };
 foreach (var kind in Enum.GetValues<ChartKind>())
@@ -707,6 +708,30 @@ ChartSpec Gaps(ChartStyle style)
 }
 lines.Add($"gap/340-light {Hash(Unlegended(Gaps(ChartStyle.Light)))}");
 lines.Add($"gap/340-midnight {Hash(Unlegended(Gaps(ChartStyle.Midnight)))}");
+// 0.39.0: proportions and meters. An invented ride's effort zones as a strip, at 340 in light and Midnight and wide, with a zone of none, and
+// its cadence split; score bars on tracks at 340 in light and Midnight; columns on tracks; and a chart that keeps its title unwritten.
+ChartSpec Effort(ChartStyle? style, int width = 340, double hard = 820) => new()
+{
+    Kind = ChartKind.Strip, Style = style, Width = width, Title = "Effort zones", Description = "Time in each heart-rate zone", YFormat = ValueFormat.Duration,
+    Series = [new("Zones", [new(0, 740, "Easy") { Color = "#3FD17A" }, new(1, 1290, "Moderate") { Color = "#D7DDE5" }, new(2, hard, "Hard") { Color = "#F5B642" }, new(3, 250, "Very hard") { Color = "#E30613" }])]
+};
+lines.Add($"strip/340-light {Hash(Render(Effort(ChartStyle.Light) with { Series = [new("Zones", Effort(null).Series[0].Points.Select(p => p with { Color = null }).ToArray())] }))}");
+lines.Add($"strip/340-midnight {Hash(Render(Effort(ChartStyle.Midnight)))}");
+lines.Add($"strip/900-light {Hash(Render(Effort(ChartStyle.Light, 900) with { Series = [new("Zones", Effort(null).Series[0].Points.Select(p => p with { Color = null }).ToArray())] }))}");
+lines.Add($"strip/zero-part {Hash(Render(Effort(ChartStyle.Midnight, hard: 0)))}");
+lines.Add($"strip/cadence-split {Hash(Render(new ChartSpec { Kind = ChartKind.Strip, Style = ChartStyle.Midnight, Width = 340, DrawTitles = false, Title = "Cadence split", Description = "Pedalling against coasting",
+    YFormat = ValueFormat.Duration, Series = [new("Cadence", [new(0, 4310, "Pedalling") { Color = "#D7DDE5" }, new(1, 890, "Coasting") { Color = "#80858E" }])] }))}");
+ChartSpec Scores(ChartStyle style) => new()
+{
+    Kind = ChartKind.Bar, Style = style with { Gridlines = GridLine.Hidden }, Width = 340, Height = 240, Title = "Race scores", Description = "Each out of 100", DrawTitles = false,
+    YMin = 0, YMax = 100, BarTrack = true, YTickLabels = TickLabels.None,
+    Series = [new("Score", [new(0, 82, "Execution"), new(1, 64, "Improvement"), new(2, 91, "Effort"), new(3, 58, "Consistency")]) { ValueLabels = true }]
+};
+lines.Add($"scores/340-light {Hash(Unlegended(Scores(ChartStyle.Light)))}");
+lines.Add($"scores/340-midnight {Hash(Unlegended(Scores(ChartStyle.Midnight)))}");
+lines.Add($"track/columns {Hash(Render(new ChartSpec { Kind = ChartKind.Column, Title = "Columns on tracks", YMax = 100, BarTrack = true,
+    Series = [new("Score", [new(0, 82, "A"), new(1, 64, "B"), new(2, 105, "C")]) { ValueLabels = true }, new("Last", [new(0, 70, "A"), new(1, 50, "B"), new(2, 90, "C")])] }))}");
+lines.Add($"titles/undrawn {Hash(Render(line with { Title = "Not drawn", Description = "Named, not written", DrawTitles = false }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

@@ -24,6 +24,9 @@ internal sealed class SvgWriter
     public ChartSpec? Spec { get; init; }
     /// <summary>A sparkline's data alone: no words are written, and references draw their shapes without their labels.</summary>
     public bool Bare { get; init; }
+    /// <summary>Whether the title and description are drawn at the top, as they are unless a chart sets <see cref="ChartSpec.DrawTitles"/>
+    /// off; they stay its accessible name either way.</summary>
+    public bool Titled { get; init; } = true;
     /// <summary>How far a chart's body moves down because its description takes a second line, 14 pixels or none.</summary>
     public int Head { get; set; }
     /// <summary>How far a chart's body moves up from its foot because its source takes a second line, 14 pixels or none.</summary>
@@ -87,8 +90,17 @@ public static partial class ChartSvg
     // every record, so leaving out the nulls loses nothing, and it halves the text a long series makes.
     private static readonly JsonSerializerOptions Hashing = new()
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended, Unchanged, Unsparked, Unmarked, Unread, Unchanneled } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended, Unchanged, Unsparked, Unmarked, Unread, Unchanneled, Untracked } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
+    /// <summary>A chart without bar tracks that draws its title and description, as every chart did before 0.39.0, is serialized for hashing
+    /// as 0.38.0, which had neither setting, serialized it, so every chart drawn before them keeps its IDs.</summary>
+    private static void Untracked(JsonTypeInfo info)
+    {
+        if (info.Type != typeof(ChartSpec)) return;
+        foreach (var property in info.Properties)
+            if (property.Name == nameof(ChartSpec.BarTrack)) property.ShouldSerialize = (_, track) => track is true;
+            else if (property.Name == nameof(ChartSpec.DrawTitles)) property.ShouldSerialize = (_, drawn) => drawn is false;
+    }
     /// <summary>A classic style is serialized for hashing as 0.23.0 serialized it, without its finish.</summary>
     private static void Unfinished(JsonTypeInfo info)
     {
@@ -198,23 +210,29 @@ public static partial class ChartSvg
         return "lumen-" + Convert.ToHexString(SHA256.HashData(Hashed(hashed)))[..12].ToLowerInvariant();
     }
 
-    /// <summary>Renders a chart. <paramref name="includeTitles"/> controls the native SVG tooltip on each mark.</summary>
+    /// <summary>Renders a chart. <paramref name="includeLegend"/> adds the series legend under the chart, which kinds that draw a key of their
+    /// own leave out. <paramref name="includeTitles"/> controls only the native SVG tooltip, the <c>&lt;title&gt;</c>, in each mark: the
+    /// chart's own title and description are drawn unless <see cref="ChartSpec.DrawTitles"/> is off, and are its <c>&lt;title&gt;</c>,
+    /// <c>&lt;desc&gt;</c> and accessible name either way.</summary>
     public static string Render(ChartSpec spec, bool includeLegend = true, bool includeTitles = true)
     {
         ChartValidation.Validate(spec);
         var style = ResolveStyle(spec);
         // A sparkline draws no gridlines, so it carries no rule for minor ones either.
         var bare = spec.Sparkline;
-        var w = new SvgWriter { Titles = includeTitles, Style = style, MinorGrid = !bare && spec.MinorGridlines && style.Gridlines != GridLine.Hidden, Spec = spec, Bare = bare };
+        var w = new SvgWriter { Titles = includeTitles, Style = style, MinorGrid = !bare && spec.MinorGridlines && style.Gridlines != GridLine.Hidden, Spec = spec, Bare = bare, Titled = spec.DrawTitles };
         // A ring's key carries its value and goal as well as its name, so its columns are wider.
         var ring = spec.Kind == ChartKind.Ring;
         var legendColumns = Math.Max(1, (spec.Width - 48) / (ring ? 220 : 180));
         // A histogram of one distribution needs no key; of several, its colours are the only way to tell them apart.
         // A gauge's one score is written in its centre, so it needs no key either, and a calendar draws its colour scale under its days.
-        // A sparkline is read beside words that name what it draws.
-        var legendRows = includeLegend && !bare && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Box and not ChartKind.Violin and not ChartKind.Gauge and not ChartKind.Calendar
+        // A sparkline is read beside words that name what it draws, and a strip's key under its bar names its parts.
+        var legendRows = includeLegend && !bare && spec.Kind is not ChartKind.Donut and not ChartKind.Heatmap and not ChartKind.Box and not ChartKind.Violin and not ChartKind.Gauge and not ChartKind.Calendar and not ChartKind.Strip
             && (spec.Kind != ChartKind.Histogram || spec.Series.Count > 1) ? (int)Math.Ceiling(spec.Series.Count / (double)legendColumns) : 0;
-        Begin(w, spec.Width, spec.Height + legendRows * 22, spec.Title, spec.Description);
+        // A strip is drawn as tall as its content; every other chart as tall as it asks.
+        var strip = spec.Kind == ChartKind.Strip ? Stripped(spec) : null;
+        var height = strip?.Height ?? spec.Height;
+        Begin(w, spec.Width, height + legendRows * 22, spec.Title, spec.Description);
         // The source wraps as the description does, but upward from the foot, so a second line takes 14 pixels from the bottom of the
         // body, which is laid out knowing it.
         var source = bare ? [] : Wrap(spec.Source, spec.Width - 48);
@@ -222,8 +240,9 @@ public static partial class ChartSvg
         // An empty sparkline is an empty drawing: its title, which a host writes for the data it has, says what is missing.
         if (!HasData(spec))
         {
-            if (!bare) w.Text(spec.Width / 2, spec.Height / 2, "No data to display", "text-anchor='middle'");
+            if (!bare) w.Text(spec.Width / 2, height / 2, "No data to display", "text-anchor='middle'");
         }
+        else if (strip is not null) Strip(w, spec, strip);
         else if (spec.Kind == ChartKind.Gauge) Gauge(w, spec);
         else if (spec.Kind == ChartKind.Ring) Rings(w, spec);
         else if (spec.Kind == ChartKind.Donut) Donut(w, spec);
@@ -238,7 +257,7 @@ public static partial class ChartSvg
         if (spec.Kind == ChartKind.Scatter && spec.DensityCells is not null && !bare)
             w.Text(spec.Width - 30, 64 + w.Head, $"{Count(spec.Series.Where(series => Mark(spec, series) == ChartKind.Scatter).Sum(series => series.Points.Count(p => p.Y.HasValue)))} observations aggregated into {spec.DensityCells} cells across",
                 "text-anchor='end' class='lumen-muted' font-size='11'");
-        for (var i = 0; i < source.Length; i++) w.Text(24, spec.Height - 12 - 14 * (source.Length - 1 - i), source[i], "class='lumen-muted' font-size='11'");
+        for (var i = 0; i < source.Length; i++) w.Text(24, height - 12 - 14 * (source.Length - 1 - i), source[i], "class='lumen-muted' font-size='11'");
         if (legendRows > 0)
             for (var i = 0; i < spec.Series.Count; i++)
             {
@@ -358,8 +377,10 @@ public static partial class ChartSvg
         w.Add("<style>.lumen-svg .lumen-grid{stroke:var(--lumen-grid);stroke-width:1}"+(w.MinorGrid?".lumen-svg .lumen-grid-minor{stroke:var(--lumen-grid);stroke-width:1;stroke-opacity:.45}":"")+".lumen-svg .lumen-muted{fill:var(--lumen-muted)}.lumen-svg .lumen-datum{outline:none;cursor:pointer}.lumen-svg .lumen-datum:focus{stroke:currentColor;stroke-width:3}.lumen-svg .lumen-datum:hover{filter:brightness(.87)}"
             +(w.Refined?".lumen-svg .lumen-marker{opacity:0}.lumen-svg .lumen-datum:hover .lumen-marker,.lumen-svg .lumen-datum:focus .lumen-marker{opacity:1}":"")+".lumen-svg .lumen-node{cursor:grab;outline:none}.lumen-svg .lumen-node:focus circle{stroke-width:4}.lumen-svg .lumen-node:active{cursor:grabbing}</style>");
         w.MarkDefinitions();
-        // A sparkline's title and description are its accessible name, its title and its desc, and are not written.
+        // A sparkline's title and description are its accessible name, its title and its desc, and are not written; nor are a chart's
+        // whose page writes its own heading, and its body moves up into their room.
         if (w.Bare) return;
+        if (!w.Titled) { w.Head = -Untitled; return; }
         // The title is 17 pixels to the description's 11, so its width is the estimate for 11 px text scaled by 17 / 11.
         var room = width - 48d;
         w.Text(24, 28, Wide(title) * 17 / 11 <= room ? title : Cut(title, room * 11 / 17), "font-size='17' font-weight='600'");
@@ -379,6 +400,13 @@ public static partial class ChartSvg
         }
         else w.Text(24, 49, description, "class='lumen-muted' font-size='11'");
     }
+
+    /// <summary>How far a chart's body moves up when its title and description are not drawn: the room they take above it.</summary>
+    internal const int Untitled = 50;
+    /// <summary>How far a chart's body moves down from where it stands under a one-line description, as <see cref="Begin"/> sets it: 14
+    /// pixels for a description on two lines, none on one, none on a sparkline, and up by <see cref="Untitled"/> where neither title nor
+    /// description is drawn.</summary>
+    internal static int Headroom(ChartSpec spec) => spec.Sparkline ? 0 : !spec.DrawTitles ? -Untitled : 14 * (Wrap(spec.Description, spec.Width - 48d).Length - 1);
 
     /// <summary>How many of <paramref name="clauses"/> go on a first line <paramref name="room"/> pixels wide: as many as fit, at least
     /// one, the rest going on the second.</summary>
@@ -504,7 +532,7 @@ public static partial class ChartSvg
         // A Y axis on the right takes the margin a secondary axis would, and gives the left one back.
         var flipped = s.YAxisSide == AxisSide.Right;
         // A chart that names its plots above them and writes no label up the left keeps only the margin the X axis's first label needs.
-        var left = s.Sparkline ? pad : horizontal ? 160d : flipped || Unlabelled(s) ? 30d : 76d; var right = s.Width - (s.Sparkline ? pad : secondary || flipped ? 76d : Math.Max(30d, Ending(s, left)));
+        var left = s.Sparkline ? pad : horizontal ? s.BarTrack ? Tracked(s).Left : 160d : flipped || Unlabelled(s) ? 30d : 76d; var right = s.Width - (s.Sparkline ? pad : horizontal && s.BarTrack ? Tracked(s).Right : secondary || flipped ? 76d : Math.Max(30d, Ending(s, left)));
         var points = s.Series.SelectMany(x => x.Points).ToArray();
         var cats = points.Select(p => p.X).Distinct().Order().ToArray();
         // A block reaches to its XEnd, and only a block has one here.
@@ -520,6 +548,34 @@ public static partial class ChartSvg
             for (var pass = 0; pass < 3; pass++)
                 inset = Math.Clamp((ranged.Length > 1 ? Enumerable.Range(1, ranged.Length - 1).Min(i => ranged[i] - ranged[i - 1]) * (right - left - 2 * inset) : 30) * .7, 1, 34) / 2;
         return new(horizontal, category, left, right, inset, points, cats, xs, plots);
+    }
+
+    /// <summary>The thickest a bar on a track is drawn, and how far its value label stands past the track's end.</summary>
+    private const double TrackThick = 18, TrackGap = 6;
+    /// <summary>A horizontal bar chart's category name as it is written beside its bar: its name, or its X, cut to 21 characters.</summary>
+    private static string Category(ChartSpec s, double x) => Short(s.Series.SelectMany(series => series.Points).First(p => p.X == x).Label ?? LinearScale.Label(x), 21);
+    /// <summary>The room a horizontal bar chart on tracks keeps beside the plot for its category names: 12 units from the plot, and 12 from
+    /// the drawing's edge, or 42 where the value axis's title stands up the left.</summary>
+    private static double Aside(ChartSpec s) => string.IsNullOrWhiteSpace(s.XLabel) ? 24 : 42;
+    /// <summary>The margins of a horizontal bar chart on tracks: on the left the widest category name by the generous estimate for 12 px text
+    /// and the room round it, up to 45 % of the width; on the right the widest value label and its note past the track's end, by the estimate
+    /// for 11 px text, or 30 where there are none.</summary>
+    private static (double Left, double Right) Tracked(ChartSpec s)
+    {
+        var cats = s.Series.SelectMany(series => series.Points).Select(p => p.X).Distinct().ToArray();
+        var widest = cats.Length == 0 ? 0 : cats.Max(x => Broad(Category(s, x)));
+        var left = Math.Min(Math.Ceiling(widest) + Aside(s), Math.Floor(s.Width * .45));
+        var words = new Axis(AxisKind.Linear, 0, 1) { ValueFormat = s.YFormat, Unit = s.YUnit };
+        var labels = s.Series.Where(series => series.ValueLabels).SelectMany(series => series.Points).Where(p => p.Y.HasValue).Select(p => Wide(words.Format(p.Y!.Value) + p.ValueNote)).ToArray();
+        return (left, labels.Length == 0 ? 30 : Math.Max(30, Math.Ceiling(TrackGap + labels.Max() + 6)));
+    }
+    /// <summary>12 px text cut with <c>…</c> to fit <paramref name="room"/> units by the generous estimate, one letter at least.</summary>
+    private static string Fitted(string text, double room)
+    {
+        if (Broad(text) <= room) return text;
+        var max = text.Length;
+        while (max > 2 && Broad(Short(text, max)) > room) max--;
+        return Short(text, max);
     }
 
     private static void Cartesian(SvgWriter w, ChartSpec s)
@@ -588,7 +644,7 @@ public static partial class ChartSvg
                     for (var i = 0; i < cats.Length; i += step)
                     {
                         var label = Name(i);
-                        if (horizontal) w.Text(left - 12, top + (i + .5) / cats.Length * (bottom - top) + 4, Short(label, 21), "text-anchor='end' class='lumen-muted'");
+                        if (horizontal) w.Text(left - 12, top + (i + .5) / cats.Length * (bottom - top) + 4, s.BarTrack ? Fitted(Short(label, 21), left - Aside(s)) : Short(label, 21), "text-anchor='end' class='lumen-muted'");
                         else w.Text(X(cats[i]), bottom + 21, Short(label, 12), "text-anchor='middle' class='lumen-muted'");
                     }
                 }
@@ -877,6 +933,9 @@ public static partial class ChartSvg
                     var y = p.Y.Value;
                     if (category && place >= 0)
                     {
+                        // A bar on a track is drawn no further than the track's end, and its name says where it stands.
+                        var given = y;
+                        if (s.BarTrack) y = Math.Min(y, scale.Max);
                         var ci = Array.IndexOf(cats, p.X);
                         var band = (horizontal ? bottom - top : right - left) / cats.Length;
                         var stacked = s.Kind == ChartKind.StackedColumn;
@@ -896,10 +955,23 @@ public static partial class ChartSvg
                         }
                         var end = horizontal ? y >= 0 ? End.Right : End.Left : y >= 0 ? End.Top : End.Bottom;
                         var outermost = !stacked || outer.TryGetValue((p.X, y > 0), out var last) && last == si;
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale), Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost));
+                        if (s.BarTrack)
+                        {
+                            // A track runs the whole value axis behind its bar, as thick as the bar and rounded as it is; across a row, a bar
+                            // on a track is at most 18 units thick, centred in its share of the row.
+                            if (horizontal) { var thick = Math.Min(rh, TrackThick); ry += (rh - thick) / 2; rh = thick; }
+                            var track = horizontal ? Bar(w, ys.Map(ys.Min, left, right), ry, right - left, rh, end, w.Style.Grid, AreaFill.Flat)
+                                : Bar(w, rx, At(scale.Max), rw, At(scale.Min) - At(scale.Max), end, w.Style.Grid, AreaFill.Flat);
+                            w.Add(track.Insert(5, " class='lumen-bar-track'"));
+                        }
+                        var over = given > y ? $", above the scale, drawn at {scale.Format(y)}" : "";
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale) + over, Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost));
                         if (series.ValueLabels)
                         {
-                            if (horizontal) Beside(y >= 0 ? rx + rw : rx, ry, rh, y >= 0, scale.Format(y), p.ValueNote);
+                            // On a track the value stands past the track's end, in the margin kept for it, or above a column's track.
+                            if (s.BarTrack && horizontal) Name(right + TrackGap, ry + rh / 2 + 4, scale.Format(given), "start", p.ValueNote);
+                            else if (s.BarTrack) Above(rx, rw, At(scale.Max), true, scale.Format(given), p.ValueNote);
+                            else if (horizontal) Beside(y >= 0 ? rx + rw : rx, ry, rh, y >= 0, scale.Format(y), p.ValueNote);
                             else Above(rx, rw, At(y), y >= 0, scale.Format(y), p.ValueNote);
                         }
                     }
@@ -1478,6 +1550,11 @@ public static partial class ChartSvg
         return label[..(cut.Length - 1)] + "…";
     }
 
+    /// <summary>The room under a chart's plots for its X axis's labels and title: 76 units, or, on a horizontal bar chart on tracks that writes
+    /// neither its value axis's tick labels nor its title, 24, or 36 above a source line.</summary>
+    private static double Floor(ChartSpec s) => s.Kind == ChartKind.Bar && s.BarTrack && s.YTickLabels == TickLabels.None && string.IsNullOrWhiteSpace(s.YLabel)
+        ? string.IsNullOrWhiteSpace(s.Source) ? 24 : 36 : 76;
+
     /// <summary>Whether nothing is written up the left of a chart's plots: each plot is named above it, the Y axis stands on the left,
     /// and no left-hand axis writes a tick label.</summary>
     private static bool Unlabelled(ChartSpec s) => s.PaneTitles == PaneTitlePlacement.Above && s.YAxisSide == AxisSide.Left && s.Kind != ChartKind.Bar
@@ -1494,7 +1571,7 @@ public static partial class ChartSvg
         // Plots named above them make room for each header: the main plot moves down a line and the gap between two plots grows.
         var headed = s.PaneTitles == PaneTitlePlacement.Above;
         var gap = headed ? 30d : 24d;
-        double top = s.Sparkline ? pad : 78 + head + (headed ? Header : 0), bottom = s.Height - (s.Sparkline ? pad : 76d + foot);
+        double top = s.Sparkline ? pad : 78 + head + (headed ? Header : 0), bottom = s.Height - (s.Sparkline ? pad : Floor(s) + foot);
         var room = bottom - top - gap * s.Panes.Count;
         var weight = 1 + s.Panes.Sum(p => p.Weight);
         var zero = s.IncludeZero || s.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Area;
@@ -2721,6 +2798,125 @@ public static partial class ChartSvg
         for (var i = 1; i < stops.Count; i++)
             if (value <= stops[i].Value) return Mix(stops[i - 1].Color, stops[i].Color, (value - stops[i - 1].Value) / (stops[i].Value - stops[i - 1].Value));
         return stops[^1].Color;
+    }
+
+    /// <summary>A strip's bar thickness, its default end radius, the gap between two parts, and the height of a row of its key.</summary>
+    private const double StripThick = 18, StripRadius = 6, StripGap = 2, StripRow = 20;
+    /// <summary>Where a strip stands: the top of its bar, its key's entries, each the part it names, its words and where its swatch starts and its
+    /// baseline lies, and the drawing's height.</summary>
+    private sealed record StripFrame(double Top, (int Part, string Text, double X, double Y)[] Keys, int Height);
+
+    /// <summary>
+    /// Whole percentages for <paramref name="amounts"/> that add up to exactly 100, by the largest remainder: each share's whole part, then
+    /// one more to each of the largest remainders until the whole is 100, ties going to the part listed later. A total of zero gives zeros.
+    /// </summary>
+    internal static int[] Percentages(IReadOnlyList<double> amounts)
+    {
+        var total = amounts.Sum();
+        var whole = new int[amounts.Count];
+        if (!(total > 0)) return whole;
+        var rest = new double[amounts.Count];
+        for (var i = 0; i < amounts.Count; i++)
+        {
+            var share = amounts[i] / total * 100;
+            // A share a rounding error short of a whole number is that number.
+            whole[i] = (int)Math.Floor(share + 1e-9);
+            rest[i] = Math.Max(0, share - whole[i]);
+        }
+        var left = 100 - whole.Sum();
+        foreach (var i in Enumerable.Range(0, amounts.Count).OrderByDescending(i => rest[i]).ThenByDescending(i => i).Take(Math.Max(0, left)))
+            whole[i]++;
+        return whole;
+    }
+
+    /// <summary>What a strip's part <paramref name="index"/> says, as its mark is named: its name, its whole percentage of the strip, and
+    /// its amount in <see cref="ChartSpec.YFormat"/> and <see cref="ChartSpec.YUnit"/>, with its <see cref="ChartPoint.ValueNote"/> after it:
+    /// <c>Easy: 34%, 12:20</c>. The component's status line reads the same words.</summary>
+    public static string PartLabel(ChartSpec spec, int index)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        if (spec.Kind != ChartKind.Strip || spec.Series.Count != 1 || index < 0 || index >= spec.Series[0].Points.Count)
+            throw new ArgumentException("PartLabel names a part of a strip: a strip chart's one series, at one of its points.");
+        var parts = spec.Series[0].Points;
+        var shares = Percentages(parts.Select(p => p.Y ?? 0).ToArray());
+        var words = new Axis(AxisKind.Linear, 0, 1) { ValueFormat = spec.YFormat, Unit = spec.YUnit };
+        var p = parts[index];
+        return string.Create(CultureInfo.InvariantCulture, $"{p.Label}: {shares[index]}%, {words.Format(p.Y ?? 0)}{p.ValueNote}");
+    }
+
+    /// <summary>
+    /// A strip's layout: its bar 64 units from the top, under the title and description, or 14 where they are not drawn; its key under the bar,
+    /// each entry a 10-unit swatch and the part's name and percentage, flowing left to right across the drawing less 24 units each side and
+    /// wrapping onto rows 20 units apart; and the drawing's height, 16 units under the last row, or room for the source line under it.
+    /// </summary>
+    private static StripFrame Stripped(ChartSpec s)
+    {
+        var top = 64 + Headroom(s);
+        var parts = s.Series.Count == 1 ? s.Series[0].Points : [];
+        var shares = Percentages(parts.Select(p => p.Y ?? 0).ToArray());
+        var keys = new List<(int, string, double, double)>();
+        double x = 24, y = top + StripThick + 24;
+        for (var i = 0; i < parts.Count; i++)
+        {
+            var text = string.Create(CultureInfo.InvariantCulture, $"{Short(parts[i].Label ?? "", 24)} {shares[i]}%");
+            var wide = 15 + Broad(text);
+            if (x > 24 && x + wide > s.Width - 24) { x = 24; y += StripRow; }
+            keys.Add((i, text, x, y));
+            x += wide + 16;
+        }
+        var last = keys.Count > 0 ? y : top + StripThick;
+        var source = Wrap(s.Source, s.Width - 48);
+        var height = string.IsNullOrWhiteSpace(s.Source) ? last + 16 : last + 32 + 14 * (source.Length - 1);
+        return new(top, keys.Select(k => ((int, string, double, double))k).ToArray(), (int)Math.Ceiling(height));
+    }
+
+    /// <summary>
+    /// A strip: one bar across the drawing, each part as long as its share of the total, parted from the next by a gap in the background
+    /// colour and the outer ends rounded, then the key under it. Each part drawn is a focusable mark; a part of zero draws none, and its key
+    /// entry names it.
+    /// </summary>
+    private static void Strip(SvgWriter w, ChartSpec s, StripFrame frame)
+    {
+        var series = s.Series[0]; var parts = series.Points;
+        var total = parts.Sum(p => p.Y ?? 0);
+        double left = 24, span = s.Width - 48d, top = frame.Top;
+        var drawn = Enumerable.Range(0, parts.Count).Where(i => parts[i].Y > 0).ToArray();
+        var radius = Math.Min(w.Style.BarRadius ?? StripRadius, StripThick / 2);
+        string Ink(int i) => parts[i].Color ?? w.Style.SeriesColor(i);
+        var start = left;
+        for (var i = 0; i < parts.Count; i++)
+        {
+            var length = (parts[i].Y ?? 0) / total * span;
+            double from = start, to = start + length;
+            start = to;
+            if (!(length > 0)) continue;
+            bool first = i == drawn[0], end = i == drawn[^1];
+            // Neighbours give up half the gap each; a sliver keeps 1 unit, so every part that has an amount shows.
+            if (!first) from += StripGap / 2;
+            if (!end) to -= StripGap / 2;
+            if (to - from < 1) { var middle = (from + to) / 2; (from, to) = (middle - .5, middle + .5); }
+            var width = to - from;
+            double rl = first ? Math.Min(radius, end ? width / 2 : width) : 0, rr = end ? Math.Min(radius, first ? width / 2 : width) : 0;
+            Datum(w, 0, i, PartLabel(s, i), $"<path class='lumen-part' d='{Pill(from, top, width, StripThick, rl, rr)}' fill='{Ink(i)}'/>");
+        }
+        // The key names every part in order, its swatch in its colour, its share in whole percentages that add up to 100.
+        w.Add("<g class='lumen-strip-key' font-size='12'>");
+        foreach (var (part, text, x, y) in frame.Keys)
+        {
+            w.Add($"<rect x='{N(x)}' y='{N(y - 9)}' width='10' height='10' rx='2' fill='{Ink(part)}'/>");
+            w.Text(x + 15, y, text);
+        }
+        w.Add("</g>");
+    }
+
+    /// <summary>The outline of a bar from (<paramref name="x"/>, <paramref name="y"/>), its left corners rounded by <paramref name="rl"/> and
+    /// its right corners by <paramref name="rr"/>, each already clamped; a radius of zero leaves its corners square.</summary>
+    private static string Pill(double x, double y, double width, double height, double rl, double rr)
+    {
+        string Arc(double r, double toX, double toY) => r > 0 ? $" A{N(r)},{N(r)} 0 0 1 {N(toX)},{N(toY)}" : "";
+        double right = x + width, bottom = y + height;
+        return $"M{N(x + rl)},{N(y)} L{N(right - rr)},{N(y)}{Arc(rr, right, y + rr)} L{N(right)},{N(bottom - rr)}{Arc(rr, right - rr, bottom)}" +
+            $" L{N(x + rl)},{N(bottom)}{Arc(rl, x, bottom - rl)} L{N(x)},{N(y + rl)}{Arc(rl, x + rl, y)} Z";
     }
 
     private static void Donut(SvgWriter w, ChartSpec s)

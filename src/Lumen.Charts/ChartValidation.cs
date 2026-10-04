@@ -13,9 +13,11 @@ public static partial class ChartValidation
     public static void Validate(ChartSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
-        Dimensions(spec.Width, spec.Height, spec.Sparkline);
         if (!Enum.IsDefined(spec.Kind) || !Enum.IsDefined(spec.Theme)) throw new ArgumentException("Unknown chart kind or theme.");
+        Dimensions(spec.Width, spec.Height, spec.Sparkline, spec.Kind == ChartKind.Strip);
         if (spec.Sparkline) Sparkline(spec);
+        if (spec.Kind == ChartKind.Strip) Strip(spec);
+        Track(spec);
         if (!Enum.IsDefined(spec.XAxis) || !Enum.IsDefined(spec.YAxis)) throw new ArgumentException("Unknown axis kind.");
         Style(spec.Style);
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");
@@ -255,8 +257,8 @@ public static partial class ChartValidation
                     if (mark is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Range or ChartKind.Histogram or ChartKind.Box or ChartKind.Violin or ChartKind.Timeline or ChartKind.Calendar or ChartKind.Gauge or ChartKind.Ring)
                         throw new ArgumentException("A value note is written after a mark's one value, so it applies to lines, areas, bands, scatter points, bubbles, columns, bars, blocks, donut slices, heatmap cells and radar points; a candle reads four prices, a range bar two ends, a timeline's span has no value, histograms, boxes, violins and calendars add their points up, and a gauge or ring writes its value in its legend.");
                 }
-                if (p.Color is not null && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Range or ChartKind.Blocks or ChartKind.Donut))
-                    throw new ArgumentException("Point colours apply to series drawn as lines, areas, scatter points, bubbles, columns, bars, ranges, blocks and donut slices; on the other kinds colour already says something else: direction on candlesticks and OHLC bars, value on a heatmap, the state a timeline's lane stands for, and the series or distribution a mark belongs to on stacked column, radar, band, histogram, box and violin charts.");
+                if (p.Color is not null && mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Range or ChartKind.Blocks or ChartKind.Donut or ChartKind.Strip))
+                    throw new ArgumentException("Point colours apply to series drawn as lines, areas, scatter points, bubbles, columns, bars, ranges, blocks, donut slices and a strip's parts; on the other kinds colour already says something else: direction on candlesticks and OHLC bars, value on a heatmap, the state a timeline's lane stands for, and the series or distribution a mark belongs to on stacked column, radar, band, histogram, box and violin charts.");
                 if (p.XEnd is { } end)
                 {
                     if (spec.Kind != ChartKind.Timeline && mark != ChartKind.Blocks) throw new ArgumentException("XEnd ends a span or a block, so it applies to timeline charts and to series drawn as blocks.");
@@ -347,6 +349,59 @@ public static partial class ChartValidation
     }
 
     private const int MaxCalendarDays = 3660;
+
+    /// <summary>The most parts a strip takes: past that they are too thin to see, and its key too long to read.</summary>
+    public const int MaxStripParts = 24;
+
+    /// <summary>A strip draws one series' parts as shares of one bar, with its own key and no axes, so everything that belongs to an axis, a
+    /// second series, a pane or a series' own mark has no meaning on it. Checked before the general rules, so each refusal gives the strip's
+    /// reason. A strip without points is left to draw its empty state, as every kind does.</summary>
+    private static void Strip(ChartSpec spec)
+    {
+        if (spec.Series is { Count: > 1 })
+            throw new ArgumentException("A strip draws the parts of one whole, one series whose points are its parts; draw several wholes as several strips.");
+        if (spec.Panes is { Count: > 0 } || spec.Series?.Any(series => series is not null && series.Pane != 0) == true)
+            throw new ArgumentException("A strip is one bar, so it takes no panes.");
+        if (spec.XAxis != AxisKind.Linear || spec.YAxis != AxisKind.Linear || spec.Y2Axis != AxisKind.Linear || spec.YReversed || spec.Y2Reversed || spec.XFormat != ValueFormat.Number
+            || spec.XMin is not null || spec.XMax is not null || spec.YMin is not null || spec.YMax is not null || spec.Y2Min is not null || spec.Y2Max is not null || spec.YMinSpan is not null || spec.YSymmetric is not null
+            || spec.IncludeZero || spec.MinorGridlines || spec.YAxisSide != AxisSide.Left || spec.YTickLabels != TickLabels.All || spec.YTickValues is not null)
+            throw new ArgumentException("A strip draws its parts as shares of one bar and has no axes, so it takes no axis settings: no time, logarithmic or reversed axis, no bounds, no axis side, ticks or gridlines, and no X format; YFormat and YUnit write each part's amount in its name.");
+        if (spec.Annotations is { Count: > 0 } || spec.YZones is not null)
+            throw new ArgumentException("A strip has no axes, so it takes no annotations and no zones; colour each part with its point's Color.");
+        if (spec.Series is not [{ } series]) return;
+        if (series.Kind is not null || series.Secondary || series.Trend || series.Zones is not null || series.Gradient is not null || series.ChangeColors != ChangeColors.None || series.EndLabel is not null || series.EndNote is not null)
+            throw new ArgumentException("A strip draws its one series as the parts of a bar, so the series takes no kind of its own, secondary axis, trend, zones, gradient, change colours or end label.");
+        if (series.ValueLabels)
+            throw new ArgumentException("A strip's key writes each part's share under the bar, and its amount is in the part's name, so it takes no value labels.");
+        if (series.Points is null) return;
+        if (series.Points.Count > MaxStripParts)
+            throw new ArgumentException($"A strip takes at most {MaxStripParts} parts; past that they are too thin to see and its key too long to read, so group the small ones.");
+        foreach (var p in series.Points)
+        {
+            if (p is null) continue;
+            if (string.IsNullOrWhiteSpace(p.Label))
+                throw new ArgumentException("Each part of a strip is named by its point's Label, which its key and its mark's name write, so it cannot be blank.");
+            if (p.Y is not { } amount || double.IsNaN(amount) || amount < 0)
+                throw new ArgumentException("A part of a strip is an amount, zero or more, such as seconds in a zone; it cannot be missing, negative or not a number. A part of zero keeps its place in the key.");
+        }
+        if (series.Points.Count > 0 && series.Points.All(p => p?.Y == 0))
+            throw new ArgumentException("A strip shows each part's share of the whole, and parts that are all zero have no whole to share; show the app's own empty state instead.");
+    }
+
+    /// <summary>A track runs a bar's value axis from zero to a maximum set by hand, so it needs a bar or column chart whose axis starts at zero
+    /// and ends where <see cref="ChartSpec.YMax"/> says.</summary>
+    private static void Track(ChartSpec spec)
+    {
+        if (!spec.BarTrack) return;
+        if (spec.Kind is not (ChartKind.Bar or ChartKind.Column))
+            throw new ArgumentException("BarTrack draws a track behind each bar of a bar or column chart, from zero to YMax, as a meter does; a stacked column fills its whole height with its series, and the other kinds draw no bars.");
+        if (spec.YMax is null)
+            throw new ArgumentException("A bar's track runs to the value axis's maximum, so BarTrack needs YMax, the end of the scale, such as 100 for a score out of 100.");
+        if (spec.YMin is { } min && min != 0 || spec.Series?.Any(series => series?.Points?.Any(p => p?.Y < 0) == true) == true)
+            throw new ArgumentException("A bar's track runs from zero, so BarTrack needs an axis that starts at zero: YMin unset or 0, and no value below zero.");
+        if (spec.Series?.Any(series => series?.Secondary == true) == true)
+            throw new ArgumentException("A track runs the left-hand axis, so BarTrack measures every series on it; a chart with tracks takes no secondary series.");
+    }
 
     /// <summary>A gauge draws one score and a ring chart one value a ring, so each series carries exactly one point. A chart
     /// with no series is left to draw its empty state, as every kind does, and as the component's legend leaves it when every
@@ -488,8 +543,8 @@ public static partial class ChartValidation
         if (unit is null) return;
         Text(unit);
         if (unit.Length > 8) throw new ArgumentException("YUnit is written after every value on its axis, so it is at most 8 characters, such as s, % or \" bpm\".");
-        if (!Measured(kind))
-            throw new ArgumentException("YUnit follows the values a Y axis measures, so it applies to line, area, scatter, bubble, column, bar, stacked column, candlestick, OHLC, band, range and blocks charts; donut, heatmap, radar, gauge, ring, timeline and calendar charts have no such axis, a gauge writes its unit from YLabel, and histogram, box and violin charts do not take one yet.");
+        if (!Measured(kind) && kind != ChartKind.Strip)
+            throw new ArgumentException("YUnit follows the values a Y axis measures, so it applies to line, area, scatter, bubble, column, bar, stacked column, candlestick, OHLC, band, range and blocks charts, and to the amounts a strip's parts name; donut, heatmap, radar, gauge, ring, timeline and calendar charts have no such axis, a gauge writes its unit from YLabel, and histogram, box and violin charts do not take one yet.");
     }
 
     /// <summary>A trend's fit, window and degree choose the trend <see cref="ChartSeries.Trend"/> draws, so each needs a trend, and
@@ -744,9 +799,11 @@ public static partial class ChartValidation
 
     internal static bool Finite(double n) => double.IsFinite(n) && Math.Abs(n) <= 1e100;
     /// <summary>A sparkline needs no room for axes, a title or a legend, so it may be as small as a word; the largest drawing is the
-    /// same for both.</summary>
-    internal static void Dimensions(int width, int height, bool sparkline = false)
+    /// same for both. A strip is drawn as tall as its content, so it does not use its height, which may lie anywhere from 16 to 2160.</summary>
+    internal static void Dimensions(int width, int height, bool sparkline = false, bool strip = false)
     {
+        if (strip && !sparkline && (width is < 320 or > 4096 || height is < 16 or > 2160)) throw new ArgumentException("A strip's width must be 320–4096; it is drawn as tall as its content, and its Height, which it does not use, must lie within 16–2160.");
+        if (strip && !sparkline) return;
         if (sparkline && (width is < 60 or > 4096 || height is < 16 or > 2160)) throw new ArgumentException("A sparkline's dimensions must be 60–4096 by 16–2160.");
         if (!sparkline && (width is < 320 or > 4096 || height is < 240 or > 2160)) throw new ArgumentException("Dimensions must be 320–4096 by 240–2160.");
     }

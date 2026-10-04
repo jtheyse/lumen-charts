@@ -80,7 +80,7 @@ public static partial class ChartSvg
         var style = ResolveStyle(spec);
         // Laid out as Render lays it out: a description or a source on two lines moves the body, and a sparkline has neither.
         var bare = spec.Sparkline;
-        var head = bare ? 0 : 14 * (Wrap(spec.Description, spec.Width - 48d).Length - 1);
+        var head = Headroom(spec);
         var foot = bare ? 0 : 14 * Math.Max(0, Wrap(spec.Source, spec.Width - 48).Length - 1);
         var frame = Framed(spec, bare ? Padding(spec, style.Finish == ChartFinish.Refined) : 0, head, foot);
         var xs = frame.Xs;
@@ -202,7 +202,7 @@ public static partial class ChartSvg
     {
         ChartValidation.Validate(spec);
         if (spec.Sparkline || !HasData(spec)) return null;
-        var head = 14 * (Wrap(spec.Description, spec.Width - 48d).Length - 1);
+        var head = Headroom(spec);
         var foot = 14 * Math.Max(0, Wrap(spec.Source, spec.Width - 48).Length - 1);
         if (spec.Kind == ChartKind.Timeline)
         {

@@ -191,6 +191,13 @@ public static class DemoData
             series=[new("Plan",plan){Zones=Lumen.Charts.ZoneScale.CogganPower(ftp)},new("Power",ride,Lumen.Charts.ChartStyle.Light.Series[4]){Kind=Lumen.Charts.ChartKind.Line}];
             title="Hold the plan";desc="A simulated threshold ride in Coggan's power levels";x="Elapsed time";y="Power (W)";
         }
+        if(kind==Lumen.Charts.ChartKind.Strip)
+        {
+            // A simulated week's training time in five heart-rate zones, mostly easy, each zone in the ramp's colour from blue to red.
+            double[] minutes=[200+random.Next(60),110+random.Next(40),40+random.Next(20),25+random.Next(15),8+random.Next(8)];
+            series=[new("Training time",new[]{"Recovery","Endurance","Tempo","Threshold","VO2 max"}.Select((zone,i)=>new Lumen.Charts.ChartPoint(i,minutes[i]*60,zone){Color=palette[i+1]}).ToArray())];
+            title="See where the week's time went";desc="A simulated week's training time, zone by zone";x="";y="";
+        }
         if(kind==Lumen.Charts.ChartKind.Bar) {title="Compare plans without the clutter";x="Month";}
         if(kind==Lumen.Charts.ChartKind.Scatter || kind==Lumen.Charts.ChartKind.Bubble)
         {
@@ -199,6 +206,8 @@ public static class DemoData
         }
         var spec=new Lumen.Charts.ChartSpec{Kind=kind,Theme=theme,XAxis=xKind,SkipWeekends=weekends,TimeSkips=holidays,Title=title,Description=desc,Series=series,XLabel=x,YLabel=y,Source="Source: deterministic demo data · not real results",Height=height,Panes=panes};
         if(kind==Lumen.Charts.ChartKind.Timeline) spec=spec with{TimeZone="Africa/Johannesburg"};
+        // A strip writes each zone's time as h:mm:ss in its name, and is drawn as tall as its bar and key.
+        if(kind==Lumen.Charts.ChartKind.Strip) spec=spec with{YFormat=Lumen.Charts.ValueFormat.Duration};
         // The workout's power rises from zero, as Zwift and TrainingPeaks draw it, and the threshold is a reference line.
         if(kind==Lumen.Charts.ChartKind.Blocks)
             spec=spec with{XFormat=Lumen.Charts.ValueFormat.Duration,IncludeZero=true,Annotations=[new(Lumen.Charts.AnnotationAxis.Y,250){Label="FTP"}]};

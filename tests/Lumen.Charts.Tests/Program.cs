@@ -1884,6 +1884,7 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
         }
         else if(kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Gauge or ChartKind.Ring) Check(Refusal(spec with{YReversed=true}).Contains("no Y axis"),$"{kind}: reversed Y");
         else if(kind==ChartKind.Timeline) Check(Refusal(spec with{YReversed=true}).Contains("lanes"),$"{kind}: reversed Y");
+        else if(kind==ChartKind.Strip) Check(Refusal(spec with{YReversed=true}).Contains("has no axes"),$"{kind}: reversed Y");
         else if(kind==ChartKind.Calendar) Check(Refusal(spec with{YReversed=true}).Contains("rather than measuring it on a Y axis")&&Refusal(spec with{Y2Reversed=true}).Contains("no secondary axis"),$"{kind}: reversed Y");
         else ChartSvg.Render(spec with{YReversed=true,Y2Reversed=true});
     }
@@ -2154,7 +2155,7 @@ Test("Zones and point colours are refused where colour already means something e
         var zoned=sample with{Series=sample.Series.Select(s=>s with{Zones=Effort()}).ToArray()};
         var coloured=sample with{Series=sample.Series.Select(s=>s with{Points=s.Points.Select(p=>p with{Color="#ABCDEF"}).ToArray()}).ToArray()};
         Check(Accepts(zoned)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Blocks),$"zones on {kind}");
-        Check(Accepts(coloured)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Range or ChartKind.Blocks or ChartKind.Donut),$"point colours on {kind}");
+        Check(Accepts(coloured)==(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column or ChartKind.Bar or ChartKind.Range or ChartKind.Blocks or ChartKind.Donut or ChartKind.Strip),$"point colours on {kind}");
         // Zone bands go wherever a Y annotation goes, and nowhere else; a calendar's zones colour its days, and it has no Y axis
         // for a Y annotation.
         Check(Accepts(sample with{YZones=Effort()})==(kind==ChartKind.Calendar||Accepts(sample with{Annotations=[new(AnnotationAxis.Y,1)]})),$"zone bands on {kind}");
@@ -2421,7 +2422,7 @@ Test("Series kinds and projections are refused where they cannot draw, each with
         if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Column or ChartKind.Range) ChartSvg.Render(lined);
         // A blocks chart's points end in XEnd, which a line refuses; a line beside the blocks is drawn.
         else if(kind==ChartKind.Blocks) Check(Refusal(lined).Contains("XEnd ends a span or a block")&&ChartSvg.Render(Sample(kind) with{Series=[..Sample(kind).Series,Spec().Series[0] with{Kind=ChartKind.Line}]}).Length>0,$"{kind}: {Refusal(lined)}");
-        else Check(Refusal(lined).Contains("own kind"),$"{kind}: {Refusal(lined)}");
+        else Check(Refusal(lined).Contains(kind==ChartKind.Strip?"kind of its own":"own kind"),$"{kind}: {Refusal(lined)}");
     }
     // A series can be a line, area, column, scatter, band, range or blocks, and nothing else; a range series is drawn from its
     // bounds, and blocks from their spans.
@@ -2730,6 +2731,8 @@ Test("Panes are refused where they cannot be drawn, each with its reason",()=>{
             Check(Refusal(pointed).Contains("pane is 0"),$"{kind}: {Refusal(pointed)}");
         }
         // A timeline's lanes are its one plot, and a calendar's days its one grid.
+        else if(kind==ChartKind.Strip)
+            Check(Refusal(below).Contains("one whole")&&Refusal(pointed).Contains("no panes")&&Refusal(Sample(kind) with{Panes=[new()]}).Contains("no panes"),$"{kind}: {Refusal(below)}");
         else if(kind is ChartKind.Timeline or ChartKind.Calendar)
             Check(Refusal(below).Contains("no panes")&&Refusal(pointed).Contains("no panes")&&Refusal(Sample(kind) with{Panes=[new()]}).Contains("no panes"),$"{kind}: {Refusal(below)}");
         else Check(Refusal(below).Contains("Panes share")&&Refusal(pointed).Contains("Panes share")&&Refusal(Sample(kind) with{Panes=[new()]}).Contains("Panes share"),$"{kind}: {Refusal(below)}");
@@ -3704,12 +3707,12 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: twenty-seven charts in twenty-four cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+Test("Sports page: twenty-nine charts in twenty-six cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
     // 0.34.0's Getting faster? card draws three sparklines in place of one chart; they are checked on their own below. 0.35.0 adds
     // How the field finished to the Racing section, 0.37.0 Ride channels in a Long ride section of its own, and 0.38.0 Season arc and Gap to
-    // the leader to the Racing section.
-    Check(sports.Count==24&&sports.Select(card=>card.Id).Distinct().Count()==24&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
-        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==27,"the page should have twenty-seven charts in twenty-four cards");
+    // the leader to the Racing section, and 0.39.0 Time in zone, as shares, and Session scores to the Latest session section.
+    Check(sports.Count==26&&sports.Select(card=>card.Id).Distinct().Count()==26&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
+        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==29,"the page should have twenty-nine charts in twenty-six cards");
     // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order; 0.33.0's Racing section stands
     // before it.
     Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
@@ -4223,11 +4226,11 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // after its X label, and each series' change colours, written after its value labels, and since 0.34.0 the chart's sparkline,
     // written after its height, and since 0.35.0 the chart's X tick labels, written after its X ticks, and since 0.36.0 the chart's shared
     // readout, written last, which is never hashed, and since 0.37.0 the chart's sampling, written after its rendered points, and its pane
-    // titles, written after its panes.
+    // titles, written after its panes, and since 0.39.0 its bar tracks and drawn titles, written last.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"SharedReadout\":false}";
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
@@ -6526,7 +6529,7 @@ Test("Sports page: Getting faster? rings each time faster than all before it, fr
             Check(!Svg(line.Spec with{Style=style}).Descendants(ns+"text").Any(),$"{line.Name} wrote a word");
         }
     // The page draws each at its own size beside its words, and its sparklines and charts number twenty-four.
-    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==27,"the page's count");
+    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==29,"the page's count");
 });
 // 0.35.0: how the field finished, and text that fits. Blocks keep a visible height; an annotation can draw its label without its value
 // and stand over the data; an X axis chooses which of its labels it writes, and either axis can label just its two ends; and a chart's
@@ -7559,7 +7562,7 @@ Test("Ticks, units and end labels round-trip through the HTTP API's JSON, a requ
 });
 Test("Sports page: Season arc and Gap to the leader close the Racing section, the arc's disciplines joined over each other's races and the gap's riders named at their ends with the legend off",()=>{
     var ids=sports.Where(card=>card.Section=="racing").Select(card=>card.Id).ToArray();
-    Check(ids.SequenceEqual(["race-results","field","season-arc","gap"])&&sports.Single(card=>card.Id=="gap").ShowLegend==false&&sports.Where(card=>card.Id!="gap").All(card=>card.ShowLegend),string.Join(",",ids));
+    Check(ids.SequenceEqual(["race-results","field","season-arc","gap"])&&sports.Single(card=>card.Id=="gap").ShowLegend==false&&sports.Where(card=>card.Id is not ("gap" or "scores")).All(card=>card.ShowLegend),string.Join(",",ids));
     var arc=Sports("season-arc");
     Check(arc is {YReversed:true,YMin:0,YMax:100,YUnit:"%"}&&arc.YTickValues!.Select(t=>t.Label).SequenceEqual(["Front","Mid","Back"])&&arc.Series.Select(s=>s.Name).SequenceEqual(["XCC","XCO","XCM","Other"]),"the arc");
     // Every race stands once, in one discipline, at its index in the season; the race not finished is a gap in its own line.
@@ -7569,6 +7572,254 @@ Test("Sports page: Season arc and Gap to the leader close the Racing section, th
     Check(gap.Title==$"You finished +{SportsData.LapGaps()[^1][^1].ToString(CultureInfo.InvariantCulture)}s back"&&Sports("season-arc").Title=="Top quarter in 3 of 10",gap.Title);
     // No end label is cut on a phone's card, and every one stands inside the drawing.
     Check(Ends38(doc).All(e=>!Text38(e).EndsWith("…")&&Attr(Words38(e),"x")+Broad38(Text38(e))<=340),"a label was cut on a phone");
+});
+// 0.39.0: proportions and meters. A strip of parts as shares of one bar with its own key, tracks behind bars, and charts that keep their
+// title and description as their name without drawing them. Every example is invented.
+ChartSpec Strip39(params (string Name,double Amount)[] parts)=>new(){Title="Effort zones",Description="Time in each heart-rate zone",Kind=ChartKind.Strip,Width=340,YFormat=ValueFormat.Duration,
+    Series=[new("Zones",parts.Select((p,i)=>new ChartPoint(i,p.Amount,p.Name)).ToArray())]};
+ChartSpec Zones39()=>Strip39(("Easy",740),("Moderate",1290),("Hard",820),("Very hard",250));
+// A part's outline as the drawing writes it: its left and right edges, from every point of its path that is not an arc's radii.
+(double Left,double Right,string Path) Part39(XElement mark)
+{
+    var d=mark.Element(ns+"path")!.Attribute("d")!.Value;
+    var xs=d.Split(' ').Where(t=>t.Contains(',')&&!t.StartsWith('A')).Select(t=>double.Parse(t.TrimStart('M','L').Split(',')[0],CultureInfo.InvariantCulture)).ToArray();
+    return (xs.Min(),xs.Max(),d);
+}
+string[] Keys39(XDocument doc)=>doc.Descendants(ns+"g").Single(g=>(string?)g.Attribute("class")=="lumen-strip-key").Elements(ns+"text").Select(t=>t.Value).ToArray();
+double Height39(XDocument doc)=>double.Parse(doc.Root!.Attribute("viewBox")!.Value.Split(' ')[3],CultureInfo.InvariantCulture);
+Test("A strip draws each part as long as its share across the drawing less 24 each side, parted by 2-unit gaps, its outer ends rounded, a part of zero drawing nothing",()=>{
+    var doc=Svg(Zones39());var marks=Datums(doc,0);
+    Check(marks.Length==4,$"{marks.Length} parts");
+    var parts=marks.Select(Part39).ToArray();
+    // 292 units across: 740, 1290, 820 and 250 of 3100.
+    double[] ends=[24,24+740/3100d*292,24+2030/3100d*292,24+2850/3100d*292,316];
+    for(var i=0;i<4;i++)
+        Check(Close(parts[i].Left,ends[i]+(i==0?0:1))&&Close(parts[i].Right,ends[i+1]-(i==3?0:1)),$"part {i}: {parts[i].Left}–{parts[i].Right}");
+    // The gap between two neighbours is 2 units, in the background colour that shows through it.
+    Check(Close(parts[1].Left-parts[0].Right,2)&&Close(parts[3].Left-parts[2].Right,2),"the gaps");
+    // Only the outer ends are rounded, by 6 units unless the style says otherwise; the inner parts are square.
+    Check(parts[0].Path.Contains(" A6,6 0 0 1 24,")&&!parts[0].Path.Contains("A6,6 0 0 1 "+SvgN(parts[0].Right))&&!parts[1].Path.Contains(" A")&&!parts[2].Path.Contains(" A")&&parts[3].Path.Contains(" A6,6 0 0 1 316,"),parts[0].Path);
+    // 18 units thick, 64 from the top under a one-line description.
+    var top=parts[0].Path.Split(' ')[0].Split(',')[1];
+    Check(top=="64"&&parts[1].Path.Contains(",82 "),parts[1].Path);
+    // A part's colour is its own, else the style's series colours in order.
+    Check(marks.Select(m=>m.Element(ns+"path")!.Attribute("fill")!.Value).SequenceEqual(ChartStyle.Light.Series.Take(4)),"the colours");
+    // A part of zero draws nothing, its neighbours meet across one gap, and it keeps its entry in the key.
+    var zero=Svg(Strip39(("Easy",740),("Moderate",1290),("Hard",0),("Very hard",250)));
+    Check(Datums(zero,0).Select(m=>m.Attribute("data-point")!.Value).SequenceEqual(["0","1","3"])&&Close(Part39(Datums(zero,0)[2]).Left-Part39(Datums(zero,0)[1]).Right,2),"a part of zero");
+    Check(Keys39(zero).SequenceEqual(["Easy 32%","Moderate 57%","Hard 0%","Very hard 11%"]),string.Join("|",Keys39(zero)));
+    // One part fills the whole width, both ends rounded; a style's bar radius rounds them, clamped to half the thickness.
+    var whole=Part39(Datums(Svg(Strip39(("All",5))),0)[0]);
+    Check(Close(whole.Left,24)&&Close(whole.Right,316)&&whole.Path.Split(" A").Length==5,whole.Path);
+    Check(Part39(Datums(Svg(Zones39() with{Style=ChartStyle.Light with{BarRadius=9999}}),0)[0]).Path.Contains(" A9,9 ")&&Part39(Datums(Svg(Zones39() with{Style=ChartStyle.Light with{BarRadius=0}}),0)[0]).Path.Split(" A").Length==1,"the radius");
+    // A sliver keeps one unit.
+    var sliver=Svg(Strip39(("Most",10000),("Least",1),("Rest",5000)));
+    Check(Part39(Datums(sliver,0)[1]) is var thin&&Close(thin.Right-thin.Left,1),"a sliver");
+});
+string SvgN(double value)=>value.ToString("0.########",CultureInfo.InvariantCulture);
+Test("A strip's key writes every part's whole percentage, adding up to exactly 100 by the largest remainder, ties to the part listed later, flowing and wrapping across the width",()=>{
+    Check(Keys39(Svg(Zones39())).SequenceEqual(["Easy 24%","Moderate 42%","Hard 26%","Very hard 8%"]),string.Join("|",Keys39(Svg(Zones39()))));
+    Check(Keys39(Svg(Strip39(("A",1),("B",1),("C",1)))).SequenceEqual(["A 33%","B 33%","C 34%"]),string.Join("|",Keys39(Svg(Strip39(("A",1),("B",1),("C",1))))));
+    Check(Keys39(Svg(Strip39(("A",1),("B",1),("C",1),("D",1),("E",1),("F",1)))).Select(k=>k[2..]).SequenceEqual(["16%","16%","17%","17%","17%","17%"]),"six sixths");
+    var random=new Random(39);
+    for(var n=0;n<200;n++)
+    {
+        var amounts=Enumerable.Range(0,1+random.Next(8)).Select(i=>(i.ToString(CultureInfo.InvariantCulture),(double)random.Next(0,5000))).ToArray();
+        if(amounts.All(a=>a.Item2==0))continue;
+        var shares=Keys39(Svg(Strip39(amounts))).Select(k=>int.Parse(k[(k.IndexOf(' ')+1)..^1],CultureInfo.InvariantCulture)).ToArray();
+        Check(shares.Sum()==100&&shares.Zip(amounts).All(p=>Math.Abs(p.First-p.Second.Item2/amounts.Sum(a=>a.Item2)*100)<1),string.Join(",",shares));
+    }
+    // At 340 the four entries take two rows, 20 apart, every one inside the drawing; at 900 one row.
+    var doc=Svg(Zones39());
+    var texts=doc.Descendants(ns+"g").Single(g=>(string?)g.Attribute("class")=="lumen-strip-key").Elements(ns+"text").ToArray();
+    Check(texts.Select(t=>Attr(t,"y")).Distinct().SequenceEqual([106d,126])&&texts.All(t=>Attr(t,"x")+Broad38(t.Value)<=340-24+1e-6)&&Attr(texts[0],"x")==39,string.Join(",",texts.Select(t=>$"{Attr(t,"x")},{Attr(t,"y")}")));
+    Check(Svg(Zones39() with{Width=900}).Descendants(ns+"g").Single(g=>(string?)g.Attribute("class")=="lumen-strip-key").Elements(ns+"text").Select(t=>Attr(t,"y")).Distinct().Count()==1,"one row at 900");
+    // Each entry's swatch is its part's colour, 10 units square, in the text colour's words.
+    var swatches=doc.Descendants(ns+"g").Single(g=>(string?)g.Attribute("class")=="lumen-strip-key").Elements(ns+"rect").ToArray();
+    Check(swatches.Length==4&&swatches.Select(r=>r.Attribute("fill")!.Value).SequenceEqual(ChartStyle.Light.Series.Take(4))&&texts.All(t=>t.Attribute("fill") is null&&t.Attribute("class") is null),"the swatches");
+});
+Test("A strip's parts are named by their share and their amount in its format and unit, its height is its content's whatever Height says, and neither its legend nor the component's is drawn",()=>{
+    var doc=Svg(Zones39());
+    Check(Names37(doc).SequenceEqual(["Easy: 24%, 12:20","Moderate: 42%, 21:30","Hard: 26%, 13:40","Very hard: 8%, 4:10"])&&Datums(doc,0)[0].Element(ns+"title")!.Value=="Easy: 24%, 12:20",string.Join("|",Names37(doc)));
+    Check(ChartSvg.PartLabel(Zones39(),3)=="Very hard: 8%, 4:10"&&ChartSvg.PartLabel(Zones39() with{YFormat=ValueFormat.Number,YUnit=" min"},0)=="Easy: 24%, 740 min","PartLabel");
+    var noted=Strip39(("Pedalling",3000),("Coasting",600)) with{Series=[new("Cadence",[new(0,3000,"Pedalling"),new(1,600,"Coasting"){ValueNote=" · freewheel"}])]};
+    Check(Names37(Svg(noted))[1]=="Coasting: 17%, 10:00 · freewheel",Names37(Svg(noted))[1]);
+    Check(Datums(doc,0).All(m=>(string?)m.Attribute("tabindex")=="0"&&(string?)m.Attribute("role")=="button"),"focusable marks");
+    Reject(()=>ChartSvg.PartLabel(Spec(),0));
+    // Two rows of the key under a one-line description: the last baseline 64 + 18 + 24 + 20 = 126, and 16 under it.
+    Check(Height39(doc)==142&&Height39(Svg(Zones39() with{Height=16}))==142&&ChartSvg.Render(Zones39() with{Height=2000})==ChartSvg.Render(Zones39()),$"{Height39(doc)}");
+    Check(Height39(Svg(Zones39() with{Width=900}))==122&&Height39(Svg(Zones39() with{DrawTitles=false}))==92,"one row, and no titles");
+    Check(Height39(Svg(Zones39() with{Description="A description long enough to go on over a second line on a card as narrow as a phone's"}))==156,"two-line description");
+    Check(Height39(Svg(Zones39() with{Source="Invented ride"}))==158&&Svg(Zones39() with{Source="Invented ride"}).Descendants(ns+"text").Any(t=>t.Value=="Invented ride"&&Attr(t,"y")==146),"a source line");
+    Check(Refused(Zones39() with{Height=15}).StartsWith("A strip's width must be 320–4096")&&Refused(Zones39() with{Width=319}).StartsWith("A strip's width")&&Refused(Zones39() with{Height=2161}).StartsWith("A strip's width"),"dimensions");
+    // The series legend under the chart would repeat the key, so it is never drawn; nor is the component's.
+    Check(ChartSvg.Render(Zones39(),includeLegend:true)==ChartSvg.Render(Zones39(),includeLegend:false),"the static legend");
+    var html=Prerender(ChartElement(Zones39()));
+    Check(!html.Contains("lumen-legend")&&html.Contains("Export SVG"),"the component's legend");
+    Check(Prerender(ChartElement(Spec())).Contains("lumen-legend"),"a line chart lost its legend");
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;var status="";
+    Operate(Zones39(),async chart=>{await chart.SelectPoint(0,1);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    Check(status=="Moderate: 42%, 21:30",status);
+    // An empty strip draws its empty state; CSV carries its parts as rows.
+    Check(ChartSvg.Render(new ChartSpec{Kind=ChartKind.Strip}).Contains("No data to display")&&ChartSvg.Render(Zones39() with{Series=[new("Z",[])]}).Contains("No data to display"),"empty");
+    Check(ChartExport.Csv(Zones39()).Contains("\"Zones\",1,1290,\"Moderate\""),ChartExport.Csv(Zones39()));
+    // Readout and Plot have nothing to read on a strip.
+    Check(ChartSvg.Readout(Zones39()).Columns.Count==0&&ChartSvg.Plot(Zones39()) is null,"readout");
+    // In Midnight, every key's words and every part's name read the same; the words are the style's text colour.
+    var midnight=Svg(Zones39() with{Style=ChartStyle.Midnight});
+    Check(Keys39(midnight).SequenceEqual(Keys39(doc))&&Lumen.Charts.Contrast.Ratio(ChartStyle.Midnight.Text,ChartStyle.Midnight.Background)>=4.5,"Midnight");
+});
+Test("A strip refuses several series, panes, missing, negative or blank parts, all zeros, more than 24 parts, annotations, zones, value labels and axis settings, each with its reason",()=>{
+    var spec=Zones39();
+    Check(Refused(spec with{Series=[spec.Series[0],spec.Series[0] with{Name="Again"}]}).StartsWith("A strip draws the parts of one whole"),"two series");
+    Check(Refused(spec with{Panes=[new()]}).StartsWith("A strip is one bar, so it takes no panes"),"panes");
+    Check(Refused(spec with{Series=[spec.Series[0] with{Pane=1}]}).StartsWith("A strip is one bar"),"a series' pane");
+    Check(Refused(Strip39(("A",1),("B",-1))).StartsWith("A part of a strip is an amount"),"negative");
+    Check(Refused(Strip39(("A",1),("B",double.NaN))).StartsWith("A part of a strip is an amount"),"NaN");
+    Check(Refused(spec with{Series=[new("Z",[new(0,1,"A"),new(1,null,"B")])]}).StartsWith("A part of a strip is an amount"),"missing");
+    Check(Refused(spec with{Series=[new("Z",[new(0,1,"A"),new(1,2)])]}).StartsWith("Each part of a strip is named"),"no label");
+    Check(Refused(Strip39(("A",0),("B",0))).StartsWith("A strip shows each part's share of the whole, and parts that are all zero"),"all zero");
+    Check(Refused(Strip39(Enumerable.Range(0,25).Select(i=>($"P{i}",1d)).ToArray())).StartsWith("A strip takes at most 24 parts"),"25 parts");
+    Check(Svg(Strip39(Enumerable.Range(0,24).Select(i=>($"P{i}",1d)).ToArray())) is not null,"24 parts");
+    Check(Refused(spec with{Annotations=[new(AnnotationAxis.X,1)]}).StartsWith("A strip has no axes, so it takes no annotations")&&Refused(spec with{Annotations=[new(AnnotationAxis.Y,1)]}).StartsWith("A strip has no axes")&&Refused(spec with{YZones=new([new("Z",double.PositiveInfinity)])}).StartsWith("A strip has no axes"),"annotations and zones");
+    Check(Refused(spec with{Series=[spec.Series[0] with{ValueLabels=true}]}).StartsWith("A strip's key writes each part's share"),"value labels");
+    Check(Refused(spec with{Series=[spec.Series[0] with{Kind=ChartKind.Column}]}).StartsWith("A strip draws its one series as the parts")&&Refused(spec with{Series=[spec.Series[0] with{Trend=true}]}).StartsWith("A strip draws its one series"),"a series' kind and trend");
+    foreach(var axis in new[]{spec with{YMin=0},spec with{YMax=10},spec with{XAxis=AxisKind.Time},spec with{YReversed=true},spec with{YAxis=AxisKind.Log},spec with{IncludeZero=true},spec with{YTickLabels=TickLabels.None},spec with{YAxisSide=AxisSide.Right},spec with{MinorGridlines=true},spec with{XMax=3},spec with{YTickValues=[new(1)]}})
+        Check(Refused(axis).StartsWith("A strip draws its parts as shares of one bar and has no axes"),Refused(axis));
+    Check(Refused(spec with{BarTrack=true}).StartsWith("BarTrack draws a track"),"a track");
+    Check(Refused(spec with{SharedReadout=true}).StartsWith("SharedReadout")&&Refused(spec with{XTicks=TickSource.Axis}).StartsWith("XTicks")&&Refused(spec with{Sparkline=true,Width=120,Height=32}).StartsWith("A sparkline draws"),"readout, ticks and sparkline");
+    Check(Refused(spec with{Series=[new("Z",[new(0,1,"A"){Highlight="#123456"}])]}).StartsWith("A highlight rings"),"a highlight");
+    // A point's colour, a value note, a unit and a format are what a strip takes.
+    Check(Svg(spec with{YUnit=" s",YFormat=ValueFormat.Number,Series=[new("Z",[new(0,1,"A"){Color="#123456",ValueNote=" n"}])]}) is var one&&Names37(one)[0]=="A: 100%, 1 s n"&&Datums(one,0)[0].Element(ns+"path")!.Attribute("fill")!.Value=="#123456",Names37(one)[0]);
+});
+ChartSpec Scores39(ChartStyle? style=null)=>new(){Title="Race scores",Description="Each out of 100",Kind=ChartKind.Bar,Width=340,Height=240,Style=style,YMin=0,YMax=100,BarTrack=true,YTickLabels=TickLabels.None,
+    Series=[new("Score",[new(0,82,"Execution"),new(1,64,"Improvement"),new(2,91,"Effort"),new(3,58,"Consistency")]){ValueLabels=true}]};
+XElement[] Tracks39(XDocument doc)=>doc.Descendants().Where(e=>(string?)e.Attribute("class")=="lumen-bar-track").ToArray();
+Test("BarTrack draws a track behind each bar from zero to YMax in the grid colour, rounded as the bar is, the bar at most 18 thick and centred, its label just past the track's end",()=>{
+    var doc=Svg(Scores39());var tracks=Tracks39(doc);var bars=Datums(doc,0).Select(m=>m.Element(ns+"rect")!).ToArray();
+    Check(tracks.Length==4&&tracks.All(t=>t.Name==ns+"rect"&&t.Attribute("fill")!.Value==ChartStyle.Light.Grid&&t.Attribute("rx")!.Value=="2"),"the tracks");
+    // Category names: Improvement, with its two m's, is the widest; the left margin is its width and 24.
+    var left=Math.Ceiling(new[]{"Execution","Improvement","Effort","Consistency"}.Max(Broad38))+24;
+    // Value labels: two digits, 6 past the track's end and 6 of room after them, need less than the least right margin, 30.
+    var right=340-Math.Max(30,Math.Ceiling(6+2*.62*11+6));
+    for(var i=0;i<4;i++)
+    {
+        Check(Close(Attr(tracks[i],"x"),left)&&Close(Attr(tracks[i],"width"),right-left)&&Close(Attr(tracks[i],"y"),Attr(bars[i],"y"))&&Close(Attr(tracks[i],"height"),Attr(bars[i],"height")),$"track {i}: {Attr(tracks[i],"x")} {Attr(tracks[i],"width")}");
+        Check(Close(Attr(bars[i],"x"),left)&&Close(Attr(bars[i],"width"),(right-left)*new[]{82,64,91,58}[i]/100d)&&Close(Attr(bars[i],"height"),18),$"bar {i}");
+    }
+    // The tracks stand behind their bars, outside the marks, so they are neither focused nor named.
+    Check(tracks.All(t=>t.Parent!.Attribute("class")?.Value!="lumen-datum"),"a track inside a mark");
+    // Rows evenly spread down a plot that runs from 78 to 240 − 24, nothing being written under it; each bar centred in its row.
+    var band=(216-78)/4d;
+    Check(Enumerable.Range(0,4).All(i=>Close(Attr(bars[i],"y")+9,78+band*.14+band*.72/2+i*band)),string.Join(",",bars.Select(b=>Attr(b,"y"))));
+    var labels=doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="start"&&(string?)t.Attribute("font-size")=="11").ToArray();
+    Check(labels.Select(t=>t.Value).SequenceEqual(["82","64","91","58"])&&labels.All(t=>Close(Attr(t,"x"),right+6))&&labels.Zip(bars).All(p=>Close(Attr(p.First,"y"),Attr(p.Second,"y")+9+4)),string.Join(",",labels.Select(t=>$"{t.Value}@{Attr(t,"x")}")));
+    // Category names stand 12 left of the plot, in the muted colour.
+    Check(doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="end").Select(t=>(t.Value,Attr(t,"x"))).SequenceEqual([("Execution",left-12),("Improvement",left-12),("Effort",left-12),("Consistency",left-12)]),"the names");
+    // A bar radius rounds the far end of the bar and of its track alike.
+    var round=Svg(Scores39(ChartStyle.Light with{BarRadius=9999}));
+    Check(Tracks39(round).All(t=>t.Name==ns+"path"&&t.Attribute("d")!.Value.Contains(" A9,9 "))&&Datums(round,0).All(m=>m.Element(ns+"path")!.Attribute("d")!.Value.Contains(" A9,9 ")),"rounded");
+    // A value past the maximum is drawn at the track's end and its name says so; its label keeps its value.
+    var over=Svg(Scores39() with{Series=[new("Score",[new(0,108,"Bonus"),new(1,40,"Base")]){ValueLabels=true}]});
+    Check(Names37(over)[0]=="Score: Bonus, 108, above the scale, drawn at 100"&&Close(Attr(Datums(over,0)[0].Element(ns+"rect")!,"width"),Attr(Tracks39(over)[0],"width"))&&over.Descendants(ns+"text").Any(t=>t.Value=="108"),Names37(over)[0]);
+    // A title on the value axis and its ticks bring the bottom margin back; a title up the left widens the left margin by 18.
+    Check(Close(PaneSpan(PaneClips(Svg(Scores39() with{YTickLabels=TickLabels.All}))[0]).Bottom,164)&&Close(PaneSpan(PaneClips(Svg(Scores39() with{YLabel="Score"}))[0]).Bottom,164),"the bottom margin");
+    Check(Close(Attr(Tracks39(Svg(Scores39() with{XLabel="Category"}))[0],"x"),left+18),"the left margin with a title");
+    // A name too long for 45 % of the width is cut, its whole in its mark's name.
+    var longName=Svg(Scores39() with{Series=[new("Score",[new(0,50,"An extraordinarily long category"),new(1,40,"B")])]});
+    var cut=longName.Descendants(ns+"text").First(t=>(string?)t.Attribute("text-anchor")=="end").Value;
+    Check(Close(Attr(Tracks39(longName)[0],"x"),153)&&cut.EndsWith('…')&&Broad38(cut)<=153-24&&Names37(longName)[0].StartsWith("Score: An extraordinarily long category"),cut);
+    // Without value labels the right margin is 30; the classic finish draws the same geometry.
+    Check(Close(Attr(Tracks39(Svg(Scores39() with{Series=[Scores39().Series[0] with{ValueLabels=false}]}))[0],"width"),340-30-left),"no labels");
+    Check(Close(Attr(Tracks39(Svg(Classic(Scores39())))[0],"width"),right-left),"classic");
+});
+Test("BarTrack on columns: each track runs from zero to the top of the plot behind its column, the value label above the track's top; it is refused off bar and column charts, without YMax, off zero and beside a secondary series",()=>{
+    var spec=new ChartSpec{Title="Columns",Kind=ChartKind.Column,Width=600,Height=300,YMax=100,BarTrack=true,Series=[new("Score",[new(0,82,"A"),new(1,64,"B")]){ValueLabels=true}]};
+    var doc=Svg(spec);var tracks=Tracks39(doc);var bars=Datums(doc,0).Select(m=>m.Element(ns+"rect")!).ToArray();
+    var (top,bottom)=PaneSpan(PaneClips(doc)[0]);
+    Check(tracks.Length==2&&tracks.Zip(bars).All(p=>Close(Attr(p.First,"x"),Attr(p.Second,"x"))&&Close(Attr(p.First,"width"),Attr(p.Second,"width"))&&Close(Attr(p.First,"y"),top)&&Close(Attr(p.First,"height"),bottom-top)),"the tracks");
+    Check(doc.Descendants(ns+"text").Where(t=>t.Value is "82" or "64").All(t=>Close(Attr(t,"y"),top-5)),"labels above the tracks");
+    Check(Refused(spec with{Kind=ChartKind.StackedColumn}).StartsWith("BarTrack draws a track")&&Refused(spec with{Kind=ChartKind.Line}).StartsWith("BarTrack draws a track")&&Refused(Sample(ChartKind.Gauge) with{BarTrack=true}).StartsWith("BarTrack draws"),"other kinds");
+    Check(Refused(spec with{YMax=null}).StartsWith("A bar's track runs to the value axis's maximum, so BarTrack needs YMax"),"no YMax");
+    Check(Refused(spec with{YMin=10}).Length>0&&Refused(spec with{YMin=-10}).StartsWith("A bar's track runs from zero")&&Refused(spec with{Series=[new("S",[new(0,-1,"A"),new(1,2,"B")])]}).StartsWith("A bar's track runs from zero"),"off zero");
+    Check(Svg(spec with{YMin=0}) is not null,"YMin of zero");
+    Check(Refused(spec with{Series=[spec.Series[0],new("R",[new(0,1)]){Secondary=true}]}).StartsWith("A track runs the left-hand axis"),"secondary");
+    // A line over tracked columns keeps its own mark; without BarTrack the same columns draw as before.
+    Check(Tracks39(Svg(spec with{Series=[..spec.Series,new("L",[new(0,50),new(1,60)]){Kind=ChartKind.Line}]})).Length==2&&Tracks39(Svg(spec with{BarTrack=false})).Length==0,"a line, or none");
+});
+Test("Fill against track: the recipe's and the gallery's bar colours clear 3:1 against their tracks, and the strip's against their card",()=>{
+    foreach(var fill in new[]{"#3FD17A","#D7DDE5","#F5B642","#FF5A54"})
+        Check(Lumen.Charts.Contrast.Ratio(fill,"#2D2D2F")>=3,$"{fill} on the Race Face track");
+    foreach(var fill in new[]{"#3FD17A","#D7DDE5","#F5B642","#E30613"})
+        Check(Lumen.Charts.Contrast.Ratio(fill,"#161618")>=3,$"{fill} on the card");
+});
+Test("DrawTitles off draws neither title nor description, keeps them as the drawing's title, desc and name, and moves every kind's body up 50 units",()=>{
+    foreach(var kind in Enum.GetValues<ChartKind>())
+    {
+        var spec=Sample(kind) with{Description="Said, not drawn"};
+        var drawn=Svg(spec);var bare=Svg(spec with{DrawTitles=false});
+        Check(drawn.Descendants(ns+"text").Any(t=>t.Value=="Example")&&!bare.Descendants(ns+"text").Any(t=>t.Value is "Example" or "Said, not drawn"),$"{kind}: drawn");
+        Check(bare.Root!.Element(ns+"title")!.Value=="Example"&&bare.Root!.Element(ns+"desc")!.Value=="Said, not drawn"&&bare.Root!.Attribute("aria-label")!.Value=="Example. Said, not drawn",$"{kind}: named");
+        Check(Datums(bare,0).Length==Datums(drawn,0).Length,$"{kind}: marks");
+    }
+    // A chart on axes: the plot's clip moves from 78 − 6 to 28 − 6, and ChartSvg.Plot and the readout follow it.
+    var line=Spec() with{Description="D"};
+    Check(Close(PaneSpan(PaneClips(Svg(line))[0]).Top,78)&&Close(PaneSpan(PaneClips(Svg(line with{DrawTitles=false}))[0]).Top,28)&&Close(ChartSvg.Plot(line with{DrawTitles=false})!.Top,28)&&Close(ChartSvg.Readout(line with{DrawTitles=false,SharedReadout=true}).Top,28),"the plot");
+    // The bottom stays where it was, so the plot grows; a two-line description no longer moves it.
+    Check(Close(PaneSpan(PaneClips(Svg(line with{DrawTitles=false}))[0]).Bottom,PaneSpan(PaneClips(Svg(line))[0]).Bottom),"the bottom");
+    Check(ChartSvg.Render(line with{DrawTitles=false,Description=new string('x',300)}).Replace(new string('x',300),"D")==ChartSvg.Render(line with{DrawTitles=false}),"a long description moved it");
+    // A timeline's lanes, a gauge's arc, a donut and a strip move up with it.
+    var lanes=Svg(Sample(ChartKind.Timeline) with{DrawTitles=false});
+    Check(Close(PaneSpan(PaneClips(lanes)[0]).Top,28),"timeline");
+    Check(Height39(Svg(Zones39()))-Height39(Svg(Zones39() with{DrawTitles=false}))==50,"strip");
+    // includeTitles still writes or leaves out each mark's tooltip only, whatever DrawTitles says.
+    Check(!ChartSvg.Render(line with{DrawTitles=false},includeTitles:false).Contains("<title>Series:")&&ChartSvg.Render(line with{DrawTitles=false},includeTitles:false).Contains("<title>Example</title>"),"includeTitles");
+    // Network graphs have no such setting and draw their title.
+    Check(GraphEngine.Render(new GraphSpec{Title="Net",Nodes=[new("a","A")]}).Contains(">Net</text>"),"a graph");
+});
+Test("Bar tracks, drawn titles and strips round-trip through the HTTP API's JSON, defaults stay out of the gradient hash, and every kind draws byte for byte as before with them written out",()=>{
+    var spec=Scores39() with{DrawTitles=false};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,finishJson);
+    Check(json.Contains("\"barTrack\":true")&&json.Contains("\"drawTitles\":false"),json[^200..]);
+    var back=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,finishJson)!;
+    Check(back.BarTrack&&!back.DrawTitles&&ChartSvg.Render(back)==ChartSvg.Render(spec),"the spec changed in transit");
+    var strip=Zones39();
+    var stripBack=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(System.Text.Json.JsonSerializer.Serialize(strip,finishJson),finishJson)!;
+    Check(System.Text.Json.JsonSerializer.Serialize(strip,finishJson).Contains("\"kind\":\"Strip\"")&&ChartSvg.Render(stripBack)==ChartSvg.Render(strip),"a strip");
+    var written="{\"title\":\"Zones\",\"kind\":\"Strip\",\"drawTitles\":false,\"width\":340,\"series\":[{\"name\":\"Z\",\"points\":[{\"x\":0,\"y\":3,\"label\":\"Easy\"},{\"x\":1,\"y\":1,\"label\":\"Hard\",\"color\":\"#E30613\"}]}]}";
+    var drawn=Svg(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,finishJson)!);
+    Check(Keys39(drawn).SequenceEqual(["Easy 75%","Hard 25%"])&&Height39(drawn)==92-20,"a strip written by hand");
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Bar\",\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",finishJson)!;
+    Check(!old.BarTrack&&old.DrawTitles,"the defaults");
+    string GradientId(ChartSpec s)=>System.Text.RegularExpressions.Regex.Match(ChartSvg.Render(s),"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}],Annotations=[new(AnnotationAxis.Y,2){Label="T"}]};
+    Check(GradientId(faded)=="lumen-4bce89394b87"&&GradientId(faded with{BarTrack=false,DrawTitles=true})=="lumen-4bce89394b87"&&GradientId(faded with{DrawTitles=false})!="lumen-4bce89394b87",GradientId(faded));
+    var columns=Spec(ChartKind.Column) with{YMax=10,Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
+    Check(GradientId(columns)!=GradientId(columns with{BarTrack=true}),"a track kept a gradient's name");
+    foreach(var kind in Enum.GetValues<ChartKind>())
+        Check(ChartSvg.Render(Sample(kind))==ChartSvg.Render(Sample(kind) with{BarTrack=false,DrawTitles=true}),$"{kind}");
+});
+Test("Sports page: the latest session's time in zone as a strip of its five zones, adding up to the run's time, and three illustrative scores on tracks, the scores' title kept as its name but not drawn",()=>{
+    var ids=sports.Where(card=>card.Section=="session").Select(card=>card.Id).ToArray();
+    Check(ids.SequenceEqual(["stream","time-in-zone","zone-strip","scores","splits","laps","elevation"]),string.Join(",",ids));
+    var strip=Sports("zone-strip");var bars=Sports("time-in-zone");
+    Check(strip.Kind==ChartKind.Strip&&strip.Series[0].Points.Select(p=>p.Y).SequenceEqual(bars.Series[0].Points.Select(p=>p.Y))&&strip.Series[0].Points.Select(p=>p.Color).SequenceEqual(bars.Series[0].Points.Select(p=>p.Color))
+        &&strip.Series[0].Points.Select(p=>p.Label).SequenceEqual(SportsData.HeartZones.Zones.Select(z=>z.Name)),"the strip is not the time-in-zone bars' data");
+    var doc=Svg(strip with{Width=340});
+    Check(Keys39(doc).Length==5&&Keys39(doc).Sum(k=>int.Parse(k[(k.LastIndexOf(' ')+1)..^1],CultureInfo.InvariantCulture))==100&&Names37(doc).All(n=>System.Text.RegularExpressions.Regex.IsMatch(n,@"^.+: \d+%, \d+:\d\d")),string.Join("|",Keys39(doc)));
+    var scores=Sports("scores");var card=sports.Single(c=>c.Id=="scores");
+    Check(scores is {Kind:ChartKind.Bar,BarTrack:true,YMin:0,YMax:100,DrawTitles:false,YTickLabels:TickLabels.None}&&!card.ShowLegend&&scores.Series[0].Points.Count==3&&scores.Series[0].Points.All(p=>p.Y is >=0 and <=100),"the scores");
+    Check(scores.Title==$"Session scores: {string.Join(", ",SportsData.SessionScores(latest).Select(s=>$"{s.Name.ToLowerInvariant()} {s.Score.ToString(CultureInfo.InvariantCulture)}"))}",scores.Title);
+    var sdoc=Svg(scores with{Width=340});
+    Check(Tracks39(sdoc).Length==3&&!sdoc.Descendants(ns+"text").Any(t=>t.Value==scores.Title)&&sdoc.Root!.Element(ns+"title")!.Value==scores.Title,"the scores' drawing");
+    // Every fill clears 3:1 against its track: the brand's first series colour in light, Midnight and Harbour, and in the dark preset, whose
+    // blue stands 2.73:1 on its grid colour, the palette's sixth colour, which the page gives the bars there.
+    foreach(var (fill,style) in new[]{(ChartStyle.Light.Series[0],ChartStyle.Light),(ChartStyle.Dark.Series[5],ChartStyle.Dark),(ChartStyle.Midnight.Series[0],ChartStyle.Midnight),(DemoData.Harbour.Series[0],DemoData.Harbour)})
+        Check(Lumen.Charts.Contrast.Ratio(fill,style.Grid)>=3&&Lumen.Charts.Contrast.Ratio(fill,style.Background)>=3,$"{fill} on {style.Grid}");
+    Check(Lumen.Charts.Contrast.Ratio(ChartStyle.Dark.Series[0],ChartStyle.Dark.Grid)<3,"the dark preset's blue now clears 3:1 on its grid: the page's override is no longer needed");
+    // The strip's zones clear 3:1 against every brand's background.
+    foreach(var (zones,background) in new[]{(ChartStyle.Light.Zones,"#FFFFFF"),(ChartStyle.Light.Zones,ChartStyle.Dark.Background),(ChartStyle.Midnight.Zones,ChartStyle.Midnight.Background),(DemoData.Harbour.Zones,DemoData.Harbour.Background)})
+        Check(zones.Take(5).All(z=>Lumen.Charts.Contrast.Ratio(z,background)>=3),$"a zone on {background}");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

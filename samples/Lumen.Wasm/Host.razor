@@ -23,6 +23,9 @@
 
     <h2 id="gaps">Lines named at their ends</h2>
     <div class="card"><LumenChart Spec="gaps" FitWidth="true" ShowLegend="false" ShowToolbar="false"/></div>
+
+    <h2 id="strip">Parts of a whole</h2>
+    <div class="card"><LumenChart Spec="strip" FitWidth="true"/></div>
 </LumenBrand>
 </main>
 @code {
@@ -84,6 +87,10 @@
             Series=names.Select((name,r)=>new ChartSeries(name,behind[r].Select((g,lap)=>new ChartPoint(lap,g,lap==0?"Start":$"Lap {lap}")).ToArray(),r==4?null:"#848484")
                 {StrokeWidth=r==4?3.2:2,Markers=MarkerStyle.None,EndLabel=r==4?"You":name[^1..],EndNote=behind[r][^1]==0?"leader":words.Format(behind[r][^1])}).ToArray()};
     }
+
+    // An invented ride's time in three heart-rate zones as one strip of shares, each zone in a brand colour, its percentage in the key under it.
+    private static readonly ChartSpec strip=new(){Kind=ChartKind.Strip,YFormat=ValueFormat.Duration,Title="Effort zones",Description="An invented ride · time in each heart-rate zone",
+        Source="Source: generated sample data",Series=[new("Time in zone",[new(0,2280,"Easy"),new(1,1420,"Moderate"),new(2,510,"Hard")])]};
 
     private static ChartSeries Missing(ChartSeries series,int month)=>series with{Points=series.Points.Select((p,i)=>i==month?p with{Y=null}:p).ToArray()};
 
