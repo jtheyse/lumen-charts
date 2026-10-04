@@ -63,12 +63,14 @@ That session replies with what changed and where the recipes missed real data. R
 Race Face feedback still open (the brain's "Race Face feedback" tasks hold the detail):
 - **keys (0.36.0)**: an interactive chart has two tab stops, the scrolling viewport and the roving point (the docs say so from 0.37.0); consider dropping the viewport's stop when nothing scrolls. Static `Render` output keeps one stop per mark (363 for a 90-day chart);
 - **end labels (0.38.0)**: real surnames with a gap note run past the margin at 320 px; since 0.40.0 the note is cut before the name. A second line for the note, or a wider margin when only one or two labels would be cut, is still open;
+- **annotation labels (0.41.0)**: a reference's label ("CP: 255") can sit on markers near the line's end at 340, since annotation labels don't avoid marks;
 - **legend**: short entries stack one per row in the static legend (four rows, ~90 px under a 300 px chart at 340); lay short names out in one row. Long series names are truncated ("…MTB Le…"); consider wrapping them;
 - **recipe and doc notes**:
   - use the app's own PB flag and bins where it has them;
   - a sparkline's root is `role='group'` named by title and description;
   - Lumen writes single-quoted attributes;
   - put a description's key fact first, since the two-line cut can hide its end;
+  - per-lap heart rate arrives with 0 for a lap without one: map it to null (a gap); past four laps write the sub-label's number alone; an app that stores its own power-curve durations should draw those, not `MeanMaximal` (0.41.0 feedback);
   - the 1080×1350 card needs an SVG rasteriser on the server, which Lumen does not ship (Race Face's API draws its PNGs with ImageSharp).
 
 ## How a release is done
