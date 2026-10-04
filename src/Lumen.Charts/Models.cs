@@ -279,7 +279,8 @@ public sealed record ColorStop(double Value, string Color);
 /// <summary>Null Y is a missing observation, never an implicit zero. Size encodes bubble area.</summary>
 /// <param name="X">Where the point stands on a continuous X axis, in Unix milliseconds on a time axis. Column, bar and stacked
 /// column charts place points by their order instead.</param>
-/// <param name="Y">The value. Null is a missing observation: a gap in a line or area, and left out elsewhere.</param>
+/// <param name="Y">The value. Null is a missing observation: a gap in a line or area, and left out elsewhere; <see cref="GapLabel"/>
+/// writes a word there instead of leaving it silent.</param>
 /// <param name="Label">The point's category on a category chart; elsewhere it names the point in its tooltip and the data
 /// table in place of its X.</param>
 /// <param name="Size">A bubble's area, on one scale across every series. Other kinds ignore it.</param>
@@ -306,7 +307,7 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// position for the size of its field: in the muted colour at normal weight after a value label, and after the value in the
     /// mark's tooltip and accessible name and in the component's data table. A <c>Note</c> column carries it into CSV. Give it any
     /// space it needs: <c>" inside baseline"</c>. A missing value has nothing for a note to follow, so its note reaches the CSV
-    /// alone. Marks named by more than one value, or by none, refuse it: candles, range bars, histograms, boxes, violins,
+    /// alone, unless a <see cref="GapLabel"/> gives it a word to follow in its mark's name. Marks named by more than one value, or by none, refuse it: candles, range bars, histograms, boxes, violins,
     /// timelines, calendars, gauges and rings.</summary>
     public string? ValueNote { get; init; }
     /// <summary>A <c>#RRGGBB</c> colour that rings this point of a line or scatter series with an enlarged marker in it, outlined in
@@ -327,6 +328,24 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// series may repeat it or leave it null, but two different sub-labels for one category are refused. Continuous X axes write tick labels
     /// rather than categories, so every kind but column, bar and stacked column charts refuses it, as does a sparkline.</summary>
     public string? SubLabel { get; init; }
+    /// <summary>
+    /// The word a missing value is written as, such as <c>absent</c> for a round the rider was entered in and did not ride: 1 to 12
+    /// characters on one line, on a point whose <see cref="Y"/> is null in a series drawn as a line, an area or scatter points. The point
+    /// is still a missing value, so a line or an area still breaks there, but it is no longer silent: the word is written at the point's
+    /// X, centred on it and moved in from the plot's sides so it is never cut, just inside the plot beside the start of the series' value
+    /// axis, above the plot's bottom edge, or below its top edge where a reversed axis puts the start at the top, at 11 px and weight 600,
+    /// over a copy of itself stroked in the background colour, as a value label is. It is written in the point's <see cref="Color"/> where
+    /// that clears 4.5:1 against the background, else in the series colour where that does, else in the style's
+    /// <see cref="ChartStyle.Text"/> colour. Gap labels and value labels keep clear of each other as value labels do: one that would meet
+    /// a label written before it, in this series or an earlier one, is left out, its word kept in its mark's name. The point becomes a
+    /// focusable mark like any other, an invisible box round its word, or a narrow one at its X where the word is left out, named and tooltipped <c>Share: Round 3, absent</c>, the word in
+    /// place of <c>missing</c> and any <see cref="ValueNote"/> after it, so the arrow keys reach it, the component's shared readout reads
+    /// it, <c>Share absent</c>, and its status line and data table say it. A point the X range shown leaves out is left out with its word.
+    /// A point that has a value, a series of any other kind, a density scatter and a sparkline refuse it. Leave a point out altogether,
+    /// rather than give it a null Y, where nothing was missed, such as a round the rider's category did not hold: the line then simply joins
+    /// over it. CSV does not carry it.
+    /// </summary>
+    public string? GapLabel { get; init; }
 
     /// <summary>A candle or OHLC bar, its Y the close. High must be the highest of the four prices and low the lowest.</summary>
     public static ChartPoint Candle(double x, double open, double high, double low, double close, string? label = null) =>

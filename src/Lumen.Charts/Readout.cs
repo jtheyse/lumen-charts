@@ -47,7 +47,8 @@ public sealed record ReadoutColumn(double X, double Position, string Label, IRea
 /// <param name="Point">The point's index in its series' <see cref="ChartSeries.Points"/>.</param>
 /// <param name="Position">Where the point stands down the drawing, a ring's centre; null for a missing value, which has no place.</param>
 /// <param name="Text">The series' name and its value in its axis's format, with the value's note, its zone and how it changed where it
-/// has them, as <c>Fitness 52.3</c> or <c>Form −8.7, worse than the previous</c>; <c>Form missing</c> for a missing value.</param>
+/// has them, as <c>Fitness 52.3</c> or <c>Form −8.7, worse than the previous</c>; <c>Form missing</c> for a missing value, or its gap label
+/// and note, <c>Share absent</c>, where it has one.</param>
 /// <param name="Color">The series' colour, a <c>#RRGGBB</c> colour for its ring.</param>
 public sealed record ReadoutEntry(int Series, int Point, double? Position, string Text, string Color)
 {
@@ -64,7 +65,8 @@ public static partial class ChartSvg
     /// over the SVG <see cref="Render"/> draws for the same spec, and say the same words. The Blazor component reads it when
     /// <see cref="ChartSpec.SharedReadout"/> is set. Series drawn as lines, areas, bands, scatter points, bubbles, columns, ranges and
     /// candles are read at each X of their own points, and blocks at the X they cover; a series is read at an X where it has a point
-    /// within half the closest spacing of the X values, and a missing value there reads <c>missing</c>. A line or an area is read at the
+    /// within half the closest spacing of the X values, and a missing value there reads <c>missing</c>, or its
+    /// <see cref="ChartPoint.GapLabel"/>, <c>Share absent</c>, whose X is read even where no series has a value there. A line or an area is read at the
     /// points it draws: thinned to <see cref="ChartSpec.MaxRenderedPoints"/> over the X range shown, as <see cref="ChartSpec.Sampling"/>
     /// thins it, so a long ride reads one X for each mark drawn rather than one for each second. Where averages are read, the column's
     /// label says so once, after the X: <c>1:02:30 · average of 12 s</c> on a duration or time axis, which gives the width of a slice, or
@@ -100,8 +102,9 @@ public static partial class ChartSvg
         // A density scatter draws cells rather than points, so it has none to read.
         var read = Enumerable.Range(0, spec.Series.Count).Where(i => marks[i] is not ChartKind.Blocks && !(marks[i] == ChartKind.Scatter && spec.DensityCells is not null)).ToArray();
         var blocked = Enumerable.Range(0, spec.Series.Count).Where(i => marks[i] == ChartKind.Blocks).ToArray();
-        // The X values read are those the series have values at; blocks alone are read where each starts.
-        var values = read.SelectMany(i => offered[i].Select(d => d.Point).Where(p => Valued(marks[i], p) && Shown(p))).Select(p => p.X).Distinct().Order().ToArray();
+        // The X values read are those the series have values at, or a missing value written with a gap label; blocks alone are read where
+        // each starts.
+        var values = read.SelectMany(i => offered[i].Select(d => d.Point).Where(p => (Valued(marks[i], p) || p.GapLabel is not null) && Shown(p))).Select(p => p.X).Distinct().Order().ToArray();
         if (values.Length == 0) values = blocked.SelectMany(i => spec.Series[i].Points.Where(Shown)).Select(p => p.X).Distinct().Order().ToArray();
         var (top, bottom) = (frame.Plots[0].Top, frame.Plots[^1].Bottom);
         if (values.Length == 0) return new(top, bottom, frame.Left, frame.Right, []);
@@ -125,7 +128,7 @@ public static partial class ChartSvg
             string Entry(Drawn d)
             {
                 var (pi, p) = (d.Index, d.Point);
-                if (!Valued(mark, p)) return $"{series.Name} missing";
+                if (!Valued(mark, p)) return $"{series.Name} {(p.GapLabel is { } gap ? gap + p.ValueNote : "missing")}";
                 var value = mark switch
                 {
                     ChartKind.Candlestick or ChartKind.Ohlc => $"open {scale.Format(p.Open ?? p.Y!.Value)}, high {scale.Format(p.High ?? p.Y!.Value)}, low {scale.Format(p.Low ?? p.Y!.Value)}, close {scale.Format(p.Close ?? p.Y!.Value)}",

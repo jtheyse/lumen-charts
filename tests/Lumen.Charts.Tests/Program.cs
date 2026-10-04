@@ -8221,6 +8221,169 @@ Test("The three settings round-trip through the HTTP API's JSON, stay out of the
     foreach(var kind in Enum.GetValues<ChartKind>())
         Check(ChartSvg.Render(Sample(kind))==ChartSvg.Render(Sample(kind) with{PaintBackground=true,FitHeight=false,Series=Sample(kind).Series.Select(s=>s with{AverageOf=null}).ToArray()}),$"{kind}");
 });
+// 0.42.0: words at a missing value. A missing value written as a word at the foot of its plot and named as a mark, and the component's
+// viewport a tab stop only while it scrolls. Every example is invented.
+ChartSpec Season42(string? gap="absent",bool reversed=false,string? own=null,string? series="#22d3ee",ChartStyle? style=null)=>new(){Title="Team rider",Description="Share of the category finished ahead of",
+    Kind=ChartKind.Line,Width=340,Height=260,Style=style ?? ChartStyle.Light,XMin=-.5,XMax=4.5,YMin=0,YMax=100,YUnit="%",YReversed=reversed,
+    Series=[new("Share",[new(0,78,"Round 1"){ValueNote=" · 9th of 38"},new(1,68,"Round 2"),new(2,null,"Round 3"){GapLabel=gap,Color=own},new(3,85,"Round 5"),new(4,94,"Round 6")],series){StrokeWidth=2,Markers=MarkerStyle.Filled}]};
+// The gap labels a drawing writes: each group's halo and its word.
+XElement[] Gaps42(XDocument doc)=>doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("class")=="lumen-gap").ToArray();
+XElement Gapped42(XDocument doc,int point)=>Datums(doc,0).Single(m=>(string?)m.Attribute("data-point")==point.ToString(CultureInfo.InvariantCulture));
+double At42(ChartSpec s,double x)=>76+(x-s.XMin!.Value)/(s.XMax!.Value-s.XMin!.Value)*(s.Width-76-30);
+// The library's generous estimate of 11 px text's width.
+double Wide42(string text)=>text.Sum(c=>c is '.' or ',' or ':' or ' '?.3:c is '-'?.36:c is 'm' or 'M' or 'w' or 'W'?.9:.62)*11;
+// The team rider as another kind of series, its line's stroke width left out.
+ChartSpec Kinded42(ChartKind kind)=>Season42() with{Kind=kind,Series=[Season42().Series[0] with{StrokeWidth=null}]};
+Test("A gap label is written at its point's X just inside the plot above its bottom edge, or below its top edge on a reversed axis, centred, 11 px, moved in from the plot's sides",()=>{
+    var spec=Season42();var doc=Svg(spec);
+    var (top,bottom)=PaneSpan(PaneClips(doc)[0]);
+    var gaps=Gaps42(doc);
+    Check(gaps.Length==1&&(string?)gaps[0].Attribute("text-anchor")=="middle"&&(string?)gaps[0].Attribute("font-size")=="11"&&(string?)gaps[0].Attribute("aria-hidden")=="true"&&(string?)gaps[0].Attribute("pointer-events")=="none","the group");
+    var word=gaps[0].Elements(ns+"text").ToArray();
+    Check(word.Length==2&&word.All(t=>t.Value=="absent"&&Close(Attr(t,"x"),At42(spec,2))&&Close(Attr(t,"y"),bottom-5)),$"{Attr(word[0],"x")} {Attr(word[0],"y")}, the plot {top}–{bottom}");
+    // Reversed, the value axis starts at the top, so the word stands under the plot's top edge.
+    var high=Gaps42(Svg(Season42(reversed:true)))[0].Elements(ns+"text").Last();
+    Check(Close(Attr(high,"y"),top+13)&&Close(Attr(high,"x"),At42(spec,2)),$"{Attr(high,"y")}");
+    // At the first or last X the word is moved in so it is never cut, and the X axis's labels and the Y axis's ticks stay clear of it.
+    var edge=Season42() with{Series=[Season42().Series[0] with{Points=[new(0,null,"Round 1"){GapLabel="did not start"[..12]},..Season42().Series[0].Points.Skip(1).Select(p=>p with{GapLabel=null})]}]};
+    var first=Svg(edge);var placed=Gaps42(first)[0].Elements(ns+"text").Last();
+    var half=Wide42("did not star")/2;
+    Check(Close(Attr(placed,"x"),76+half+2)&&Attr(placed,"x")-half>=76,$"{Attr(placed,"x")}");
+    var ticks=first.Root!.Elements(ns+"text").Where(t=>(string?)t.Attribute("class")=="lumen-muted").ToArray();
+    Check(ticks.All(t=>Attr(t,"y")>bottom+10||Attr(t,"x")<=64),"a tick label inside the plot");
+    // A pane below the main plot writes its word at its own foot; a point the X range leaves out writes none and has no mark.
+    var paned=Season42() with{Panes=[new ChartPane{Label="Points"}],Series=[new("Team",[new(0,60),new(4,70)]),Season42().Series[0] with{Pane=1}]};
+    var pdoc=Svg(paned);var lower=PaneSpan(PaneClips(pdoc)[1]);
+    Check(Close(Attr(Gaps42(pdoc)[0].Elements(ns+"text").Last(),"y"),lower.Bottom-5),"the pane");
+    var zoomed=Svg(Season42() with{XMin=2.6});
+    Check(Gaps42(zoomed).Length==0&&Datums(zoomed,0).All(m=>(string?)m.Attribute("data-point")!="2"),"out of view");
+    // Scatter points and areas take it too.
+    Check(Gaps42(Svg(Kinded42(ChartKind.Scatter))).Length==1&&Gaps42(Svg(Kinded42(ChartKind.Area))).Length==1,"scatter and area");
+});
+Test("A gap label takes its point's colour where it clears 4.5:1, else the series colour where that does, else the text colour, over a halo in the background colour",()=>{
+    string Ink(ChartSpec s)=>Gaps42(Svg(s))[0].Elements(ns+"text").Last().Attribute("fill")!.Value;
+    // #8A6500 stands 5.33:1 on white, #E0A800 2.15:1; #1F5FA8 6.44:1 and #22d3ee 1.81:1.
+    Check(Ink(Season42(own:"#8A6500"))=="#8A6500","its own colour");
+    Check(Ink(Season42(own:"#E0A800",series:"#1F5FA8"))=="#1F5FA8","the series colour");
+    Check(Ink(Season42(own:"#E0A800"))==ChartStyle.Light.Text&&Ink(Season42())==ChartStyle.Light.Text,"the text colour");
+    Check(Lumen.Charts.Contrast.Ratio("#8A6500","#FFFFFF")>=4.5&&Lumen.Charts.Contrast.Ratio("#E0A800","#FFFFFF")<4.5&&Lumen.Charts.Contrast.Ratio("#1F5FA8","#FFFFFF")>=4.5&&Lumen.Charts.Contrast.Ratio("#22d3ee","#FFFFFF")<4.5,"the ratios");
+    // On a dark card the gold clears and is used; the halo is the card's colour, as a value label's is.
+    var card=ChartStyle.Dark with{Background="#161618"};
+    var halo=Gaps42(Svg(Season42(own:"#e0a800",style:card)))[0].Elements(ns+"text").ToArray();
+    Check(halo[1].Attribute("fill")!.Value=="#e0a800"&&halo[0].Attribute("fill")!.Value=="#161618"&&halo[0].Attribute("stroke")!.Value=="#161618"&&halo[0].Attribute("stroke-width")!.Value=="3","the halo");
+    Check(Gaps42(Svg(Season42(style:ChartStyle.Midnight)))[0].Elements(ns+"text").First().Attribute("stroke")!.Value==ChartStyle.Midnight.Background,"Midnight's halo");
+    // Every gap label drawn clears 4.5:1 against the background, whatever the colours asked for.
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight,DemoData.Harbour})
+        foreach(var own in new string?[]{null,"#E0A800","#8A6500","#FFFFFF","#000000"})
+            foreach(var line in new[]{"#22d3ee","#1F5FA8","#808080"})
+                Check(Lumen.Charts.Contrast.Ratio(Ink(Season42(own:own,series:line,style:style)),style.Background)>=4.5,$"{own} {line} on {style.Background}");
+});
+Test("A gap label's point is a focusable mark named and tooltipped with the word in place of missing, its note after it, and the line still breaks there",()=>{
+    var doc=Svg(Season42());
+    var mark=Gapped42(doc,2);
+    Check((string?)mark.Attribute("class")=="lumen-datum"&&(string?)mark.Attribute("tabindex")=="0"&&(string?)mark.Attribute("role")=="button"&&mark.Attribute("aria-label")!.Value=="Share: Round 3, absent"&&mark.Element(ns+"title")!.Value=="Share: Round 3, absent","the mark");
+    // Its target is an invisible box round the word, inside the plot.
+    var box=mark.Element(ns+"rect")!;var word=Gaps42(doc)[0].Elements(ns+"text").Last();
+    Check((string?)box.Attribute("fill-opacity")=="0"&&Attr(box,"x")<Attr(word,"x")-Wide42("absent")/2&&Attr(box,"x")+Attr(box,"width")>Attr(word,"x")+Wide42("absent")/2&&Attr(box,"y")<Attr(word,"y")-9&&Attr(box,"y")+Attr(box,"height")>Attr(word,"y"),"the target");
+    // A note follows the word, and the other marks are named as before.
+    var noted=Svg(Season42() with{Series=[Season42().Series[0] with{Points=Season42().Series[0].Points.Select((p,i)=>i==2?p with{ValueNote=" · DNS"}:p).ToArray()}]});
+    Check(Gapped42(noted,2).Attribute("aria-label")!.Value=="Share: Round 3, absent · DNS"&&Names37(noted)[0]=="Share: Round 1, 78% · 9th of 38","the note");
+    // The line breaks at it exactly as it does without the word: the strokes are the same.
+    string[] Strokes(XDocument d)=>d.Descendants(ns+"path").Where(p=>(string?)p.Attribute("fill")=="none").Select(p=>p.ToString()).ToArray();
+    var plain=Svg(Season42(gap:null));
+    Check(Strokes(doc).Length==2&&Strokes(doc).SequenceEqual(Strokes(plain)),$"{Strokes(doc).Length} strokes");
+    // Without the word the missing value has no mark, as before; with it, only the mark and the word are added to the drawing.
+    Check(Datums(plain,0).Length==4&&Datums(doc,0).Length==5,"the marks");
+    var stripped=System.Text.RegularExpressions.Regex.Replace(ChartSvg.Render(Season42()),"<g class='lumen-datum'[^>]*data-point='2'[^>]*>.*?</g>|<g class='lumen-gap'.*?</g>","");
+    Check(stripped==ChartSvg.Render(Season42(gap:null)),"more than the mark and its word moved");
+    // A scatter point's mark is named the same way, and an area's.
+    Check(Gapped42(Svg(Kinded42(ChartKind.Scatter)),2).Attribute("aria-label")!.Value=="Share: Round 3, absent"&&Gapped42(Svg(Kinded42(ChartKind.Area)),2).Attribute("aria-label")!.Value=="Share: Round 3, absent","scatter and area");
+});
+Test("Gap labels that would collide are thinned as value labels are: the later word is left out, its mark kept as a narrow target at its X and its word in its name",()=>{
+    // Twenty rounds across 340 units stand 11.7 apart, so the word of the round after a written one has no room.
+    var crowded=Season42() with{XMax=19.5,Series=[new("Share",Enumerable.Range(0,20).Select(i=>new ChartPoint(i,i is 8 or 9 or 14?null:50+i,$"R{i+1}"){GapLabel=i is 8 or 9 or 14?"absent":null}).ToArray())]};
+    var doc=Svg(crowded);var gaps=Gaps42(doc);
+    Check(gaps.Length==2&&gaps.Select(g=>Attr(g.Elements(ns+"text").Last(),"x")).SequenceEqual([At42(crowded,8),At42(crowded,14)]),string.Join(",",gaps.Select(g=>Attr(g.Elements(ns+"text").Last(),"x"))));
+    var thinned=Gapped42(doc,9);var box=thinned.Element(ns+"rect")!;
+    Check(thinned.Attribute("aria-label")!.Value=="Share: R10, absent"&&Close(Attr(box,"width"),10)&&Close(Attr(box,"x")+5,At42(crowded,9)),"the thinned mark");
+    // Value labels keep clear of a word written before them, and a word of one written before it.
+    var labelled=crowded with{Series=[crowded.Series[0] with{ValueLabels=true}],YMin=50,YMax=80};
+    var ldoc=Svg(labelled);
+    var boxes=ldoc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("class") is "lumen-value" or "lumen-gap").Select(g=>{var t=g.Elements(ns+"text").Last();var w=Wide42(t.Value);return new Bounds(Attr(t,"x")-w/2,Attr(t,"y")-9,Attr(t,"x")+w/2,Attr(t,"y")+3);}).ToArray();
+    Check(boxes.Length>2&&!boxes.SelectMany((a,i)=>boxes.Skip(i+1).Select(b=>a.Overlaps(b))).Any(o=>o),"two labels overlap");
+});
+Test("A gap label is refused on a point with a value, on other kinds and a density scatter, on a sparkline, blank, past 12 characters and across lines, each with its reason",()=>{
+    ChartSpec With(ChartSpec s,string gap,double? y=null)=>s with{Series=[s.Series[0] with{Points=[s.Series[0].Points[0] with{Y=y,GapLabel=gap},..s.Series[0].Points.Skip(1)]},..s.Series.Skip(1)]};
+    Check(Refused(With(Spec(),"absent",2)).StartsWith("A gap label is written where a value is missing"),"a valued point");
+    foreach(var kind in new[]{ChartKind.Column,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Bubble,ChartKind.Band,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Donut})
+        Check(Refused(With(Sample(kind),"absent")).StartsWith("A gap label is written where a line, an area or scatter points miss a value"),$"{kind}: {Refused(With(Sample(kind),"absent"))}");
+    Check(Refused(Spec(ChartKind.Column) with{Series=[Spec().Series[0],new("Share",[new(0,null,"A"){GapLabel="absent"}]){Kind=ChartKind.Column}]}).StartsWith("A gap label is written where a line"),"a column series");
+    Check(Refused(With(Spec(ChartKind.Scatter),"absent") with{DensityCells=20}).StartsWith("A density scatter shades cells rather than points, so it writes no gap label"),"a density scatter");
+    Check(Refused(With(Spark(),"absent")).StartsWith("A sparkline draws its data alone, with no words, so it writes no gap labels"),"a sparkline");
+    Check(Refused(With(Spec()," ")).StartsWith("A gap label is the word a missing value is written as")&&Refused(With(Spec(),"")).StartsWith("A gap label is the word a missing value is written as"),"blank");
+    Check(Refused(With(Spec(),"did not finish")).StartsWith("A gap label is one short word or two")&&Refused(With(Spec(),"no\nresult")).StartsWith("A gap label is one short word or two")&&Svg(With(Spec(),"did not star")) is not null,"long or two lines");
+    // A line series beside columns takes it, its word at the foot of the plot.
+    Check(Gaps42(Svg(Spec(ChartKind.Column) with{Series=[Spec().Series[0],new("Share",[new(0,4,"A"),new(1,null,"B"){GapLabel="absent"},new(2,5,"C")]){Kind=ChartKind.Line}]})).Length==1,"a line beside columns");
+});
+Test("The shared readout reads a gap label's X, even where no series has a value, as the series' word, and the component's status line and data table say it",()=>{
+    var read=ChartSvg.Readout(Season42() with{SharedReadout=true});
+    var column=read.Columns.Single(c=>c.X==2);
+    Check(read.Columns.Count==5&&column.Text=="Round 3 · Share absent"&&column.Entries.Single() is {Series:0,Point:2,Position:null},column.Text);
+    // Without the word the X with no value is not read, as before.
+    Check(ChartSvg.Readout(Season42(gap:null) with{SharedReadout=true}).Columns.Count==4,"without the word");
+    // Beside another series the word stands in the column with that series' value; a note follows it.
+    var two=Season42() with{SharedReadout=true,Series=[Season42().Series[0] with{Points=Season42().Series[0].Points.Select((p,i)=>i==2?p with{ValueNote=" · DNS"}:p).ToArray()},new("Team",[new(0,60),new(1,62),new(2,64),new(3,66),new(4,68)])]};
+    Check(ChartSvg.Readout(two).Columns.Single(c=>c.X==2).Text=="Round 3 · Share absent · DNS · Team 64%",ChartSvg.Readout(two).Columns.Single(c=>c.X==2).Text);
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;var status="";
+    Operate(Season42(),async chart=>{await chart.SelectPoint(0,2);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    Check(status=="Share: Round 3 = absent",status);
+    Operate(Season42() with{SharedReadout=true},async chart=>{await chart.SelectPoint(0,2);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    Check(status=="Round 3 · Share absent",status);
+    var html=Operate(Season42(),async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,2);});
+    Check(html.Contains("<tr><td>Share</td><td>Round 3</td><td>absent</td></tr>")&&Operate(Season42(gap:null),async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,0);}).Contains("<td>Round 3</td><td>Missing</td>"),"the data table");
+});
+Test("The component's viewport is written as a scrolling region and a tab stop as before, and its script takes both away while the drawing fits and gives them back while it scrolls",()=>{
+    var html=Operate(Season42(),_=>Task.CompletedTask,fit:true);
+    Check(html.Contains("<div class=\"lumen-viewport\" tabindex=\"0\" role=\"region\" aria-label=\"Scrollable chart\">"),"the markup");
+    var script=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.js"));
+    Check(script.Contains("viewport.scrollWidth > viewport.clientWidth + 1")&&script.Contains("viewport.setAttribute('tabindex', '-1')")&&script.Contains("viewport.removeAttribute('role')")&&script.Contains("viewport.setAttribute('aria-label', 'Scrollable chart')")
+        &&script.Contains("new ResizeObserver(region)")&&script.Contains("sized.observe(svg)")&&script.Contains("state.sized?.disconnect()"),"the script");
+});
+Test("GapLabel round-trips through the HTTP API's JSON, a point that names none keeps it null, it stays out of the gradient hash while null, and every kind draws byte for byte as before",()=>{
+    var spec=Season42(own:"#8A6500");
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,finishJson);
+    Check(json.Contains("\"gapLabel\":\"absent\"")&&json.Contains("\"y\":null"),json);
+    var back=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,finishJson)!;
+    Check(back.Series[0].Points[2].GapLabel=="absent"&&ChartSvg.Render(back)==ChartSvg.Render(spec),"the spec changed in transit");
+    Check(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":null}]}]}",finishJson)!.Series[0].Points[0].GapLabel is null,"the default");
+    string GradientId(ChartSpec s)=>System.Text.RegularExpressions.Regex.Match(ChartSvg.Render(s),"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}],Annotations=[new(AnnotationAxis.Y,2){Label="T"}]};
+    Check(GradientId(faded)=="lumen-4bce89394b87"&&GradientId(faded with{Series=[faded.Series[0] with{Points=faded.Series[0].Points.Select(p=>p with{GapLabel=null}).ToArray()}]})=="lumen-4bce89394b87",GradientId(faded));
+    var gapped=faded with{Series=[faded.Series[0] with{Points=[..faded.Series[0].Points,new(2,null){GapLabel="absent"}]}]};
+    var ungapped=faded with{Series=[faded.Series[0] with{Points=[..faded.Series[0].Points,new(2,null)]}]};
+    Check(GradientId(gapped)!=GradientId(ungapped),"a gap label kept a gradient's name");
+    foreach(var kind in Enum.GetValues<ChartKind>())
+        Check(ChartSvg.Render(Sample(kind))==ChartSvg.Render(Sample(kind) with{Series=Sample(kind).Series.Select(s=>s with{Points=s.Points.Select(p=>p with{GapLabel=null}).ToArray()}).ToArray()}),$"{kind}");
+    // CSV keeps the empty value, as before.
+    Check(ChartExport.Csv(spec)==ChartExport.Csv(Season42(gap:null,own:"#8A6500")),"the CSV");
+});
+Test("Home page: the team rider's missed round is written absent in a gold that clears 4.5:1 in both themes, round 4 has no point, and every other round is named with its place and field",()=>{
+    foreach(var theme in new[]{ChartTheme.Light,ChartTheme.Dark})
+    {
+        var spec=DemoData.TeamRider(theme);var doc=Svg(spec);
+        Check(spec.Series[0].Points.Count==7&&spec.Series[0].Points.All(p=>p.Label!="Round 4")&&spec.Series[0].Points.Count(p=>p.Y is null)==1,"the rounds");
+        var gaps=Gaps42(doc);var own=spec.Series[0].Points.Single(p=>p.Y is null).Color!;
+        Check(gaps.Length==1&&gaps[0].Elements(ns+"text").Last().Attribute("fill")!.Value==own&&Lumen.Charts.Contrast.Ratio(own,ChartSvg.ResolveStyle(spec).Background)>=4.5,$"{theme}");
+        Check(Names37(doc).SequenceEqual(["Share: Round 1, 78% · 9th of 38","Share: Round 2, 68% · 14th of 41","Share: Round 3, 89% · 5th of 37","Share: Round 5, 85% · 7th of 40","Share: Round 7, 94% · 3rd of 36","Share: Round 8, 88% · 6th of 42","Share: Round 6, absent"]),string.Join("|",Names37(doc)));
+    }
+    // Under Midnight the light theme's gold falls short, so the word takes the series colour, which clears.
+    var midnight=Svg(DemoData.TeamRider(ChartTheme.Light) with{Style=ChartStyle.Midnight});
+    Check(Gaps42(midnight)[0].Elements(ns+"text").Last().Attribute("fill")!.Value==ChartStyle.Midnight.SeriesColor(0)&&Lumen.Charts.Contrast.Ratio(ChartStyle.Midnight.SeriesColor(0),ChartStyle.Midnight.Background)>=4.5,"Midnight");
+    Check(DemoData.Ordinal(1)=="1st"&&DemoData.Ordinal(2)=="2nd"&&DemoData.Ordinal(3)=="3rd"&&DemoData.Ordinal(11)=="11th"&&DemoData.Ordinal(12)=="12th"&&DemoData.Ordinal(13)=="13th"&&DemoData.Ordinal(21)=="21st"&&DemoData.Ordinal(14)=="14th","ordinals");
+});
+Test("Race Face recipe: the team rider's gold word stands 8.41:1 on the card and its cyan line 10.00:1",()=>{
+    Check(Math.Round(Lumen.Charts.Contrast.Ratio("#e0a800","#161618"),2)==8.41&&Math.Round(Lumen.Charts.Contrast.Ratio("#22d3ee","#161618"),2)==10.00,$"{Lumen.Charts.Contrast.Ratio("#e0a800","#161618")} {Lumen.Charts.Contrast.Ratio("#22d3ee","#161618")}");
+});
 // A colour a fraction of the way from one to another, channel by channel, as the library blends a gradient.
 string Blend40(string from,string to,double t){int C(string h,int at)=>int.Parse(h.AsSpan(at,2),NumberStyles.HexNumber,CultureInfo.InvariantCulture);return "#"+string.Concat(new[]{1,3,5}.Select(at=>((int)(C(from,at)+(C(to,at)-C(from,at))*t)).ToString("X2",CultureInfo.InvariantCulture)));}
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");

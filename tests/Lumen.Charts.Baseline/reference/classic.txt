@@ -366,3 +366,8 @@ fit/four-tracked E2A52D4DB9BA8819
 fit/one-plain 9960D3B91BF32FA4
 fit/four-plain 9C7189E90AC6B35C
 recipe/score-bars-340-fitted BC56E6BFF9E0B17F
+gap/light 6AF26C8881DA70BF
+gap/midnight 3E0F6E6F9ABFB1EC
+gap/reversed 46F66793ECD9FBE1
+gap/two-close FF71FDACCFFB0A79
+recipe/team-rider-340 5097FAD7E9EF9731

@@ -145,8 +145,8 @@ export function attach(root, dotnet) {
     };
     const centre = element => { const box = element.getBoundingClientRect(); return box.left + box.width / 2; };
     const along = (length, from, step) => step === -Infinity ? 0 : step === Infinity ? length - 1 : Math.max(0, Math.min(length - 1, from + step));
-    // Left and Right step along the series, skipping its gaps, which have no mark; Up and Down go to the point nearest the same X in
-    // the series before or after.
+    // Left and Right step along the series, skipping its gaps, which have no mark unless a gap label writes one; Up and Down go to the
+    // point nearest the same X in the series before or after.
     const move = (element, keyName) => {
         const all = rows(), row = all.findIndex(r => r.includes(element));
         if (row < 0) return element;
@@ -277,11 +277,32 @@ export function attach(root, dotnet) {
     const left = event => { if (state.readout && !state.brush?.band && event.pointerType !== 'touch') hide(); };
     const blurred = event => { if (!mark(event.relatedTarget)) hide(); };
 
-    // The words that name the keys describe the chart's scrolling viewport, which Tab reaches first, or a sparkline's drawing. They are
-    // given an ID here, so the server's drawing stays the same for every chart and every render.
+    // The words that name the keys describe the chart's scrolling viewport while it scrolls, and otherwise the drawing, as they do a
+    // sparkline's. They are given an ID here, so the server's drawing stays the same for every chart and every render.
     const words = root.querySelector(':scope > .lumen-keys');
     const keys = words ? words.id || (words.id = 'lumen-keys-' + ++described) : null;
-    if (keys && !root.classList.contains('lumen-spark')) root.querySelector(':scope > .lumen-viewport')?.setAttribute('aria-describedby', keys);
+    // The viewport is a tab stop, a region named "Scrollable chart", only while the drawing is wider or taller than it and so scrolls,
+    // since a keyboard needs it then to scroll; while the drawing fits it is neither, and the chart's one tab stop is its roving mark.
+    // The markup is written as a region, so a page without this script keeps the stop; the script settles it on load, for each new
+    // drawing and whenever the viewport or its drawing changes size.
+    const viewport = root.classList.contains('lumen-spark') ? null : root.querySelector(':scope > .lumen-viewport');
+    const region = () => {
+        if (!viewport) return;
+        const svg = drawing();
+        if (viewport.scrollWidth > viewport.clientWidth + 1 || viewport.scrollHeight > viewport.clientHeight + 1) {
+            viewport.setAttribute('tabindex', '0');
+            viewport.setAttribute('role', 'region');
+            viewport.setAttribute('aria-label', 'Scrollable chart');
+            if (keys) { viewport.setAttribute('aria-describedby', keys); svg?.removeAttribute('aria-describedby'); }
+        } else {
+            viewport.setAttribute('tabindex', '-1');
+            viewport.removeAttribute('role');
+            viewport.removeAttribute('aria-label');
+            if (keys) { viewport.removeAttribute('aria-describedby'); svg?.setAttribute('aria-describedby', keys); }
+        }
+    };
+    const sized = viewport ? new ResizeObserver(region) : null;
+    if (viewport) { sized.observe(viewport); region(); }
 
     // Each new drawing: the readout it reads, its one tab stop, and, on a sparkline, the keys named in its drawing's description. A
     // drawing replaced takes its guide and tooltip with it.
@@ -293,13 +314,16 @@ export function attach(root, dotnet) {
             state.readout.columns.forEach((column, c) => { for (const entry of column[2]) if (!state.index.has(`${entry[0]}:${entry[1]}`)) state.index.set(`${entry[0]}:${entry[1]}`, c); });
         const svg = drawing();
         if (svg !== state.svg) {
+            if (sized && state.svg) sized.unobserve(state.svg);
             state.svg = svg;
             state.overlay = null;
             if (state.brush?.band) unbrush();
             state.brush = null;
             hide();
+            if (sized && svg) sized.observe(svg);
         }
         settle();
+        region();
         if (svg && keys && root.classList.contains('lumen-spark')) svg.setAttribute('aria-describedby', keys);
     };
 
@@ -307,7 +331,7 @@ export function attach(root, dotnet) {
         ['pointerout', out], ['pointerleave', left], ['focusin', focused], ['focusout', blurred],
         ['pointerdown', pressed], ['pointerup', released], ['pointercancel', cancelled]];
     for (const [type, handler] of bindings) root.addEventListener(type, handler);
-    handlers.set(root, { bindings, tooltip, state, escaped });
+    handlers.set(root, { bindings, tooltip, state, escaped, sized });
 }
 
 /// Tells the script of a chart's new drawing, the shared readout it reads, or null, and the plots a drag zooms across, or null.
@@ -404,6 +428,7 @@ export function detach(root) {
     clearTimeout(state.state?.timer);
     state.state?.overlay?.remove();
     state.state?.brush?.band?.remove();
+    state.sized?.disconnect();
     if (state.escaped) document.removeEventListener('keydown', state.escaped, true);
     handlers.delete(root);
 }

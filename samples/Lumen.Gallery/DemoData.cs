@@ -387,6 +387,25 @@ public static class DemoData
                 new("Power",buckets.Select(t=>new Lumen.Charts.ChartPoint(t,Math.Round(205+55*Math.Sin(t/240+.4)+12*Math.Sin(t/23)))).ToArray()){AverageOf="12 s",Secondary=true,Markers=Lumen.Charts.MarkerStyle.None}]
         };
     }
+    // 0.42.0: words at a missing value. Every number is invented.
+    /// <summary>An invented team rider's season of seven held rounds: in each, the share of the category the rider finished ahead of, with
+    /// the place and field as each point's note. Round 6 was held and the rider missed it, so it is a missing value written "absent", in a
+    /// gold that clears 4.5:1 on the theme's background; round 4 was not held, so it has no point and the line joins rounds 3 and 5 over
+    /// it.</summary>
+    public static Lumen.Charts.ChartSpec TeamRider(Lumen.Charts.ChartTheme theme)
+    {
+        (int Round,int? Place,int Field)[] rounds=[(1,9,38),(2,14,41),(3,5,37),(5,7,40),(6,null,39),(7,3,36),(8,6,42)];
+        return new()
+        {
+            Title="Team rider",Description="Share of the category finished ahead of, round by round; round 4 was not held",Kind=Lumen.Charts.ChartKind.Line,Theme=theme,
+            Width=340,Height=260,XMin=-.5,XMax=rounds.Length-.5,YMin=0,YMax=100,YUnit="%",YTickValues=[new(0,"0%"),new(50,"50%"),new(100,"100%")],
+            Series=[new("Share",rounds.Select((r,i)=>r.Place is int place
+                ? new Lumen.Charts.ChartPoint(i,Math.Round(100d*(r.Field-place)/(r.Field-1),MidpointRounding.AwayFromZero),$"Round {r.Round}"){ValueNote=$" · {Ordinal(place)} of {r.Field}"}
+                : new Lumen.Charts.ChartPoint(i,null,$"Round {r.Round}"){GapLabel="absent",Color=theme==Lumen.Charts.ChartTheme.Dark?"#E0A800":"#8A6500"}).ToArray()){StrokeWidth=2,Markers=Lumen.Charts.MarkerStyle.Filled}]
+        };
+    }
+    /// <summary>A place in words: 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st.</summary>
+    public static string Ordinal(int place)=>place+(place%100 is 11 or 12 or 13?"th":(place%10) switch{1=>"st",2=>"nd",3=>"rd",_=>"th"});
     public static Lumen.Charts.GraphSpec Graph(Lumen.Charts.GraphLayout layout,Lumen.Charts.ChartTheme theme)=>new()
     {
         Title="From source to insight",Layout=layout,Theme=theme,

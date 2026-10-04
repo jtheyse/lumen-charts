@@ -1,6 +1,6 @@
 # Race results recipes
 
-Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields, a race's gaps to the leader, a ride's effort zones as a strip of shares, a race's scores on meter bars, a ride's best efforts and a race's heart rate lap by lap, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.41.0, together with the recipes in `sports.md`.
+Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields, a race's gaps to the leader, a ride's effort zones as a strip of shares, a race's scores on meter bars, a ride's best efforts, a race's heart rate lap by lap and a team rider's season with a missed round written in, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.42.0, together with the recipes in `sports.md`.
 
 ```csharp
 using System.Globalization;
@@ -13,9 +13,9 @@ using Lumen.Charts;
 - **Phone width.** For SVG rendered on the server set `Width` to the width the card shows it at, `Width = 340` here: drawn at the width it is shown, every label is 11 px or larger (axis ticks 12, value labels and notes 11, the title 17), and none needs the 8 to 9 px text a stretched 340-unit viewBox gives. A card a little narrower, 320 px, still shows 10.4 px. On an interactive page `FitWidth="true"` redraws the chart at its card's width instead. A chart is at least 240 units tall (a sparkline at least 60 wide and 16 tall), and keeps its `Height` at any width, so choose a height that reads at a phone's width; a strip (0.39.0) is drawn as tall as its bar and key instead, and a bar chart with `FitHeight = true` (0.41.0) as tall as its rows.
 - **Text that fits.** From 0.35.0 a description or a source too wide for the card, by the library's generous estimate of its width, goes on over a second line, between its ` · ` clauses where both lines then fit and otherwise as evenly as its words allow, and the plot gives up 14 units for it; past two lines the second ends in `…`. A title stays one line, cut at a word with `…`. The whole of each stays in the drawing's `<title>`, `<desc>` and accessible name, so a long description written for a desktop no longer runs off a 340-pixel card.
 - **Accessible.** `Title` and `Description` are the drawing's accessible name; each mark is focusable and named, `Position: 16-05-2026, 24/48, better than the previous`, and the same words are its tooltip.
-- **Missing data is a gap, never a zero.** A race without a position or without points is a `null` Y: its line breaks there and no mark is drawn. A race without a field size writes its place alone.
+- **Missing data is a gap, never a zero.** A race without a position or without points is a `null` Y: its line breaks there and no mark is drawn, unless a `GapLabel` (0.42.0) writes a word such as `absent` there, which also makes it a named mark. A race without a field size writes its place alone.
 - **Never colour alone.** A place coloured by its change also says the change in words, in its tooltip and its accessible name.
-- **Keys.** From 0.36.0 each `<LumenChart>` has two tab stops: its scrollable viewport (a `role=region`), and then one roving point, from which the arrow keys move — Left and Right along a series, skipping its gaps, Up and Down to the series before or after it, Home and End to its ends, Page Up and Page Down ten points — with the keys named in the chart's description. The static SVG keeps every mark focusable on its own. Test the keys with real input, such as Playwright's `keyboard.press`: a `KeyboardEvent` dispatched from script can move focus without bringing up the shared readout or its status line.
+- **Keys.** From 0.36.0 each `<LumenChart>` has one roving point among its marks; from 0.42.0 that is its only tab stop while its drawing fits its box, and a drawing wider than its box adds the scrollable viewport (a `role=region`) before it, so the chart has two. From the roving point the arrow keys move — Left and Right along a series, skipping its gaps (a gap with a gap label is a mark they stop on), Up and Down to the series before or after it, Home and End to its ends, Page Up and Page Down ten points — with the keys named in the chart's description. The static SVG keeps every mark focusable on its own. Test the keys with real input, such as Playwright's `keyboard.press`: a `KeyboardEvent` dispatched from script can move focus without bringing up the shared readout or its status line.
 
 ## A dark brand style from design tokens
 
@@ -630,10 +630,43 @@ string lapHeartSvg = ChartSvg.Render(lapHeartColumns, includeLegend: false);
 - **Never colour alone.** The colour repeats what the height and the words say: each mark's name and tooltip read `Heart rate: L3 · 168 bpm, 168`. Against the card the amber stands 8.41:1 and the red 6.53:1, and every blend between them at least 6.53:1, well past the 3:1 a filled mark needs. On a white card take darker stops, `ChartStyle.Light`'s zone gold `#A88200` (3.58:1) and red `#DD4B45` (4.06:1).
 - **No value labels.** The sub-labels already write each lap's heart rate, so `ValueLabels` is left off and `YTickLabels = TickLabels.None` with hidden gridlines leaves the plot to the columns. With value labels on, each would be written above its column in the text colour.
 
+## Team rider
+
+An invented team rider's season, round by round: in each round the rider rode, the share of their category they finished ahead of, their place and the field after it; a round they were entered in and missed is written `absent` at the foot of the plot rather than left blank (0.42.0).
+
+```csharp
+// The app's results for one team rider: each held round's number, the rider's place, null for a round the rider missed, and the size
+// of the category's field. Round 4 was not held, so it is not here at all. An invented season:
+(int Round, int? Place, int Field)[] teamRounds = [(1, 9, 38), (2, 14, 41), (3, 5, 37), (5, 7, 40), (6, null, 39), (7, 3, 36), (8, 6, 42)];
+// The share of the category the rider finished ahead of: the riders behind over everyone else in the field, 100 for first and 0 for last.
+static double TeamShare(int place, int field) => Math.Round(100d * (field - place) / (field - 1), MidpointRounding.AwayFromZero);
+static string TeamOrdinal(int place) => place + (place % 100 is 11 or 12 or 13 ? "th" : (place % 10) switch { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" });
+var teamRider = new ChartSpec {
+    Title = "Team rider", Description = "Share of the category finished ahead of, round by round; round 4 was not held",
+    Kind = ChartKind.Line, Width = 340, Height = 260, Style = raceFace, DrawTitles = false,
+    XMin = -0.5, XMax = teamRounds.Length - 0.5,
+    YMin = 0, YMax = 100, YUnit = "%", YTickValues = [new(0, "0%"), new(50, "50%"), new(100, "100%")],
+    Series = [new("Share", teamRounds.Select((r, i) => r.Place is int place
+        ? new ChartPoint(i, TeamShare(place, r.Field), $"Round {r.Round}") { ValueNote = $" · {TeamOrdinal(place)} of {r.Field}" }
+        : new ChartPoint(i, null, $"Round {r.Round}") { GapLabel = "absent", Color = "#e0a800" }).ToArray(), "#22d3ee")
+        { StrokeWidth = 2, Markers = MarkerStyle.Filled }]
+};
+string teamRiderSvg = ChartSvg.Render(teamRider);
+// Interactive: <LumenChart Spec="teamRider" FitWidth="true" />
+```
+
+- **Missed, or not held.** A round the rider was entered in and did not ride is a missing value: a point with a `null` Y. The line breaks there, since nothing was ridden to join, and `GapLabel = "absent"` writes the word where the value would be. A round that was not held at all is not a missing value, so it has no point: X counts the held rounds, round 5 stands next to round 3, and the line joins them. Give a cancelled round a `null` Y instead and the line would break for a round nobody rode; give a missed round no point and the season would read as if the rider had ridden every round.
+- **The word.** `GapLabel` (0.42.0), 1 to 12 characters on one line, is written at 11 px and weight 600 at its round's X, centred on it and moved in from the plot's sides so it is never cut, just inside the plot beside the value axis's start: above the bottom edge here, or below the top edge on a reversed axis. It stands on a copy of itself stroked in the card's colour, as a value label does, so the `0%` gridline never cuts it, and it keeps clear of the labels written before it; where it has no room it is left out and the word stays in its mark's name. Lines, areas and scatter series take it, on a point whose Y is `null`; sparklines and other kinds refuse it.
+- **Its colour.** The word takes the point's `Color` where that clears 4.5:1 on the card, else the series colour where that does, else the text colour, `hi`. Gold `#e0a800` stands 8.41:1 on the card `#161618`, so the word is gold; the cyan line `#22d3ee` stands 10.00:1, and its markers are filled.
+- **Named and reached.** The absent round is a focusable mark like the others, an invisible box round its word, named and tooltipped `Share: Round 6, absent`, the word in place of `missing`, with the point's `ValueNote` after it if it has one. The arrow keys stop on it, the component's shared readout reads it `Share absent`, and its status line and data table say it. CSV leaves its value empty.
+- **Values and names.** `YUnit = "%"` writes `89%` after each value, and `ValueNote` adds the place and field, so a round reads `Share: Round 3, 89% · 5th of 37`. `YTickValues` labels 0, 50 and 100 as given. At 340 the axis writes every other round's name so none touch (`Round 1`, `Round 3`, `Round 6`, `Round 8`), and every round keeps its name in its mark; label the points `R3` instead and all seven fit, at the cost of names that read `Share: R3, 89% · 5th of 37`.
+- **Never colour alone.** `absent` is a word, not only a gold mark, and the series is named in its legend and in every mark's name.
+- **Keys.** From 0.42.0 a card whose drawing fits it is one tab stop, the roving point; its viewport takes a stop of its own, as a `role=region`, only while the drawing is wider than the card and scrolls.
+
 ## Rendering notes
 
 - **Static:** `ChartSvg.Render(spec)` at `Width = 340` (or the card's own width) is the whole chart: labels, colours, tooltips and names, with no script. Write it into the page, or rasterise it on the server with an SVG library of your choice; Lumen ships no PNG or PDF renderer. Each line's value label stands on a copy of itself stroked in the background colour, not on SVG 2's `paint-order`, so rasterisers without it draw it the same.
 - **Interactive:** `<LumenChart Spec="recommended" FitWidth="true" />` measures its card and redraws at that width, never below 320 px; before it is interactive it is drawn at `Width` and scaled to fit. `Height` is kept, so choose one that reads at a phone's width.
-- **Gaps:** a race with no place or no points is `null`, never zero: the line breaks, no mark or label is drawn, and the next race's change still compares with the last race that had a place. A race with no field size draws its place without a note.
+- **Gaps:** a race with no place or no points is `null`, never zero: the line breaks, no mark or label is drawn, and the next race's change still compares with the last race that had a place. A `GapLabel` (0.42.0) writes a word there instead, `absent`, and names the point; a race that was not held has no point at all. A race with no field size draws its place without a note.
 - **CSV:** `ChartExport.Csv(spec)` adds a `Note` column whenever a point carries a note, so the export keeps each field size beside its place.
 - **Sparklines:** `ChartSvg.Render` draws a sparkline at its own size, `width:120px;max-width:100%`, rather than the width of its box. In the component, `<LumenChart Spec="pb" />` draws the drawing alone with its tooltips — no legend, toolbar, zoom or data table — and a tooltip stands just above the drawing, as wide as its words. A sparkline may be as small as 60 by 16; other kinds than line, area, scatter and column, panes and value labels are refused.

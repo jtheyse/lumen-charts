@@ -98,7 +98,8 @@ public static partial class ChartSvg
     /// <summary>A chart drawn at the height it asks for, as every chart was before 0.41.0, is serialized for hashing as 0.40.0, which had no
     /// such setting, serialized it, so every chart drawn before it keeps its IDs. Whether the background is painted changes only the root's
     /// style, never a gradient, so it is never part of the hash, painted or not, and an unpainted chart names its gradients as the painted one
-    /// does. A series' average changes only the words its marks say, so it is never part of the hash either.</summary>
+    /// does. A series' average changes only the words its marks say, so it is never part of the hash either. A point's gap label, from 0.42.0,
+    /// is null unless set, and nulls are left out already.</summary>
     private static void Unfitted(JsonTypeInfo info)
     {
         if (info.Type == typeof(ChartSeries))
@@ -503,10 +504,11 @@ public static partial class ChartSvg
         w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-series='{series}' data-point='{index}' aria-label='{SvgWriter.E(label)}'{attributes}>{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}{shape}</g>");
     }
     private static string PointLabel(ChartSeries s, ChartPoint p) => $"{s.Name}: {p.Label ?? LinearScale.Label(p.X)}, {(p.Y.HasValue ? LinearScale.Label(p.Y.Value) + p.ValueNote : "missing")}";
-    /// <summary>A mark's name: its series, its label or X and its category's sub-label, its value and the value's note, then what colours it
-    /// — its zone, or how it changed from the point before — whether it is projected, and a band's bounds.</summary>
+    /// <summary>A mark's name: its series, its label or X and its category's sub-label, its value and the value's note, or a missing value's
+    /// gap label and note, then what colours it — its zone, or how it changed from the point before — whether it is projected, and a band's
+    /// bounds.</summary>
     private static string PointLabel(ChartSeries s, ChartPoint p, Axis x, Axis y, int? change = null, string? sub = null) =>
-        $"{s.Name}: {p.Label ?? x.Format(p.X)}{Under(sub)}, {(p.Y.HasValue ? y.Format(p.Y.Value) + p.ValueNote : "missing")}" +
+        $"{s.Name}: {p.Label ?? x.Format(p.X)}{Under(sub)}, {(p.Y.HasValue ? y.Format(p.Y.Value) + p.ValueNote : p.GapLabel is { } gap ? gap + p.ValueNote : "missing")}" +
         (s.Zones is { } zones && p.Y is { } value ? $", {zones.Zones[zones.IndexOf(value)].Name}" : "") +
         change switch { > 0 => ", better than the previous", < 0 => ", worse than the previous", 0 => ", level with the previous", _ => "" } +
         (s.ProjectedFrom is { } from && p.X >= from ? ", projected" : "") +
@@ -816,6 +818,32 @@ public static partial class ChartSvg
                     return;
                 }
             }
+            // A missing value's gap label: its word just inside the plot at the point's X, beside the start of the series' value axis — above
+            // the bottom edge, or below the top edge where a reversed axis starts at the top — centred on the X and moved in from the plot's
+            // sides so it is never cut, in the point's colour, else the series colour, else the text colour, whichever first clears 4.5:1,
+            // over a copy of itself stroked in the background colour. It keeps clear of the labels written before it, as a value label does,
+            // and with no room it is left out, its word kept in its mark's name. Its mark is an invisible box round the word, or a narrow one
+            // at its X where the word is left out, so the point is focused, hovered and announced as any other is; a point the X range shown
+            // leaves out is left out with its word.
+            void Gap(int si, int pi, ChartPoint p, string color, Axis scale, string label)
+            {
+                var cx = X(p.X);
+                if (cx < left - .5 || cx > right + .5) return;
+                var text = p.GapLabel!;
+                var width = Wide(text);
+                var x = width + 4 < right - left ? Math.Clamp(cx, left + width / 2 + 2, right - width / 2 - 2) : cx;
+                var y = scale.Map(scale.Min, bottom, top) < (top + bottom) / 2 ? top + 13 : bottom - 5;
+                var free = width + 4 < right - left && !written.Any(t => t.X2 > x - width / 2 && t.X1 < x + width / 2 && t.Y2 > y - 9 && t.Y1 < y + 3);
+                var (from, across) = free ? (x - width / 2 - 3, width + 6) : (cx - 5, 10d);
+                var ground = w.Style.Background;
+                Datum(w, si, pi, label, $"<rect x='{N(from)}' y='{N(y - 12)}' width='{N(across)}' height='18' rx='3' fill='{ground}' fill-opacity='0'/>");
+                if (!free) return;
+                written.Add((x - width / 2, x + width / 2, y - 9, y + 3));
+                var ink = p.Color is { } own && Contrast.Ratio(own, ground) >= 4.5 ? own : Contrast.Ratio(color, ground) >= 4.5 ? color : w.Style.Text;
+                var at = $"x='{N(x)}' y='{N(y)}'";
+                named.Append($"<g class='lumen-gap' text-anchor='middle' font-size='11' font-weight='600' pointer-events='none' aria-hidden='true'>" +
+                    $"<text {at} fill='{ground}' stroke='{ground}' stroke-width='3' stroke-linejoin='round'>{SvgWriter.E(text)}</text><text {at} fill='{ink}'>{SvgWriter.E(text)}</text></g>");
+            }
             w.Add($"<svg x='{N(left-bleed)}' y='{N(top-bleed)}' width='{N(right-left+2*bleed)}' height='{N(bottom-top+2*bleed)}' viewBox='{N(left-bleed)} {N(top-bleed)} {N(right-left+2*bleed)} {N(bottom-top+2*bleed)}' overflow='hidden'>");
             // Behind the data, and inside the clip, so a reference pans and zooms with what it refers to. A refined chart sets
             // their labels clear of each other and writes them over the data, where a halo keeps them legible.
@@ -934,6 +962,10 @@ public static partial class ChartSvg
                             if (series.ValueLabels) Over(X(p.X), At(p.Y!.Value), d.Index == last && d.Count == 1 || p.Highlight is not null ? Highlighted : run.Length > 80 ? 2 : 4, scale.Format(p.Y!.Value), p.ValueNote, Lettered(MovedOf(d), p));
                         }
                     }
+                    // A missing value with a gap label is written and named where the line breaks.
+                    for (var pi = 0; pi < series.Points.Count; pi++)
+                        if (series.Points[pi] is { Y: null, GapLabel: not null } missed)
+                            Gap(si, pi, missed, color, scale, PointLabel(series, missed, xs, scale, sub: Sub(missed.X)) + Of(series, missed));
                 }
                 else if (mark == ChartKind.Range)
                 {
@@ -985,7 +1017,13 @@ public static partial class ChartSvg
                 }
                 else for (var pi = 0; pi < series.Points.Count; pi++)
                 {
-                    var p = series.Points[pi]; if (!p.Y.HasValue) continue;
+                    var p = series.Points[pi];
+                    if (!p.Y.HasValue)
+                    {
+                        // Only scatter points among these marks take a gap label, written and named where the point would stand.
+                        if (p.GapLabel is not null) Gap(si, pi, p, color, scale, PointLabel(series, p, xs, scale, sub: Sub(p.X)) + Of(series, p));
+                        continue;
+                    }
                     var y = p.Y.Value;
                     if (category && place >= 0)
                     {

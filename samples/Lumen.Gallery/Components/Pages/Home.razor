@@ -51,11 +51,12 @@
             <div class="under-chart"><span>↳ @Hint</span><span>@(selection ?? "Select a point to inspect its value")</span></div>
         </section>
         <section id="cards" class="card-fits">
-            <div class="section-heading"><div><div class="eyebrow">ON A PHONE CARD</div><h2>Charts that fit a card.</h2></div><span class="quiet">Rows set the height, the card shows through, and averages say what they average.</span></div>
+            <div class="section-heading"><div><div class="eyebrow">ON A PHONE CARD</div><h2>Charts that fit a card.</h2></div><span class="quiet">Rows set the height, the card shows through, averages say what they average, and a missed round says so.</span></div>
             <div class="fit-grid">
                 <div class="chart-card">@Branded(@<LumenChart Spec="DemoData.FittedMeters(Theme)" FitWidth="true" ShowLegend="false"/>)<p class="fit-note"><code>FitHeight</code>: three meters on tracks, drawn as tall as their rows need.</p></div>
                 <div class="chart-card tinted" style="background:@DemoData.CardTint(Theme)"><LumenChart Spec="DemoData.Unpainted(Theme)" FitWidth="true" ShowLegend="false"/><p class="fit-note"><code>PaintBackground = false</code>: the card's tint shows through; the style's background is the tint.</p></div>
                 <div class="chart-card">@Branded(@<LumenChart Spec="DemoData.PreAveraged(Theme)" FitWidth="true"/>)<p class="fit-note"><code>AverageOf = "12 s"</code>: points the app averaged; the readout says so once.</p></div>
+                <div class="chart-card">@Branded(@<LumenChart Spec="DemoData.TeamRider(Theme)" FitWidth="true" ShowLegend="false"/>)<p class="fit-note"><code>GapLabel = "absent"</code>: a round the rider missed is written and named, not left blank; round 4 was not held, so it has no point and the line joins over it.</p></div>
             </div>
         </section>
         <section class="lower-grid">

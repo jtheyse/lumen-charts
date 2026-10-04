@@ -247,6 +247,7 @@ public static partial class ChartValidation
                     throw new ArgumentException("Coordinates must be finite, magnitude <= 1e100; bubble sizes must be nonnegative.");
                 Text(p.Label); Color(p.Color); Text(p.ValueNote); Color(p.Highlight);
                 if (p.SubLabel is not null) SubLabel(spec, p.SubLabel);
+                if (p.GapLabel is not null) GapLabel(spec, mark, p);
                 if (p.Highlight is not null)
                 {
                     if (mark is not (ChartKind.Line or ChartKind.Scatter))
@@ -453,6 +454,8 @@ public static partial class ChartValidation
             throw new ArgumentException("A sparkline draws no axes, so it takes no ticks; YTickValues applies to a full chart.");
         if (spec.Series?.Any(series => series?.EndLabel is not null || series?.EndNote is not null) == true)
             throw new ArgumentException("A sparkline draws its data alone, with no words, so it writes no end labels; name the series in the words beside it.");
+        if (spec.Series?.Any(series => series?.Points?.Any(p => p?.GapLabel is not null) == true) == true)
+            throw new ArgumentException("A sparkline draws its data alone, with no words, so it writes no gap labels; a missing value is a gap in it, and the words beside it can say why.");
     }
 
     /// <summary>A minimum span widens an axis fitted to the data about the data's middle, so it needs an axis that is fitted to the
@@ -639,6 +642,27 @@ public static partial class ChartValidation
             throw new ArgumentException("A sub-label is written under its category's name, so it needs words; leave SubLabel null to write none.");
         if (sub.Length > MaxSubLabel || sub.Any(c => c is '\n' or '\r' or '\t'))
             throw new ArgumentException($"A sub-label is one short line under its category's name, at most {MaxSubLabel} characters and no line breaks, such as 152 bpm or 13.0 W/kg.");
+    }
+
+    /// <summary>The most characters a point's gap label takes.</summary>
+    private const int MaxGapLabel = 12;
+
+    /// <summary>A gap label is the word a missing value is written as, so it needs words on one short line, a point with no value, and a
+    /// series whose missing values leave a place on the chart: a line, an area or scatter points.</summary>
+    private static void GapLabel(ChartSpec spec, ChartKind mark, ChartPoint p)
+    {
+        var gap = p.GapLabel!;
+        Text(gap);
+        if (string.IsNullOrWhiteSpace(gap))
+            throw new ArgumentException("A gap label is the word a missing value is written as, such as absent, so it needs words; leave GapLabel null to write none.");
+        if (gap.Length > MaxGapLabel || gap.Any(c => c is '\n' or '\r' or '\t'))
+            throw new ArgumentException($"A gap label is one short word or two written in the plot, at most {MaxGapLabel} characters and no line breaks, such as absent or no result.");
+        if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter))
+            throw new ArgumentException("A gap label is written where a line, an area or scatter points miss a value, so it applies to series drawn as lines, areas or scatter points; the other kinds draw nothing at a missing value, or draw a value of their own, so name the point in its Label or ValueNote.");
+        if (spec.DensityCells is not null && mark == ChartKind.Scatter)
+            throw new ArgumentException("A density scatter shades cells rather than points, so it writes no gap label at a missing point.");
+        if (p.Y.HasValue)
+            throw new ArgumentException("A gap label is written where a value is missing, so it applies to a point whose Y is null; a point with a value is read by its value, and a note on it belongs in its ValueNote.");
     }
 
     /// <summary>Each finishing touch applies to the marks that can show it.</summary>

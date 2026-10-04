@@ -10,7 +10,7 @@ $r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 28 -and $r.Content.Contains('id="lap-heart"') -and $r.Content.Contains('id="best-efforts"') -and $r.Content.Contains('id="zone-strip"') -and $r.Content.Contains("class='lumen-strip-key'") -and $r.Content.Contains('id="scores"') -and ([regex]::Matches($r.Content,"class='lumen-bar-track'")).Count -eq 3 -and $r.Content.Contains('id="ride-channels"') -and $r.Content.Contains('id="season-arc"') -and $r.Content.Contains('id="gap"') -and ([regex]::Matches($r.Content,"class='lumen-end'")).Count -eq 8 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'") -and $r.Content.Contains('id="laps"') -and $r.Content.Contains('id="next-session"') -and $r.Content.Contains('id="field"') -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 31) 'The Sports & performance page answers 200 and prerenders its twenty-eight charts, each set to fit its card, the laps'' heart rates and the best efforts, the time-in-zone strip with its key, the three session scores on their tracks, the season arc, the gap to the leader with its eight end labels, the ride channels, last night''s sleep stages, the training calendar, the run''s four laps, the next session''s ten steps and the seventeen bins of how the field finished among them'
 $r=Invoke-WebRequest "$BaseUrl/" -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('class="lumen-chart lumen-fit"') -and $r.Content.Contains('<b>23</b><span>Chart types</span>') -and $r.Content.Contains('>Calendar</button>') -and $r.Content.Contains('>Blocks</button>') -and $r.Content.Contains('>Strip</button>')) 'The home page answers 200, its chart explorer set to fit its card, with twenty-three chart types and a calendar, blocks and a strip among them'
-Verify (([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 5 -and $r.Content.Contains("data-node='sources'") -and $r.Content.Contains("viewBox='0 0 900 460'")) 'The home page prerenders its network graph set to fit its card too, drawn at its own width until the browser measures the card, and the three charts that fit a card'
+Verify (([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 6 -and $r.Content.Contains("data-node='sources'") -and $r.Content.Contains("viewBox='0 0 900 460'")) 'The home page prerenders its network graph set to fit its card too, drawn at its own width until the browser measures the card, and the four charts that fit a card'
 $types=Invoke-RestMethod "$BaseUrl/api/charts/types"
 Verify ($types.Count -eq 23 -and $types -contains 'Gauge' -and $types -contains 'Ring' -and $types -contains 'Timeline' -and $types -contains 'Range' -and $types -contains 'Calendar' -and $types -contains 'Blocks' -and $types -contains 'Strip') 'Twenty-three chart types, gauge, ring, timeline, range, calendar, blocks and strip among them'
 foreach($kind in @('Line','Area','Scatter','Bubble','Column','Bar','StackedColumn','Donut','Heatmap','Radar')){
@@ -523,6 +523,32 @@ foreach($bad in @(@{body=$meters.Replace('"kind":"Bar"','"kind":"Column"');reaso
   @{body='{"title":"Recovery","kind":"Gauge","series":[{"name":"Recovery","averageOf":"a week","points":[{"x":0,"y":72}]}]}';reason='AverageOf is said after a mark''s one value';name='An AverageOf on a gauge'},
   @{body='{"title":"Zones","kind":"Strip","width":340,"series":[{"name":"Zones","averageOf":"a week","points":[{"x":0,"y":30,"label":"Easy"},{"x":1,"y":70,"label":"Hard"}]}]}';reason='AverageOf is said after a mark''s one value';name='An AverageOf on a strip'},
   @{body=$meters.Replace('"height":240','"height":100');reason='240';name='A fitted chart''s height outside 240-2160'})){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
+}
+# 0.42.0: a missing value written as a word and named as a mark, and its refusals.
+$r=Invoke-WebRequest "$BaseUrl/" -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('>absent</text>') -and $r.Content.Contains("aria-label='Share: Round 6, absent'")) 'The home page prerenders the team rider''s missed round, written absent and named as a mark'
+$rider='{"title":"Team rider","kind":"Line","width":340,"height":260,"xMin":-0.5,"xMax":4.5,"yMin":0,"yMax":100,"yUnit":"%","series":[{"name":"Share","points":[{"x":0,"y":78,"label":"Round 1","valueNote":"/38"},{"x":1,"y":68,"label":"Round 2"},{"x":2,"y":null,"label":"Round 3","gapLabel":"absent","color":"#8A6500"},{"x":3,"y":85,"label":"Round 5"},{"x":4,"y":94,"label":"Round 6"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $rider -SkipHttpErrorCheck
+$doc=[xml]$r.Content
+$named=@($doc.SelectNodes('//*[local-name()="g"][@class="lumen-datum"]')|ForEach-Object{$_.GetAttribute('aria-label')})
+$word=@($doc.SelectNodes('//*[local-name()="g"][@class="lumen-gap"]/*[local-name()="text"]'))
+Verify ($r.StatusCode -eq 200 -and $named.Count -eq 5 -and $named -contains 'Share: Round 3, absent' -and $named -contains 'Share: Round 1, 78%/38' -and $word.Count -eq 2 -and $word[1].InnerText -eq 'absent' -and $word[1].GetAttribute('fill') -eq '#8A6500') '"gapLabel" posted as JSON writes the word in the point''s colour and names the missing round as a mark'
+Verify (@($doc.SelectNodes('//*[local-name()="path"][@fill="none"]')).Count -eq 2) 'The line still breaks at the missing round'
+$silent=$rider.Replace(',"gapLabel":"absent"','')
+$p=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $silent -SkipHttpErrorCheck
+Verify ($p.StatusCode -eq 200 -and -not $p.Content.Contains('absent') -and @(([xml]$p.Content).SelectNodes('//*[local-name()="g"][@class="lumen-datum"]')).Count -eq 4) 'Without "gapLabel" the missing round is silent and has no mark, as before'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $rider
+$p=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $silent
+Verify ($r.StatusCode -eq 200 -and $r.Content -eq $p.Content) 'CSV keeps a missing round''s empty value'
+foreach($bad in @(@{body=$rider.Replace('"y":null,"label":"Round 3"','"y":50,"label":"Round 3"');reason='so it applies to a point whose Y is null';name='A gap label on a point with a value'},
+  @{body=$rider.Replace('"kind":"Line","width":340,"height":260,"xMin":-0.5,"xMax":4.5','"kind":"Column","width":340,"height":260');reason='so it applies to series drawn as lines, areas or scatter points';name='A gap label on a column chart'},
+  @{body=$rider.Replace('"width":340,"height":260','"width":120,"height":32,"sparkline":true');reason='so it writes no gap labels';name='A gap label on a sparkline'},
+  @{body=$rider.Replace('"gapLabel":"absent"','"gapLabel":"did not finish"');reason='at most 12 characters and no line breaks';name='A gap label past 12 characters'},
+  @{body=$rider.Replace('"gapLabel":"absent"','"gapLabel":"no\nride"');reason='at most 12 characters and no line breaks';name='A gap label on two lines'},
+  @{body=$rider.Replace('"gapLabel":"absent"','"gapLabel":" "');reason='so it needs words';name='A blank gap label'},
+  @{body=$rider.Replace('"kind":"Line"','"kind":"Scatter","densityCells":20').Replace(',"color":"#8A6500"','');reason='so it writes no gap label';name='A gap label on a density scatter'})){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
 }

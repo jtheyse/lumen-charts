@@ -796,6 +796,27 @@ lines.Add($"recipe/score-bars-340-fitted {Hash(Unlegended(new ChartSpec { Title 
     Kind = ChartKind.Bar, Width = 340, Height = 240, Style = raceFace40 with { Gridlines = GridLine.Hidden }, DrawTitles = false,
     YMin = 0, YMax = 100, BarTrack = true, YTickLabels = TickLabels.None, FitHeight = true,
     Series = [new("Score", raceScores41.Select((s, i) => new ChartPoint(i, s.Score, s.Name)).ToArray(), "#D7DDE5") { ValueLabels = true }] }))}");
+// 0.42.0: words at a missing value. A round the rider missed written "absent" at the foot of the plot in light and Midnight, at the top of
+// a reversed axis, two missed rounds side by side, the second's word left out, and the team-rider recipe at 340 on the Race Face card.
+ChartSpec Missed(ChartStyle style, bool reversed = false, params int[] gaps) => new()
+{
+    Kind = ChartKind.Line, Width = 340, Height = 260, Title = "Team rider", Description = "Share of the category finished ahead of", Style = style,
+    XMin = -0.5, XMax = 9.5, YMin = 0, YMax = 100, YUnit = "%", YReversed = reversed,
+    Series = [new("Share", Enumerable.Range(0, 10).Select(i => gaps.Contains(i) ? new ChartPoint(i, null, $"R{i + 1}") { GapLabel = "absent", Color = "#8A6500" }
+        : new ChartPoint(i, 60 + 3 * i % 35, $"R{i + 1}")).ToArray()) { Markers = MarkerStyle.Filled }]
+};
+lines.Add($"gap/light {Hash(Unlegended(Missed(ChartStyle.Light, false, 4)))}");
+lines.Add($"gap/midnight {Hash(Unlegended(Missed(ChartStyle.Midnight, false, 4)))}");
+lines.Add($"gap/reversed {Hash(Unlegended(Missed(ChartStyle.Light, true, 4)))}");
+lines.Add($"gap/two-close {Hash(Unlegended(Missed(ChartStyle.Light, false, 4, 5)))}");
+static string Ordinal42(int place) => place + (place % 100 is 11 or 12 or 13 ? "th" : (place % 10) switch { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" });
+(int Round, int? Place, int Field)[] teamRounds42 = [(1, 9, 38), (2, 14, 41), (3, 5, 37), (5, 7, 40), (6, null, 39), (7, 3, 36), (8, 6, 42)];
+lines.Add($"recipe/team-rider-340 {Hash(Render(new ChartSpec { Title = "Team rider", Description = "Share of the category finished ahead of, round by round; round 4 was not held",
+    Kind = ChartKind.Line, Width = 340, Height = 260, Style = raceFace40, DrawTitles = false, XMin = -0.5, XMax = teamRounds42.Length - 0.5,
+    YMin = 0, YMax = 100, YUnit = "%", YTickValues = [new(0, "0%"), new(50, "50%"), new(100, "100%")],
+    Series = [new("Share", teamRounds42.Select((r, i) => r.Place is int place
+        ? new ChartPoint(i, Math.Round(100d * (r.Field - place) / (r.Field - 1), MidpointRounding.AwayFromZero), $"Round {r.Round}") { ValueNote = $" · {Ordinal42(place)} of {r.Field}" }
+        : new ChartPoint(i, null, $"Round {r.Round}") { GapLabel = "absent", Color = "#e0a800" }).ToArray(), "#22d3ee") { StrokeWidth = 2, Markers = MarkerStyle.Filled }] }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

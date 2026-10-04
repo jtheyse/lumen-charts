@@ -99,10 +99,11 @@ if (await concealed.CountAsync() > 0)
 }
 else Console.WriteLine("SKIP hidden-marker check: this host's first chart shows its markers");
 
-// 0.36.0: every chart is one tab stop, and the arrow keys move between its marks. The drawing itself keeps every mark at tabindex 0, so
-// the script is what makes them one; the words that name the keys are the viewport's description.
+// 0.36.0: every chart is one tab stop among its marks, and the arrow keys move between them. The drawing itself keeps every mark at
+// tabindex 0, so the script is what makes them one; the words that name the keys are the viewport's description while it scrolls and the
+// drawing's otherwise (0.42.0).
 const string active = "() => { const a = document.activeElement; return a?.dataset?.series + ':' + a?.dataset?.point; }";
-await Test("Every chart on the page is one tab stop, its keys named in its viewport's description, and Tab leaves it after one mark", async () =>
+await Test("Every chart on the page is one tab stop among its marks, its keys named in its description, and Tab leaves it after one mark", async () =>
 {
     var stops = await page.EvaluateAsync<int[][]>(@"() => [...document.querySelectorAll('.lumen-chart')].filter(c => c.querySelector('.lumen-datum')).map(c => {
         const marks = [...c.querySelectorAll('.lumen-datum')], v = c.querySelector(':scope > .lumen-viewport');
@@ -1166,6 +1167,91 @@ if (await page.EvaluateAsync<int>(averagedIndex) >= 0)
         Check(Regex.Matches(await card.Locator(".lumen-status").TextContentAsync() ?? "", "average of").Count == 1, "the status line");
     });
 else Console.WriteLine("SKIP averaged readout check: this host's first page draws no readout of series the app averaged");
+// 0.42.0: a chart is one tab stop while its drawing fits its box, its roving point, and two while it scrolls, its viewport a region before
+// the point; and a missing value written with a gap label is a mark the arrow keys reach, its tooltip saying the word. Each check opens the
+// host's first page afresh. A button put just before the chart stands for whatever comes before it on a page.
+const string stop42 = @"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'), keys = c.querySelector(':scope > .lumen-keys');
+    return [v.getAttribute('tabindex'), v.getAttribute('role') || '', v.getAttribute('aria-label') || '', v.getAttribute('aria-describedby') === keys.id ? 'viewport' : s.getAttribute('aria-describedby') === keys.id ? 'drawing' : 'none',
+        String(v.scrollWidth - v.clientWidth), String(c.querySelectorAll('.lumen-datum[tabindex=""0""]').length)]; }";
+const string before42 = "c => { const b = document.createElement('button'); b.id = 'lumen-before-42'; b.textContent = 'Before'; c.before(b); b.focus(); }";
+const string where42 = "() => { const a = document.activeElement; return a?.classList.contains('lumen-viewport') ? 'viewport' : a?.classList.contains('lumen-datum') ? 'point' : a?.tagName || 'none'; }";
+foreach (var (width, phone) in new[] { (375, true), (1280, false) })
+    await Test($"At {width} pixels{(phone ? ", on a phone," : "")} a chart that fits is one tab stop, its viewport neither a stop nor a region, and without FitWidth in a narrower box it scrolls and its viewport is a region and a stop before its point, and back", async () =>
+    {
+        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = phone ? 812 : 900 }, IsMobile = phone, HasTouch = phone, DeviceScaleFactor = phone ? 2 : 1 });
+        var tab = await Fresh41(context);
+        var card = tab.Locator(".lumen-chart:not(.lumen-spark):has(> .lumen-keys)").First;
+        await card.ScrollIntoViewIfNeededAsync();
+        await tab.WaitForFunctionAsync(fitted41, await card.ElementHandleAsync(), new() { Timeout = 60_000 });
+        await tab.WaitForFunctionAsync("c => c.querySelector(':scope > .lumen-viewport').getAttribute('tabindex') === '-1'", await card.ElementHandleAsync());
+        var fits = await card.EvaluateAsync<string[]>(stop42);
+        Check(fits[0] == "-1" && fits[1] == "" && fits[2] == "" && fits[3] == "drawing" && fits[4] == "0" && fits[5] == "1", $"fitting: {string.Join(", ", fits)}");
+        // Tab from what comes before the chart lands on its roving point, and the next Tab leaves the chart.
+        await card.EvaluateAsync(before42);
+        await tab.Keyboard.PressAsync("Tab");
+        Check(await tab.EvaluateAsync<string>(where42) == "point", $"Tab reached the {await tab.EvaluateAsync<string>(where42)}");
+        await tab.Keyboard.PressAsync("Escape");
+        // Without FitWidth a chart keeps the stylesheet's 640-pixel floor and scrolls in a narrower box. Neither host draws such a chart, so the
+        // check takes this one's lumen-fit class away, which is all FitWidth changes in the page's styles, in a box 480 pixels wide on a
+        // desktop and the phone's own: the drawing scrolls, and the viewport takes its stop and its name back.
+        await card.EvaluateAsync(phone ? "c => c.classList.remove('lumen-fit')" : "c => { c.classList.remove('lumen-fit'); c.style.width = '480px'; }");
+        await tab.WaitForFunctionAsync("c => c.querySelector(':scope > .lumen-viewport').getAttribute('role') === 'region'", await card.ElementHandleAsync(), new() { Timeout = 30_000 });
+        var scrolls = await card.EvaluateAsync<string[]>(stop42);
+        Check(scrolls[0] == "0" && scrolls[1] == "region" && scrolls[2] == "Scrollable chart" && scrolls[3] == "viewport" && int.Parse(scrolls[4], CultureInfo.InvariantCulture) > 0 && scrolls[5] == "1", $"scrolling: {string.Join(", ", scrolls)}");
+        await tab.FocusAsync("#lumen-before-42");
+        await tab.Keyboard.PressAsync("Tab");
+        var first = await tab.EvaluateAsync<string>(where42);
+        await tab.Keyboard.PressAsync("Tab");
+        var second = await tab.EvaluateAsync<string>(where42);
+        Check(first == "viewport" && second == "point", $"Tab reached the {first}, then the {second}");
+        await tab.Keyboard.PressAsync("Escape");
+        // Given FitWidth's class and its room back, it fits again and is one stop again.
+        await card.EvaluateAsync("c => { c.classList.add('lumen-fit'); c.style.width = ''; }");
+        await tab.WaitForFunctionAsync("c => c.querySelector(':scope > .lumen-viewport').getAttribute('tabindex') === '-1'", await card.ElementHandleAsync(), new() { Timeout = 30_000 });
+        var again = await card.EvaluateAsync<string[]>(stop42);
+        Check(again[1] == "" && again[3] == "drawing" && again[4] == "0", $"again: {string.Join(", ", again)}");
+        // Every other chart on the page that fits is one stop, and any that scrolls is a region.
+        var all = await tab.EvaluateAsync<string[]>(@"() => [...document.querySelectorAll('.lumen-chart:not(.lumen-spark):has(> .lumen-keys)')].map(c => { const v = c.querySelector(':scope > .lumen-viewport');
+            const scrolls = v.scrollWidth > v.clientWidth + 1 || v.scrollHeight > v.clientHeight + 1; return (scrolls ? v.getAttribute('tabindex') === '0' && v.getAttribute('role') === 'region' : v.getAttribute('tabindex') === '-1' && !v.hasAttribute('role')) ? '' : (scrolls ? 'scrolls ' : 'fits ') + v.getAttribute('tabindex'); }).filter(s => s)");
+        Check(all.Length == 0, string.Join(" | ", all));
+    });
+// A missing value written with a gap label is found by its word.
+const string gappedIndex = "() => [...document.querySelectorAll('.lumen-chart')].findIndex(c => !!c.querySelector('g.lumen-gap'))";
+if (await page.EvaluateAsync<int>(gappedIndex) >= 0)
+    foreach (var (width, phone) in new[] { (375, true), (1280, false) })
+        await Test($"At {width} pixels{(phone ? ", on a phone," : "")} the arrow keys reach a missing value's gap label, its mark named and tooltipped with the word, its word clearing 4.5:1 and drawn whole", async () =>
+        {
+            await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = phone ? 812 : 900 }, IsMobile = phone, HasTouch = phone, DeviceScaleFactor = phone ? 2 : 1 });
+            var tab = await Fresh41(context);
+            var card = tab.Locator(".lumen-chart").Nth(await tab.EvaluateAsync<int>(gappedIndex));
+            await card.ScrollIntoViewIfNeededAsync();
+            await tab.WaitForFunctionAsync(fitted41, await card.ElementHandleAsync(), new() { Timeout = 60_000 });
+            var word = (await card.Locator("g.lumen-gap text").Last.TextContentAsync())!;
+            await card.Locator(".lumen-datum[data-series='0'][data-point='0']").FocusAsync();
+            var reached = "";
+            for (var i = 0; i < 20 && !reached.EndsWith(", " + word); i++)
+            {
+                await tab.Keyboard.PressAsync("ArrowRight");
+                reached = await tab.EvaluateAsync<string>("() => document.activeElement?.getAttribute('aria-label') || ''");
+            }
+            Check(reached.EndsWith(", " + word), $"the keys reached \"{reached}\"");
+            var tip = card.Locator(".lumen-tooltip");
+            await tip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            Check(await tip.TextContentAsync() == reached, $"the tooltip reads \"{await tip.TextContentAsync()}\"");
+            // The focused mark shows its ring round the word; the word stands inside the drawing and the plot, on a ground it clears 4.5:1 against.
+            var measured = await card.EvaluateAsync<string[]>(@"c => { const a = document.activeElement, r = a.querySelector('rect'), s = c.querySelector(':scope > .lumen-viewport > svg'), t = [...c.querySelectorAll('g.lumen-gap text')].pop();
+                const box = t.getBoundingClientRect(), page = s.getBoundingClientRect(), ground = s.style.getPropertyValue('--lumen-ground').trim() || getComputedStyle(s).backgroundColor;
+                return [getComputedStyle(r).strokeWidth, String(box.left >= page.left && box.right <= page.right && box.top >= page.top && box.bottom <= page.bottom), getComputedStyle(t).fill, ground, String(parseFloat(getComputedStyle(t).fontSize))]; }");
+            Check(measured[0] == "3px" && measured[1] == "true" && measured[4] == "11", string.Join(", ", measured));
+            double[] Rgb(string colour) => colour.StartsWith('#') ? [Convert.ToInt32(colour[1..3], 16), Convert.ToInt32(colour[3..5], 16), Convert.ToInt32(colour[5..7], 16)]
+                : Regex.Matches(colour, @"[\d.]+").Take(3).Select(m => double.Parse(m.Value, CultureInfo.InvariantCulture)).ToArray();
+            double Luminance(double[] c) => c.Select(v => v / 255).Select(v => v <= .04045 ? v / 12.92 : Math.Pow((v + .055) / 1.055, 2.4)).Zip(new[] { .2126, .7152, .0722 }, (v, w) => v * w).Sum();
+            double l1 = Luminance(Rgb(measured[2])), l2 = Luminance(Rgb(measured[3]));
+            var ratio = (Math.Max(l1, l2) + .05) / (Math.Min(l1, l2) + .05);
+            Check(ratio >= 4.5, $"the word {measured[2]} stands {ratio:0.00}:1 on {measured[3]}");
+            await tab.Keyboard.PressAsync("Escape");
+        });
+else Console.WriteLine("SKIP gap label checks: this host's first page draws no missing value written with a gap label");
 var quietHere = page.Locator(".lumen-chart:has(.lumen-quiet)");
 if (await quietHere.CountAsync() > 0) await QuietChecks(page, quietHere.First, address, "This host");
 else Console.WriteLine("SKIP quiet chart checks: this host's first page draws no chart without its toolbar");

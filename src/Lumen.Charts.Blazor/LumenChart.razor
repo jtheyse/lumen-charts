@@ -10,7 +10,8 @@ else
 <div class="@(FitWidth ? "lumen-chart lumen-fit" : "lumen-chart")" @ref="root">
     <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart">@((MarkupString)svg)</div>
     @* The keys a reader moves with, hidden from view and from reading in place: the script, which makes them work, names them as the
-       viewport's description, or a sparkline's drawing's. *@
+       viewport's description while it scrolls, and otherwise the drawing's, as a sparkline's. The viewport is written as a scrolling
+       region and a tab stop; the script leaves it neither while the drawing fits it (0.42.0). *@
     <span class="lumen-keys" hidden>@Keys</span>@if(ShowLegend&&Spec.Kind!=ChartKind.Strip){@Indent<div class="lumen-legend" aria-label="Chart series">
         @for(var i=0;i<Spec.Series.Count;i++)
         {
@@ -123,8 +124,8 @@ else
             ChartKind.Blocks when point.XEnd is {} end&&point.Y.HasValue=>$"{y.Format(point.Y.Value)}{point.ValueNote} from {xAxis.Format(point.X)} to {xAxis.Format(end)}",
             ChartKind.Range when point.Y is null&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Low.Value)} to {y.Format(point.High.Value)}",
             _ when point.Y.HasValue&&point.Low.HasValue&&point.High.HasValue=>$"{y.Format(point.Y.Value)}{point.ValueNote} ({y.Format(point.Low.Value)} to {y.Format(point.High.Value)})",
-            // A value's note follows it, as it does in the mark's name.
-            _=>point.Y.HasValue?y.Format(point.Y.Value)+point.ValueNote:"Missing"
+            // A value's note follows it, as it does in the mark's name, and a missing value's gap label and note stand in its place.
+            _=>point.Y.HasValue?y.Format(point.Y.Value)+point.ValueNote:point.GapLabel is {} gap?gap+point.ValueNote:"Missing"
         };
     }
     // A point's category or X as its mark's name says it: its label, and on a category chart its category's sub-label after it, the first
@@ -251,7 +252,7 @@ else
             : p.XEnd is {} end&&(Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Blocks&&p.Y is {} height ? $"{Spec.Series[index].Name}: {(p.Label is null ? "" : p.Label+", ")}{xAxis.Format(p.X)} to {xAxis.Format(end)} = {Measure(Spec.Series[index]).Format(height)}{p.ValueNote}{Averages(index,p)}"
             : p.XEnd is {} finish ? $"{Spec.Series[index].Name}: {xAxis.Format(p.X)} to {xAxis.Format(finish)}"
             : (Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Range&&p.Low is {} low&&p.High is {} high ? $"{Spec.Series[index].Name}: {Category(p)} = {Measure(Spec.Series[index]).Format(low)} to {Measure(Spec.Series[index]).Format(high)}{(p.Y is {} typical ? $", average {Measure(Spec.Series[index]).Format(typical)}" : "")}"
-            : $"{Spec.Series[index].Name}: {Category(p)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y)+p.ValueNote+Averages(index,p) : "missing")}";
+            : $"{Spec.Series[index].Name}: {Category(p)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y)+p.ValueNote+Averages(index,p) : p.GapLabel is {} gap ? gap+p.ValueNote : "missing")}";
         await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
     }
     /// <summary>Called by the component's script when a reader drags across the plots with a mouse or a pen and lets go, with the drag's
