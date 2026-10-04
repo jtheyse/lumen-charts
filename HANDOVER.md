@@ -39,13 +39,13 @@ Where it stands (3 October 2026):
 |---|---|---|
 | #1 position & points, #2 season by round | 0.33.0 | live |
 | #3 season strip | stays HTML (its ▲/▼ rule is in the recipe) | — |
-| #4 PB sparklines, #6 growth sparklines | 0.34.0 | committed in RaceSenseNet, not yet deployed (the owner deploys) |
-| #5 finish-time histogram | 0.35.0 | committed in RaceSenseNet (5f69ee7d), not yet deployed |
-| #8 fitness & form | 0.36.0 | committed in RaceSenseNet (e24e7d1d), not yet deployed |
-| #7 ride channels | 0.37.0 | committed in RaceSenseNet (6ba3169e), not yet deployed |
-| #9 season arc, #10 gap to the leader | 0.38.0 | committed in RaceSenseNet (fb30f341), not yet deployed |
-| #12 effort zones, #14 score bars | 0.39.0 | committed in RaceSenseNet (edd8d77d), not yet deployed |
-| #11 best efforts, #13 heart rate per lap | 0.40.0 | Race Face told to upgrade and swap them (4 Oct 2026); awaiting its report |
+| #4 PB sparklines, #6 growth sparklines | 0.34.0 | live (production deployed 4 Oct 2026, 20:05, from b20c3359 on Lumen 0.39) |
+| #5 finish-time histogram | 0.35.0 | live (same deploy) |
+| #8 fitness & form | 0.36.0 | live (same deploy) |
+| #7 ride channels | 0.37.0 | live (same deploy) |
+| #9 season arc, #10 gap to the leader | 0.38.0 | live (same deploy) |
+| #12 effort zones, #14 score bars | 0.39.0 | live (same deploy) |
+| #11 best efforts, #13 heart rate per lap | 0.40.0 | Race Face has the request; queued behind the owner's Mission 021 in that session |
 | #15–#20 (P3) | after P2 | — |
 
 **After each release** the owner wants the Claude session **"RACEFACE RUNNING EXPANSION 2"** told to upgrade: `SendMessage` to that name (check `ListAgents` first). The message gives the release URL, what it adds for which charts, and steps:
