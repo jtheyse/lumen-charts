@@ -72,7 +72,8 @@ export function attach(root, dotnet) {
             state.overlay = draw('g', { class: 'lumen-readout', 'aria-hidden': 'true', 'pointer-events': 'none' });
             svg.appendChild(state.overlay);
         }
-        const ground = getComputedStyle(svg).backgroundColor;
+        // A drawing left unpainted carries the colour it stands on, which its halos are drawn in, as --lumen-ground.
+        const ground = svg.style.getPropertyValue('--lumen-ground').trim() || getComputedStyle(svg).backgroundColor;
         const parts = [draw('line', { x1: x, x2: x, y1: readout.top, y2: readout.bottom, 'stroke-width': 1, 'vector-effect': 'non-scaling-stroke', style: 'stroke:var(--lumen-muted)' })];
         for (const [, , y, , color] of entries) {
             if (y === null) continue;
@@ -459,8 +460,12 @@ export function png(svg, filename, scale) {
                 canvas.width = Math.round(width * factor);
                 canvas.height = Math.round(height * factor);
                 const context = canvas.getContext('2d');
-                context.fillStyle = root.style.background || '#FFFFFF';
-                context.fillRect(0, 0, canvas.width, canvas.height);
+                // A drawing left unpainted, which carries its colour as --lumen-ground instead, stays transparent.
+                const ground = root.style.background || (root.style.getPropertyValue('--lumen-ground') ? '' : '#FFFFFF');
+                if (ground) {
+                    context.fillStyle = ground;
+                    context.fillRect(0, 0, canvas.width, canvas.height);
+                }
                 context.drawImage(image, 0, 0, canvas.width, canvas.height);
                 canvas.toBlob(blob => {
                     if (!blob) { reject(new Error('The browser produced no image data.')); return; }

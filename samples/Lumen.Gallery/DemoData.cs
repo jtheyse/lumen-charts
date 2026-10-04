@@ -354,6 +354,39 @@ public static class DemoData
         }
         return spec;
     }
+    // 0.41.0: charts that fit a card. Every number is invented.
+    /// <summary>Three scores on meters drawn as tall as their rows need: 78 above them for the title and description, 36 a row and 24 under them.</summary>
+    public static Lumen.Charts.ChartSpec FittedMeters(Lumen.Charts.ChartTheme theme)=>new()
+    {
+        Title="Session scores",Description="Three invented scores, each out of 100",Kind=Lumen.Charts.ChartKind.Bar,Theme=theme,Width=340,
+        YMin=0,YMax=100,BarTrack=true,FitHeight=true,YTickLabels=Lumen.Charts.TickLabels.None,YTickValues=[],
+        Series=[new("Score",[new(0,82,"Pacing"),new(1,64,"Recovery"),new(2,91,"Technique")]){ValueLabels=true}]
+    };
+    /// <summary>The colour of the tinted card the unpainted chart stands on, in each theme, which its style's background repeats.</summary>
+    public static string CardTint(Lumen.Charts.ChartTheme theme)=>theme==Lumen.Charts.ChartTheme.Dark?"#202A3E":"#F3F6FB";
+    /// <summary>A week of resting heart rate on a tinted card: the chart leaves its background unpainted, and its style's background is the
+    /// card's colour, which its value labels' halos are drawn in and its contrast is checked against.</summary>
+    public static Lumen.Charts.ChartSpec Unpainted(Lumen.Charts.ChartTheme theme)=>new()
+    {
+        Title="Resting heart rate",Description="An invented week, in beats per minute",Kind=Lumen.Charts.ChartKind.Line,Width=340,Height=260,
+        PaintBackground=false,Style=(theme==Lumen.Charts.ChartTheme.Dark?Lumen.Charts.ChartStyle.Dark:Lumen.Charts.ChartStyle.Light) with{Background=CardTint(theme)},
+        XMin=-.5,XMax=6.5,YUnit=" bpm",
+        Series=[new("Resting heart rate",new double[]{52,51,53,50,49,51,48}.Select((bpm,i)=>new Lumen.Charts.ChartPoint(i,bpm,new[]{"Mon","Tue","Wed","Thu","Fri","Sat","Sun"}[i])).ToArray()){ValueLabels=true,Markers=Lumen.Charts.MarkerStyle.Filled}]
+    };
+    /// <summary>Twenty minutes of heart rate and power that the app has averaged into 12-second buckets itself, each point at its bucket's
+    /// middle, so each series says what its points average and the shared readout says it once a column.</summary>
+    public static Lumen.Charts.ChartSpec PreAveraged(Lumen.Charts.ChartTheme theme)
+    {
+        var buckets=Enumerable.Range(0,100).Select(i=>6+12d*i).ToArray();
+        return new()
+        {
+            Title="Heart rate and power",Description="Twenty invented minutes, averaged by the app over 12 seconds",Kind=Lumen.Charts.ChartKind.Line,Theme=theme,
+            Height=320,XFormat=Lumen.Charts.ValueFormat.Duration,XLabel="Elapsed time",YLabel="Heart rate (bpm)",Y2Label="Power (W)",SharedReadout=true,
+            Series=[
+                new("Heart rate",buckets.Select(t=>new Lumen.Charts.ChartPoint(t,Math.Round(128+22*Math.Sin(t/260)+4*Math.Sin(t/37)))).ToArray()){AverageOf="12 s",Markers=Lumen.Charts.MarkerStyle.None},
+                new("Power",buckets.Select(t=>new Lumen.Charts.ChartPoint(t,Math.Round(205+55*Math.Sin(t/240+.4)+12*Math.Sin(t/23)))).ToArray()){AverageOf="12 s",Secondary=true,Markers=Lumen.Charts.MarkerStyle.None}]
+        };
+    }
     public static Lumen.Charts.GraphSpec Graph(Lumen.Charts.GraphLayout layout,Lumen.Charts.ChartTheme theme)=>new()
     {
         Title="From source to insight",Layout=layout,Theme=theme,

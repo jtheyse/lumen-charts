@@ -248,10 +248,10 @@ else
         status=Spec.Kind is ChartKind.Gauge or ChartKind.Ring ? ChartSvg.LegendLabel(Spec,index)
             : Spec.Kind==ChartKind.Strip ? ChartSvg.PartLabel(Spec,point)
             : Spec.Kind==ChartKind.Calendar ? Day(index,p)
-            : p.XEnd is {} end&&(Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Blocks&&p.Y is {} height ? $"{Spec.Series[index].Name}: {(p.Label is null ? "" : p.Label+", ")}{xAxis.Format(p.X)} to {xAxis.Format(end)} = {Measure(Spec.Series[index]).Format(height)}{p.ValueNote}"
+            : p.XEnd is {} end&&(Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Blocks&&p.Y is {} height ? $"{Spec.Series[index].Name}: {(p.Label is null ? "" : p.Label+", ")}{xAxis.Format(p.X)} to {xAxis.Format(end)} = {Measure(Spec.Series[index]).Format(height)}{p.ValueNote}{Averages(index,p)}"
             : p.XEnd is {} finish ? $"{Spec.Series[index].Name}: {xAxis.Format(p.X)} to {xAxis.Format(finish)}"
             : (Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Range&&p.Low is {} low&&p.High is {} high ? $"{Spec.Series[index].Name}: {Category(p)} = {Measure(Spec.Series[index]).Format(low)} to {Measure(Spec.Series[index]).Format(high)}{(p.Y is {} typical ? $", average {Measure(Spec.Series[index]).Format(typical)}" : "")}"
-            : $"{Spec.Series[index].Name}: {Category(p)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y)+p.ValueNote : "missing")}";
+            : $"{Spec.Series[index].Name}: {Category(p)} = {(p.Y is {} y ? Measure(Spec.Series[index]).Format(y)+p.ValueNote+Averages(index,p) : "missing")}";
         await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
     }
     /// <summary>Called by the component's script when a reader drags across the plots with a mouse or a pen and lets go, with the drag's
@@ -274,6 +274,8 @@ else
         if(readout is null||column<0||column>=readout.Columns.Count)return;
         status=readout.Columns[column].Text;StateHasChanged();
     });
+    // A series whose points the app averaged says so after a value, as its marks' names do.
+    private string Averages(int index,ChartPoint point)=>Spec.Series[index].AverageOf is {} of&&point.Y.HasValue?$", average of {of}":"";
     // A calendar's mark is a day, which reports its first point: it reads the day, in the chart's zone, and the total of every
     // point on it.
     private string Day(int index,ChartPoint point)

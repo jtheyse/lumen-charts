@@ -69,7 +69,10 @@ public static partial class ChartSvg
     /// thins it, so a long ride reads one X for each mark drawn rather than one for each second. Where averages are read, the column's
     /// label says so once, after the X: <c>1:02:30 · average of 12 s</c> on a duration or time axis, which gives the width of a slice, or
     /// <c>average of 12 points</c> on another, and each entry reads its average alone, <c>Heart rate 152</c>; an entry that stands for
-    /// another number of points, at a gap's edge, says its own, <c>, average of 3 points</c>. A chart without a continuous X axis, or without data, reads
+    /// another number of points, at a gap's edge, says its own, <c>, average of 3 points</c>. Series whose points the app averaged, by
+    /// <see cref="ChartSeries.AverageOf"/>, say so the same way: once in the label, <c>1:02:30 · average of 12 s</c>, where every entry of the
+    /// column says the same and none is Lumen's own average, and otherwise after each such entry's value, <c>Power 212, average of 12 s</c>.
+    /// A chart without a continuous X axis, or without data, reads
     /// <see cref="ChartReadout.Empty"/>. Checks the spec as <see cref="Render"/> does.
     /// </summary>
     public static ChartReadout Readout(ChartSpec spec)
@@ -174,7 +177,15 @@ public static partial class ChartSvg
         {
             var label = labels[c] ?? xs.Format(values[c]);
             var counts = entries[c].Where(e => e.Count > 1).Select(e => e.Count).ToArray();
-            if (counts.Length == 0) return label;
+            // Averages the app made say what they average: once in the label where every entry in the column says the same and Lumen
+            // averaged none of them, and otherwise after each such entry's value. A missing value says nothing, and an entry Lumen averaged
+            // keeps Lumen's words.
+            var given = entries[c].Select(e => e.Count > 1 ? null : spec.Series[e.Series].AverageOf).ToArray();
+            var once = counts.Length == 0 && given.Length > 0 && given.All(of => of is not null && of == given[0]) ? given[0] : null;
+            if (once is null)
+                for (var k = 0; k < entries[c].Count; k++)
+                    if (given[k] is { } of && entries[c][k].Position is not null) entries[c][k] = entries[c][k] with { Text = $"{entries[c][k].Text}, average of {of}" };
+            if (counts.Length == 0) return once is null ? label : $"{label} · average of {once}";
             var shared = counts.GroupBy(n => n).OrderByDescending(g => g.Count()).ThenByDescending(g => g.Key).First().Key;
             for (var k = 0; k < entries[c].Count; k++)
                 if (entries[c][k] is { Count: > 1 } e && e.Count != shared) entries[c][k] = e with { Text = e.Text + Averaged(e.Count) };

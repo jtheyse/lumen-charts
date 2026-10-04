@@ -358,3 +358,11 @@ recipe/lap-heart-340 708ED286B4E47D81
 recipe/best-efforts-340 66970F9572F67E8E
 strip/shares-once AE1BD27206E13C72
 ends/note-first 08B63EBD9683B5A2
+paint/unpainted-light 28B294850933AB4C
+paint/unpainted-midnight 779C7F7F03B6A64F
+average/line B50B73F9F1FAF122
+fit/one-tracked D5777B6FC321AAB7
+fit/four-tracked 7C3E89D6ACDF713F
+fit/one-plain 41D9CF1DBE6CAB36
+fit/four-plain 50BA5C37D920F7A5
+recipe/score-bars-340-fitted 843908E91BE6B670

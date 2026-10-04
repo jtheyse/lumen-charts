@@ -59,7 +59,7 @@ public static class GraphEngine
     {
         var layout = Layout(graph).ToDictionary(p => p.Id, p => positions is not null && positions.TryGetValue(p.Id, out var moved) ? moved : new GraphPoint(p.X, p.Y), StringComparer.Ordinal);
         var routes = Routes(graph);
-        var w = new SvgWriter { Style = graph.Style ?? ChartSvg.Preset(graph.Theme) };
+        var w = new SvgWriter { Style = graph.Style ?? ChartSvg.Preset(graph.Theme), Painted = graph.PaintBackground };
         var down = Down(graph);
         var crossings = graph.Layout == GraphLayout.Circular ? "" : $" · {Crossings(graph)} edge crossings";
         ChartSvg.Begin(w, graph.Width, graph.Height, graph.Title,

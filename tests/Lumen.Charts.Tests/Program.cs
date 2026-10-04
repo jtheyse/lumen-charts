@@ -4227,11 +4227,12 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // after its X label, and each series' change colours, written after its value labels, and since 0.34.0 the chart's sparkline,
     // written after its height, and since 0.35.0 the chart's X tick labels, written after its X ticks, and since 0.36.0 the chart's shared
     // readout, written last, which is never hashed, and since 0.37.0 the chart's sampling, written after its rendered points, and its pane
-    // titles, written after its panes, and since 0.39.0 its bar tracks and drawn titles, written last.
+    // titles, written after its panes, and since 0.39.0 its bar tracks and drawn titles, and since 0.41.0 its painted background and
+    // fitted height, written last.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true}";
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
@@ -8048,6 +8049,177 @@ Test("Sports page: heart rate by lap closes the Latest session section as gradie
 Test("Race Face recipes: the lap columns' amber to red and the best efforts' sky blue clear 3:1 on the card at every stop and blend, and the sub-labels' low grey 4.5:1",()=>{
     for(var t=0;t<=20;t++) Check(Lumen.Charts.Contrast.Ratio(Blend40("#f59e0b","#f87171",t/20d),"#161618")>=3,$"blend {t}");
     Check(Lumen.Charts.Contrast.Ratio("#38bdf8","#161618")>=3&&Lumen.Charts.Contrast.Ratio("#80858E","#161618")>=4.5&&Lumen.Charts.Contrast.Ratio("#F5F6F7","#161618")>=4.5,"the card");
+});
+// 0.41.0: fits a card. A background left unpainted, points the app averaged itself, and bar charts drawn as tall as their rows. Every example
+// is invented.
+string Root41(string svg)=>XDocument.Parse(svg).Root!.Attribute("style")!.Value;
+double Tall41(string svg)=>double.Parse(XDocument.Parse(svg).Root!.Attribute("viewBox")!.Value.Split(' ')[3],CultureInfo.InvariantCulture);
+ChartSpec Meters41(int rows,bool tracked=true)=>new(){Title="Scores",Description="Each out of 100",Kind=ChartKind.Bar,Width=340,Height=240,YMin=0,YMax=100,BarTrack=tracked,FitHeight=true,
+    YTickLabels=TickLabels.None,DrawTitles=false,Series=[new("Score",Enumerable.Range(0,rows).Select(i=>new ChartPoint(i,40+i*5%60,$"Score {i+1}")).ToArray()){ValueLabels=true}]};
+Test("PaintBackground = false writes no background on the root, only --lumen-ground, and nothing else moves, in every kind and both finishes; a graph takes it too",()=>{
+    foreach(var kind in Enum.GetValues<ChartKind>())
+        foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight,ChartStyle.Light with{Finish=ChartFinish.Classic}})
+        {
+            var painted=Sample(kind) with{Style=style};
+            var bare=ChartSvg.Render(painted with{PaintBackground=false});
+            Check(!Root41(bare).Contains("background:")&&Root41(bare).Contains($"--lumen-ground:{style.Background}"),$"{kind}: {Root41(bare)}");
+            // The only change is the root's style: gradients keep their names, and no shape fills the drawing.
+            Check(bare==ChartSvg.Render(painted).Replace($"background:{style.Background}",$"--lumen-ground:{style.Background}"),$"{kind} moved");
+            Check(!XDocument.Parse(bare).Descendants(ns+"rect").Any(r=>(string?)r.Attribute("width")==$"{painted.Width}"),$"{kind}: a full-size rect");
+        }
+    // Painted, the root writes its background as before.
+    Check(Root41(ChartSvg.Render(Spec())).Contains("background:#FFFFFF")&&!Root41(ChartSvg.Render(Spec())).Contains("--lumen-ground"),"painted");
+    var graph=DemoData.Graph(GraphLayout.Layered,ChartTheme.Light);
+    var unpainted=GraphEngine.Render(graph with{PaintBackground=false});
+    Check(!Root41(unpainted).Contains("background:")&&unpainted==GraphEngine.Render(graph).Replace("background:#FFFFFF","--lumen-ground:#FFFFFF"),"a graph");
+});
+Test("Left unpainted, a chart still draws its halos and separators in Style.Background and checks contrast against it",()=>{
+    var card=ChartStyle.Light with{Background="#F3F6FB"};
+    var line=new ChartSpec{Title="Rest",Kind=ChartKind.Line,Style=card,PaintBackground=false,Series=[new("Rest",[new(0,52),new(1,49),new(2,51)],"#5675E7"){ValueLabels=true,EndLabel="Rest"}]};
+    var doc=Svg(line);
+    // A value label's halo and an end label's are the card's colour.
+    var halo=doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("class")=="lumen-value").Select(g=>g.Elements(ns+"text").First()).ToArray();
+    Check(halo.Length==3&&halo.All(t=>t.Attribute("stroke")!.Value=="#F3F6FB"&&t.Attribute("fill")!.Value=="#F3F6FB"),"value-label halos");
+    // #5675E7 stands 3.81:1 on the card, short of 4.5:1, so its labels are written in the text colour, as on a painted card.
+    Check(Lumen.Charts.Contrast.Ratio("#5675E7","#F3F6FB")<4.5&&doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("class")=="lumen-value").All(g=>g.Elements(ns+"text").Last().Attribute("fill")!.Value==card.Text),"the label's colour");
+    Check(ChartSvg.Render(line)==ChartSvg.Render(line with{PaintBackground=true}).Replace("background:#F3F6FB","--lumen-ground:#F3F6FB"),"the rest moved");
+    // A strip's gaps are left empty, so the card shows through them; a reference in front stands on a halo of the card's colour.
+    var strip=ChartSvg.Render(new ChartSpec{Title="Z",Kind=ChartKind.Strip,Width=340,Style=card,PaintBackground=false,Series=[new("Z",[new(0,30,"A"),new(1,40,"B"),new(2,30,"C")])]});
+    Check(!strip.Replace("--lumen-ground:#F3F6FB","").Contains("#F3F6FB"),"the strip");
+    var front=ChartSvg.Render(Spec(ChartKind.Column) with{Style=card,PaintBackground=false,Annotations=[new(AnnotationAxis.Y,4){Label="Target",InFront=true}]});
+    Check(front.Contains("stroke='#F3F6FB'"),"a reference in front");
+    // The muted and text colours clear 4.5:1 on the gallery's tinted cards, and its series, zones and candles 3:1; the graph edge colour,
+    // which only a graph draws, is not used.
+    foreach(var theme in new[]{ChartTheme.Light,ChartTheme.Dark})
+    {
+        var style=DemoData.Unpainted(theme).Style!;
+        Check(style.Background==DemoData.CardTint(theme)&&style.ContrastIssues().All(i=>i.Element=="Graph edges"),$"{theme}: {string.Join(", ",style.ContrastIssues().Select(i=>$"{i.Element} {i.Ratio}"))}");
+    }
+});
+Test("AverageOf ends each mark's name and tooltip with its words, on every mark that names one value; a missing value says nothing, and Lumen's own averages keep theirs",()=>{
+    var line=new ChartSpec{Title="Power",Kind=ChartKind.Line,XFormat=ValueFormat.Duration,Series=[new("Power",[new(6,212),new(18,null),new(30,240)]){AverageOf="12 s",Markers=MarkerStyle.Filled}]};
+    var doc=Svg(line);
+    Check(Names37(doc).SequenceEqual(["Power: 0:06, 212, average of 12 s","Power: 0:30, 240, average of 12 s"])&&Datums(doc,0)[0].Element(ns+"title")!.Value=="Power: 0:06, 212, average of 12 s",string.Join("|",Names37(doc)));
+    // The note follows the value's words, before an end label, and a value note, zone or change words come first.
+    var ended=Svg(line with{Series=[line.Series[0] with{EndLabel="P",ChangeColors=ChangeColors.HigherIsBetter,Points=[new(6,212){ValueNote=" W"},new(30,240)]}]});
+    Check(Names37(ended)[1]=="Power: 0:30, 240, better than the previous, average of 12 s, labelled P",Names37(ended)[1]);
+    // Columns, bars on tracks, scatter, bubbles, bands, blocks, heatmaps, radar and stacked columns say it too.
+    string First(ChartSpec s,int series=0)=>Names37(Svg(s),series)[0];
+    Check(First(Spec(ChartKind.Column) with{Series=[Spec().Series[0] with{AverageOf="a week"}]})=="Series: A, 2, average of a week","columns");
+    Check(First(Scores39() with{Series=[new("Score",[new(0,108,"Bonus")]){AverageOf="3 races"}]})=="Score: Bonus, 108, average of 3 races, above the scale, drawn at 100","bars on tracks");
+    foreach(var kind in new[]{ChartKind.Scatter,ChartKind.Bubble,ChartKind.Area,ChartKind.Heatmap,ChartKind.Radar,ChartKind.StackedColumn,ChartKind.Band,ChartKind.Blocks,ChartKind.Bar})
+        Check(First(Sample(kind) with{Series=Sample(kind).Series.Select(s=>s with{AverageOf="12 s"}).ToArray()}).EndsWith(", average of 12 s"),$"{kind}: {First(Sample(kind) with{Series=Sample(kind).Series.Select(s=>s with{AverageOf="12 s"}).ToArray()})}");
+    // A sparkline's marks say it.
+    Check(Names37(Svg(Spark() with{Series=[Spark().Series[0] with{AverageOf="a day"}]}))[0].EndsWith(", average of a day"),"a sparkline");
+    // Where Lumen averages a slice itself, its own words stand.
+    var averaged=Long37(64) with{Series=[Long37(64).Series[0] with{AverageOf="12 s"}]};
+    Check(Names37(Svg(averaged)).All(n=>n.EndsWith(", average of 4 points")&&!n.Contains("12 s")),Names37(Svg(averaged))[0]);
+    // It changes no drawing, only words, and no gradient's name; CSV keeps the values.
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
+    Check(ChartSvg.Render(faded with{Series=[faded.Series[0] with{AverageOf="12 s"}]})==ChartSvg.Render(faded).Replace("S: 0, 1","S: 0, 1, average of 12 s").Replace("S: 1, 3","S: 1, 3, average of 12 s"),"the drawing moved");
+    Check(ChartExport.Csv(line)==ChartExport.Csv(line with{Series=[line.Series[0] with{AverageOf=null}]}),"the CSV");
+});
+Test("The shared readout says an average of the app's once in the column's label when every entry shares it, and after each such entry otherwise; the component's status line reads the same",()=>{
+    double[] at=[6,18,30,42];
+    ChartSpec Two(string? first,string? second,double? gap=null)=>new(){Title="Ride",Kind=ChartKind.Line,XFormat=ValueFormat.Duration,SharedReadout=true,
+        Series=[new("Heart rate",at.Select(x=>new ChartPoint(x,x==gap?null:140+x)).ToArray()){AverageOf=first},new("Power",at.Select(x=>new ChartPoint(x,200+x)).ToArray()){AverageOf=second}]};
+    var shared=ChartSvg.Readout(Two("12 s","12 s"));
+    Check(shared.Columns.All(c=>c.Label.EndsWith(" · average of 12 s")&&c.Entries.All(e=>!e.Text.Contains("average")))&&shared.Columns[0].Text=="0:06 · average of 12 s · Heart rate 146 · Power 206",shared.Columns[0].Text);
+    var one=ChartSvg.Readout(Two("12 s",null));
+    Check(one.Columns[0].Text=="0:06 · Heart rate 146, average of 12 s · Power 206",one.Columns[0].Text);
+    var differ=ChartSvg.Readout(Two("12 s","1 min"));
+    Check(differ.Columns[0].Text=="0:06 · Heart rate 146, average of 12 s · Power 206, average of 1 min",differ.Columns[0].Text);
+    // A missing value says nothing: shared, the label still says it once; otherwise the missing entry reads plainly.
+    Check(ChartSvg.Readout(Two("12 s","12 s",18)).Columns[1].Text=="0:18 · average of 12 s · Heart rate missing · Power 218","shared with a gap");
+    Check(ChartSvg.Readout(Two("12 s","1 min",18)).Columns[1].Text=="0:18 · Heart rate missing · Power 218, average of 1 min","differing with a gap");
+    // Without AverageOf the readout reads as before.
+    Check(ChartSvg.Readout(Two(null,null)).Columns[0].Text=="0:06 · Heart rate 146 · Power 206","plain");
+    // Lumen's own averages keep the slice's words in the label, and a series that says its own says nothing more there.
+    var ride=Ride37(14_400);
+    var mine=ChartSvg.Readout(ride with{Series=ride.Series.Select(s=>s with{AverageOf="1 s"}).ToArray()});
+    Check(mine.Columns[0].Label=="0:12 · average of 24 s"&&mine.Columns[0].Entries.All(e=>!e.Text.Contains("average")),mine.Columns[0].Text);
+    // The component's status line reads the column, and a chart without a readout reads the point's words.
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;var status="";
+    Operate(Two("12 s","12 s"),async chart=>{await chart.Readout(1);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    Check(status=="0:18 · average of 12 s · Heart rate 158 · Power 218",status);
+    Operate(Spec(ChartKind.Column) with{Series=[Spec().Series[0] with{AverageOf="a week"}]},async chart=>{await chart.SelectPoint(0,1);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    Check(status=="Series: B = 5, average of a week",status);
+    var html=Operate(Spec(ChartKind.Column) with{Series=[Spec().Series[0] with{AverageOf="a week"}]},async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,1);});
+    Check(html.Contains("<tr><td>Series</td><td>B</td><td>5</td></tr>"),"the data table");
+    // The gallery's pre-averaged channels say it once a column.
+    var gallery=ChartSvg.Readout(DemoData.PreAveraged(ChartTheme.Light));
+    Check(gallery.Columns.Count==100&&gallery.Columns.All(c=>c.Label.EndsWith(" · average of 12 s")&&c.Entries.Count==2&&c.Entries.All(e=>!e.Text.Contains("average"))),gallery.Columns[0].Text);
+});
+Test("AverageOf is refused blank, past 16 characters, across lines and on marks named by several values, none, a count, a sum or a share, each with its reason",()=>{
+    ChartSpec With(ChartSpec s,string of)=>s with{Series=s.Series.Select(x=>x with{AverageOf=of}).ToArray()};
+    Check(Refused(With(Spec()," ")).StartsWith("AverageOf says what a series' points are averages of"),"blank");
+    Check(Refused(With(Spec(),new string('x',17))).StartsWith("AverageOf is said after each value")&&Refused(With(Spec(),"12\ns")).StartsWith("AverageOf is said after each value")&&Svg(With(Spec(),new string('x',16))) is not null,"long or two lines");
+    foreach(var kind in new[]{ChartKind.Candlestick,ChartKind.Ohlc,ChartKind.Range,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Timeline,ChartKind.Calendar,ChartKind.Donut,ChartKind.Gauge,ChartKind.Ring})
+        Check(Refused(With(Sample(kind),"12 s")).StartsWith("AverageOf is said after a mark's one value"),$"{kind}: {Refused(With(Sample(kind),"12 s"))}");
+    Check(Refused(new ChartSpec{Title="Z",Kind=ChartKind.Strip,Width=340,Series=[new("Z",[new(0,1,"A")]){AverageOf="12 s"}]}).StartsWith("AverageOf is said after a mark's one value"),"a strip");
+    // A moving-average line beside candles is a line, and takes it.
+    Check(Svg(Sample(ChartKind.Candlestick) with{Series=[..Sample(ChartKind.Candlestick).Series,new("Average",[new(0,10),new(1,11)]){Kind=ChartKind.Line,AverageOf="5 days"}]}) is not null,"a line beside candles");
+});
+Test("FitHeight draws a bar chart as tall as its rows: 36 a row on tracks, 32 without, 38 with sub-labels, round them the room it draws in, and no 240 floor",()=>{
+    // Untitled, no ticks or title under the plot, no source: 28 above the rows and 24 under them.
+    foreach(var (rows,expected) in new[]{(1,88d),(3,160d),(4,196d),(10,412d)})
+        Check(Tall41(ChartSvg.Render(Meters41(rows),includeLegend:false))==expected,$"{rows} rows on tracks: {Tall41(ChartSvg.Render(Meters41(rows),includeLegend:false))}");
+    foreach(var (rows,expected) in new[]{(1,84d),(3,148d),(10,372d)})
+        Check(Tall41(ChartSvg.Render(Meters41(rows,false),includeLegend:false))==expected,$"{rows} rows without tracks: {Tall41(ChartSvg.Render(Meters41(rows,false),includeLegend:false))}");
+    // The plot holds exactly the rows, each 36 tall, and the tracks stand 36 apart.
+    var (top,bottom)=PaneSpan(PaneClips(XDocument.Parse(ChartSvg.Render(Meters41(4),includeLegend:false)))[0]);
+    Check(Close(top,28)&&Close(bottom,28+4*36),$"{top} {bottom}");
+    var tracks=Tracks39(XDocument.Parse(ChartSvg.Render(Meters41(4),includeLegend:false)));
+    Check(tracks.Length==4&&tracks.Zip(tracks.Skip(1)).All(p=>Close(Attr(p.Second,"y")-Attr(p.First,"y"),36))&&tracks.All(t=>Close(Attr(t,"height"),18)),"the rows");
+    // Titles drawn take 78 above the rows; a description on two lines 14 more.
+    Check(Tall41(ChartSvg.Render(Meters41(3) with{DrawTitles=true},includeLegend:false))==210,"titled");
+    Check(Tall41(ChartSvg.Render(Meters41(3) with{DrawTitles=true,Description="A description long enough that a 340-unit card has to set it over a second line of its own"},includeLegend:false))==224,"two lines of description");
+    // Tick labels or a value-axis title bring the 76 back; a source line keeps 36, a second one 14 more.
+    Check(Tall41(ChartSvg.Render(Meters41(3) with{YTickLabels=TickLabels.All},includeLegend:false))==28+108+76&&Tall41(ChartSvg.Render(Meters41(3) with{YLabel="Score"},includeLegend:false))==212,"ticks or a title");
+    Check(Tall41(ChartSvg.Render(Meters41(3) with{Source="Invented"},includeLegend:false))==172,"a source");
+    Check(Tall41(ChartSvg.Render(Meters41(3) with{Source="An invented source line long enough that it runs over a second line on a phone card"},includeLegend:false))==186,"two source lines");
+    // Sub-labels make every row 38, so the two lines never collide; every name and sub-label is written.
+    var subbed=Meters41(3) with{Series=[new("Score",[new(0,82,"Pacing"){SubLabel="Top 10%"},new(1,64,"Recovery"),new(2,91,"Technique")])]};
+    var sdoc=XDocument.Parse(ChartSvg.Render(subbed,includeLegend:false));
+    Check(Tall41(ChartSvg.Render(subbed,includeLegend:false))==28+3*38+24&&sdoc.Root!.Elements(ns+"text").Count(t=>(string?)t.Attribute("text-anchor")=="end")==4,"sub-labels");
+    // The legend Render includes goes under, 22 a row; Height is checked but not used.
+    Check(Tall41(ChartSvg.Render(Meters41(3)))==182,"the legend");
+    Check(ChartSvg.Render(Meters41(3))==ChartSvg.Render(Meters41(3) with{Height=2000}),"Height was used");
+    Check(Refused(Meters41(3) with{Height=100}).Length>0&&Refused(Meters41(3) with{Height=3000}).Length>0,"Height unchecked");
+    // Without FitHeight a bar chart keeps its height and its 76-unit floor without tracks.
+    Check(Tall41(ChartSvg.Render(Meters41(3,false) with{FitHeight=false},includeLegend:false))==240&&Tall41(ChartSvg.Render(Meters41(1) with{FitHeight=false},includeLegend:false))==240,"unfitted");
+    var plain=XDocument.Parse(ChartSvg.Render(Meters41(3,false) with{FitHeight=false},includeLegend:false));
+    Check(Close(PaneSpan(PaneClips(plain)[0]).Bottom,240-76),"the floor without tracks");
+    // The component draws the same height.
+    var html=Operate(Meters41(3),_=>Task.CompletedTask);
+    Check(html.Contains("viewBox='0 0 340 160'"),"the component");
+    // The gallery's fitted meters: titled, three rows.
+    Check(Tall41(ChartSvg.Render(DemoData.FittedMeters(ChartTheme.Light),includeLegend:false))==78+108+24,"the gallery's meters");
+});
+Test("FitHeight is refused on every kind but horizontal bars, with its reason",()=>{
+    foreach(var kind in Enum.GetValues<ChartKind>().Where(k=>k!=ChartKind.Bar))
+        Check(Refused(Sample(kind) with{FitHeight=true}).StartsWith("FitHeight works out a horizontal bar chart's height"),$"{kind}: {Refused(Sample(kind) with{FitHeight=true})}");
+    Check(Svg(Sample(ChartKind.Bar) with{FitHeight=true}) is not null,"bars");
+});
+Test("The three settings round-trip through the HTTP API's JSON, stay out of the gradient hash at their defaults, and every kind draws byte for byte as before with them written out",()=>{
+    var spec=Meters41(3) with{PaintBackground=false,Series=[Meters41(3).Series[0] with{AverageOf="3 races"}]};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,finishJson);
+    Check(json.Contains("\"paintBackground\":false")&&json.Contains("\"fitHeight\":true")&&json.Contains("\"averageOf\":\"3 races\""),json);
+    var back=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,finishJson)!;
+    Check(!back.PaintBackground&&back.FitHeight&&back.Series[0].AverageOf=="3 races"&&ChartSvg.Render(back)==ChartSvg.Render(spec),"the spec changed in transit");
+    var defaults=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Bar\",\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]}]}",finishJson)!;
+    Check(defaults.PaintBackground&&!defaults.FitHeight&&defaults.Series[0].AverageOf is null,"the defaults");
+    var graph=System.Text.Json.JsonSerializer.Deserialize<GraphSpec>("{\"title\":\"G\",\"paintBackground\":false,\"nodes\":[{\"id\":\"a\",\"label\":\"A\"}]}",finishJson)!;
+    Check(!graph.PaintBackground&&!GraphEngine.Render(graph).Contains("background:"),"a graph");
+    string GradientId(ChartSpec s)=>System.Text.RegularExpressions.Regex.Match(ChartSvg.Render(s),"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}],Annotations=[new(AnnotationAxis.Y,2){Label="T"}]};
+    Check(GradientId(faded)=="lumen-4bce89394b87"&&GradientId(faded with{PaintBackground=true,FitHeight=false,Series=[faded.Series[0] with{AverageOf=null}]})=="lumen-4bce89394b87","the defaults moved a gradient's name");
+    // Unpainted and averaged charts name their gradients as the painted, plain one does; a fitted one does not need to.
+    Check(GradientId(faded with{PaintBackground=false})=="lumen-4bce89394b87"&&GradientId(faded with{Series=[faded.Series[0] with{AverageOf="12 s"}]})=="lumen-4bce89394b87","unpainted or averaged");
+    var bars=Sample(ChartKind.Bar) with{Series=[Sample(ChartKind.Bar).Series[0] with{Gradient=[new(1,"#A88200"),new(9,"#DD4B45")]}]};
+    Check(GradientId(bars with{FitHeight=true})!=GradientId(bars),"fitted bars kept a gradient's name");
+    foreach(var kind in Enum.GetValues<ChartKind>())
+        Check(ChartSvg.Render(Sample(kind))==ChartSvg.Render(Sample(kind) with{PaintBackground=true,FitHeight=false,Series=Sample(kind).Series.Select(s=>s with{AverageOf=null}).ToArray()}),$"{kind}");
 });
 // A colour a fraction of the way from one to another, channel by channel, as the library blends a gradient.
 string Blend40(string from,string to,double t){int C(string h,int at)=>int.Parse(h.AsSpan(at,2),NumberStyles.HexNumber,CultureInfo.InvariantCulture);return "#"+string.Concat(new[]{1,3,5}.Select(at=>((int)(C(from,at)+(C(to,at)-C(from,at))*t)).ToString("X2",CultureInfo.InvariantCulture)));}

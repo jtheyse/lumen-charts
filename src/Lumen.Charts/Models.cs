@@ -458,6 +458,21 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// <summary>A note written after <see cref="EndLabel"/> on the same line, at normal weight in the muted colour, such as <c>leader</c>
     /// or <c>+12.3s</c>, at most 24 characters; it needs an end label to follow.</summary>
     public string? EndNote { get; init; }
+    /// <summary>
+    /// Says that this series' points are already averages the app made, and over what, such as <c>12 s</c> for a ride's channels bucketed
+    /// into 12-second slices or <c>a week</c> for weekly means: at most 16 characters on one line, written exactly as given. Each of its
+    /// marks with a value is then named, and its tooltip read, with <c>, average of 12 s</c> after its value's words, where
+    /// <see cref="SamplingMethod.Average"/> writes its own; and the shared readout says it too: once in a column's label,
+    /// <c>1:02:30 · average of 12 s</c>, where every series read there says the same, its entries reading their values alone, and otherwise
+    /// after each such entry's value, <c>Power 212, average of 12 s</c>. The component's status line reads the same words. Where Lumen itself
+    /// averages a mark, under <see cref="SamplingMethod.Average"/>, that mark keeps Lumen's own words, <c>, average of 4 points</c>, and a
+    /// column of such marks its slice, <c>average of 24 s</c>, since those are what it draws. A missing value says nothing, and CSV and the
+    /// data table keep the values as given. It changes no drawing, only words. Series whose marks are named by one value take it: lines,
+    /// areas, scatter points, bubbles, columns, bars, stacked columns, bands, blocks, heatmap rows and radar series, a sparkline's
+    /// included; candles, range bars, histograms, boxes, violins, timelines, calendars, donut slices, gauges, rings and a strip's parts,
+    /// named by several values, by none, by a count, a sum or a share, refuse it. Null, the default, says nothing.
+    /// </summary>
+    public string? AverageOf { get; init; }
 
     /// <summary>A series from your own objects, in the order given: <paramref name="x"/> and <paramref name="y"/> read each
     /// item's position and value, and <paramref name="label"/>, if given, its label.</summary>
@@ -708,6 +723,34 @@ public sealed record ChartSpec
     /// <c>&lt;title&gt;</c>, in each mark.
     /// </summary>
     public bool DrawTitles { get; init; } = true;
+    /// <summary>
+    /// Paints the drawing's background in the style's <see cref="ChartStyle.Background"/>, the default. Off, the root <c>&lt;svg&gt;</c>
+    /// carries no background, and no shape fills the drawing, so the surface it sits on shows through, as a card of another colour does;
+    /// nothing else moves. Lumen still reads <see cref="ChartStyle.Background"/> as the colour the chart stands on: every contrast rule is
+    /// checked against it, a value label too pale for it is written in the text colour, and the halos and separators drawn in it stay in
+    /// it — a value label's halo, an end label's, a reference line drawn <see cref="ChartAnnotation.InFront"/>, a hollow marker's fill, a highlighted point's outline, a gauge's knob and target tick; a strip's gaps are left empty, so the surface shows through them. So when the background is left
+    /// unpainted, set <see cref="ChartStyle.Background"/> to the colour of the surface the chart sits on, or the halos show as patches of
+    /// another colour and the contrast checks measure against the wrong one. The root then carries the colour as <c>--lumen-ground</c>
+    /// in place of <c>background</c>, so the component's readout rings keep their halo. The SVG export carries no background either, and
+    /// the component's PNG export is transparent where nothing is drawn. Every kind takes it; network graphs have
+    /// <see cref="GraphSpec.PaintBackground"/>.
+    /// </summary>
+    public bool PaintBackground { get; init; } = true;
+    /// <summary>
+    /// Horizontal bar charts only: draws the chart as tall as its rows need instead of <see cref="Height"/>, as a strip is drawn as tall as
+    /// its content, so a card of three or four meters keeps no spare room. Each category takes a row of 36 units on tracks
+    /// (<see cref="BarTrack"/>), 32 without, or 38 where any category writes a <see cref="ChartPoint.SubLabel"/>, so names never collide;
+    /// and round the rows the chart keeps the room it draws in: 78 units above them for the title and description, 14 more for a
+    /// description on two lines, or 28 in all where <see cref="DrawTitles"/> is off; 76 under them for the value axis's tick labels and its
+    /// title, or 24 where neither is written (<see cref="YTickLabels"/> <see cref="TickLabels.None"/> and no <see cref="YLabel"/>), with
+    /// or without tracks, or 36 above a <see cref="Source"/> line, 14 more for a source on two lines; and 22 a row for the legend
+    /// <see cref="ChartSvg.Render"/> draws when it includes one. So three meters on tracks without titles, ticks or source are
+    /// 28 + 3 × 36 + 24 = 160 units tall, and one is 88: no 240-unit floor applies. <see cref="Height"/> is still checked, 240 to 2160, and
+    /// otherwise not used. The height follows the categories the chart draws, so the component, which draws a hidden series without its
+    /// points, draws a chart shorter when the series it hides held a category alone; its <c>FitWidth</c> scaling is unchanged. Off by
+    /// default; other kinds refuse it.
+    /// </summary>
+    public bool FitHeight { get; init; }
 }
 
 /// <summary>
@@ -855,6 +898,11 @@ public sealed record GraphSpec
     public int Width { get; init; } = 900;
     /// <summary>The drawing's height in SVG units, from 240 to 2160.</summary>
     public int Height { get; init; } = 460;
+    /// <summary>Paints the drawing's background in the style's <see cref="ChartStyle.Background"/>, the default. Off, the root
+    /// <c>&lt;svg&gt;</c> carries no background, so the surface it sits on shows through, as <see cref="ChartSpec.PaintBackground"/>
+    /// leaves a chart's. A graph draws nothing else in the background colour, but set <see cref="ChartStyle.Background"/> to the colour
+    /// of the surface all the same, so <see cref="ChartStyle.ContrastIssues"/> measures the graph's colours against what is behind them.</summary>
+    public bool PaintBackground { get; init; } = true;
 }
 /// <summary>Where a layout puts the centre of the node <paramref name="Id"/>, in the drawing's coordinates.</summary>
 /// <param name="Id">The node's <see cref="GraphNode.Id"/>.</param>

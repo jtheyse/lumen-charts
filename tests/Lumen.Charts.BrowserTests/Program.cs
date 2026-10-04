@@ -1079,6 +1079,93 @@ async Task QuietChecks(IPage tab, ILocator quiet, string url, string where)
             Check(measured[0] >= 5 && measured[1] == 0 && measured[2] == 0 && measured[3] == 0 && measured[5] <= width, string.Join(", ", measured));
         });
 }
+// 0.41.0: fits a card. A chart left unpainted shows the colour of the card it stands on; a bar chart fitted to its rows is drawn as tall as
+// they need at a phone's width and a desktop's; and the readout of series whose points the app averaged says so once. Each check opens the
+// host's first page afresh, in its first theme, finds its chart by what the drawing carries, and says SKIP where the page has none.
+async Task<IPage> Fresh41(IBrowserContext context)
+{
+    var tab = await context.NewPageAsync();
+    tab.SetDefaultTimeout(15_000);
+    await tab.GotoAsync(address, new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+    await tab.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });
+    return tab;
+}
+// A fitted chart is drawn at its spec's width until its script measures its box; the checks wait for the drawing at the box's width.
+const string fitted41 = "c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'); return !c.classList.contains('lumen-fit') || Number(s.getAttribute('viewBox').split(' ')[2]) === Math.max(320, v.clientWidth); }";
+const string unpaintedIndex = "() => [...document.querySelectorAll('.lumen-chart')].findIndex(c => (c.querySelector(':scope > .lumen-viewport > svg')?.getAttribute('style') || '').includes('--lumen-ground:'))";
+if (await page.EvaluateAsync<int>(unpaintedIndex) >= 0)
+    await Test("A chart left unpainted writes no background, so the card it stands on shows through, and that card is the colour its style names as its ground", async () =>
+    {
+        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 } });
+        var tab = await Fresh41(context);
+        var card = tab.Locator(".lumen-chart").Nth(await tab.EvaluateAsync<int>(unpaintedIndex));
+        await card.ScrollIntoViewIfNeededAsync();
+        await tab.WaitForFunctionAsync(fitted41, await card.ElementHandleAsync());
+        // The drawing's own background is transparent; the nearest painted box round it is the card, whose colour is the drawing's ground. A
+        // pixel of the plot away from every mark, read from a screenshot, is that colour too.
+        var measured = await card.EvaluateAsync<string[]>(@"c => { const s = c.querySelector(':scope > .lumen-viewport > svg'), hex = s.style.getPropertyValue('--lumen-ground').trim();
+            let e = s.parentElement; while (e && getComputedStyle(e).backgroundColor === 'rgba(0, 0, 0, 0)') e = e.parentElement;
+            const n = parseInt(hex.slice(1), 16); return [getComputedStyle(s).backgroundColor, e ? getComputedStyle(e).backgroundColor : '', `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`]; }");
+        Check(measured[0] == "rgba(0, 0, 0, 0)" && measured[1] == measured[2], $"the drawing's background is {measured[0]}, the card's {measured[1]}, its ground {measured[2]}");
+        var box = (await card.Locator(".lumen-viewport > svg").BoundingBoxAsync())!;
+        var shot = await tab.ScreenshotAsync(new() { Clip = new() { X = box.X + 4, Y = box.Y + 4, Width = 2, Height = 2 } });
+        var pixel = await tab.EvaluateAsync<int[]>(@"async b64 => { const i = new Image(); i.src = 'data:image/png;base64,' + b64; await i.decode(); const c = document.createElement('canvas'); c.width = i.width; c.height = i.height;
+            const g = c.getContext('2d'); g.drawImage(i, 0, 0); return [...g.getImageData(0, 0, 1, 1).data].slice(0, 3); }", Convert.ToBase64String(shot));
+        var ground = Regex.Matches(measured[2], @"\d+").Select(m => int.Parse(m.Value, CultureInfo.InvariantCulture)).ToArray();
+        Check(pixel.Zip(ground).All(p => Math.Abs(p.First - p.Second) <= 2), $"the drawing's corner is rgb({string.Join(", ", pixel)}), its card {measured[2]}");
+    });
+else Console.WriteLine("SKIP unpainted chart check: this host's first page draws no chart left unpainted");
+// A bar chart fitted to its rows is found by its tracks: a chart whose drawing is as tall as its title, its rows of 36 and the 24 under them.
+const string fittedIndex = @"() => [...document.querySelectorAll('.lumen-chart')].findIndex(c => { const s = c.querySelector(':scope > .lumen-viewport > svg'), rows = s ? s.querySelectorAll('.lumen-bar-track').length : 0;
+    if (!rows) return false; const titled = !!s.querySelector(':scope > text[font-size=""17""]'); return Number(s.getAttribute('viewBox').split(' ')[3]) === (titled ? 78 : 28) + 36 * rows + 24; })";
+if (await page.EvaluateAsync<int>(fittedIndex) >= 0)
+    foreach (var (width, phone) in new[] { (375, true), (1280, false) })
+        await Test($"At {width} pixels{(phone ? ", on a phone," : "")} a bar chart fitted to its rows is drawn as tall as they need, shown at that height, and no taller", async () =>
+        {
+            await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = phone ? 812 : 900 }, IsMobile = phone, HasTouch = phone, DeviceScaleFactor = phone ? 2 : 1 });
+            var tab = await Fresh41(context);
+            var index = await tab.EvaluateAsync<int>(fittedIndex);
+            Check(index >= 0, "no fitted chart on a fresh page");
+            var card = tab.Locator(".lumen-chart").Nth(index);
+            await card.ScrollIntoViewIfNeededAsync();
+            await tab.WaitForFunctionAsync(fitted41, await card.ElementHandleAsync(), new() { Timeout = 60_000 });
+            var measured = await card.EvaluateAsync<double[]>(@"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'), b = s.getBoundingClientRect(), box = s.getAttribute('viewBox').split(' ').map(Number);
+                const tracks = [...s.querySelectorAll('.lumen-bar-track')].map(t => t.getBoundingClientRect()), titled = !!s.querySelector(':scope > text[font-size=""17""]');
+                return [box[2], box[3], b.width, b.height, tracks.length, titled ? 78 : 28, v.scrollWidth - v.clientWidth, document.documentElement.scrollWidth, tracks.length > 1 ? tracks[1].top - tracks[0].top : 0]; }");
+            var expected = measured[5] + 36 * measured[4] + 24;
+            Check(measured[1] == expected, $"drawn {measured[1]} tall for {measured[4]} rows, not {expected}");
+            // Drawn at the width it is shown, so a unit is a pixel: the drawing stands as tall on the screen as its rows, 36 pixels apart.
+            Check(Math.Abs(measured[2] - measured[0]) < 1.5 && Math.Abs(measured[3] - measured[1] * measured[2] / measured[0]) < 1.5 && Math.Abs(measured[8] - 36 * measured[2] / measured[0]) < 1, $"{measured[0]} by {measured[1]} shown {measured[2]:0.#} by {measured[3]:0.#}, rows {measured[8]:0.#} apart");
+            Check(measured[6] <= 0 && measured[7] <= width, $"the chart scrolls by {measured[6]}, the page is {measured[7]} wide");
+        });
+else Console.WriteLine("SKIP fitted bar checks: this host's first page draws no bar chart fitted to its rows");
+// A chart whose series the app averaged is found by the words its marks end with and the readout that names its keys.
+const string averagedIndex = @"() => [...document.querySelectorAll('.lumen-chart')].findIndex(c => (c.querySelector(':scope > .lumen-keys')?.textContent || '').startsWith('Arrow keys read')
+    && [...c.querySelectorAll('.lumen-datum[data-point]')].some(m => / average of (?!\d+ points$)/.test(m.getAttribute('aria-label') || '')))";
+if (await page.EvaluateAsync<int>(averagedIndex) >= 0)
+    await Test("The readout of series the app averaged says what they average once, after the X, and so does the status line the keys read", async () =>
+    {
+        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 } });
+        var tab = await Fresh41(context);
+        var card = tab.Locator(".lumen-chart").Nth(await tab.EvaluateAsync<int>(averagedIndex));
+        await card.ScrollIntoViewIfNeededAsync();
+        await tab.WaitForFunctionAsync(fitted41, await card.ElementHandleAsync(), new() { Timeout = 60_000 });
+        var tip = card.Locator(".lumen-tooltip");
+        var box = (await card.Locator(".lumen-viewport > svg").BoundingBoxAsync())!;
+        await tab.Mouse.MoveAsync(box.X + box.Width * .5f, box.Y + box.Height * .5f);
+        await tip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        var lines = ((await tip.TextContentAsync()) ?? "").Split('\n');
+        var said = Regex.Matches(string.Join("\n", lines), "average of").Count;
+        Check(lines.Length >= 3 && said == 1 && Regex.IsMatch(lines[0], @" · average of .+$") && lines.Skip(1).All(l => !l.Contains("average")), $"the readout reads {string.Join(" / ", lines)}");
+        // The keys bring the readout to an X, and the status line reads the same words.
+        await card.Locator(".lumen-datum[tabindex='0']").FocusAsync();
+        await tab.Keyboard.PressAsync("Home");
+        await tab.Keyboard.PressAsync("ArrowRight");
+        var read = ((await tip.TextContentAsync()) ?? "").Split('\n');
+        await tab.WaitForFunctionAsync("([c, text]) => c.querySelector('.lumen-status')?.textContent === text", new object[] { await card.ElementHandleAsync(), string.Join(" · ", read) });
+        Check(Regex.Matches(await card.Locator(".lumen-status").TextContentAsync() ?? "", "average of").Count == 1, "the status line");
+    });
+else Console.WriteLine("SKIP averaged readout check: this host's first page draws no readout of series the app averaged");
 var quietHere = page.Locator(".lumen-chart:has(.lumen-quiet)");
 if (await quietHere.CountAsync() > 0) await QuietChecks(page, quietHere.First, address, "This host");
 else Console.WriteLine("SKIP quiet chart checks: this host's first page draws no chart without its toolbar");

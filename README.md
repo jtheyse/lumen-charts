@@ -120,7 +120,7 @@ A chart's title, description and source are written from its left edge, 24 units
 - A **source** wraps the same way, growing upward from the foot: its second line moves the plot's bottom, the X axis and its title up 14 units.
 - A **title** stays one line, cut at a word with `…` where it is wider than the drawing.
 
-The whole of each stays in the drawing's `<title>`, `<desc>` and accessible name, so nothing is lost to a screen reader or a tooltip. Text that fits is drawn exactly as before. A chart is at least 240 units tall, a sparkline at least 60 by 16, and keeps its `Height` at any width, so choose one that reads at a phone's width. A graph keeps its own description, which goes on over a second line between its clauses as it did, and its title is cut the same way.
+The whole of each stays in the drawing's `<title>`, `<desc>` and accessible name, so nothing is lost to a screen reader or a tooltip. Text that fits is drawn exactly as before. A chart is at least 240 units tall, a sparkline at least 60 by 16, and keeps its `Height` at any width, so choose one that reads at a phone's width; a strip is drawn as tall as its content, and from 0.41.0 a bar chart with `FitHeight` as tall as its rows. A graph keeps its own description, which goes on over a second line between its clauses as it did, and its title is cut the same way.
 
 The root `<svg>` carries its own layout and font in its `style` attribute: its width rule (`width:100%`, or a sparkline's own width), `height:auto`, `display:block`, the background, the text colour and the font family. A host must not add a `style` attribute of its own, which makes the SVG invalid XML and which an HTML page ignores, or replace this one, which drops the chart's background, colours and font. To size, place or frame a chart, wrap the SVG in an element and style the wrapper:
 
@@ -845,6 +845,27 @@ var laps = new ChartSpec {
 
 `SubLabel` is left out of the hash that names gradients while it is null, so every chart drawn before keeps its IDs and its drawing. Limits: a sub-label is one line, at most 16 characters, and CSV does not carry it; a horizontal bar chart's names and sub-labels share one rule of 38 units a row; a gradient colours by the value axis only, so the base of every column shares the first stop's colour, and it has no contrast check of its own. The Sports & performance page draws Heart rate by lap in its Latest session section and Best efforts in its Fitness section, and the Claude Code skill's `references/recipes-race-face.md` gives "Heart rate per lap" and "Best efforts" as recipes.
 
+### Fits a card: rows that set the height, an unpainted background and averages made by the app
+
+0.41.0 adds three settings for charts that live on a phone card, none of which moves any existing drawing.
+
+```csharp
+var meters = new ChartSpec {
+    Title = "Race scores", Kind = ChartKind.Bar, Width = 340, YMin = 0, YMax = 100, BarTrack = true,
+    YTickLabels = TickLabels.None, DrawTitles = false,
+    FitHeight = true,                                                    // 28 + 3 × 36 + 24 = 160 units tall
+    PaintBackground = false, Style = ChartStyle.Light with { Background = "#F3F6FB" },   // the card's own colour
+    Series = [new("Score", [new(0, 82, "Execution"), new(1, 64, "Improvement"), new(2, 91, "Effort")]) { ValueLabels = true }]
+};
+var power = new ChartSeries("Power", buckets) { AverageOf = "12 s" };   // points the app averaged itself
+```
+
+- **`ChartSpec.FitHeight`**, horizontal bar charts only: the chart is drawn as tall as its rows need instead of `Height`. Each category takes 36 units on tracks, 32 without, and 38 where any category writes a sub-label, so names never collide; round the rows the chart keeps the room it draws in: 78 units above for the title and description (14 more for a description on two lines, 28 in all with `DrawTitles` off), 76 under them for the value axis's ticks and title, or 24 where neither is written (36 above a source, 14 more for a second source line), and 22 a row for the legend `Render` includes. No 240-unit floor applies: one tracked meter without titles, ticks or source is 88 units tall. `Height` is still checked, 240 to 2160, and otherwise unused. The component honours it, its `FitWidth` scaling unchanged; other kinds refuse it.
+- **`ChartSpec.PaintBackground`**, on by default: off, the root `<svg>` writes no background, and nothing fills the drawing, so the card it sits on shows through. Lumen still treats `Style.Background` as the colour the chart stands on: contrast is checked against it, and its halos and separators are drawn in it (value-label and end-label halos, references in front, hollow markers, a highlight's outline, a gauge's knob), so set `Style.Background` to the colour of the card. The root carries that colour as `--lumen-ground` instead, which the component's readout rings read for their halo. The SVG export has no background, and the PNG export is transparent where nothing is drawn. `GraphSpec.PaintBackground` does the same for graphs.
+- **`ChartSeries.AverageOf`**, at most 16 characters on one line: says the series' points are averages the app made already, over `"12 s"` or `"a week"`. Each mark with a value ends its name and tooltip `, average of 12 s`; the shared readout says it once in a column's label, `1:02:30 · average of 12 s`, where every entry there shares it, its entries then reading plainly, and otherwise after each such entry's value, and the component's status line reads the same. Where Lumen averaged a mark itself under `SamplingMethod.Average`, its own words, `, average of 4 points`, stand. CSV and the data table keep the values. Series whose marks carry one value take it; candles, range bars, histograms, boxes, violins, timelines, calendars, donuts, gauges, rings and strips refuse it.
+
+All three are left out of the hash that names gradients at their defaults, so every chart drawn before keeps its IDs and its drawing.
+
 ### Dense scatter charts
 
 A scatter chart draws every observation, which stops being readable long before it stops being fast: fifty thousand points saturate into solid shapes, and an overlapping series disappears underneath the one drawn after it. Setting `DensityCells` bins the plot into a square grid and shades one cell per occupied region instead:
@@ -863,7 +884,7 @@ Series keep their own colour and bin independently, so overlapping cohorts stay 
 
 ### Exports and tooltips
 
-The component toolbar exports SVG, PNG and CSV. PNG is produced in the browser: the same SVG is serialized to a blob, loaded as an image, drawn into a canvas at twice the chart's pixel size over the chart's own background, and saved. The scale is capped so the longest edge stays within 8192 pixels. Text is rasterized with the fonts the browser has, so a host that needs an exact typeface must install or embed it. There is no server-side PNG or PDF rendering — that needs a rasterizer dependency, and these packages have none.
+The component toolbar exports SVG, PNG and CSV. PNG is produced in the browser: the same SVG is serialized to a blob, loaded as an image, drawn into a canvas at twice the chart's pixel size over the chart's own background, or over nothing for a chart with `PaintBackground = false` (0.41.0), so its PNG is transparent there, and saved. The scale is capped so the longest edge stays within 8192 pixels. Text is rasterized with the fonts the browser has, so a host that needs an exact typeface must install or embed it. There is no server-side PNG or PDF rendering — that needs a rasterizer dependency, and these packages have none.
 
 Interactive charts draw their own HTML tooltips: hovering or focusing a mark shows its label, Escape hides it. Those charts render with `includeTitles: false` so the browser's slow native tooltip does not compete with it:
 
@@ -1038,6 +1059,12 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.41.0 additions
+
+Fits a card: three settings from a race-results app's feedback, none of which moves an existing drawing. `ChartSpec.FitHeight` draws a horizontal bar chart as tall as its rows need, 36 units a row on tracks, 32 without and 38 with sub-labels, plus the title, axis and source it draws, with no 240-unit floor, so three meters on a phone card are 160 units tall rather than 240. `ChartSpec.PaintBackground` and `GraphSpec.PaintBackground`, off, leave the drawing's background unpainted so the card it sits on shows through, while contrast checks, halos and separators keep using `Style.Background`, which should then be the card's colour; the component's PNG export is transparent there. `ChartSeries.AverageOf` says a series' points are averages the app made, `"12 s"`: each mark's name and tooltip end `, average of 12 s`, and the shared readout and the component's status line say it once a column where every series there shares it.
+
+Every chart drawn before renders as it did: v0.40.0's 360 hashed renderings match byte for byte in both finishes, `FitHeight` is left out of the hash that names gradients at its default, and `PaintBackground` and `AverageOf`, which change no gradient, are never part of it. Eight new renderings cover unpainted charts in light and Midnight, a line averaged by its app, fitted bars of one and four rows on tracks and without, and the score-bars recipe at 340 fitted to its rows. Limits: `FitHeight` takes horizontal bar charts only, its row pitch is fixed (several series share a row, so their bars thin), and in the component hiding the only series in a category drops its row; `PaintBackground` cannot know the surface's colour, so `Style.Background` must be set to it by hand; `AverageOf` is words only, so the data table and CSV keep the values without it.
 
 ## 0.40.0 additions
 

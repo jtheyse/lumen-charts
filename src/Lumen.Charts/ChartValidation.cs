@@ -18,6 +18,8 @@ public static partial class ChartValidation
         if (spec.Sparkline) Sparkline(spec);
         if (spec.Kind == ChartKind.Strip) Strip(spec);
         Track(spec);
+        if (spec.FitHeight && spec.Kind != ChartKind.Bar)
+            throw new ArgumentException("FitHeight works out a horizontal bar chart's height from its rows, one a category, so it applies to bar charts only; a strip is drawn as tall as its content already, and the other kinds lay their marks out in the Height they are given.");
         if (!Enum.IsDefined(spec.XAxis) || !Enum.IsDefined(spec.YAxis)) throw new ArgumentException("Unknown axis kind.");
         Style(spec.Style);
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");
@@ -226,6 +228,7 @@ public static partial class ChartValidation
                 throw new ArgumentException("A density scatter shades cells rather than points, so it takes no value labels or change colours.");
             Changed(series, mark);
             Ended(spec, series, mark);
+            Averaged(series, mark);
             if (series.ProjectedFrom is { } from)
             {
                 if (mark is not (ChartKind.Line or ChartKind.Area))
@@ -583,6 +586,23 @@ public static partial class ChartValidation
             throw new ArgumentException("A point's own colour would hide whether it did better or worse than the one before, so a series with change colours takes no point colours.");
         if (series.Points.Zip(series.Points.Skip(1)).Any(p => p.First is not null && p.Second is not null && p.First.X > p.Second.X))
             throw new ArgumentException("Change colours compare each point with the one before it, so the points must be ordered by X.");
+    }
+
+    /// <summary>The longest <see cref="ChartSeries.AverageOf"/>: a short span such as <c>12 s</c> or <c>a week</c>.</summary>
+    private const int MaxAverageOf = 16;
+    /// <summary>A series' own average is said after each of its marks' one value, so it needs a few words on one line and marks named by one
+    /// value each.</summary>
+    private static void Averaged(ChartSeries series, ChartKind mark)
+    {
+        if (series.AverageOf is not { } of) return;
+        Text(of);
+        if (string.IsNullOrWhiteSpace(of))
+            throw new ArgumentException("AverageOf says what a series' points are averages of, such as 12 s, so it needs words; leave it null for points that are not averages.");
+        if (of.Length > MaxAverageOf || of.Any(c => c is '\n' or '\r' or '\t'))
+            throw new ArgumentException($"AverageOf is said after each value, as \", average of 12 s\", so it is at most {MaxAverageOf} characters on one line, such as 12 s or a week.");
+        if (mark is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Range or ChartKind.Histogram or ChartKind.Box or ChartKind.Violin or ChartKind.Timeline
+            or ChartKind.Calendar or ChartKind.Donut or ChartKind.Gauge or ChartKind.Ring or ChartKind.Strip)
+            throw new ArgumentException("AverageOf is said after a mark's one value, so it applies to series drawn as lines, areas, scatter points, bubbles, columns, bars, stacked columns, bands, blocks, heatmap rows and radar series; a candle reads four prices and a range bar two ends, histograms, boxes, violins and calendars count or add up their points, a timeline's span has no value, and a donut's slices, a strip's parts, a gauge's score and a ring's progress are shares or totals rather than averages.");
     }
 
     /// <summary>An end label names a series where its line or its points end, in the margin right of the plot, so it needs a series that

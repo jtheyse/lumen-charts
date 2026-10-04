@@ -10,7 +10,7 @@ $r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 28 -and $r.Content.Contains('id="lap-heart"') -and $r.Content.Contains('id="best-efforts"') -and $r.Content.Contains('id="zone-strip"') -and $r.Content.Contains("class='lumen-strip-key'") -and $r.Content.Contains('id="scores"') -and ([regex]::Matches($r.Content,"class='lumen-bar-track'")).Count -eq 3 -and $r.Content.Contains('id="ride-channels"') -and $r.Content.Contains('id="season-arc"') -and $r.Content.Contains('id="gap"') -and ([regex]::Matches($r.Content,"class='lumen-end'")).Count -eq 8 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'") -and $r.Content.Contains('id="laps"') -and $r.Content.Contains('id="next-session"') -and $r.Content.Contains('id="field"') -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 31) 'The Sports & performance page answers 200 and prerenders its twenty-eight charts, each set to fit its card, the laps'' heart rates and the best efforts, the time-in-zone strip with its key, the three session scores on their tracks, the season arc, the gap to the leader with its eight end labels, the ride channels, last night''s sleep stages, the training calendar, the run''s four laps, the next session''s ten steps and the seventeen bins of how the field finished among them'
 $r=Invoke-WebRequest "$BaseUrl/" -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('class="lumen-chart lumen-fit"') -and $r.Content.Contains('<b>23</b><span>Chart types</span>') -and $r.Content.Contains('>Calendar</button>') -and $r.Content.Contains('>Blocks</button>') -and $r.Content.Contains('>Strip</button>')) 'The home page answers 200, its chart explorer set to fit its card, with twenty-three chart types and a calendar, blocks and a strip among them'
-Verify (([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 2 -and $r.Content.Contains("data-node='sources'") -and $r.Content.Contains("viewBox='0 0 900 460'")) 'The home page prerenders its network graph set to fit its card too, drawn at its own width until the browser measures the card'
+Verify (([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 5 -and $r.Content.Contains("data-node='sources'") -and $r.Content.Contains("viewBox='0 0 900 460'")) 'The home page prerenders its network graph set to fit its card too, drawn at its own width until the browser measures the card, and the three charts that fit a card'
 $types=Invoke-RestMethod "$BaseUrl/api/charts/types"
 Verify ($types.Count -eq 23 -and $types -contains 'Gauge' -and $types -contains 'Ring' -and $types -contains 'Timeline' -and $types -contains 'Range' -and $types -contains 'Calendar' -and $types -contains 'Blocks' -and $types -contains 'Strip') 'Twenty-three chart types, gauge, ring, timeline, range, calendar, blocks and strip among them'
 foreach($kind in @('Line','Area','Scatter','Bubble','Column','Bar','StackedColumn','Donut','Heatmap','Radar')){
@@ -493,6 +493,36 @@ foreach($bad in @(@{body=$laps.Replace('"kind":"Column"','"kind":"StackedColumn"
   @{body=$laps.Replace('"kind":"Column"','"kind":"Line"');reason='A sub-label is a second line under a category''s name';name='A sub-label on a line chart'},
   @{body=$laps.Replace('"subLabel":"152 bpm"','"subLabel":"152 beats a minute"');reason='at most 16 characters';name='A sub-label past 16 characters'},
   @{body=$laps.Replace('"series":[{','"series":[{"name":"Other","points":[{"x":0,"y":150,"label":"L1","subLabel":"150 bpm"}]},{');reason='may repeat it or leave it null, but not give different ones';name='Two sub-labels for one category'})){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
+}
+# 0.41.0: a background left unpainted, points the app averaged, bars drawn as tall as their rows, and their refusals.
+$r=Invoke-WebRequest "$BaseUrl/" -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains("viewBox='0 0 340 210'") -and $r.Content.Contains('--lumen-ground:#F3F6FB') -and $r.Content.Contains('style="background:#F3F6FB"') -and $r.Content.Contains(', average of 12 s')) 'The home page prerenders a fitted meter 210 units tall, a chart left unpainted on a card of its ground''s colour, and series the app averaged'
+
+$meters='{"title":"Scores","kind":"Bar","width":340,"height":240,"yMin":0,"yMax":100,"barTrack":true,"fitHeight":true,"yTickLabels":"None","drawTitles":false,"paintBackground":false,"style":{"background":"#F3F6FB"},"series":[{"name":"Score","valueLabels":true,"averageOf":"3 races","points":[{"x":0,"y":82,"label":"Pacing"},{"x":1,"y":64,"label":"Recovery"},{"x":2,"y":91,"label":"Technique"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $meters
+$root=([xml]$r.Content).DocumentElement
+Verify ($r.StatusCode -eq 200 -and $root.GetAttribute('viewBox') -eq '0 0 340 182') '"fitHeight" posted as JSON draws three meters 160 units tall and its legend row 22 under them, not the 240 asked for'
+Verify (-not $root.GetAttribute('style').Contains('background:') -and $root.GetAttribute('style').Contains('--lumen-ground:#F3F6FB')) '"paintBackground":false writes no background on the root, only the colour it stands on'
+$named=@(([xml]$r.Content).SelectNodes('//*[local-name()="g"][@class="lumen-datum"]')|ForEach-Object{$_.GetAttribute('aria-label')})
+Verify (($named -join '|') -eq 'Score: Pacing, 82, average of 3 races|Score: Recovery, 64, average of 3 races|Score: Technique, 91, average of 3 races') '"averageOf" posted as JSON ends each mark''s name with what its points average'
+$plain=$meters.Replace('"fitHeight":true,','').Replace('"paintBackground":false,','').Replace('"averageOf":"3 races",','')
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $plain
+Verify ($r.StatusCode -eq 200 -and ([xml]$r.Content).DocumentElement.GetAttribute('viewBox') -eq '0 0 340 262' -and $r.Content.Contains('background:#F3F6FB') -and -not $r.Content.Contains('average of')) 'Without them the chart keeps its height, its background and its plain names'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $meters
+$p=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $plain
+Verify ($r.StatusCode -eq 200 -and $r.Content -eq $p.Content -and -not $r.Content.Contains('average')) 'CSV keeps the values a series says are averages'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType application/json -Body '{"title":"Flow","paintBackground":false,"nodes":[{"id":"a","label":"Start"},{"id":"b","label":"End"}],"edges":[{"source":"a","target":"b"}]}'
+Verify ($r.StatusCode -eq 200 -and -not ([xml]$r.Content).DocumentElement.GetAttribute('style').Contains('background:')) 'A graph posted with "paintBackground":false writes no background'
+foreach($bad in @(@{body=$meters.Replace('"kind":"Bar"','"kind":"Column"');reason='FitHeight works out a horizontal bar chart''s height';name='FitHeight on a column chart'},
+  @{body='{"title":"Line","fitHeight":true,"series":[{"name":"S","points":[{"x":0,"y":1}]}]}';reason='FitHeight works out a horizontal bar chart''s height';name='FitHeight on a line chart'},
+  @{body=$meters.Replace('"averageOf":"3 races"','"averageOf":" "');reason='so it needs words';name='A blank AverageOf'},
+  @{body=$meters.Replace('"averageOf":"3 races"','"averageOf":"seventeen letters"');reason='at most 16 characters on one line';name='An AverageOf past 16 characters'},
+  @{body=$meters.Replace('"averageOf":"3 races"','"averageOf":"12\ns"');reason='at most 16 characters on one line';name='An AverageOf on two lines'},
+  @{body='{"title":"Recovery","kind":"Gauge","series":[{"name":"Recovery","averageOf":"a week","points":[{"x":0,"y":72}]}]}';reason='AverageOf is said after a mark''s one value';name='An AverageOf on a gauge'},
+  @{body='{"title":"Zones","kind":"Strip","width":340,"series":[{"name":"Zones","averageOf":"a week","points":[{"x":0,"y":30,"label":"Easy"},{"x":1,"y":70,"label":"Hard"}]}]}';reason='AverageOf is said after a mark''s one value';name='An AverageOf on a strip'},
+  @{body=$meters.Replace('"height":240','"height":100');reason='240';name='A fitted chart''s height outside 240-2160'})){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
 }

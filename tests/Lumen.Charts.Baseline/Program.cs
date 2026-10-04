@@ -771,6 +771,31 @@ lines.Add($"strip/shares-once {Hash(Render(new ChartSpec { Kind = ChartKind.Stri
     Series = [new("Zones", [new(0, 33, "Easy"), new(1, 33, "Moderate"), new(2, 33, "Hard")])] }))}");
 lines.Add($"ends/note-first {Hash(Unlegended(new ChartSpec { Kind = ChartKind.Line, Width = 340, Height = 260, Title = "Gap", Description = "A name that fits without its note",
     Series = [new("Rider", [new(0, 0), new(1, 4)]) { EndLabel = "Rider name", EndNote = "+12.3s" }] }))}");
+// 0.41.0: fits a card. A line on a tinted card with its background unpainted, in light and Midnight; a line whose points the app averaged;
+// bars drawn as tall as their rows, one row and four, on tracks and without; and the score-bars recipe at 340 fitted to its rows.
+ChartSpec Resting(ChartStyle style) => new()
+{
+    Kind = ChartKind.Line, Width = 340, Height = 260, Title = "Resting heart rate", Description = "An invented week", Style = style, PaintBackground = false, XMin = -0.5, XMax = 6.5,
+    Series = [new("Resting", new double[] { 52, 51, 53, 50, 49, 51, 48 }.Select((bpm, i) => new ChartPoint(i, bpm, $"D{i + 1}")).ToArray()) { ValueLabels = true, EndLabel = "Rest" }]
+};
+lines.Add($"paint/unpainted-light {Hash(Unlegended(Resting(ChartStyle.Light with { Background = "#F3F6FB" })))}");
+lines.Add($"paint/unpainted-midnight {Hash(Unlegended(Resting(ChartStyle.Midnight with { Background = "#151A24" })))}");
+lines.Add($"average/line {Hash(Render(new ChartSpec { Kind = ChartKind.Line, Title = "Power", Description = "Averaged by the app over 12 seconds", XFormat = ValueFormat.Duration,
+    Series = [new("Power", Enumerable.Range(0, 40).Select(i => new ChartPoint(6 + 12 * i, i == 20 ? null : Math.Round(210 + 40 * Math.Sin(i / 5.0)))).ToArray()) { AverageOf = "12 s" }] }))}");
+ChartSpec Fitted(int rows, bool tracked) => new()
+{
+    Kind = ChartKind.Bar, Width = 340, Title = "Scores", Description = "Each out of 100", YMin = 0, YMax = 100, BarTrack = tracked, FitHeight = true, YTickLabels = TickLabels.None,
+    Series = [new("Score", Enumerable.Range(0, rows).Select(i => new ChartPoint(i, 55 + 9 * i, $"Score {i + 1}")).ToArray()) { ValueLabels = true }]
+};
+lines.Add($"fit/one-tracked {Hash(Unlegended(Fitted(1, true)))}");
+lines.Add($"fit/four-tracked {Hash(Unlegended(Fitted(4, true)))}");
+lines.Add($"fit/one-plain {Hash(Unlegended(Fitted(1, false)))}");
+lines.Add($"fit/four-plain {Hash(Render(Fitted(4, false)))}");
+(string Name, double Score)[] raceScores41 = [("Execution", 82), ("Improvement", 64), ("Effort", 91), ("Consistency", 58)];
+lines.Add($"recipe/score-bars-340-fitted {Hash(Unlegended(new ChartSpec { Title = "Race scores", Description = "Execution, improvement, effort and consistency, each out of 100",
+    Kind = ChartKind.Bar, Width = 340, Height = 240, Style = raceFace40 with { Gridlines = GridLine.Hidden }, DrawTitles = false,
+    YMin = 0, YMax = 100, BarTrack = true, YTickLabels = TickLabels.None, FitHeight = true,
+    Series = [new("Score", raceScores41.Select((s, i) => new ChartPoint(i, s.Score, s.Name)).ToArray(), "#D7DDE5") { ValueLabels = true }] }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

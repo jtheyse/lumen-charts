@@ -27,6 +27,9 @@ internal sealed class SvgWriter
     /// <summary>Whether the title and description are drawn at the top, as they are unless a chart sets <see cref="ChartSpec.DrawTitles"/>
     /// off; they stay its accessible name either way.</summary>
     public bool Titled { get; init; } = true;
+    /// <summary>Whether the drawing paints its background, as it does unless a chart or graph sets <c>PaintBackground</c> off; its halos
+    /// and separators stay in the style's background colour either way.</summary>
+    public bool Painted { get; init; } = true;
     /// <summary>How far a chart's body moves down because its description takes a second line, 14 pixels or none.</summary>
     public int Head { get; set; }
     /// <summary>How far a chart's body moves up from its foot because its source takes a second line, 14 pixels or none.</summary>
@@ -90,8 +93,22 @@ public static partial class ChartSvg
     // every record, so leaving out the nulls loses nothing, and it halves the text a long series makes.
     private static readonly JsonSerializerOptions Hashing = new()
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended, Unchanged, Unsparked, Unmarked, Unread, Unchanneled, Untracked } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { Unfinished, Unswept, Unconnected, Uncalendared, Untrended, Unchanged, Unsparked, Unmarked, Unread, Unchanneled, Untracked, Unfitted } }, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
+    /// <summary>A chart drawn at the height it asks for, as every chart was before 0.41.0, is serialized for hashing as 0.40.0, which had no
+    /// such setting, serialized it, so every chart drawn before it keeps its IDs. Whether the background is painted changes only the root's
+    /// style, never a gradient, so it is never part of the hash, painted or not, and an unpainted chart names its gradients as the painted one
+    /// does. A series' average changes only the words its marks say, so it is never part of the hash either.</summary>
+    private static void Unfitted(JsonTypeInfo info)
+    {
+        if (info.Type == typeof(ChartSeries))
+            foreach (var property in info.Properties)
+                if (property.Name == nameof(ChartSeries.AverageOf)) property.ShouldSerialize = (_, _) => false;
+        if (info.Type != typeof(ChartSpec)) return;
+        foreach (var property in info.Properties)
+            if (property.Name == nameof(ChartSpec.PaintBackground)) property.ShouldSerialize = (_, _) => false;
+            else if (property.Name == nameof(ChartSpec.FitHeight)) property.ShouldSerialize = (_, fitted) => fitted is true;
+    }
     /// <summary>A chart without bar tracks that draws its title and description, as every chart did before 0.39.0, is serialized for hashing
     /// as 0.38.0, which had neither setting, serialized it, so every chart drawn before them keeps its IDs.</summary>
     private static void Untracked(JsonTypeInfo info)
@@ -217,10 +234,12 @@ public static partial class ChartSvg
     public static string Render(ChartSpec spec, bool includeLegend = true, bool includeTitles = true)
     {
         ChartValidation.Validate(spec);
+        // A bar chart fitted to its rows is drawn as if it had asked for the height they need.
+        if (spec.FitHeight) spec = spec with { Height = FittedHeight(spec) };
         var style = ResolveStyle(spec);
         // A sparkline draws no gridlines, so it carries no rule for minor ones either.
         var bare = spec.Sparkline;
-        var w = new SvgWriter { Titles = includeTitles, Style = style, MinorGrid = !bare && spec.MinorGridlines && style.Gridlines != GridLine.Hidden, Spec = spec, Bare = bare, Titled = spec.DrawTitles };
+        var w = new SvgWriter { Titles = includeTitles, Style = style, MinorGrid = !bare && spec.MinorGridlines && style.Gridlines != GridLine.Hidden, Spec = spec, Bare = bare, Titled = spec.DrawTitles, Painted = spec.PaintBackground };
         // A ring's key carries its value and goal as well as its name, so its columns are wider.
         var ring = spec.Kind == ChartKind.Ring;
         var legendColumns = Math.Max(1, (spec.Width - 48) / (ring ? 220 : 180));
@@ -373,7 +392,9 @@ public static partial class ChartSvg
         var style = w.Style;
         // A chart fills the width of its box. A sparkline is shown at its own width, as a word is, and never wider than its box.
         var shown = w.Bare ? $"width:{width}px;max-width:100%" : "width:100%";
-        w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{style.Grid};--lumen-muted:{style.Muted};{shown};height:auto;display:block;background:{style.Background};color:{style.Text};font-family:{style.FontFamily};font-size:12px' fill='currentColor'>");
+        // Left unpainted, the drawing carries its background colour, which its halos are drawn in, for a host's script to read instead.
+        var ground = w.Painted ? $"background:{style.Background}" : $"--lumen-ground:{style.Background}";
+        w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{style.Grid};--lumen-muted:{style.Muted};{shown};height:auto;display:block;{ground};color:{style.Text};font-family:{style.FontFamily};font-size:12px' fill='currentColor'>");
         w.Add($"<title>{SvgWriter.E(title)}</title><desc>{SvgWriter.E(description)}</desc>");
         // A refined line marker is drawn but transparent, so it is hovered and focused where a visible one would be, and
         // appears while it is.
@@ -908,7 +929,7 @@ public static partial class ChartSvg
                                     _ => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", "")
                                 };
                             var followed = ending is { } e && e.Index == d.Index && e.Count == d.Count && e.Point.X == p.X;
-                            Datum(w, si, d.Index, PointLabel(series, p, xs, scale, d.Count > 1 ? null : changes[d.Index], Sub(p.X)) + Averaged(d.Count) + (followed ? Said(series) : ""), shape, attributes);
+                            Datum(w, si, d.Index, PointLabel(series, p, xs, scale, d.Count > 1 ? null : changes[d.Index], Sub(p.X)) + (d.Count > 1 ? Averaged(d.Count) : Of(series, p)) + (followed ? Said(series) : ""), shape, attributes);
                             if (followed) endings.Add(new(X(p.X), At(p.Y!.Value), series, color, d.Index == last && d.Count == 1 ? 10 : p.Highlight is not null ? Highlighted + 1 : series.Markers == MarkerStyle.Hollow ? 5 : 4));
                             if (series.ValueLabels) Over(X(p.X), At(p.Y!.Value), d.Index == last && d.Count == 1 || p.Highlight is not null ? Highlighted : run.Length > 80 ? 2 : 4, scale.Format(p.Y!.Value), p.ValueNote, Lettered(MovedOf(d), p));
                         }
@@ -959,7 +980,7 @@ public static partial class ChartSvg
                         // A block above the bottom of its plot keeps 2 pixels of height, so a bin of one among hundreds still shows;
                         // one at the bottom, a count of none, draws nothing visible and keeps its name and its focus.
                         if (bottom - far > 1e-9) far = Math.Min(far, bottom - 2);
-                        Datum(w, si, pi, BlockLabel(series, p, xs, scale, several), Block(from, far, to - from, bottom - far, radius, Ink(p)));
+                        Datum(w, si, pi, BlockLabel(series, p, xs, scale, several) + Of(series, p), Block(from, far, to - from, bottom - far, radius, Ink(p)));
                     }
                 }
                 else for (var pi = 0; pi < series.Points.Count; pi++)
@@ -1000,7 +1021,7 @@ public static partial class ChartSvg
                             w.Add(track.Insert(5, " class='lumen-bar-track'"));
                         }
                         var over = given > y ? $", above the scale, drawn at {scale.Format(y)}" : "";
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + over, Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost));
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + Of(series, p) + over, Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost));
                         if (series.ValueLabels)
                         {
                             // On a track the value stands past the track's end, in the margin kept for it, or above a column's track.
@@ -1015,7 +1036,7 @@ public static partial class ChartSvg
                         // Centred on its X within the slot, rising from zero on the series' own axis.
                         var width = slot / columns.Length;
                         var x = X(p.X) - slot / 2 + place * width;
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)), Bar(w, x, Math.Min(At(0), At(y)), width, Math.Abs(At(y) - At(0)), y >= 0 ? End.Top : End.Bottom, Ink(p), series.Fill));
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + Of(series, p), Bar(w, x, Math.Min(At(0), At(y)), width, Math.Abs(At(y) - At(0)), y >= 0 ? End.Top : End.Bottom, Ink(p), series.Fill));
                         if (series.ValueLabels) Above(x, width, At(y), y >= 0, scale.Format(y), p.ValueNote);
                     }
                     else
@@ -1030,7 +1051,7 @@ public static partial class ChartSvg
                             MarkerStyle.Hollow => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{w.Style.Background}'{w.Fixed}/>", $" stroke='{ink}' stroke-width='2'"),
                             _ => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'{w.Fixed}/>", "")
                         };
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale,changes[pi],Sub(p.X)) + (pi == endPoint ? Said(series) : ""), shape, attributes);
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale,changes[pi],Sub(p.X)) + Of(series, p) + (pi == endPoint ? Said(series) : ""), shape, attributes);
                         if (pi == endPoint) endings.Add(new(X(p.X), At(y), series, color, p.Highlight is null ? radius + (series.Markers == MarkerStyle.Hollow ? 1 : 0) : Highlighted + 1));
                         if (series.ValueLabels) Over(X(p.X), At(y), p.Highlight is null ? radius : Highlighted, scale.Format(y), p.ValueNote, Lettered(Moved(pi), p));
                     }
@@ -1411,6 +1432,9 @@ public static partial class ChartSvg
 
     /// <summary>What an averaged mark's name adds: how many points it stands for. A mark of one point adds nothing.</summary>
     private static string Averaged(int count) => count > 1 ? $", average of {Count(count)} points" : "";
+    /// <summary>What a mark's name adds when its series says its points are averages already, <c>, average of 12 s</c>: nothing for a series
+    /// that says none, and nothing for a missing value.</summary>
+    internal static string Of(ChartSeries s, ChartPoint p) => s.AverageOf is { } of && p.Y.HasValue ? $", average of {of}" : "";
 
     /// <summary>
     /// The marks a line, area or band series draws, one entry for each unbroken run of values it draws: the run's own length, the marks
@@ -1595,10 +1619,24 @@ public static partial class ChartSvg
     }
 
     /// <summary>The room under a chart's plots for its X axis's labels and title: 76 units, or 90 where columns write sub-labels under their
-    /// names, or, on a horizontal bar chart on tracks that writes neither its value axis's tick labels nor its title, 24, or 36 above a source
-    /// line.</summary>
-    private static double Floor(ChartSpec s) => s.Kind == ChartKind.Bar && s.BarTrack && s.YTickLabels == TickLabels.None && string.IsNullOrWhiteSpace(s.YLabel)
+    /// names, or, on a horizontal bar chart on tracks or fitted to its rows that writes neither its value axis's tick labels nor its title, 24,
+    /// or 36 above a source line.</summary>
+    private static double Floor(ChartSpec s) => s.Kind == ChartKind.Bar && (s.BarTrack || s.FitHeight) && s.YTickLabels == TickLabels.None && string.IsNullOrWhiteSpace(s.YLabel)
         ? string.IsNullOrWhiteSpace(s.Source) ? 24 : 36 : Subbed(s) ? 76 + SubLine : 76;
+
+    /// <summary>The row a horizontal bar chart fitted to its rows gives each category: 36 units on tracks, 32 without, and
+    /// <see cref="SubRow"/>, 38, where a category writes a sub-label under its name.</summary>
+    private const double TrackRow = 36, BarRow = 32;
+    /// <summary>The height a horizontal bar chart with <see cref="ChartSpec.FitHeight"/> is drawn at: its rows, one a category, and the room
+    /// round them the chart draws in, its title and description above, as <see cref="Headroom"/> moves them, and its axis or bare foot and
+    /// source under, as <see cref="Floor"/> and a second source line keep them. The legend <see cref="Render"/> may add goes under that.</summary>
+    internal static int FittedHeight(ChartSpec s)
+    {
+        var rows = Math.Max(1, s.Series.SelectMany(series => series.Points).Select(p => p.X).Distinct().Count());
+        var pitch = s.Series.Any(series => series.Points.Any(p => p.SubLabel is not null)) ? SubRow : s.BarTrack ? TrackRow : BarRow;
+        var foot = 14 * Math.Max(0, Wrap(s.Source, s.Width - 48).Length - 1);
+        return (int)Math.Ceiling(78 + Headroom(s) + rows * pitch + Floor(s) + foot);
+    }
 
     /// <summary>Whether nothing is written up the left of a chart's plots: each plot is named above it, the Y axis stands on the left,
     /// and no left-hand axis writes a tick label.</summary>
@@ -3016,7 +3054,7 @@ public static partial class ChartSvg
                 var t = scale.Map(p.Y.Value, 0, 1);
                 var color = Mix(w.Style.HeatmapLow, w.Style.HeatmapHigh, t);
                 // A hairline keeps the palest cells distinguishable from the chart background.
-                Datum(w,si,pi,PointLabel(s.Series[si],p),$"<rect x='{N(x+1)}' y='{N(80+w.Head+si*ch+1)}' width='{N(Math.Max(0,cw-2))}' height='{N(Math.Max(0,ch-2))}' rx='3' fill='{color}' stroke='var(--lumen-muted)' stroke-opacity='.4'{w.Fixed}/>");
+                Datum(w,si,pi,PointLabel(s.Series[si],p)+Of(s.Series[si],p),$"<rect x='{N(x+1)}' y='{N(80+w.Head+si*ch+1)}' width='{N(Math.Max(0,cw-2))}' height='{N(Math.Max(0,ch-2))}' rx='3' fill='{color}' stroke='var(--lumen-muted)' stroke-opacity='.4'{w.Fixed}/>");
             }
         }
         for (var i = 0; i < cats.Length; i += Math.Max(1,(int)Math.Ceiling(cats.Length/12d)))
@@ -3048,7 +3086,7 @@ public static partial class ChartSvg
             for(var pi=0;pi<series.Points.Count;pi++)
             {
                 var p=series.Points[pi];var pos=At(Array.IndexOf(cats,p.X),p.Y!.Value);
-                Datum(w,si,pi,PointLabel(series,p),$"<circle cx='{N(pos.X)}' cy='{N(pos.Y)}' r='4' fill='{color}'/>");
+                Datum(w,si,pi,PointLabel(series,p)+Of(series,p),$"<circle cx='{N(pos.X)}' cy='{N(pos.Y)}' r='4' fill='{color}'/>");
             }
         }
         w.Text(24,s.Height-w.Foot-38,$"Radial scale: 0 to {LinearScale.Label(max)}","class='lumen-muted'");
