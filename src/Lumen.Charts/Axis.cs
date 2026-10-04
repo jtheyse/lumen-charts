@@ -129,6 +129,9 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
     /// <summary>Maps the minimum to the end of the pixel interval instead of its start, so on a Y axis the
     /// smallest value sits at the top. Everything placed through <see cref="Map"/> follows.</summary>
     public bool Reversed { get; init; }
+    /// <summary>Written straight after every value <see cref="Format"/> and <see cref="Ticks"/> write, exactly as given, such as <c>s</c>
+    /// or <c> bpm</c>; a time axis writes its calendar and takes none. Null writes none.</summary>
+    public string? Unit { get; init; }
 
     private const double Second = 1000, Minute = 60 * Second, Hour = 60 * Minute, Day = 24 * Hour;
     private static readonly (double Step, string Format)[] FixedSteps =
@@ -237,10 +240,10 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         return Kind == AxisKind.Log ? Math.Pow(10, value) : value;
     }
 
-    /// <summary>Label for a data value, used by tooltips and tables.</summary>
+    /// <summary>Label for a data value, used by tooltips and tables, with the axis's <see cref="Unit"/> after it.</summary>
     public string Format(double value) => Kind == AxisKind.Time
         ? Local(value).ToString(Max - Min < 2 * Day ? "d MMM yyyy HH:mm" : "d MMM yyyy", CultureInfo.InvariantCulture)
-        : Label(value);
+        : Label(value) + Unit;
 
     private string Label(double value) => ValueFormat switch
     {
@@ -322,8 +325,17 @@ public readonly record struct Axis(AxisKind Kind, double Min, double Max)
         return TimeAxis.Value(new DateTimeOffset(moment, Zone.GetUtcOffset(moment)));
     }
 
-    /// <summary>Tick values inside the domain with their axis labels. Time ticks fall on calendar boundaries.</summary>
+    /// <summary>Tick values inside the domain with their axis labels, each followed by the axis's <see cref="Unit"/>. Time ticks fall on
+    /// calendar boundaries.</summary>
     public IReadOnlyList<(double Value, string Label)> Ticks(int count = 5)
+    {
+        var ticks = Unitless(count);
+        if (string.IsNullOrEmpty(Unit) || Kind == AxisKind.Time) return ticks;
+        var unit = Unit;
+        return ticks.Select(tick => (tick.Value, tick.Label + unit)).ToArray();
+    }
+
+    private IReadOnlyList<(double Value, string Label)> Unitless(int count)
     {
         if (Kind == AxisKind.Log) return ValueFormat == ValueFormat.Duration ? LogDurationTicks(count) : LogTicks(count);
         if (Kind != AxisKind.Time)

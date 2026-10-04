@@ -968,6 +968,66 @@ if (await blocksTab.CountAsync() > 0)
     });
 }
 else Console.WriteLine("SKIP blocks check: this host offers no blocks");
+// 0.38.0: a chart drawn without its legend or toolbar, as a phone card is, keeps its status line out of sight and reading; its lines are
+// named at their ends, each label inside the drawing on a phone and on a desktop; and its shared readout reads every line. The checks
+// find such a chart by the class its toolbar takes, so they run on any host that draws one.
+async Task QuietChecks(IPage tab, ILocator quiet, string url, string where)
+{
+    await Test($"{where}: a chart without its legend and toolbar draws neither, and its status line, out of sight, reads the readout the arrow keys move", async () =>
+    {
+        await quiet.ScrollIntoViewIfNeededAsync();
+        var shape = await quiet.EvaluateAsync<double[]>(@"c => { const s = c.querySelector('.lumen-status'), b = s.getBoundingClientRect();
+            return [c.querySelectorAll('.lumen-legend').length, c.querySelectorAll('button').length, c.querySelectorAll('.lumen-status[role=status]').length, b.width, b.height,
+                c.querySelectorAll('.lumen-viewport g.lumen-end').length]; }");
+        Check(shape[0] == 0 && shape[1] == 0 && shape[2] == 1 && shape[3] <= 1 && shape[4] <= 1 && shape[5] >= 5, string.Join(", ", shape));
+        var status = quiet.Locator(".lumen-status");
+        var marks = quiet.Locator(".lumen-datum[data-point]");
+        await marks.First.FocusAsync();
+        await tab.WaitForFunctionAsync("s => s.textContent.length > 0", await status.ElementHandleAsync());
+        var before = await status.TextContentAsync();
+        await tab.Keyboard.PressAsync("ArrowRight");
+        await tab.WaitForFunctionAsync("([s, b]) => s.textContent !== b && s.textContent.length > 0", new object[] { await status.ElementHandleAsync(), before! });
+        var after = (await status.TextContentAsync())!;
+        Check(after.Contains(" · You ") && after.Split(" · ").Skip(1).All(e => e.EndsWith('s')), $"the status line reads \"{after}\"");
+        await tab.Keyboard.PressAsync("Escape");
+    });
+    await Test($"{where}: the shared readout reads every line, each with its unit, in legend order", async () =>
+    {
+        var box = (await quiet.Locator(".lumen-viewport > svg").BoundingBoxAsync())!;
+        await tab.Mouse.MoveAsync(box.X + box.Width * .5f, box.Y + box.Height * .5f);
+        var tip = quiet.Locator(".lumen-tooltip");
+        await tip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        var lines = ((await tip.TextContentAsync()) ?? "").Split('\n');
+        var series = await quiet.EvaluateAsync<int>("c => new Set([...c.querySelectorAll('.lumen-datum[data-series]')].map(m => m.dataset.series)).size");
+        Check(lines.Length == series + 1 && lines[^1].StartsWith("You ") && lines.Skip(1).All(l => l.EndsWith('s')), string.Join(" / ", lines));
+        await tab.Mouse.MoveAsync(1, 1);
+    });
+    foreach (var (width, phone) in new[] { (375, true), (1280, false) })
+        await Test($"{where}: at {width} pixels{(phone ? ", on a phone," : "")} every end label stands whole inside the drawing, none overlapping another", async () =>
+        {
+            await using var context = await browser.NewContextAsync(phone ? new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 }
+                : new() { ViewportSize = new() { Width = width, Height = 900 } });
+            var other = await context.NewPageAsync();
+            other.SetDefaultTimeout(15_000);
+            await other.GotoAsync(url, new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+            await other.WaitForSelectorAsync(".lumen-tooltip", new() { State = WaitForSelectorState.Attached, Timeout = 120_000 });
+            var card = other.Locator(".lumen-chart:has(.lumen-quiet)").First;
+            await card.ScrollIntoViewIfNeededAsync();
+            await other.WaitForFunctionAsync("c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'); return Number(s.getAttribute('viewBox').split(' ')[2]) === Math.max(320, v.clientWidth); }", await card.ElementHandleAsync());
+            var measured = await card.EvaluateAsync<double[]>(@"c => { const s = c.querySelector(':scope > .lumen-viewport > svg'), box = s.getBoundingClientRect();
+                const labels = [...s.querySelectorAll('g.lumen-end > text:last-child')].map(t => t.getBoundingClientRect());
+                const outside = labels.filter(b => b.left < box.left - .5 || b.right > box.right + .5 || b.top < box.top - .5 || b.bottom > box.bottom + .5).length;
+                /* A text's box is its font's whole line, a third taller than its letters: boxes 14 apart meet by a pixel or two while the letters stand clear. */ let overlaps = 0;
+                for (let i = 0; i < labels.length; i++) for (let j = i + 1; j < labels.length; j++) { const a = labels[i], b = labels[j];
+                    if (a.left < b.right && b.left < a.right && a.top < b.bottom - 3 && b.top < a.bottom - 3) overlaps++; }
+                const cut = [...s.querySelectorAll('g.lumen-end > text:last-child')].filter(t => t.textContent.includes('…')).length;
+                return [labels.length, outside, overlaps, cut, box.width, document.documentElement.scrollWidth]; }");
+            Check(measured[0] >= 5 && measured[1] == 0 && measured[2] == 0 && measured[3] == 0 && measured[5] <= width, string.Join(", ", measured));
+        });
+}
+var quietHere = page.Locator(".lumen-chart:has(.lumen-quiet)");
+if (await quietHere.CountAsync() > 0) await QuietChecks(page, quietHere.First, address, "This host");
+else Console.WriteLine("SKIP quiet chart checks: this host's first page draws no chart without its toolbar");
 // The Sports & performance page belongs to the gallery, so the suite finds it as a visitor does, by the link that names it, and a
 // host without one says SKIP. It opens in a page of its own, so it starts in the light theme and the Lumen brand.
 var sportsLink = page.GetByRole(AriaRole.Link, new() { Name = "Sports & performance" });
@@ -981,15 +1041,15 @@ if (await sportsLink.CountAsync() > 0)
     var charts = sports.Locator(".lumen-chart");
     // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
-        return svgs.length === 25 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+        return svgs.length === 27 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
-    await Test("The Sports & performance page renders its twenty-five charts, each live and drawn at the width it is shown", async () =>
+    await Test("The Sports & performance page renders its twenty-seven charts, each live and drawn at the width it is shown", async () =>
     {
-        Check(await charts.CountAsync() == 25, $"the page shows {await charts.CountAsync()} charts");
-        for (var i = 0; i < 25; i++)
+        Check(await charts.CountAsync() == 27, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 27; i++)
             Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
-        // Each chart's script adds its tooltip, so twenty-five of them prove every chart, sparklines included, is interactive.
-        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 25");
+        // Each chart's script adds its tooltip, so twenty-seven of them prove every chart, sparklines included, is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 27");
         await sports.WaitForFunctionAsync(drawnToFit);
     });
 
@@ -1037,13 +1097,17 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 25", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 27", null, new() { Timeout = 120_000 });
             await Sparklines(tab, "phone");
         });
     }
     else Console.WriteLine("SKIP sparkline checks: this host's Sports & performance page has no Getting faster? card");
 
     await ReadoutChecks(sports, "Sports & performance page");
+
+    if (await sports.Locator("#gap .lumen-chart:has(.lumen-quiet)").CountAsync() > 0)
+        await QuietChecks(sports, sports.Locator("#gap .lumen-chart"), sportsUrl.ToString(), "Gap to the leader");
+    else Console.WriteLine("SKIP Gap to the leader checks: this host's Sports & performance page has no such card");
 
     // 0.37.0: the Ride channels card reads six channels at once, zooms by a drag through all six panes, takes a tap on a phone as the
     // readout, never a band, and keeps every word inside its drawing there.
@@ -1073,7 +1137,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 25", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 27", null, new() { Timeout = 120_000 });
             await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
             var card = tab.Locator("#ride-channels .lumen-chart");
             await card.ScrollIntoViewIfNeededAsync();
@@ -1173,7 +1237,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 25", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 27", null, new() { Timeout = 120_000 });
             await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
             var card = tab.Locator("#field .lumen-chart");
             await card.ScrollIntoViewIfNeededAsync();
@@ -1189,7 +1253,7 @@ if (await sportsLink.CountAsync() > 0)
             Check(measured[0] > 10 && measured[1] == 0, $"{measured[1]} of the card's {measured[0]} texts run outside its drawing");
             // Its title, its description and its source on two lines, the card drawn at the width it is shown and the page not scrolling sideways.
             Check(measured[2] == 4 && measured[6] <= 375 && Math.Abs(measured[7] - measured[6]) < 1.5 && measured[8] <= 375, $"{measured[2]} lines written from the left, drawn {measured[6]} wide and shown {measured[7]:0.#}, the page {measured[8]} wide");
-            Check(measured[3] == 22 && measured[4] >= 66 && measured[5] == 0, $"{measured[5]} of the {measured[4]} titles, descriptions and sources of {measured[3]} charts run outside their drawings");
+            Check(measured[3] == 24 && measured[4] >= 72 && measured[5] == 0, $"{measured[5]} of the {measured[4]} titles, descriptions and sources of {measured[3]} charts run outside their drawings");
         });
     else Console.WriteLine("SKIP field phone check: this host's Sports & performance page has no How the field finished");
     await sports.CloseAsync();

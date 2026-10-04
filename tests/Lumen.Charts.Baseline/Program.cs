@@ -667,6 +667,46 @@ ChartSpec Channels(ChartStyle style)
 }
 lines.Add($"channels/340-light {Hash(Unlegended(Channels(ChartStyle.Light)))}");
 lines.Add($"channels/340-midnight {Hash(Unlegended(Channels(ChartStyle.Midnight)))}");
+// 0.38.0: season arc and gap to the leader. Ticks set by hand on a reversed percentile axis, a unit after every value, eight end labels
+// ending within a whisker, and an invented season's arc and an invented race's gaps to the leader at 340 in light and Midnight.
+lines.Add($"ticks/set {Hash(Render(line with { Title = "Ticks set by hand", YReversed = true, YMin = 0, YMax = 60, YTickValues = [new(0, "Front"), new(30), new(60, "Back"), new(90, "Outside")] }))}");
+lines.Add($"units/seconds {Hash(Render(Symmetric(formValues) with { YUnit = "s", Series = [new("Form", formValues.Select((v, i) => new ChartPoint(i, v)).ToArray()) { ValueLabels = true, Markers = MarkerStyle.Filled }] }))}");
+lines.Add($"ends/crowded {Hash(Render(line with { Title = "Crowded endings", Width = 340, Height = 300,
+    Series = Enumerable.Range(0, 8).Select(k => new ChartSeries($"S{k}", [new(0, 10 + k * 9), new(5, 50 + k * .3)]) { EndLabel = $"S{k}", EndNote = $"+{k}.0s" }).ToArray() }))}");
+ChartSpec SeasonArc(ChartStyle style)
+{
+    var dark = style == ChartStyle.Midnight;
+    (string Discipline, int? Position, int Field)[] races = [("XCO", 18, 40), ("XCC", 9, 32), ("XCO", 12, 44), ("XCM", 31, 60), ("XCO", null, 41), ("XCC", 6, 30), ("XCO", 7, 42), ("Enduro", 22, 55), ("XCM", 19, 58), ("XCO", 5, 40)];
+    (string Name, string Color)[] kinds = [("XCC", "#38bdf8"), ("XCO", "#34d399"), ("XCM", "#f59e0b"), ("Other", "#a78bfa")];
+    string Kind(string d) => kinds.Any(k => k.Name == d) ? d : "Other";
+    return new()
+    {
+        Kind = ChartKind.Line, Style = style, Width = 340, Height = 300, Title = "Season arc", Description = "Each race's place in its field, front at the top",
+        XMin = -0.5, XMax = races.Length - 0.5, YReversed = true, YMin = 0, YMax = 100, YUnit = "%", YTickValues = [new(0, "Front"), new(50, "Mid"), new(100, "Back")],
+        Series = kinds.Select(k => new ChartSeries(k.Name, races.Select((r, i) => (r, i)).Where(t => Kind(t.r.Discipline) == k.Name)
+            .Select(t => new ChartPoint(t.i, t.r.Position is int p ? Math.Round(100.0 * (p - 1) / (t.r.Field - 1)) : null, $"R{t.i + 1}") { ValueNote = t.r.Position is int q ? $" · P{q}/{t.r.Field}" : null }).ToArray(),
+            dark ? k.Color : null) { Markers = MarkerStyle.Filled }).ToArray()
+    };
+}
+lines.Add($"arc/340-light {Hash(Render(SeasonArc(ChartStyle.Light)))}");
+lines.Add($"arc/340-midnight {Hash(Render(SeasonArc(ChartStyle.Midnight)))}");
+ChartSpec Gaps(ChartStyle style)
+{
+    var dark = style == ChartStyle.Midnight;
+    var cumulative = Enumerable.Range(0, 8).Select(r => { var total = 0.0; return Enumerable.Range(0, 7).Select(lap => lap == 0 ? 0 : total += Math.Round(r == 7 ? 309 - 3.1 * lap + 2 * Math.Sin(lap * 1.9) : 296 + r * 2.4 + 6 * Math.Sin(r * 1.7 + lap * 2.3), 1)).ToArray(); }).ToArray();
+    var gaps = cumulative.Select(times => times.Select((t, lap) => Math.Round(t - cumulative.Min(other => other[lap]), 1)).ToArray()).ToArray();
+    var signed = new Axis(AxisKind.Linear, 0, 1) { ValueFormat = ValueFormat.Signed, Unit = "s" };
+    return new()
+    {
+        Kind = ChartKind.Line, Style = style, Width = 340, Height = 320, Title = "Gap to the leader", Description = "Seconds behind the leader at each lap", XLabel = "Lap",
+        YReversed = true, YMin = 0, YFormat = ValueFormat.Signed, YUnit = "s",
+        Series = Enumerable.Range(0, 8).Select(r => new ChartSeries(r == 7 ? "You" : $"Rider {(char)('A' + r)}", gaps[r].Select((g, lap) => new ChartPoint(lap, g, lap == 0 ? "Start" : $"Lap {lap}")).ToArray(),
+            r == 7 ? (dark ? "#34d399" : style.Series[0]) : style.Zones[0]) { StrokeWidth = r == 7 ? 3.2 : 2, Markers = MarkerStyle.None, EndLabel = r == 7 ? "You" : ((char)('A' + r)).ToString(),
+            EndNote = gaps[r][^1] == 0 ? "leader" : signed.Format(gaps[r][^1]) }).ToArray()
+    };
+}
+lines.Add($"gap/340-light {Hash(Unlegended(Gaps(ChartStyle.Light)))}");
+lines.Add($"gap/340-midnight {Hash(Unlegended(Gaps(ChartStyle.Midnight)))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

@@ -3704,11 +3704,12 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: twenty-five charts in twenty-two cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+Test("Sports page: twenty-seven charts in twenty-four cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
     // 0.34.0's Getting faster? card draws three sparklines in place of one chart; they are checked on their own below. 0.35.0 adds
-    // How the field finished to the Racing section, and 0.37.0 Ride channels in a Long ride section of its own.
-    Check(sports.Count==22&&sports.Select(card=>card.Id).Distinct().Count()==22&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
-        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==25,"the page should have twenty-five charts in twenty-two cards");
+    // How the field finished to the Racing section, 0.37.0 Ride channels in a Long ride section of its own, and 0.38.0 Season arc and Gap to
+    // the leader to the Racing section.
+    Check(sports.Count==24&&sports.Select(card=>card.Id).Distinct().Count()==24&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
+        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==27,"the page should have twenty-seven charts in twenty-four cards");
     // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order; 0.33.0's Racing section stands
     // before it.
     Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
@@ -6525,7 +6526,7 @@ Test("Sports page: Getting faster? rings each time faster than all before it, fr
             Check(!Svg(line.Spec with{Style=style}).Descendants(ns+"text").Any(),$"{line.Name} wrote a word");
         }
     // The page draws each at its own size beside its words, and its sparklines and charts number twenty-four.
-    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==25,"the page's count");
+    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==27,"the page's count");
 });
 // 0.35.0: how the field finished, and text that fits. Blocks keep a visible height; an annotation can draw its label without its value
 // and stand over the data; an X axis chooses which of its labels it writes, and either axis can label just its two ends; and a chart's
@@ -7314,6 +7315,260 @@ Test("Sports page: Ride channels draws an invented two-hour ride in six plots na
     Check(Datums(doc,1).Length==600&&Datums(doc,0).Length<600&&Datums(doc,0).Length>=595&&doc.Descendants(ns+"text").Count(t=>(string?)t.Attribute("class")=="lumen-pane-title")==6,$"{Datums(doc,0).Length} heart-rate marks");
     // The same ride, its data identical on every run.
     Check(SportsData.LongRide().Power.SequenceEqual(ride.Power),"the ride is not deterministic");
+});
+// 0.38.0: season arc and gap to the leader. Ticks set by hand, a unit after every value an axis writes, end-of-line labels, and the
+// component's ShowLegend and ShowToolbar. Every example is invented.
+ChartSpec Arc38(ChartStyle? style=null)=>new(){Title="Season arc",Description="Each race's place in its field, front at the top",Kind=ChartKind.Line,Style=style,
+    XMin=-.5,XMax=7.5,YReversed=true,YMin=0,YMax=100,YUnit="%",YTickValues=[new(0,"Front"),new(50,"Mid"),new(100,"Back")],
+    Series=[new("XCO",[new(0,40,"R1"){ValueNote=" · P17/41"},new(2,30,"R3"),new(4,null,"R5"),new(6,12,"R7")]){Markers=MarkerStyle.Filled},
+        new("XCC",[new(1,20,"R2"),new(5,10,"R6")]){Markers=MarkerStyle.Filled},new("XCM",[new(3,55,"R4"),new(7,45,"R8")]){Markers=MarkerStyle.Filled}]};
+// Eight invented riders' gaps to the leader over six laps, the last listed "You".
+ChartSpec Gap38(int width=900,int height=420)=>new(){Title="Gap to the leader",Description="Seconds behind the leader at each lap",Kind=ChartKind.Line,Width=width,Height=height,
+    YReversed=true,YMin=0,YFormat=ValueFormat.Signed,YUnit="s",
+    Series=Enumerable.Range(0,8).Select(r=>new ChartSeries(r==7?"You":$"Rider {(char)('A'+r)}",Enumerable.Range(0,7).Select(lap=>new ChartPoint(lap,Math.Max(0,Math.Round(r*lap*1.7-(r==7?6*Math.Min(lap,3):0),1)),lap==0?"Start":$"Lap {lap}")).ToArray())
+        {EndLabel=r==7?"You":((char)('A'+r)).ToString(),EndNote=r==0?"leader":null,StrokeWidth=r==7?3.2:2,Markers=MarkerStyle.None}).ToArray()};
+XElement[] Ends38(XDocument doc)=>doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("class")=="lumen-end").ToArray();
+// An end label's words as written, its note included, and the text that carries them, not the halo under it.
+XElement Words38(XElement end)=>end.Elements(ns+"text").Last();
+string Text38(XElement end)=>string.Concat(Words38(end).Nodes().Where(n=>n is XText||n is XElement{Name.LocalName:"tspan"}).Select(n=>n is XText t?t.Value:((XElement)n).Value));
+Test("YTickValues stands each tick and gridline exactly at its value, labelled as given or in the axis's format and unit, leaves out values outside the axis, and reverses",()=>{
+    var doc=Svg(Arc38());
+    // The plot runs from 78 to 344, reversed, so 0 stands at the top and 100 at the bottom.
+    Check(Grid(doc).SequenceEqual([78d,211,344]),string.Join(",",Grid(doc)));
+    Check(Upward(doc).Select(t=>t.Text).SequenceEqual(["Front","Mid","Back"])&&Upward(doc).Select(t=>t.Y).SequenceEqual([82d,215,348]),string.Join(",",Upward(doc)));
+    // A tick without a label writes its value in the axis's format with its unit; one outside the axis is left out and does not stretch it.
+    var plain=Svg(Arc38() with{YTickValues=[new(0),new(25.5),new(100,"Back"),new(140,"Beyond"),new(-5)]});
+    Check(Upward(plain).Select(t=>t.Text).SequenceEqual(["0%","25.5%","Back"])&&Grid(plain).Length==3&&Close(Grid(plain)[1],78+25.5/100*266),string.Join(",",Upward(plain)));
+    // Not reversed, the lowest value stands at the bottom; the order given does not matter.
+    var upright=Svg(Arc38() with{YReversed=false,YTickValues=[new(100,"Back"),new(0,"Front")]});
+    Check(Upward(upright).Select(t=>t.Text).SequenceEqual(["Front","Back"])&&Upward(upright)[0].Y==348&&Upward(upright)[1].Y==82,string.Join(",",Upward(upright)));
+    // TickLabels still chooses which labels are written: Ends the lowest and highest, None none, the gridlines staying.
+    var ends=Svg(Arc38() with{YTickLabels=TickLabels.Ends,YTickValues=[new(0,"Front"),new(25),new(50,"Mid"),new(100,"Back")]});
+    Check(Upward(ends).Select(t=>t.Text).SequenceEqual(["Front","Back"])&&Grid(ends).Length==4,string.Join(",",Upward(ends)));
+    var none=Svg(Arc38() with{YTickLabels=TickLabels.None});
+    Check(Upward(none).Length==0&&Grid(none).Length==3,"None wrote a label");
+    // A pane sets its own; the main plot keeps choosing its ticks.
+    var paned=Arc38() with{YTickValues=null,Panes=[new(){Label="Points",Weight=1,YMin=0,YMax=60,YTickValues=[new(0),new(30,"Half"),new(60)]}],Series=[..Arc38().Series,new("Points",[new(0,20),new(7,50)]){Pane=1}]};
+    var pdoc=Svg(paned);var spans=PaneClips(pdoc).Select(PaneSpan).ToArray();
+    var lower=Upward(pdoc).Where(t=>t.Y>spans[1].Top).Select(t=>t.Text).ToArray();
+    Check(lower.SequenceEqual(["0","Half","60"])&&Upward(pdoc).Count(t=>t.Y<spans[0].Bottom+5)>3,string.Join(",",lower));
+    // Minor gridlines are not drawn between ticks the axis did not choose.
+    Check(!Svg(Arc38() with{MinorGridlines=true}).Descendants(ns+"line").Any(l=>(string?)l.Attribute("class")=="lumen-grid-minor"&&Attr(l,"y1")==Attr(l,"y2")),"minor lines on a set axis");
+    // A horizontal bar chart writes its set ticks along the bottom; classic places them alike.
+    var bars=Svg(Spec(ChartKind.Bar) with{YTickValues=[new(0,"none"),new(5,"most")]});
+    Check(bars.Descendants(ns+"text").Count(t=>t.Value is "none" or "most")==2,"the bar chart's ticks");
+    Check(Grid(Svg(Classic(Arc38()))).SequenceEqual([78d,211,344]),"classic");
+});
+Test("YTickValues is refused when a value is not finite or appears twice, past 24 ticks or 24 characters, at zero or below on a log axis, and where there is no such axis, each with its reason",()=>{
+    var spec=Arc38();
+    Check(Refused(spec with{YTickValues=[new(double.NaN)]}).StartsWith("A tick's value must be finite"),"NaN");
+    Check(Refused(spec with{YTickValues=[new(10),new(10,"Ten")]}).StartsWith("Each value in YTickValues stands once"),"duplicates");
+    Check(Refused(spec with{YTickValues=Enumerable.Range(0,25).Select(i=>new AxisTick(i*4)).ToArray()}).StartsWith("YTickValues takes at most 24"),"25 ticks");
+    Check(Refused(spec with{YTickValues=[new(10,new string('x',25))]}).StartsWith("A tick's label is written beside the plot"),"a long label");
+    Check(Refused(spec with{YTickValues=[null!]}).StartsWith("YTickValues cannot hold a null"),"a null tick");
+    var logged=new ChartSpec{Title="L",Kind=ChartKind.Line,YAxis=AxisKind.Log,Series=[new("S",[new(0,1),new(1,100)])]};
+    Check(Refused(logged with{YTickValues=[new(0,"none")]}).StartsWith("A logarithmic axis has no zero"),"log");
+    Check(Svg(logged with{YTickValues=[new(1),new(10),new(100,"most")]}).Descendants(ns+"text").Any(t=>t.Value=="most"),"positive ticks on a log axis");
+    Check(Refused(spec with{Panes=[new(){YTickValues=[new(1),new(1)]}],Series=[..spec.Series,new("P",[new(0,1)]){Pane=1}]}).StartsWith("Each value in YTickValues"),"a pane's duplicates");
+    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Gauge,ChartKind.Ring,ChartKind.Calendar})
+        Check(Refused(Sample(kind) with{YTickValues=[new(1)]}).Length>0,$"{kind}");
+    Check(Refused(Spark() with{YTickValues=[new(1)]}).StartsWith("A sparkline draws no axes"),"a sparkline");
+    Check(Svg(spec with{YTickValues=[]}) is not null&&Grid(Svg(spec with{YTickValues=[]})).Length==0,"an empty set draws no ticks");
+});
+Test("YUnit follows every value the axis writes: its ticks, names and tooltips, value labels, bounds, annotations, the readout, and the component's status and table, but not a tick labelled by hand or the right-hand axis",()=>{
+    var spec=new ChartSpec{Title="Gap",Kind=ChartKind.Line,YFormat=ValueFormat.Signed,YUnit="s",Annotations=[new(AnnotationAxis.Y,10){Label="Target"}],SharedReadout=true,
+        Series=[new("Rider",[new(0,0,"Start"),new(1,12.3,"Lap 1"),new(2,20,"Lap 2")]){ValueLabels=true,Markers=MarkerStyle.Filled},new("Climb",[new(0,100),new(2,200)]){Secondary=true}]};
+    var doc=Svg(spec);
+    Check(Upward(doc).Select(t=>t.Text).All(t=>t.EndsWith('s'))&&Upward(doc).Any(t=>t.Text=="+20s")&&Upward(doc).Any(t=>t.Text=="0s"),string.Join(",",Upward(doc)));
+    Check(Names37(doc)[1]=="Rider: Lap 1, +12.3s"&&Datums(doc,0)[1].Element(ns+"title")!.Value=="Rider: Lap 1, +12.3s",Names37(doc)[1]);
+    Check(doc.Descendants(ns+"text").Any(t=>t.Value=="+12.3s"),"the value label");
+    Check(doc.Descendants().Any(e=>(string?)e.Attribute("aria-label")=="Target: +10s"),"the annotation");
+    // The right-hand axis takes none.
+    Check(Names37(doc,1)[0]=="Climb: 0, 100"&&doc.Descendants(ns+"text").Any(t=>t.Value=="200"),Names37(doc,1)[0]);
+    Check(ChartSvg.Readout(spec).Columns[1].Text=="Lap 1 · Rider +12.3s · Climb 150"||ChartSvg.Readout(spec).Columns[1].Text.StartsWith("Lap 1 · Rider +12.3s"),ChartSvg.Readout(spec).Columns[1].Text);
+    // A unit is written exactly as given: " bpm" keeps its space. Bounds labels take it too.
+    var hr=Svg(new ChartSpec{Title="HR",Kind=ChartKind.Line,YUnit=" bpm",YTickLabels=TickLabels.Bounds,YMin=100,YMax=180,Series=[new("HR",[new(0,152),new(1,160)])]});
+    Check(Upward(hr).Select(t=>t.Text).SequenceEqual(["100 bpm","180 bpm"])&&Names37(hr)[0]=="HR: 0, 152 bpm",string.Join(",",Upward(hr)));
+    // A pane takes its own, not the spec's.
+    var paned=Svg(spec with{Series=[spec.Series[0],new("Power",[new(0,200),new(2,250)]){Pane=1}],Panes=[new(){YUnit=" W"}],SharedReadout=false});
+    Check(Names37(paned,1)[0]=="Power: 0, 200 W"&&Names37(paned,0)[1].EndsWith("+12.3s"),Names37(paned,1)[0]);
+    // The component's status line and data table read the unit; CSV keeps raw numbers.
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;var status="";
+    var html=Operate(spec with{SharedReadout=false},async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,1);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
+    html=html.Replace("&#x2B;","+");
+    Check(status=="Rider: Lap 1 = +12.3s"&&html.Contains("<td>Rider</td><td>Lap 1</td><td>+12.3s</td>")&&html.Contains("<td>Climb</td><td>2</td><td>200</td>"),status);
+    Check(ChartExport.Csv(spec).Contains(",12.3")&&!ChartExport.Csv(spec).Contains("12.3s"),"CSV took the unit");
+    // A pane hidden in the component takes its unit and ticks with it when another takes the main plot's place.
+    ChartSpec shown=spec;
+    var two=new ChartSpec{Title="T",Kind=ChartKind.Line,YUnit="s",Panes=[new(){YUnit=" W",YTickValues=[new(200,"FTP")]}],Series=[new("A",[new(0,1),new(1,2)]),new("B",[new(0,200),new(1,250)]){Pane=1}]};
+    Operate(two,chart=>{typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(chart,[0]);shown=(ChartSpec)typeof(LumenChart).GetMethod("VisibleSpec",flags)!.Invoke(chart,[])!;return Task.CompletedTask;});
+    Check(shown.YUnit==" W"&&shown.YTickValues is [{Label:"FTP"}],$"{shown.YUnit}");
+});
+Test("YUnit is refused past 8 characters and where there is no such axis, each with its reason",()=>{
+    Check(Refused(Spec() with{YUnit="seconds!!"}).StartsWith("YUnit is written after every value"),"long");
+    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Gauge,ChartKind.Ring,ChartKind.Timeline,ChartKind.Calendar})
+        Check(Refused(Sample(kind) with{YUnit="s"}).Length>0,$"{kind}");
+    Check(Refused(Spec() with{Panes=[new(){YUnit="123456789"}],Series=[..Spec().Series,new("P",[new(0,1)]){Pane=1}]}).StartsWith("YUnit is written"),"a pane's");
+    Check(ChartSvg.Render(Spark() with{YUnit=" kg"}).Contains("aria-label='S: A, 3 kg'"),"a sparkline's names");
+});
+Test("An end label stands just right of its series' last point drawn, centred on it, in the series colour where it clears 4.5:1 and the text colour where it does not, its note muted",()=>{
+    var spec=new ChartSpec{Title="Ends",Kind=ChartKind.Line,Series=[
+        new("Alpha",[new(0,10),new(1,20),new(2,30)],"#1D4E89"){EndLabel="Alpha",EndNote="+3.2s"},
+        new("Beta",[new(0,60),new(1,50),new(2,null)],"#FFD400"){EndLabel="Beta"}]};
+    var doc=Svg(spec);var ends=Ends38(doc);
+    Check(ends.Length==2,$"{ends.Length} end labels");
+    // Alpha ends at x 2; Beta's last value is at x 1, its missing point drawing nothing.
+    var alphaMark=Datums(doc,0)[^1].Element(ns+"circle")!;var betaMark=Datums(doc,1)[^1].Element(ns+"circle")!;
+    var alpha=Words38(ends.Single(e=>Text38(e).StartsWith("Alpha")));var beta=Words38(ends.Single(e=>Text38(e)=="Beta"));
+    Check(Close(Attr(alpha,"x"),Attr(alphaMark,"cx")+8)&&Close(Attr(alpha,"y"),Attr(alphaMark,"cy")+4),$"{Attr(alpha,"x")},{Attr(alpha,"y")} for {Attr(alphaMark,"cx")},{Attr(alphaMark,"cy")}");
+    Check(Close(Attr(beta,"x"),Attr(betaMark,"cx")+8)&&Close(Attr(beta,"y"),Attr(betaMark,"cy")+4),"Beta's label is not at its last value");
+    Check(Text38(ends[0]).Length>0&&ends.Select(Text38).Contains("Alpha +3.2s"),string.Join("|",ends.Select(Text38)));
+    // Navy clears 4.5:1 on white and keeps its colour; yellow does not and takes the text colour. The note is muted at normal weight.
+    Check(alpha.Attribute("fill")!.Value=="#1D4E89"&&beta.Attribute("fill")!.Value==ChartStyle.Light.Text,$"{alpha.Attribute("fill")} {beta.Attribute("fill")}");
+    var note=alpha.Element(ns+"tspan")!;
+    Check((string?)note.Attribute("class")=="lumen-muted"&&(string?)note.Attribute("font-weight")=="400"&&ends[0].Attribute("font-weight")!.Value=="600"&&ends[0].Attribute("font-size")!.Value=="12","the note");
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight,raceFace})
+        Check(Lumen.Charts.Contrast.Ratio(style.Muted,style.Background)>=4.5&&Lumen.Charts.Contrast.Ratio(style.Text,style.Background)>=4.5,$"{style.Background}");
+    // A muted colour that falls short gives the note the text colour.
+    var faint=Svg(spec with{Style=ChartStyle.Light with{Muted="#A0A0A0"}});
+    Check(Words38(Ends38(faint).Single(e=>Text38(e).StartsWith("Alpha"))).Element(ns+"tspan")!.Attribute("fill")?.Value==ChartStyle.Light.Text,"a faint note");
+    // Each stands on a halo of the background colour, hidden from assistive technology.
+    Check(ends.All(e=>e.Elements(ns+"text").First().Attribute("stroke")!.Value==ChartStyle.Light.Background&&(string?)e.Elements(ns+"text").First().Attribute("aria-hidden")=="true"),"the halo");
+    // The last point's name says the label and its note, so neither is drawn only.
+    Check(Names37(doc,0)[^1]=="Alpha: 2, 30, labelled Alpha · +3.2s"&&Names37(doc,1)[^1]=="Beta: 1, 50, labelled Beta"&&!Names37(doc,0)[0].Contains("labelled"),Names37(doc,0)[^1]);
+    // A zoomed view follows the last point in view; a scatter series follows its point furthest along X.
+    var zoomed=Svg(spec with{XMax=1});
+    Check(Names37(zoomed,0).Count(n=>n.Contains("labelled"))==1&&Names37(zoomed,0).Single(n=>n.Contains("labelled")).StartsWith("Alpha: 1,"),string.Join("|",Names37(zoomed,0)));
+    var scatter=Svg(new ChartSpec{Title="S",Kind=ChartKind.Scatter,Series=[new("Dots",[new(3,1),new(5,2),new(1,3)]){EndLabel="Dots"}]});
+    Check(Names37(scatter)[1]=="Dots: 5, 2, labelled Dots"&&Ends38(scatter).Length==1,string.Join("|",Names37(scatter)));
+    // An area and a classic chart write them the same way; a series without one writes none.
+    Check(Ends38(Svg(spec with{Kind=ChartKind.Area,Series=[spec.Series[0]]})).Length==1&&Ends38(Svg(Classic(spec))).Length==2&&Ends38(Svg(Spec())).Length==0,"area, classic or none");
+});
+Test("End labels widen the right margin to the widest, up to half the drawing, cut past that with an ellipsis keeping their whole as name and tooltip, and the plot's layout follows",()=>{
+    var spec=new ChartSpec{Title="Ends",Kind=ChartKind.Line,Width=900,Series=[new("Long",[new(0,1),new(1,2)]){EndLabel="A long rider name here",EndNote="+12.3s"}]};
+    var doc=Svg(spec);
+    // The plot's clip runs 6 past its right edge; without labels the margin is 30.
+    double Right(XDocument d)=>Attr(PaneClips(d)[0],"x")+Attr(PaneClips(d)[0],"width")-6;
+    Check(Close(Right(Svg(Spec())),870)&&Right(doc)<870&&Close(900-Right(doc),8+6+(Broad38("A long rider name here +12.3s"))+4),$"{Right(doc)}");
+    Check(Text38(Ends38(doc)[0])=="A long rider name here +12.3s"&&Words38(Ends38(doc)[0]).Attribute("role") is null,"uncut");
+    // ChartSvg.Plot and the readout stand where the marks do.
+    Check(Close(ChartSvg.Plot(spec)!.Right,Right(doc)),"Plot's right edge");
+    // At 340 the plot keeps 170: the margin stops at 340 − 76 − 170 = 94, and the label is cut.
+    var narrow=Svg(spec with{Width=340});
+    Check(Close(340-Right(narrow),94),$"{340-Right(narrow)}");
+    var cut=Words38(Ends38(narrow)[0]);
+    Check(Text38(Ends38(narrow)[0]).EndsWith("…")&&(string?)cut.Attribute("role")=="img"&&cut.Attribute("aria-label")!.Value=="A long rider name here +12.3s"&&cut.Element(ns+"title")!.Value=="A long rider name here +12.3s",Text38(Ends38(narrow)[0]));
+    Check(Attr(cut,"x")+Broad38(Text38(Ends38(narrow)[0]))<=340-4+1e-6,"the cut label runs off the drawing");
+    Check(Names37(narrow)[^1].EndsWith(", labelled A long rider name here · +12.3s"),"the whole stays in the name");
+});
+double Broad38(string text)=>text.Sum(c=>c is '.' or ',' or ':' or ' ' ? .3 : c is '-' ? .36 : c is 'm' or 'M' or 'w' or 'W' ? .9 : .62)*12;
+Test("Eight end labels ending within a whisker never overlap: each set by its point's height, moved apart as little as they can be, within the plot, joined to their points when moved",()=>{
+    var spec=new ChartSpec{Title="Crowded",Kind=ChartKind.Line,Width=340,Height=300,Series=Enumerable.Range(0,8).Select(k=>new ChartSeries($"S{k}",
+        [new(0,10+k*9),new(5,50+k*.3)]){EndLabel=$"S{k}",EndNote=$"+{k}.0"}).ToArray()};
+    foreach(var shown in new[]{spec,Classic(spec),spec with{Width=1280,Height=480},spec with{Style=ChartStyle.Midnight}})
+    {
+        var doc=Svg(shown);var spans=PaneClips(doc).Select(PaneSpan).ToArray();
+        var ys=Ends38(doc).Select(e=>Attr(Words38(e),"y")-4).OrderBy(y=>y).ToArray();
+        Check(ys.Length==8&&ys.Zip(ys.Skip(1)).All(p=>p.Second-p.First>=14-1e-6),string.Join(",",ys));
+        Check(ys[0]>=spans[0].Top-1-1e-6&&ys[^1]<=spans[0].Bottom+1+1e-6,"outside the plot");
+        // The highest value on an upright axis stands highest: S7 at the top.
+        Check(Text38(Ends38(doc).OrderBy(e=>Attr(Words38(e),"y")).First()).StartsWith("S7"),"the order");
+        // Each moved label is joined to its point by a thin line; the labels are centred on their points as a group.
+        Check(doc.Descendants(ns+"line").Count(l=>(string?)l.Attribute("aria-hidden")=="true"&&(string?)l.Attribute("stroke-width")=="1")>=6,"connectors");
+    }
+    // Two sets whose spans never meet are set apart on their own: a label ending mid-plot keeps its place.
+    var apart=new ChartSpec{Title="Apart",Kind=ChartKind.Line,Series=[new("Early",[new(0,50),new(2,50)]){EndLabel="Early"},new("Late",[new(0,49),new(10,50)]){EndLabel="Late"}]};
+    var adoc=Svg(apart);
+    Check(Ends38(adoc).All(e=>Close(Attr(Words38(e),"y")-4,Attr(Datums(adoc,Text38(e)=="Early"?0:1)[^1].Element(ns+"circle")!,"cy"))),"a label was moved");
+    // Past what the plot holds even at 12 a line, the lowest are left out, their words kept in their names.
+    var many=new ChartSpec{Title="Many",Kind=ChartKind.Line,Height=240,Series=Enumerable.Range(0,20).Select(k=>new ChartSeries($"S{k}",[new(0,k),new(1,50)]){EndLabel=$"S{k}"}).ToArray()};
+    var mdoc=Svg(many);var mys=Ends38(mdoc).Select(e=>Attr(Words38(e),"y")).OrderBy(y=>y).ToArray();
+    Check(mys.Length<20&&mys.Length>=7&&mys.Zip(mys.Skip(1)).All(p=>p.Second-p.First>=12-1e-6)&&Enumerable.Range(0,20).All(k=>Names37(mdoc,k)[^1].Contains("labelled")),$"{mys.Length} labels");
+});
+Test("End labels are refused on other marks, on a density scatter, beside a right-hand axis, on a sparkline, past 24 characters, blank, or as a note alone, each with its reason",()=>{
+    var line=new ChartSeries("S",[new(0,1),new(1,2)]){EndLabel="S"};
+    Check(Refused(Spec(ChartKind.Column) with{Series=[line]}).StartsWith("An end label is written after a series' last point"),"columns");
+    Check(Refused(Sample(ChartKind.Band) with{Series=[Sample(ChartKind.Band).Series[0] with{EndLabel="B"}]}).StartsWith("An end label is written"),"a band");
+    Check(Refused(Spec(ChartKind.Scatter) with{DensityCells=10,Series=[line]}).StartsWith("A density scatter shades cells"),"density");
+    Check(Refused(Spec() with{Series=[line,new("R",[new(0,5)]){Secondary=true}]}).StartsWith("End labels are written in the margin right of the plot"),"a secondary series");
+    Check(Refused(Spec() with{YAxisSide=AxisSide.Right,Series=[line]}).StartsWith("End labels are written in the margin"),"a right-hand axis");
+    Check(Refused(Spark() with{Series=[Spark().Series[0] with{EndLabel="S"}]}).StartsWith("A sparkline draws its data alone, with no words, so it writes no end labels"),"a sparkline");
+    Check(Refused(Spec() with{Series=[line with{EndLabel=new string('x',25)}]}).StartsWith("An end label and its note each take at most 24"),"long");
+    Check(Refused(Spec() with{Series=[line with{EndNote=new string('x',25)}]}).StartsWith("An end label and its note each take at most 24"),"a long note");
+    Check(Refused(Spec() with{Series=[line with{EndLabel="  "}]}).StartsWith("An end label names its series"),"blank");
+    Check(Refused(Spec() with{Series=[line with{EndLabel=null,EndNote="+1s"}]}).StartsWith("EndNote is written after"),"a note alone");
+    // A line on a column chart takes one: its last category's slot.
+    Check(Ends38(Svg(Spec(ChartKind.Column) with{Series=[new("C",[new(0,1),new(1,2)]),line with{Kind=ChartKind.Line}]})).Length==1,"a line on a column chart");
+});
+Test("Season arc: lines joined only over their own races at their global index, a missing race a gap, Front, Mid and Back up a reversed percentile axis",()=>{
+    var doc=Svg(Arc38(raceFace) with{Width=340,Height=300});
+    // XCO runs R1–R3, breaks at its missing R5, and R7 stands alone; XCC joins R2 to R6 over the races between.
+    var strokes=doc.Descendants(ns+"path").Where(p=>(string?)p.Attribute("fill")=="none").ToArray();
+    Check(strokes.Length==4,$"{strokes.Length} strokes");
+    Check(Names37(doc,0).SequenceEqual(["XCO: R1, 40% · P17/41","XCO: R3, 30%","XCO: R7, 12%"])&&Names37(doc,1)[1]=="XCC: R6, 10%",string.Join("|",Names37(doc,0)));
+    Check(Upward(doc).Select(t=>t.Text).SequenceEqual(["Front","Mid","Back"]),"the ticks");
+});
+Test("The gap chart: every rider's end label and note, the leader's note, a readout reading all eight with their units, legend off, and the defaults hashing as before",()=>{
+    var spec=Gap38(340,320);
+    var doc=Svg(spec);
+    Check(Ends38(doc).Length==8&&Ends38(doc).Select(Text38).Contains("A leader")&&Ends38(doc).Select(Text38).Contains("You"),string.Join("|",Ends38(doc).Select(Text38)));
+    var readout=ChartSvg.Readout(spec with{SharedReadout=true});
+    Check(readout.Columns.Count==7&&readout.Columns.All(c=>c.Entries.Count==8)&&readout.Columns[3].Text.Contains("You +")&&readout.Columns[3].Text.Split(" · ").Skip(1).All(t=>t.EndsWith('s')),readout.Columns[3].Text);
+    Check(!ChartSvg.Render(spec,includeLegend:false).Contains("font-size='11'>Rider A</text>"),"the legend");
+});
+Test("ShowLegend and ShowToolbar: off, the legend and the buttons are gone, the status line stays out of sight and still reads the point chosen; on, the markup is as before",()=>{
+    RenderFragment Shown(ChartSpec spec,bool legend,bool toolbar)=>b=>{b.OpenComponent<LumenChart>(0);b.AddAttribute(1,"Spec",spec);b.AddAttribute(2,"ShowLegend",legend);b.AddAttribute(3,"ShowToolbar",toolbar);b.CloseComponent();};
+    var spec=Spec();
+    var bare=Prerender(Shown(spec,false,false));
+    Check(!bare.Contains("lumen-legend")&&!bare.Contains("<button")&&bare.Contains("<div class=\"lumen-tools lumen-quiet\">\n        <span class=\"lumen-status\" role=\"status\">"),bare[..Math.Min(bare.Length,400)]);
+    Check(Prerender(Shown(spec,true,true))==Prerender(ChartElement(spec)),"setting both on changed the markup");
+    var legendOnly=Prerender(Shown(spec,true,false));var toolsOnly=Prerender(Shown(spec,false,true));
+    Check(legendOnly.Contains("lumen-legend")&&!legendOnly.Contains("Export SVG")&&!toolsOnly.Contains("lumen-legend")&&toolsOnly.Contains("Export SVG")&&toolsOnly.Contains("Reset view"),"one without the other");
+    var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
+    Check(css.Contains(".lumen-quiet .lumen-status{position:absolute;width:1px;height:1px;")&&css.Contains("clip-path:inset(50%)"),"the status line is not hidden out of sight");
+    // The status line still reads a chosen point.
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try{
+        var html=renderer.Dispatcher.InvokeAsync(async()=>{
+            LumenChart? chart=null;
+            RenderFragment content=b=>{b.OpenComponent<LumenChart>(0);b.AddAttribute(1,"Spec",spec);b.AddAttribute(2,"ShowToolbar",false);b.AddComponentReferenceCapture(3,c=>chart=(LumenChart)c);b.CloseComponent();};
+            var root=await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",ChartStyle.Light},{"ChildContent",content}}));
+            await chart!.SelectPoint(0,1);await root.QuiescenceTask;return root.ToHtmlString();}).GetAwaiter().GetResult();
+        Check(html.Contains("<span class=\"lumen-status\" role=\"status\">Series: B = 5</span>"),"the hidden status line did not read the point");
+    }finally{renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
+});
+Test("Ticks, units and end labels round-trip through the HTTP API's JSON, a request that names none keeps the defaults, a spec written out with them null draws byte for byte as before, and only a setting renames gradients",()=>{
+    var spec=Arc38() with{Panes=[new(){YUnit=" W",YTickValues=[new(1,"One")]}],Series=[..Arc38().Series.Select(s=>s with{EndLabel=s.Name,EndNote="n"}),new("P",[new(0,1),new(1,2)]){Pane=1}]};
+    var json=System.Text.Json.JsonSerializer.Serialize(spec,finishJson);
+    Check(json.Contains("\"yTickValues\":[{\"value\":0,\"label\":\"Front\"}")&&json.Contains("\"yUnit\":\"%\"")&&json.Contains("\"endLabel\":\"XCO\"")&&json.Contains("\"endNote\":\"n\"")&&json.Contains("\"yUnit\":\" W\""),json[..300]);
+    var back=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(json,finishJson)!;
+    Check(back.YUnit=="%"&&back.YTickValues![1]==new AxisTick(50,"Mid")&&back.Panes[0].YTickValues![0]==new AxisTick(1,"One")&&back.Series[0].EndNote=="n"&&ChartSvg.Render(back)==ChartSvg.Render(spec),"the spec changed in transit");
+    var written="{\"title\":\"G\",\"kind\":\"Line\",\"yUnit\":\"s\",\"yTickValues\":[{\"value\":0},{\"value\":10,\"label\":\"Ten\"}],\"series\":[{\"name\":\"R\",\"endLabel\":\"R\",\"points\":[{\"x\":0,\"y\":0},{\"x\":1,\"y\":12}]}]}";
+    var drawn=Svg(System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(written,finishJson)!);
+    Check(Upward(drawn).Select(t=>t.Text).SequenceEqual(["0s","Ten"])&&Ends38(drawn).Length==1&&Names37(drawn)[^1]=="R: 1, 12s, labelled R","a spec written by hand");
+    var old=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"kind\":\"Line\",\"panes\":[{}],\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1}]},{\"name\":\"T\",\"pane\":1,\"points\":[{\"x\":0,\"y\":1}]}]}",finishJson)!;
+    Check(old.YUnit is null&&old.YTickValues is null&&old.Panes[0].YUnit is null&&old.Panes[0].YTickValues is null&&old.Series[0].EndLabel is null&&old.Series[0].EndNote is null,"the defaults");
+    string GradientId(ChartSpec s)=>System.Text.RegularExpressions.Regex.Match(ChartSvg.Render(s),"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
+    var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}],Annotations=[new(AnnotationAxis.Y,2){Label="T"}]};
+    Check(GradientId(faded)=="lumen-4bce89394b87"&&GradientId(faded with{YUnit=null,YTickValues=null,Series=[faded.Series[0] with{EndLabel=null,EndNote=null}]})=="lumen-4bce89394b87",GradientId(faded));
+    Check(GradientId(faded with{YUnit="s"})!="lumen-4bce89394b87"&&GradientId(faded with{YTickValues=[new(2)]})!="lumen-4bce89394b87"&&GradientId(faded with{Series=[faded.Series[0] with{EndLabel="S"}]})!="lumen-4bce89394b87","a setting kept a gradient's name");
+    // Every kind's sample draws byte for byte the same with the new settings written out at their defaults.
+    foreach(var kind in Enum.GetValues<ChartKind>())
+        Check(ChartSvg.Render(Sample(kind))==ChartSvg.Render(Sample(kind) with{YUnit=null,YTickValues=null,Series=Sample(kind).Series.Select(s=>s with{EndLabel=null,EndNote=null}).ToArray()}),$"{kind}");
+});
+Test("Sports page: Season arc and Gap to the leader close the Racing section, the arc's disciplines joined over each other's races and the gap's riders named at their ends with the legend off",()=>{
+    var ids=sports.Where(card=>card.Section=="racing").Select(card=>card.Id).ToArray();
+    Check(ids.SequenceEqual(["race-results","field","season-arc","gap"])&&sports.Single(card=>card.Id=="gap").ShowLegend==false&&sports.Where(card=>card.Id!="gap").All(card=>card.ShowLegend),string.Join(",",ids));
+    var arc=Sports("season-arc");
+    Check(arc is {YReversed:true,YMin:0,YMax:100,YUnit:"%"}&&arc.YTickValues!.Select(t=>t.Label).SequenceEqual(["Front","Mid","Back"])&&arc.Series.Select(s=>s.Name).SequenceEqual(["XCC","XCO","XCM","Other"]),"the arc");
+    // Every race stands once, in one discipline, at its index in the season; the race not finished is a gap in its own line.
+    Check(arc.Series.SelectMany(s=>s.Points).Select(p=>p.X).Order().SequenceEqual(Enumerable.Range(0,SportsData.SeasonRaces.Count).Select(i=>(double)i))&&arc.Series[1].Points.Count(p=>p.Y is null)==1,"the races");
+    var gap=Sports("gap");var doc=Svg(gap with{Width=340});
+    Check(gap.Series.Count==8&&gap.Series[^1] is {Name:"You",EndLabel:"You",StrokeWidth:3.2}&&Ends38(doc).Length==8&&Ends38(doc).Select(Text38).Count(t=>t.EndsWith(" leader"))==1,string.Join("|",Ends38(doc).Select(Text38)));
+    Check(gap.Title==$"You finished +{SportsData.LapGaps()[^1][^1].ToString(CultureInfo.InvariantCulture)}s back"&&Sports("season-arc").Title=="Top quarter in 3 of 10",gap.Title);
+    // No end label is cut on a phone's card, and every one stands inside the drawing.
+    Check(Ends38(doc).All(e=>!Text38(e).EndsWith("…")&&Attr(Words38(e),"x")+Broad38(Text38(e))<=340),"a label was cut on a phone");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

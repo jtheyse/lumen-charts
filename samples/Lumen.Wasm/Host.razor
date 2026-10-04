@@ -20,6 +20,9 @@
 
     <h2 id="form">Every series at once</h2>
     <div class="card"><LumenChart Spec="form" FitWidth="true"/></div>
+
+    <h2 id="gaps">Lines named at their ends</h2>
+    <div class="card"><LumenChart Spec="gaps" FitWidth="true" ShowLegend="false" ShowToolbar="false"/></div>
 </LumenBrand>
 </main>
 @code {
@@ -64,6 +67,22 @@
             Series=[ChartSeries.From("Fitness",load,d=>When(d.Day),d=>Math.Round(d.Fitness,1)),ChartSeries.From("Fatigue",load,d=>When(d.Day),d=>Math.Round(d.Fatigue,1)),
                 ChartSeries.From("Form",load,d=>When(d.Day),d=>Math.Round(d.Form,1)) with{Pane=1},
                 ChartSeries.From("Stress",load,d=>When(d.Day),d=>d.Stress) with{Kind=ChartKind.Column,Color="#848484"}]};
+    }
+
+    // An invented race of five riders over five laps: each rider's seconds behind whoever led at each lap, the leader at the top, every line
+    // named at its end, so the chart needs no legend, and drawn as a phone card would be, without its toolbar.
+    private static readonly ChartSpec gaps=Gaps();
+    private static ChartSpec Gaps()
+    {
+        double[][] laps=[[301,296,299,298,297],[298,300,303,295,300],[305,301,298,304,299],[303,306,309,302,306],[308,302,297,296,292]];
+        var clocks=laps.Select(rider=>rider.Aggregate(new List<double>{0},(clock,lap)=>{clock.Add(clock[^1]+lap);return clock;}).ToArray()).ToArray();
+        var behind=clocks.Select(clock=>clock.Select((t,lap)=>t-clocks.Min(other=>other[lap])).ToArray()).ToArray();
+        var words=new Axis(AxisKind.Linear,0,1){ValueFormat=ValueFormat.Signed,Unit="s"};
+        string[] names=["Rider A","Rider B","Rider C","Rider D","You"];
+        return new(){Kind=ChartKind.Line,Height=360,SharedReadout=true,YReversed=true,YMin=0,YFormat=ValueFormat.Signed,YUnit="s",XLabel="Lap",
+            Title="Gap to the leader",Description="An invented race · seconds behind the leader at each lap",Source="Source: generated sample data",
+            Series=names.Select((name,r)=>new ChartSeries(name,behind[r].Select((g,lap)=>new ChartPoint(lap,g,lap==0?"Start":$"Lap {lap}")).ToArray(),r==4?null:"#848484")
+                {StrokeWidth=r==4?3.2:2,Markers=MarkerStyle.None,EndLabel=r==4?"You":name[^1..],EndNote=behind[r][^1]==0?"leader":words.Format(behind[r][^1])}).ToArray()};
     }
 
     private static ChartSeries Missing(ChartSeries series,int month)=>series with{Points=series.Points.Select((p,i)=>i==month?p with{Y=null}:p).ToArray()};

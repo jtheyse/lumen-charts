@@ -79,7 +79,7 @@ public static partial class ChartSvg
     /// <summary>What pane <paramref name="index"/> draws with: the spec's own Y properties for the main plot, and
     /// <c>Panes[index - 1]</c> below it.</summary>
     internal static ChartPane Pane(ChartSpec spec, int index) => index == 0
-        ? new() { Label = spec.YLabel, Weight = 1, YAxis = spec.YAxis, YMin = spec.YMin, YMax = spec.YMax, YMinSpan = spec.YMinSpan, YSymmetric = spec.YSymmetric, YFormat = spec.YFormat, YReversed = spec.YReversed, YTickLabels = spec.YTickLabels, YZones = spec.YZones,
+        ? new() { Label = spec.YLabel, Weight = 1, YAxis = spec.YAxis, YMin = spec.YMin, YMax = spec.YMax, YMinSpan = spec.YMinSpan, YSymmetric = spec.YSymmetric, YFormat = spec.YFormat, YReversed = spec.YReversed, YTickLabels = spec.YTickLabels, YTickValues = spec.YTickValues, YUnit = spec.YUnit, YZones = spec.YZones,
             Y2Label = spec.Y2Label, Y2Axis = spec.Y2Axis, Y2Min = spec.Y2Min, Y2Max = spec.Y2Max, Y2Format = spec.Y2Format, Y2Reversed = spec.Y2Reversed }
         : spec.Panes[index - 1];
 
@@ -504,7 +504,7 @@ public static partial class ChartSvg
         // A Y axis on the right takes the margin a secondary axis would, and gives the left one back.
         var flipped = s.YAxisSide == AxisSide.Right;
         // A chart that names its plots above them and writes no label up the left keeps only the margin the X axis's first label needs.
-        var left = s.Sparkline ? pad : horizontal ? 160d : flipped || Unlabelled(s) ? 30d : 76d; var right = s.Width - (s.Sparkline ? pad : secondary || flipped ? 76d : 30d);
+        var left = s.Sparkline ? pad : horizontal ? 160d : flipped || Unlabelled(s) ? 30d : 76d; var right = s.Width - (s.Sparkline ? pad : secondary || flipped ? 76d : Math.Max(30d, Ending(s, left)));
         var points = s.Series.SelectMany(x => x.Points).ToArray();
         var cats = points.Select(p => p.X).Distinct().Order().ToArray();
         // A block reaches to its XEnd, and only a block has one here.
@@ -541,9 +541,11 @@ public static partial class ChartSvg
             var tickLabels = pane.YTickLabels ?? s.YTickLabels;
             // A pane's value ticks are spaced to its height, or along the bottom of a horizontal bar chart to their labels.
             var (count, ticks) = Spaced(w, ys, horizontal ? right - left : bottom - top, across: horizontal);
+            // Ticks set by hand stand where they are set, and the axis draws no minor lines between ticks it did not choose.
+            if (pane.YTickValues is { } chosen) ticks = Chosen(chosen, ys);
             if (s.MinorGridlines)
             {
-                foreach (var minor in ys.MinorTicks(count))
+                foreach (var minor in pane.YTickValues is null ? ys.MinorTicks(count) : Array.Empty<double>())
                 {
                     if (horizontal) { var x = ys.Map(minor, left, right); Gridline(w, x, top, x, bottom, minor: true); }
                     else { var y = Y(minor); Gridline(w, left, y, right, y, minor: true); }
@@ -659,6 +661,8 @@ public static partial class ChartSvg
             // Every value label written in the pane, as a box round its 11 px text, so a point's label can keep clear of the ones
             // before it, columns' and bars' included.
             var written = new List<(double X1, double X2, double Y1, double Y2)>();
+            // The end labels the pane's series ask for, written once every series is drawn, so they can be moved apart.
+            var endings = new List<EndMark>();
             // A value's note follows it at normal weight in the muted colour.
             string Noted(string text, string? note) => SvgWriter.E(text) + (note is null ? "" : $"<tspan class='lumen-muted' font-weight='400'>{SvgWriter.E(note)}</tspan>");
             void Name(double x, double y, string text, string anchor, string? note)
@@ -742,6 +746,11 @@ public static partial class ChartSvg
                 string Ink(ChartPoint p) => p.Color ?? (series.Zones is { } zones ? ZoneColor(w.Style, zones, zones.IndexOf(p.Y!.Value)) : paint);
                 // A change colour stands for a point that did better or worse than the one before; a level one keeps the series colour.
                 var changes = Changes(series);
+                // The point an end label follows on a scatter series: the one furthest along X in view with a value, the last listed of any at
+                // one X. A line's or an area's follows the mark it draws furthest along, found below.
+                var endPoint = series.EndLabel is not null && mark == ChartKind.Scatter
+                    ? Enumerable.Range(0, series.Points.Count).Where(i => series.Points[i].Y.HasValue && (category || series.Points[i].X >= xs.Min && series.Points[i].X <= xs.Max))
+                        .Aggregate(-1, (best, i) => best >= 0 && series.Points[best].X > series.Points[i].X ? best : i) : -1;
                 string? Moved(int i) => changes[i] switch { > 0 => w.Style.Rising, < 0 => w.Style.Falling, _ => null };
                 // A value label takes its point's colour, and on a gradient the colour the gradient takes at its value, since text
                 // painted with the gradient would take the colour at its own height instead. A mark's colour need only clear 3:1, and
@@ -764,7 +773,11 @@ public static partial class ChartSvg
                     // Each continuous run is thinned on its own, preserving missing-observation gaps. An average stands for its slice, so it
                     // has no change of its own to colour or to name.
                     string? MovedOf(Drawn d) => d.Count > 1 ? null : Moved(d.Index);
-                    foreach (var (length, drawn, apart) in Traces(s, series, mark, xs, last))
+                    var traces = Traces(s, series, mark, xs, last);
+                    // The mark an end label follows: the one drawn furthest along X in view, the last of any at one X.
+                    Drawn? ending = series.EndLabel is null ? null : traces.SelectMany(t => t.Path.Concat(t.Apart)).Where(d => category || d.Point.X >= xs.Min && d.Point.X <= xs.Max)
+                        .Aggregate((Drawn?)null, (best, d) => best is { } b && b.Point.X > d.Point.X ? best : d);
+                    foreach (var (length, drawn, apart) in traces)
                     {
                         var run = drawn.Select(d => d.Point).ToArray();
                         var indices = Enumerable.Range(0, run.Length).ToArray();
@@ -803,7 +816,9 @@ public static partial class ChartSvg
                                     MarkerStyle.Auto when w.Refined && length > 1 => ($"<circle class='lumen-marker' cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", ""),
                                     _ => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", "")
                                 };
-                            Datum(w, si, d.Index, PointLabel(series, p, xs, scale, d.Count > 1 ? null : changes[d.Index]) + Averaged(d.Count), shape, attributes);
+                            var followed = ending is { } e && e.Index == d.Index && e.Count == d.Count && e.Point.X == p.X;
+                            Datum(w, si, d.Index, PointLabel(series, p, xs, scale, d.Count > 1 ? null : changes[d.Index]) + Averaged(d.Count) + (followed ? Said(series) : ""), shape, attributes);
+                            if (followed) endings.Add(new(X(p.X), At(p.Y!.Value), series, color, d.Index == last && d.Count == 1 ? 10 : p.Highlight is not null ? Highlighted + 1 : series.Markers == MarkerStyle.Hollow ? 5 : 4));
                             if (series.ValueLabels) Over(X(p.X), At(p.Y!.Value), d.Index == last && d.Count == 1 || p.Highlight is not null ? Highlighted : run.Length > 80 ? 2 : 4, scale.Format(p.Y!.Value), p.ValueNote, Lettered(MovedOf(d), p));
                         }
                     }
@@ -908,7 +923,8 @@ public static partial class ChartSvg
                             MarkerStyle.Hollow => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{w.Style.Background}'{w.Fixed}/>", $" stroke='{ink}' stroke-width='2'"),
                             _ => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'{w.Fixed}/>", "")
                         };
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale,changes[pi]), shape, attributes);
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale,changes[pi]) + (pi == endPoint ? Said(series) : ""), shape, attributes);
+                        if (pi == endPoint) endings.Add(new(X(p.X), At(y), series, color, p.Highlight is null ? radius + (series.Markers == MarkerStyle.Hollow ? 1 : 0) : Highlighted + 1));
                         if (series.ValueLabels) Over(X(p.X), At(y), p.Highlight is null ? radius : Highlighted, scale.Format(y), p.ValueNote, Lettered(Moved(pi), p));
                     }
                 }
@@ -919,12 +935,135 @@ public static partial class ChartSvg
             if (w.Refined) foreach (var reference in references) Label(w, reference);
             w.Add("</svg>");
             w.Add(named.ToString());
+            Ends(w, s, endings, top, bottom);
         }
     }
 
     /// <summary>The radius of a highlighted point's marker, as large as the latest point's ring, outlined 2 units wide in the
     /// background colour, so it reaches 6.5 from its centre.</summary>
     private const double Highlighted = 5.5;
+
+    /// <summary>Where an end label's series ends in the drawing: its last point's centre, the series, its colour, and how far the point's
+    /// marker or ring reaches from that centre.</summary>
+    private readonly record struct EndMark(double X, double Y, ChartSeries Series, string Color, double Reach);
+    /// <summary>The room an end label keeps from the drawing's right edge, how far a label moved off its point steps right to make room for
+    /// the line that joins them, and the height of a line of labels and the least it closes to before the lowest are left out.</summary>
+    private const double EndPad = 4, EndShift = 6, EndLine = 14, EndTight = 12;
+    /// <summary>How far an end label starts right of its point's centre: clear of a marker, or of the ring round a highlighted last point.</summary>
+    private static double Lead(ChartSeries series) => series.HighlightLast ? 14 : 8;
+    /// <summary>An end label and its note on one line, as the drawing writes them.</summary>
+    private static string EndText(ChartSeries series) => series.EndNote is null ? series.EndLabel! : $"{series.EndLabel} {series.EndNote}";
+    /// <summary>What the last point's name adds for an end label, so its words are never drawn only: <c>, labelled You · leader</c>.</summary>
+    private static string Said(ChartSeries series) => $", labelled {series.EndLabel}{(series.EndNote is { } note ? " · " + note : "")}";
+    /// <summary>The right margin end labels ask for: the widest label and note, by the generous estimate for 12 px text, after its lead and
+    /// the step a label moved off its point takes, and the room kept from the edge; capped so the plot keeps at least half the drawing's
+    /// width. None where no series has one.</summary>
+    private static double Ending(ChartSpec s, double left)
+    {
+        var need = 0d;
+        foreach (var series in s.Series)
+            if (series?.EndLabel is not null) need = Math.Max(need, Lead(series) + EndShift + Broad(EndText(series)) + EndPad);
+        return Math.Min(need, s.Width - left - s.Width / 2d);
+    }
+    /// <summary>12 px text cut to <paramref name="room"/> pixels between its letters, with <c>…</c> after it, the spaces and punctuation the
+    /// cut would leave before the ellipsis dropped; one letter at least.</summary>
+    private static string Clipped(string text, double room)
+    {
+        var letters = 1;
+        while (letters < text.Length && Broad(text[..(letters + 1)] + "…") <= room) letters++;
+        return text[..letters].TrimEnd(' ', ',', ';', ':', '·', '-', '—') + "…";
+    }
+    /// <summary>
+    /// Centres for labels one <paramref name="gap"/> apart at least, as near as they can be to <paramref name="wanted"/>, which is sorted
+    /// from the top down, all between <paramref name="low"/> and <paramref name="high"/>: the least squares of their moves, found by pooling
+    /// neighbours that would cross (isotonic regression on each centre less its place in the line) and then held within the bounds. The
+    /// bounds must hold them all.
+    /// </summary>
+    private static double[] Spread(double[] wanted, double gap, double low, double high)
+    {
+        var pools = new List<(double Sum, int Count)>();
+        for (var i = 0; i < wanted.Length; i++)
+        {
+            pools.Add((wanted[i] - i * gap, 1));
+            while (pools.Count > 1 && pools[^2].Sum / pools[^2].Count > pools[^1].Sum / pools[^1].Count)
+            {
+                var merged = (pools[^2].Sum + pools[^1].Sum, pools[^2].Count + pools[^1].Count);
+                pools.RemoveAt(pools.Count - 1);
+                pools[^1] = merged;
+            }
+        }
+        var centres = new double[wanted.Length];
+        var at = 0;
+        foreach (var (sum, count) in pools)
+            for (var j = 0; j < count; j++, at++) centres[at] = Math.Clamp(sum / count, low, high - (wanted.Length - 1) * gap) + at * gap;
+        return centres;
+    }
+    /// <summary>
+    /// A pane's end labels, as <see cref="ChartSeries.EndLabel"/> describes them: each just right of its series' last point, centred on it,
+    /// in its series' colour where that clears 4.5:1 and in the text colour where it does not, its note after it in the muted colour, cut
+    /// with <c>…</c> where the drawing's edge comes first. Labels whose spans across the drawing overlap are set apart from the top down,
+    /// <see cref="EndLine"/> a line, or <see cref="EndTight"/> where that does not fit, within the plot and 8 units past it, the lowest left
+    /// out where even that does not; one moved more than 3 units from its point steps right and is joined to it by a thin line. Each is
+    /// written over a copy of itself stroked in the background colour, as a value label is, so a line or a gridline under it never cuts it.
+    /// </summary>
+    private static void Ends(SvgWriter w, ChartSpec s, List<EndMark> ends, double top, double bottom)
+    {
+        if (ends.Count == 0) return;
+        var style = w.Style;
+        var set = ends.Select((end, order) =>
+        {
+            var full = EndText(end.Series);
+            var from = end.X + Lead(end.Series);
+            return (End: end, Order: order, Full: full, From: from, To: Math.Min(from + EndShift + Broad(full), s.Width - EndPad));
+        }).OrderBy(item => item.From).ToList();
+        // Labels that share no span across the drawing cannot meet, so each run of overlapping spans is set apart on its own.
+        var groups = new List<List<int>>();
+        var reach = double.NegativeInfinity;
+        for (var i = 0; i < set.Count; i++)
+        {
+            if (set[i].From >= reach) groups.Add([]);
+            groups[^1].Add(i);
+            reach = Math.Max(reach, set[i].To);
+        }
+        double low = top - 1, high = bottom + 1;
+        var ground = style.Background;
+        var noted = Contrast.Ratio(style.Muted, ground) >= 4.5 ? " class='lumen-muted'" : $" fill='{style.Text}'";
+        foreach (var group in groups)
+        {
+            var sorted = group.OrderBy(i => Math.Clamp(set[i].End.Y, low, high)).ThenBy(i => set[i].Order).ToList();
+            var gap = (sorted.Count - 1) * EndLine <= high - low ? EndLine : EndTight;
+            // Past what the plot holds even at the closer spacing, the lowest labels are left out; their words stay in their points' names.
+            if ((sorted.Count - 1) * gap > high - low) sorted = sorted.Take((int)Math.Floor((high - low) / gap) + 1).ToList();
+            var centres = Spread(sorted.Select(i => Math.Clamp(set[i].End.Y, low, high)).ToArray(), gap, low, high);
+            for (var n = 0; n < sorted.Count; n++)
+            {
+                var (end, _, full, from, _) = set[sorted[n]];
+                var centre = centres[n];
+                var moved = Math.Abs(centre - end.Y) > 3;
+                var x = from + (moved ? EndShift : 0);
+                // Cut where the drawing's edge comes first, which it does only where the margin met its cap or the label moved.
+                var room = s.Width - EndPad - x;
+                var shown = Broad(full) <= room + 1e-6 ? full : Clipped(full, room);
+                if (moved)
+                    w.Line(end.X + end.Reach + 1, end.Y, x - 2, centre, $"stroke='{(Contrast.Ratio(end.Color, ground) >= 3 ? end.Color : style.Muted)}' stroke-width='1' stroke-linecap='round'{w.Fixed} aria-hidden='true'");
+                // The words shown, split into the label and the note after it; a cut that reaches no further than the label drops the note.
+                var label = end.Series.EndLabel!;
+                string? note = end.Series.EndNote;
+                if (shown != full)
+                {
+                    var kept = shown[..^1];
+                    (label, note) = kept.Length <= label.Length ? (kept + "…", null) : (label, kept[(label.Length + 1)..] + "…");
+                }
+                var ink = Contrast.Ratio(end.Color, ground) >= 4.5 ? end.Color : style.Text;
+                var at = $"x='{N(x)}' y='{N(centre + 4)}'";
+                var halo = SvgWriter.E(label) + (note is null ? "" : $"<tspan font-weight='400'> {SvgWriter.E(note)}</tspan>");
+                var words = SvgWriter.E(label) + (note is null ? "" : $"<tspan font-weight='400'{noted}> {SvgWriter.E(note)}</tspan>");
+                w.Add($"<g class='lumen-end' font-size='12' font-weight='600'><text {at} fill='{ground}' stroke='{ground}' stroke-width='3' stroke-linejoin='round' aria-hidden='true' pointer-events='none'>{halo}</text>" +
+                    (shown == full ? $"<text {at} fill='{ink}'>{words}</text>"
+                        : $"<text {at} fill='{ink}' role='img' aria-label='{SvgWriter.E(full)}'><title>{SvgWriter.E(full)}</title>{words}</text>") + "</g>");
+            }
+        }
+    }
 
     /// <summary>A highlighted point's marker: a dot in its highlight colour, outlined in the background colour so it stands off the
     /// line it sits on. The outline is set on the mark's group, as a hollow marker's is, so the focus rule overrides it and a focused
@@ -952,6 +1091,15 @@ public static partial class ChartSvg
             pad = Math.Max(pad, marker);
         }
         return Math.Min(pad, (Math.Min(s.Width, s.Height) - 2) / 2d);
+    }
+
+    /// <summary>The ticks set by hand that stand within <paramref name="axis"/>'s range, lowest first, each labelled as given or else in the
+    /// axis's format and unit. A value outside the range is left out rather than stretching the axis.</summary>
+    private static IReadOnlyList<(double Value, string Label)> Chosen(IReadOnlyList<AxisTick> set, Axis axis)
+    {
+        var slack = (axis.Max - axis.Min) * 1e-9;
+        return set.Where(tick => tick.Value >= axis.Min - slack && tick.Value <= axis.Max + slack).OrderBy(tick => tick.Value)
+            .Select(tick => (tick.Value, tick.Label ?? axis.Format(tick.Value))).ToArray();
     }
 
     /// <summary>A main Y axis tick label, on the side the spec puts the axis, unless <paramref name="labels"/>, the plot's labelling, writes
@@ -1392,7 +1540,7 @@ public static partial class ChartSvg
                 var reach = Math.Max(least, values.Count > 0 ? values.Max(v => Math.Abs(v)) : 0);
                 (low, high) = (-reach, reach);
             }
-            var ys = Footed(Axis.Create(pane.YAxis, values, zero || Filled(false), low, high) with { ValueFormat = pane.YFormat, Reversed = pane.YReversed },
+            var ys = Footed(Axis.Create(pane.YAxis, values, zero || Filled(false), low, high) with { ValueFormat = pane.YFormat, Reversed = pane.YReversed, Unit = pane.YUnit },
                 false, zero || Filled(false) || pane.YSymmetric is not null, pane.YReversed ? pane.YMax : pane.YMin);
             var paired = mine.Any(x => x.Secondary);
             var secondValues = mine.Where(x => x.Secondary).SelectMany(x => x.Points).Where(p => p.Y.HasValue).Select(p => p.Y!.Value).ToList();

@@ -250,6 +250,14 @@ public enum PaneTitlePlacement
     /// the style's text colour: a header such as <c>Heart rate · avg 148 · max 182 bpm</c>, which a stack of channels reads best by.</summary>
     Above
 }
+/// <summary>A tick of a Y axis set by hand, through <see cref="ChartSpec.YTickValues"/> or <see cref="ChartPane.YTickValues"/>: a gridline
+/// at <paramref name="Value"/>, labelled <paramref name="Label"/> or else the value in the axis's format and its unit, as <c>Front</c>,
+/// <c>Mid</c> and <c>Back</c> name 0, 50 and 100 on a percentile axis.</summary>
+/// <param name="Value">Where the tick stands, on the axis's own scale. A value outside the axis's range is left out; it never stretches
+/// the axis.</param>
+/// <param name="Label">The words written for it, at most 24 characters, exactly as given: no format and no unit is added. Null writes the
+/// value as the axis writes its values, with <see cref="ChartSpec.YUnit"/> after it.</param>
+public sealed record AxisTick(double Value, string? Label = null);
 /// <summary>A colour a gradient takes at <paramref name="Value"/>, measured on the axis of the series it colours.</summary>
 /// <param name="Value">The value at which the stroke takes this colour.</param>
 /// <param name="Color">A <c>#RRGGBB</c> colour.</param>
@@ -398,6 +406,25 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// <summary>Ring charts only: the target this ring's value is measured against, so its progress is Y ÷ Goal. Positive;
     /// null means 100. The point's label, if any, is the unit both are written in, such as <c>kcal</c>.</summary>
     public double? Goal { get; init; }
+    /// <summary>
+    /// Names this series at the end of its line, so a chart can do without a legend: written just right of the series' last point drawn
+    /// in view, the one furthest along X that has a value, centred on it, at 12 px and weight 600 in the series colour where that clears
+    /// 4.5:1 against the background and in the style's text colour where it does not, followed on the same line by <see cref="EndNote"/>
+    /// in the muted colour. At most 24 characters. The right margin grows to hold the widest label and note, but never past the point
+    /// where the plot would keep less than half the drawing's width; a label wider than that is cut with <c>…</c>, its whole kept as its
+    /// tooltip and accessible name. Labels whose spans across the drawing overlap never overlap each other: each set is sorted by the height
+    /// of its points and moved apart up or down as little as it can be, 14 units a line, within its plot and 8 units past its top and
+    /// bottom; a label moved more than 3 units from its point is joined to it by a short line in the series colour, or in the muted
+    /// colour where the series colour does not clear 3:1. Where even 12 units a line do not fit, the lowest labels are left out. The label
+    /// and its note are also said in the last point's name, <c>, labelled You · leader</c>, so they are never drawn only. Line, area and
+    /// scatter series take it, except a density scatter's; it is refused on a series measured on the right-hand axis and on a chart whose
+    /// Y axis stands on the right, which take the right margin, and on a sparkline. When every series has one, draw the chart without its
+    /// legend: <c>includeLegend: false</c>, or <c>ShowLegend="false"</c> on the component.
+    /// </summary>
+    public string? EndLabel { get; init; }
+    /// <summary>A note written after <see cref="EndLabel"/> on the same line, at normal weight in the muted colour, such as <c>leader</c>
+    /// or <c>+12.3s</c>, at most 24 characters; it needs an end label to follow.</summary>
+    public string? EndNote { get; init; }
 
     /// <summary>A series from your own objects, in the order given: <paramref name="x"/> and <paramref name="y"/> read each
     /// item's position and value, and <paramref name="label"/>, if given, its label.</summary>
@@ -465,6 +492,24 @@ public sealed record ChartSpec
     /// all of them, the lowest and highest drawn, with <see cref="TickLabels.Bounds"/> none but the axis's two ends at their exact values,
     /// or with <see cref="TickLabels.None"/> none at all. Gridlines stay at every tick; a secondary axis labels all of its own.</summary>
     public TickLabels YTickLabels { get; init; }
+    /// <summary>
+    /// Ticks of the main plot's left-hand axis set by hand, in place of the ticks it would choose: a gridline at each value, labelled with
+    /// its <see cref="AxisTick.Label"/> or else its value in the axis's format and <see cref="YUnit"/>, as <c>Front</c>, <c>Mid</c> and
+    /// <c>Back</c> name 0, 50 and 100. A value outside the axis's range is left out, and never stretches it: set <see cref="YMin"/> and
+    /// <see cref="YMax"/> to the range the ticks need. <see cref="YTickLabels"/> still chooses which labels are written, and the axis takes
+    /// no minor gridlines of its own. At most 24, none twice, each finite, positive on a logarithmic axis, and each label at most 24
+    /// characters. Null, the default, lets the axis choose. Charts drawn on an X and a Y axis take it; donut, heatmap, radar, histogram,
+    /// box, violin, gauge, ring, timeline and calendar charts and a sparkline refuse it.
+    /// </summary>
+    public IReadOnlyList<AxisTick>? YTickValues { get; init; }
+    /// <summary>
+    /// A unit written straight after every value the main plot's left-hand axis writes, exactly as given, at most 8 characters: its
+    /// automatic tick labels, the names and tooltips of the marks measured on it, their value labels, its bounds, zones and annotations, the
+    /// shared readout, and the component's status line and data table. <c>"s"</c> writes <c>+12.3s</c> and <c>" bpm"</c> writes
+    /// <c>152 bpm</c>, so give it the space it needs. A tick set by <see cref="YTickValues"/> with a label of its own is written as given,
+    /// and the right-hand axis takes none. CSV keeps raw numbers. Null writes none. The kinds that take <see cref="YTickValues"/> take it.
+    /// </summary>
+    public string? YUnit { get; init; }
     /// <summary>The data: at most 32 series and 100,000 points in all.</summary>
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];
     /// <summary>Names the X axis.</summary>
@@ -639,6 +684,12 @@ public sealed record ChartPane
     /// <summary>Which ticks of the pane's left-hand axis carry a label, as <see cref="ChartSpec.YTickLabels"/> says for the main plot;
     /// null, the default, takes the spec's. <see cref="TickLabels.None"/> writes none, the gridlines staying.</summary>
     public TickLabels? YTickLabels { get; init; }
+    /// <summary>Ticks of the pane's left-hand axis set by hand, as <see cref="ChartSpec.YTickValues"/> sets the main plot's, and refused
+    /// where it is. Null lets the axis choose.</summary>
+    public IReadOnlyList<AxisTick>? YTickValues { get; init; }
+    /// <summary>A unit written after every value the pane's left-hand axis writes, as <see cref="ChartSpec.YUnit"/> is for the main plot's;
+    /// a pane does not take the spec's. Null writes none.</summary>
+    public string? YUnit { get; init; }
     /// <summary>Shades each zone as a band behind this pane's data.</summary>
     public ZoneScale? YZones { get; init; }
     /// <summary>Names the pane's right-hand axis, which appears when one of its series is secondary.</summary>

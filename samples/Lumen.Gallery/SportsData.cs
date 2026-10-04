@@ -52,6 +52,10 @@ public sealed record SportsCard(string Section, string Id, string Title, string 
     /// <summary>Sparklines the card draws instead of one chart, each with a line of words beside it; the first is its
     /// <see cref="SportsCard.Spec"/>.</summary>
     public IReadOnlyList<SportsLine>? Lines { get; init; }
+    /// <summary>Whether the chart's component draws its legend: off for a chart whose lines are named at their ends.</summary>
+    public bool ShowLegend { get; init; } = true;
+    /// <summary>Whether the chart's component draws its toolbar: off for a card drawn as a phone app would, its status line kept out of sight.</summary>
+    public bool ShowToolbar { get; init; } = true;
 }
 
 /// <summary>A sparkline on the Sports &amp; performance page and the words written beside it: what it measures, in bold, and what
@@ -88,6 +92,28 @@ public static class SportsData
     /// size would write its place alone.</summary>
     public static readonly IReadOnlyList<(DateOnly Day, int Position, int? Field, int? Points)> Races =
         [(new(2026, 4, 11), 31, 50, 40), (new(2026, 5, 16), 24, 48, 52), (new(2026, 7, 4), 27, 51, 47), (new(2026, 8, 8), 21, 49, 58), (new(2026, 9, 19), 19, 52, 61)];
+
+    /// <summary>An invented season of ten races in three disciplines and one other, apart from the simulated training: each race's day, its
+    /// discipline, the place it finished, null for a race not finished, and the size of its field.</summary>
+    public static readonly IReadOnlyList<(DateOnly Day, string Discipline, int? Place, int Field)> SeasonRaces =
+        [(new(2026, 2, 7), "XCO", 18, 40), (new(2026, 2, 21), "XCC", 9, 32), (new(2026, 3, 14), "XCO", 12, 44), (new(2026, 3, 28), "XCM", 31, 60),
+         (new(2026, 4, 18), "XCO", null, 41), (new(2026, 5, 9), "XCC", 6, 30), (new(2026, 5, 30), "XCO", 7, 42), (new(2026, 6, 20), "Enduro", 22, 55),
+         (new(2026, 7, 11), "XCM", 19, 58), (new(2026, 8, 1), "XCO", 5, 40)];
+
+    /// <summary>An invented race of eight riders over six laps, apart from the simulated training: each rider's name, the athlete last as
+    /// "You", and their lap times in seconds.</summary>
+    public static readonly IReadOnlyList<(string Rider, double[] Laps)> LapRace =
+        [("Rider A", [300.5, 290.0, 299.5, 297.3, 290.7, 301.7]), ("Rider B", [293.9, 298.5, 302.8, 292.4, 302.0, 299.6]),
+         ("Rider C", [297.5, 306.7, 296.2, 301.0, 305.1, 294.8]), ("Rider D", [308.6, 301.6, 300.0, 309.1, 298.5, 303.5]),
+         ("Rider E", [307.5, 300.1, 311.0, 303.9, 302.5, 311.5]), ("Rider F", [302.1, 311.1, 309.8, 302.5, 313.5, 306.2]),
+         ("Rider G", [310.0, 315.1, 304.5, 313.5, 312.1, 305.0]), ("You", [307.8, 301.6, 298.6, 298.5, 293.3, 288.6])];
+
+    /// <summary>Each rider of <see cref="LapRace"/>'s gap to whoever led at the end of each lap, in seconds, lap 0 the start.</summary>
+    public static double[][] LapGaps()
+    {
+        var clocks = LapRace.Select(r => r.Laps.Aggregate(new List<double> { 0 }, (clock, lap) => { clock.Add(Math.Round(clock[^1] + lap, 1)); return clock; }).ToArray()).ToArray();
+        return clocks.Select(clock => clock.Select((time, lap) => Math.Round(time - clocks.Min(other => other[lap]), 1)).ToArray()).ToArray();
+    }
 
     /// <summary>An invented field for the last of <see cref="Races"/>: its 52 finishers' times in seconds, fastest first, the athlete's
     /// own, 40:12, the 19th, as its place has it. Most finish within a few minutes of 41, the slower tail the longer, as a field does;
@@ -926,6 +952,38 @@ public static class SportsData
                 { Color = mine >= b.From && mine < b.To ? zones[5] : null, ValueNote = mine >= b.From && mine < b.To ? " · you" : null }).ToArray(), zones[0])]
         };
 
+        // An invented season's arc: each race at its index in the season, as far back in its field as it finished, 0 % at the front and 100 %
+        // at the back on a reversed axis with three ticks set by hand. One line a discipline joins only its own races, over the others' between
+        // them, and breaks at a race it did not finish. The disciplines take the brand's series colours and the legend names them.
+        string[] arcKinds = ["XCC", "XCO", "XCM", "Other"];
+        string ArcKind(string discipline) => arcKinds.Contains(discipline) ? discipline : "Other";
+        var arc = Chart(half, 360) with
+        {
+            Kind = ChartKind.Line, XMin = -.5, XMax = SeasonRaces.Count - .5, YReversed = true, YMin = 0, YMax = 100, YUnit = "%",
+            YTickValues = [new(0, "Front"), new(50, "Mid"), new(100, "Back")],
+            Title = $"Top quarter in {SeasonRaces.Count(r => r.Place is { } p && (p - 1.0) / (r.Field - 1) < .25)} of {SeasonRaces.Count}",
+            Description = "An invented season · each race's place in its field, front at the top", XLabel = "Race",
+            Series = arcKinds.Select(kind => new ChartSeries(kind, SeasonRaces.Select((r, i) => (Race: r, Index: i)).Where(t => ArcKind(t.Race.Discipline) == kind)
+                .Select(t => new ChartPoint(t.Index, t.Race.Place is { } p ? Math.Round(100.0 * (p - 1) / (t.Race.Field - 1)) : null, Day(t.Race.Day))
+                    { ValueNote = t.Race.Place is { } q ? $" · P{q}/{t.Race.Field}" : null }).ToArray()) { Markers = MarkerStyle.Filled }).ToArray()
+        };
+        // An invented race's gaps to the leader lap by lap, the leader at the top: every rider in the ramp's neutral grey but the athlete,
+        // in its green and wider, listed last so it is drawn over the rest; each line named at its end with its last gap, so it needs no legend.
+        var gapsBehind = LapGaps();
+        var signedSeconds = new Axis(AxisKind.Linear, 0, 1) { ValueFormat = ValueFormat.Signed, Unit = "s" };
+        var you = LapRace.Count - 1;
+        var gap = Chart(half, 360) with
+        {
+            Kind = ChartKind.Line, YReversed = true, YMin = 0, YFormat = ValueFormat.Signed, YUnit = "s", XLabel = "Lap",
+            Title = $"You finished {signedSeconds.Format(gapsBehind[you][^1])} back",
+            Description = "An invented race · seconds behind the leader at each lap",
+            Series = LapRace.Select((r, k) => new ChartSeries(r.Rider, gapsBehind[k].Select((g, lap) => new ChartPoint(lap, g, lap == 0 ? "Start" : $"Lap {lap}")).ToArray(), k == you ? zones[2] : zones[0])
+            {
+                StrokeWidth = k == you ? 3.2 : 2, Markers = MarkerStyle.None, EndLabel = k == you ? "You" : r.Rider[^1..],
+                EndNote = gapsBehind[k][^1] == 0 ? "leader" : signedSeconds.Format(gapsBehind[k][^1])
+            }).ToArray()
+        };
+
         // Last night's stages, one lane each, on the clock: awake in the ramp's orange, REM blue, light sleep its neutral grey and
         // deep sleep purple. Each night runs from the midnight before it, so its seconds are added to that midnight.
         var sleep = Nights(season);
@@ -985,6 +1043,8 @@ public static class SportsData
             new("fitness", "hrv", "HRV against its baseline", "Each night's HRV in green inside a band of the mean ± one standard deviation of the 28 nights before, from `Statistics.Rolling`, orange below it and blue above it, its `ValueNote` naming that status in its tooltip; the dashed purple line is a seven-night `TrendFit.MovingAverage`.", true, hrv),
             new("racing", "race-results", "Race results", "Five invented races in two `Panes` on one race-by-race axis: the place each finished on a reversed axis, first at the top, `ChangeColors.LowerIsBetter` drawing a race that finished higher than the one before in the style's rising colour and one that finished lower in its falling colour, and saying so in its tooltip, and `ValueLabels` writing each place with its field as a muted `ValueNote`; beneath, the points each race earned.", true, results),
             new("racing", "field", "How the field finished", "An invented field for the last race, its finish times in bins the page works out, each a `ChartPoint.Block` on an axis that `IncludeZero`; the athlete's bin in red with the `ValueNote` `· you`, so its tooltip says why, a bin of one kept 2 pixels tall, `TickLabels.Bounds` labelling only the ends of each axis, and the median a dashed X annotation `InFront` of the bins, its label drawn without its time by `ShowValue = false`; the finishers off the chart are counted in the source line.", true, finish),
+            new("racing", "season-arc", "Season arc", "An invented season of ten races in three disciplines, each at its index in the season and as far back in its field as it finished, on a reversed axis whose `YTickValues` set `Front`, `Mid` and `Back` by hand; `YUnit` writes `%` after every value, each discipline's line joins only its own races, and a race not finished is a gap.", false, arc),
+            new("racing", "gap", "Gap to the leader", "An invented race's eight riders lap by lap, `YReversed` from 0, the leader, written `+9.5s` by `ValueFormat.Signed` and `YUnit`; each line is named at its end by `EndLabel` and `EndNote`, moved apart where lines end close together, so the component's legend is off, and its toolbar too, as on a phone card, its status line kept for screen readers; `SharedReadout` reads every rider at the lap under the pointer. The athlete's line is green and wider and named \"You\".", false, gap with { SharedReadout = true }) { ShowLegend = false, ShowToolbar = false },
             new("sleep", "hypnogram", "Last night's sleep stages", "A `ChartKind.Timeline`: one series per stage, each period a `ChartPoint.Span`, joined where the stage changes; the higher the HRV sits above its baseline, the more deep sleep.", true, hypnogram),
             new("sleep", "sleep-timing", "Sleep timing", "Bedtime to waking as `ChartKind.Range` bars on a reversed `ValueFormat.TimeOfDay` axis, its seconds running past 24 hours so a night never crosses zero.", false, timing),
             new("sleep", "heart-range", "Daily heart rate", "Each day's lowest and highest heart rate as `ChartPoint.Interval` range bars, the dot its average; today's highest is the run's.", false, heartRange)];

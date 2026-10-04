@@ -145,6 +145,8 @@ public static partial class ChartValidation
             Zones(spec.YZones, style);
         }
         foreach (var pane in spec.Panes) Pane(pane, spec, style);
+        Ticked(spec.YTickValues, spec.YAxis, spec.Kind);
+        Unit(spec.YUnit, spec.Kind);
         if (spec.DensityCells is not null)
         {
             if (spec.Kind != ChartKind.Scatter) throw new ArgumentException("Density cells apply to scatter charts; the other kinds either draw one mark per category or already sample.");
@@ -221,6 +223,7 @@ public static partial class ChartValidation
             if (spec.DensityCells is not null && mark == ChartKind.Scatter && (series.ValueLabels || series.ChangeColors != ChangeColors.None))
                 throw new ArgumentException("A density scatter shades cells rather than points, so it takes no value labels or change colours.");
             Changed(series, mark);
+            Ended(spec, series, mark);
             if (series.ProjectedFrom is { } from)
             {
                 if (mark is not (ChartKind.Line or ChartKind.Area))
@@ -385,6 +388,10 @@ public static partial class ChartValidation
             throw new ArgumentException("A sparkline is read beside the words that give its numbers, a point at a time, so it takes no shared readout; draw the series as a full chart to read them together.");
         if (spec.PaneTitles != PaneTitlePlacement.Axis)
             throw new ArgumentException("A sparkline draws its data alone, with no words, so it names no plot above it; PaneTitles applies to a full chart.");
+        if (spec.YTickValues is not null)
+            throw new ArgumentException("A sparkline draws no axes, so it takes no ticks; YTickValues applies to a full chart.");
+        if (spec.Series?.Any(series => series?.EndLabel is not null || series?.EndNote is not null) == true)
+            throw new ArgumentException("A sparkline draws its data alone, with no words, so it writes no end labels; name the series in the words beside it.");
     }
 
     /// <summary>A minimum span widens an axis fitted to the data about the data's middle, so it needs an axis that is fitted to the
@@ -447,6 +454,42 @@ public static partial class ChartValidation
         if (pane.Y2Axis == AxisKind.Log && (pane.Y2Min <= 0 || pane.Y2Max <= 0)) throw new ArgumentException("Log secondary bounds must be positive.");
         if (spec.Kind == ChartKind.Area && (pane.YMin > 0 || pane.YMax < 0 || pane.Y2Min > 0 || pane.Y2Max < 0)) throw new ArgumentException("Magnitude charts require a zero baseline.");
         if (pane.YZones is not null) Zones(pane.YZones, style);
+        Ticked(pane.YTickValues, pane.YAxis, spec.Kind);
+        Unit(pane.YUnit, spec.Kind);
+    }
+
+    /// <summary>The kinds whose values a Y axis measures up the side or along the bottom: those drawn on an X and a Y axis.</summary>
+    private static bool Measured(ChartKind kind) => kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Column
+        or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Blocks;
+
+    /// <summary>Ticks set by hand stand where a Y axis can show them: few enough to read, each once, finite, positive on a logarithmic
+    /// axis, and with labels short enough to sit beside the plot.</summary>
+    private static void Ticked(IReadOnlyList<AxisTick>? ticks, AxisKind axis, ChartKind kind)
+    {
+        if (ticks is null) return;
+        if (!Measured(kind))
+            throw new ArgumentException("YTickValues sets the ticks of a Y axis drawn beside a plot, so it applies to line, area, scatter, bubble, column, bar, stacked column, candlestick, OHLC, band, range and blocks charts; donut, heatmap, radar, gauge, ring, timeline and calendar charts have no such axis, and histogram, box and violin charts draw their own.");
+        if (ticks.Count > 24) throw new ArgumentException("YTickValues takes at most 24 ticks; more than that crowd an axis past reading.");
+        foreach (var tick in ticks)
+        {
+            if (tick is null) throw new ArgumentException("YTickValues cannot hold a null tick.");
+            if (!Finite(tick.Value)) throw new ArgumentException("A tick's value must be finite, magnitude <= 1e100.");
+            if (axis == AxisKind.Log && tick.Value <= 0) throw new ArgumentException("A logarithmic axis has no zero or negative values, so its ticks must be positive.");
+            Text(tick.Label);
+            if (tick.Label?.Length > 24) throw new ArgumentException("A tick's label is written beside the plot, so it is at most 24 characters, such as Front or Back.");
+        }
+        if (ticks.Select(tick => tick.Value).Distinct().Count() != ticks.Count)
+            throw new ArgumentException("Each value in YTickValues stands once; two ticks at one value would write two labels in one place.");
+    }
+
+    /// <summary>A unit follows every value an axis writes, so it is short, and it needs an axis whose values are written.</summary>
+    private static void Unit(string? unit, ChartKind kind)
+    {
+        if (unit is null) return;
+        Text(unit);
+        if (unit.Length > 8) throw new ArgumentException("YUnit is written after every value on its axis, so it is at most 8 characters, such as s, % or \" bpm\".");
+        if (!Measured(kind))
+            throw new ArgumentException("YUnit follows the values a Y axis measures, so it applies to line, area, scatter, bubble, column, bar, stacked column, candlestick, OHLC, band, range and blocks charts; donut, heatmap, radar, gauge, ring, timeline and calendar charts have no such axis, a gauge writes its unit from YLabel, and histogram, box and violin charts do not take one yet.");
     }
 
     /// <summary>A trend's fit, window and degree choose the trend <see cref="ChartSeries.Trend"/> draws, so each needs a trend, and
@@ -482,6 +525,24 @@ public static partial class ChartValidation
             throw new ArgumentException("A point's own colour would hide whether it did better or worse than the one before, so a series with change colours takes no point colours.");
         if (series.Points.Zip(series.Points.Skip(1)).Any(p => p.First is not null && p.Second is not null && p.First.X > p.Second.X))
             throw new ArgumentException("Change colours compare each point with the one before it, so the points must be ordered by X.");
+    }
+
+    /// <summary>An end label names a series where its line or its points end, in the margin right of the plot, so it needs a series that
+    /// ends at a point, words to write, and a right margin no axis takes.</summary>
+    private static void Ended(ChartSpec spec, ChartSeries series, ChartKind mark)
+    {
+        if (series.EndLabel is null && series.EndNote is null) return;
+        Text(series.EndLabel); Text(series.EndNote);
+        if (series.EndLabel is null) throw new ArgumentException("EndNote is written after a series' EndLabel, so it needs one to follow.");
+        if (string.IsNullOrWhiteSpace(series.EndLabel)) throw new ArgumentException("An end label names its series, so it needs words; leave EndLabel null to write none.");
+        if (series.EndLabel.Length > 24 || series.EndNote?.Length > 24)
+            throw new ArgumentException("An end label and its note each take at most 24 characters, such as a rider's short name and +12.3s; longer words belong in the series' name.");
+        if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter))
+            throw new ArgumentException("An end label is written after a series' last point, so it applies to series drawn as lines, areas or scatter points; the other kinds end in a bar, a span, a slice, a cell or a distribution, and their legend names them.");
+        if (spec.DensityCells is not null && mark == ChartKind.Scatter)
+            throw new ArgumentException("A density scatter shades cells rather than points, so it has no last point to write an end label after.");
+        if (series.Secondary || spec.Series.Any(other => other?.Secondary == true) || spec.YAxisSide == AxisSide.Right)
+            throw new ArgumentException("End labels are written in the margin right of the plot, which a right-hand axis takes for its tick labels, so a chart with a secondary series or its Y axis on the right takes none; name its series in the legend.");
     }
 
     /// <summary>Each finishing touch applies to the marks that can show it.</summary>

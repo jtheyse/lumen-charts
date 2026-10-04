@@ -1,6 +1,6 @@
 # Race results recipes
 
-Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, and how a race's whole field finished, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.37.0, together with the recipes in `sports.md`.
+Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields and a race's gaps to the leader, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.38.0, together with the recipes in `sports.md`.
 
 ```csharp
 using System.Globalization;
@@ -324,6 +324,7 @@ string fitnessSvg = ChartSvg.Render(fitnessMonth);
 - **The shared readout.** `SharedReadout = true` changes nothing in the SVG: `ChartSvg.Render` draws the same chart with it or without it. In `<LumenChart>` a guide runs through both panes at the day nearest the pointer, a tap or the focused point, each series' point there is ringed, and one tooltip reads the day and then each series in legend order: `4 Jul 2026`, `Fitness 61.2`, `Fatigue 70.4`, `Form −9.1`, `TSS 0`. Left and Right step a day, Up and Down move between the series, Home and End go to the first and last day, Page Up and Page Down ten days, and Escape hides it; the status line reads the same words for a screen reader. `ChartSvg.Readout(spec)` gives the same table to a host that draws its own.
 - **The app's own load.** When the app already computes fitness, fatigue and form, as an API with custom from–to windows does, draw its values rather than run `Training.Load`: `ChartSeries.From("Fitness", apiDays, d => UtcDay(d.Day), d => d.Fitness)` and the same for the others, so the chart and the app never disagree.
 - **Race names.** A race line may carry the race's own name, `Label = race.Name`, rather than `Race`; its tooltip and accessible name read it whole. Where race lines stand close, labels step down a row and one with no room left is left out, and a long name needs the most room, so it is the first to be left out: keep the label short, the date or an abbreviation, and leave the full name to the tooltip or the page.
+- **Phone cards.** On a small card `<LumenChart Spec="fitnessMonth" FitWidth="true" ShowToolbar="false" />` (0.38.0) leaves out the zoom, export and data-table buttons, which wrap onto several rows under a phone chart; the status line stays in the page, out of sight, so a screen reader still hears the readout. Keep the legend here, since four series share the plots; `ShowLegend="false"` suits a chart whose series are named in the drawing. Hiding the toolbar takes away the keyboard's way to zoom and the only way to the data table, so keep it where those matter.
 - **Ranges.** Slice the model's days, not the stress before the model, so a 7-day chart's first fitness is the one the whole year built. Fitness takes about six weeks to build, so seed `Training.Load` with the rider's typical daily stress, or start the log six weeks before the first day shown.
 
 ## Ride channels
@@ -391,6 +392,91 @@ string rideSvg = ChartSvg.Render(rideChannels, includeLegend: false);
 - **Never colour alone.** Each plot holds one channel, named in its header and in every point's name and the readout, so the colours only tell the lines apart. Against the card, `#161618`, the lines need 3:1: heart rate `#e24b4a` 4.59:1, power `#7048e8` 3.25:1, cadence `#1098ad` 5.26:1, speed `#0ca678` 5.80:1, elevation `#868e96` 5.44:1 and temperature `#e8950c` 7.52:1. On a white card heart rate stands 3.93:1, power 5.55:1, cadence 3.43:1, speed 3.12:1 and elevation 3.32:1, but temperature only 2.40:1: there take `#e8590c`, 3.58:1 on white and 5.05:1 on the card, and a light style such as `ChartStyle.Light`, whose text colour writes the headers at 12.80:1.
 - **Interactive.** `SharedReadout = true` reads all six at the slice nearest the pointer, a tap or the focused point, and the arrow keys step it slice by slice. With a mouse or a pen, a drag across the plots of 8 pixels or more draws a band through all six and zooms to it; Escape lets it go, Reset view draws the whole ride again, and on a phone a tap still reads the chart. The zoom and pan buttons do the same from the keyboard.
 - **Buckets of your own.** If the app already buckets its channels, to 600 points say, pass those points and leave `Sampling` alone: a series within the budget is drawn as given. `includeLegend: false` leaves out the legend, since each header names its channel.
+- **Keep the decimals in the points.** A channel recorded or stored in whole units, a speed in whole km/h say, draws a staircase: at this size each step of one unit is a visible jump. Keep the tenths in the points, as `rideKmh` does, and round only in the header.
+- **Phone cards.** Each header names its channel, so the component's legend adds nothing: `<LumenChart Spec="rideChannels" FitWidth="true" ShowLegend="false" ShowToolbar="false" />` (0.38.0) leaves out the legend and the toolbar, which together took about 250 pixels under a phone chart. The status line stays, out of sight, for a screen reader; drag to zoom and the arrow keys still work, but the keyboard loses zoom, pan and reset and the data table, so keep the toolbar where those matter.
+- **A large spec on an interactive island.** A spec passed as a parameter into an `InteractiveServer` component travels in SignalR's circuit-start message. Six channels of 600 points went past SignalR's default 32 KB `MaximumReceiveMessageSize`, and the circuit closed with only a console error, leaving the chart static: no readout, no zoom. Raise the limit where the server is set up, `builder.Services.AddRazorComponents().AddInteractiveServerComponents().AddHubOptions(o => o.MaximumReceiveMessageSize = 256 * 1024);`, or let the island load its own data, passing it an ID rather than the spec.
+
+## Season arc
+
+Every race of a season in date order, each at its index along X, placed by where the rider finished in its field: 0 % at the front, 100 % at the back, on a reversed axis so the front is at the top, with three ticks set by hand, `Front`, `Mid` and `Back`. One line per discipline joins only that discipline's races, over the races of the others between them, so a rider's cross-country form reads as one line however many marathons sit between its races (0.38.0).
+
+```csharp
+// The app's races of the season in date order: its day, its discipline, the rider's place (null for a race started but not finished)
+// and the size of its field. An invented season:
+(DateOnly Day, string Discipline, int? Place, int Field)[] seasonRaces = [
+    (new(2026, 2, 7), "XCO", 18, 40), (new(2026, 2, 21), "XCC", 9, 32), (new(2026, 3, 14), "XCO", 12, 44), (new(2026, 3, 28), "XCM", 31, 60),
+    (new(2026, 4, 18), "XCO", null, 41), (new(2026, 5, 9), "XCC", 6, 30), (new(2026, 5, 30), "XCO", 7, 42), (new(2026, 6, 20), "Enduro", 22, 55),
+    (new(2026, 7, 11), "XCM", 19, 58), (new(2026, 8, 1), "XCO", 5, 40)];
+// One line per discipline, each in its colour on the card; any discipline not listed is drawn as Other.
+(string Name, string Color)[] arcDisciplines = [("XCC", "#38bdf8"), ("XCO", "#34d399"), ("XCM", "#f59e0b"), ("Other", "#a78bfa")];
+string ArcGroup(string discipline) => arcDisciplines.Any(d => d.Name == discipline) ? discipline : "Other";
+// Where a place stands in its field, 0 for first and 100 for last, rounded to a whole per cent; a race without a place is null, a gap.
+static double? FieldPercent(int? place, int field) => place is int p && field > 1 ? Math.Round(100.0 * (p - 1) / (field - 1)) : null;
+var seasonArc = new ChartSpec {
+    Title = "Season arc", Description = "Each race's place in its field, front at the top, by discipline",
+    Kind = ChartKind.Line, Width = 340, Height = 300, Style = raceFace,
+    XMin = -0.5, XMax = seasonRaces.Length - 0.5,
+    YReversed = true, YMin = 0, YMax = 100, YUnit = "%", YTickValues = [new(0, "Front"), new(50, "Mid"), new(100, "Back")],
+    Series = arcDisciplines.Select(d => new ChartSeries(d.Name, seasonRaces.Select((race, i) => (Race: race, Index: i))
+            .Where(t => ArcGroup(t.Race.Discipline) == d.Name)
+            .Select(t => new ChartPoint(t.Index, FieldPercent(t.Race.Place, t.Race.Field), t.Race.Day.ToString("d MMM", CultureInfo.InvariantCulture))
+                { ValueNote = t.Race.Place is int p ? $" · P{p}/{t.Race.Field}" : null }).ToArray(), d.Color) { Markers = MarkerStyle.Filled })
+        .Where(series => series.Points.Count > 0).ToArray()
+};
+string seasonArcSvg = ChartSvg.Render(seasonArc);
+// Interactive: <LumenChart Spec="seasonArc" FitWidth="true" />
+```
+
+- **One season, one X.** Each race's `X` is its index in the whole season, whatever its discipline, so the disciplines share one axis and `XMin = -0.5`, `XMax = seasonRaces.Length - 0.5` stand each race in the middle of its slot. Each date labels the axis, thinned at 340 so none touch.
+- **Joined over the others, broken by its own gap.** A discipline's series holds only its own races: the races of the other disciplines between two of its races are simply absent, so its line joins them. A race of its own the rider did not finish is a `null` Y, a gap: the XCO line above breaks at 18 Apr and starts again. Never give an absent race a `null`, or every discipline breaks at every race it did not ride.
+- **Ticks set by hand.** `YTickValues` (0.38.0) puts a gridline and a label exactly at 0, 50 and 100 and nowhere else; a tick's `Label` is written as given, and a tick without one writes its value in the axis's format. A value outside the axis is left out, never stretching it, so `YMin = 0` and `YMax = 100` hold the axis to the field; with `YReversed`, 0 stands exactly at the top. `YTickLabels` still chooses which of them are written.
+- **The words a point says.** `YUnit = "%"` (0.38.0) writes the percentage after every value the axis writes and the place in its field follows as the `ValueNote`, so each mark's name and tooltip read `XCO: 1 Aug, 10% · P5/40`; the `Front`, `Mid` and `Back` labels are written as given, without the unit. The note is at most 20 characters, room for a field in the thousands.
+- **Never colour alone.** The disciplines are told apart by colour on the line and by name everywhere else: the legend under the chart, each point's name and tooltip, and the shared readout if it is on. Against the card, `#161618`, XCC `#38bdf8` stands 8.44:1, XCO `#34d399` 9.40:1, XCM `#f59e0b` 8.41:1 and Other `#a78bfa` 6.64:1. On a white card they stand only 2.14, 1.92, 2.15 and 2.72 to 1, short of the 3:1 a line needs: there take `#0284c7` (4.10:1), `#047857` (5.48:1), `#b45309` (5.02:1) and `#7c3aed` (5.70:1).
+- **A single race.** A discipline raced once, Other here, is one marker and no line; `Markers = MarkerStyle.Filled` keeps every race visible, since a refined line otherwise shows its markers only on hover.
+
+## Gap to the lap leader
+
+An invented race's eight riders lap by lap: each rider's time behind whoever led at the end of that lap, the leader at the top, each line named at its end instead of in a legend, and the reader's own line, "You", drawn over the others in a colour of its own and wider (0.38.0).
+
+```csharp
+// The app's lap times in seconds, one row a rider, the reader's own last. An invented race of eight riders over six laps:
+string[] gapRiders = ["Rider A", "Rider B", "Rider C", "Rider D", "Rider E", "Rider F", "Rider G", "You"];
+double[][] lapSeconds = [
+    [300.5, 290.0, 299.5, 297.3, 290.7, 301.7], [293.9, 298.5, 302.8, 292.4, 302.0, 299.6], [297.5, 306.7, 296.2, 301.0, 305.1, 294.8],
+    [308.6, 301.6, 300.0, 309.1, 298.5, 303.5], [307.5, 300.1, 311.0, 303.9, 302.5, 311.5], [302.1, 311.1, 309.8, 302.5, 313.5, 306.2],
+    [310.0, 315.1, 304.5, 313.5, 312.1, 305.0], [307.8, 301.6, 298.6, 298.5, 293.3, 288.6]];
+// Each rider's race clock at the end of each lap, lap 0 the start at 0, and how far behind whoever led at that lap.
+double[][] lapClock = lapSeconds.Select(laps => laps.Aggregate(new List<double> { 0 }, (clock, lap) => { clock.Add(Math.Round(clock[^1] + lap, 1)); return clock; }).ToArray()).ToArray();
+double[][] lapGaps = lapClock.Select(clock => clock.Select((time, lap) => Math.Round(time - lapClock.Min(other => other[lap]), 1)).ToArray()).ToArray();
+var gapWords = new Axis(AxisKind.Linear, 0, 1) { ValueFormat = ValueFormat.Signed, Unit = "s" };   // writes +9.5s, as the axis does
+string[] riderGreys = ["#D7DDE5", "#C2C6D2", "#B7BCC4", "#A9AEB7", "#9AA0A9", "#8D939C", "#80858E"];
+ChartSeries GapLine(int rider)
+{
+    var you = rider == gapRiders.Length - 1;
+    var behind = lapGaps[rider][^1];
+    return new(gapRiders[rider], lapGaps[rider].Select((gap, lap) => new ChartPoint(lap, gap, lap == 0 ? "Start" : $"Lap {lap}")).ToArray(), you ? "#34d399" : riderGreys[rider])
+    {
+        StrokeWidth = you ? 3.2 : 2, Markers = MarkerStyle.None,
+        EndLabel = you ? "You" : gapRiders[rider][^1..],                       // "A" to "G" fit a phone card; the series name says "Rider A"
+        EndNote = behind == 0 ? "leader" : gapWords.Format(behind)
+    };
+}
+var gapToLeader = new ChartSpec {
+    Title = "Gap to the leader", Description = "Seconds behind the leader at each lap, the leader at the top",
+    Kind = ChartKind.Line, Width = 340, Height = 320, Style = raceFace, XLabel = "Lap",
+    YReversed = true, YMin = 0, YFormat = ValueFormat.Signed, YUnit = "s",
+    Series = Enumerable.Range(0, gapRiders.Length).Select(GapLine).ToArray()   // "You" is listed last, so it is drawn over the others
+};
+string gapSvg = ChartSvg.Render(gapToLeader, includeLegend: false);
+var gapLive = gapToLeader with { SharedReadout = true };
+// Interactive: <LumenChart Spec="gapLive" FitWidth="true" ShowLegend="false" />
+```
+
+- **Gaps.** A rider's gap at a lap is their race clock less the least clock of any rider at that lap, so whoever leads stands at 0 and the lead can change hands, Rider B leading after lap 1 and Rider A after that. Lap 0, the start, is 0 for everyone. `YReversed = true` with `YMin = 0` puts 0 exactly at the top, the leader's place, and the axis fits the furthest behind.
+- **Seconds with their sign.** `YFormat = ValueFormat.Signed` with `YUnit = "s"` (0.38.0) writes the ticks `0s`, `+25s`, `+50s` and every value said, `You: Lap 3, +18s`; `gapWords` writes the end notes the same way. A unit is written exactly as given, so `" bpm"` keeps its space.
+- **End labels instead of a legend.** `EndLabel` and `EndNote` (0.38.0) write each rider's name and gap just right of the line's last point, in the line's colour where it clears 4.5:1 on the card and in the text colour where it does not, the note in the muted colour, `low` `#80858E` 4.87:1. Labels whose points end close together are moved apart, as little as they can be, 14 units a line, and a label moved off its point is joined to it by a short line in its colour. The right margin grows to hold the widest, up to half the drawing: at 340 that is about 10 characters, so the labels here are the riders' letters and "You", and a longer one is cut with `…`, its whole kept as its tooltip and accessible name. Each label and note is also said in its line's last point's name, `You: Lap 6, +8.7s, labelled You · +8.7s`. With every line labelled, `includeLegend: false` drops the legend; in the component, `ShowLegend="false"`.
+- **Never colour alone.** The other riders are greys from `#D7DDE5` (13.22:1) down to `low` `#80858E` (4.87:1), which only tell the lines apart; "You" is the token `improved` `#34d399`, 9.40:1, and 3.2 units wide to their 2, and it is named "You" at its end and in every point's name, so neither the colour nor the width carries it alone. On a white card take `ChartStyle.Light`'s first series colour for "You" and its zone grey for the others.
+- **Interactive.** `SharedReadout = true` reads all eight riders at the lap under a finger, the pointer or the focused point, `Lap 3 · Rider A 0s · Rider B +5.2s · … · You +18s`, and the arrow keys step lap by lap. `ShowLegend="false"` leaves out the component's legend of toggle buttons; with it, a reader can no longer hide a rider.
 
 ## Rendering notes
 

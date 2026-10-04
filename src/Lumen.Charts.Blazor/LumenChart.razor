@@ -11,8 +11,7 @@ else
     <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart">@((MarkupString)svg)</div>
     @* The keys a reader moves with, hidden from view and from reading in place: the script, which makes them work, names them as the
        viewport's description, or a sparkline's drawing's. *@
-    <span class="lumen-keys" hidden>@Keys</span>
-    <div class="lumen-legend" aria-label="Chart series">
+    <span class="lumen-keys" hidden>@Keys</span>@if(ShowLegend){@Indent<div class="lumen-legend" aria-label="Chart series">
         @for(var i=0;i<Spec.Series.Count;i++)
         {
             var index=i;
@@ -21,9 +20,10 @@ else
                 @if(Style.Finish==ChartFinish.Classic){<span style="background:@ChartSvg.SeriesColor(Spec.Series[i],i,Style)"></span>}else{@((MarkupString)ChartSvg.LegendKey(Spec with{Style=Style},i))}@ChartSvg.LegendLabel(Spec,i)
             </button>
         }
-    </div>
-    <div class="lumen-tools">
-        @if(CanZoom)
+    </div>}@Indent<div class="@(ShowToolbar ? "lumen-tools" : "lumen-tools lumen-quiet")">
+        @if(ShowToolbar)
+        {
+        if(CanZoom)
         {
             <button type="button" @onclick="()=>Zoom(.5)" aria-label="Zoom in">+</button>
             <button type="button" @onclick="()=>Zoom(2)" aria-label="Zoom out">−</button>
@@ -35,7 +35,7 @@ else
         <button type="button" @onclick='()=>Download("png")'>Export PNG</button>
         <button type="button" @onclick='()=>Download("csv")'>Export CSV</button>
         <button type="button" @onclick="()=>showData=!showData" aria-expanded="@(showData ? "true" : "false")">@(showData ? "Hide data" : "View data")</button>
-        <span class="lumen-status" role="status">@status</span>
+        }@Deeper<span class="lumen-status" role="status">@status</span>
     </div>
     @if(showData)
     {
@@ -66,6 +66,21 @@ else
     /// accepts, or 60 for a sparkline, and the SVG and PNG exports take the width it is drawn at.
     /// </summary>
     [Parameter] public bool FitWidth { get; set; }
+    /// <summary>Draws the legend of toggle buttons under the chart, the default. Off, the chart has none, and every series stays shown: for a
+    /// chart whose series are named in its drawing already, by <see cref="ChartSeries.EndLabel"/> or by pane headers, or a single series named
+    /// by the title. A series can then not be hidden from the page.</summary>
+    [Parameter] public bool ShowLegend { get; set; } = true;
+    /// <summary>
+    /// Draws the toolbar under the chart, the default: zoom, pan and reset where the chart zooms, the SVG, PNG and CSV exports, and the button
+    /// that shows the data table. Off, none of these buttons is drawn, which suits a small phone card, but the status line stays in the page,
+    /// out of sight, so a screen reader still hears the shared readout and each point chosen; dragging across the plots still zooms, and the
+    /// arrow keys still read the chart. Hiding it takes away the keyboard's way to zoom, pan and reset, and the only way to the data table, so
+    /// keep it where those matter.
+    /// </summary>
+    [Parameter] public bool ShowToolbar { get; set; } = true;
+    // The line breaks the legend and the toolbar stand on, written out, since Razor drops the whitespace beside a code block: with both
+    // shown, the markup is the same as before either could be hidden. Without its toolbar the chart keeps its status line, out of sight.
+    private static readonly MarkupString Indent=new("\n    "),Deeper=new("\n        ");
     /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style on the spec itself wins.</summary>
     [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }
     private ChartStyle Style => Spec.Style ?? CascadingStyle ?? ChartSvg.ResolveStyle(Spec);
@@ -117,7 +132,7 @@ else
     private Axis Measure(ChartSeries series)
     {
         var pane=series.Pane>0&&series.Pane<=Spec.Panes.Count?Spec.Panes[series.Pane-1]:null;
-        return series.Secondary ? new(pane?.Y2Axis ?? Spec.Y2Axis,1,10){ValueFormat=pane?.Y2Format ?? Spec.Y2Format} : new(pane?.YAxis ?? Spec.YAxis,1,10){ValueFormat=pane?.YFormat ?? Spec.YFormat};
+        return series.Secondary ? new(pane?.Y2Axis ?? Spec.Y2Axis,1,10){ValueFormat=pane?.Y2Format ?? Spec.Y2Format} : new(pane?.YAxis ?? Spec.YAxis,1,10){ValueFormat=pane?.YFormat ?? Spec.YFormat,Unit=pane is null ? Spec.YUnit : pane.YUnit};
     }
     // A timeline's spans reach to their ends.
     private Axis FullRange => Axis.Create(Spec.XAxis,Spec.Series.SelectMany(s=>s.Points).SelectMany(p=>p.XEnd is {} end?new[]{p.X,end}:new[]{p.X}), min:Spec.XMin, max:Spec.XMax, zone:TimeAxis.Zone(Spec.TimeZone),
@@ -151,7 +166,7 @@ else
         if(used[0]==0)return spec;
         var main=Spec.Panes[used[0]-1];
         // A pane that labels its ticks as the spec does keeps the spec's labelling when another pane takes the main plot's place.
-        return spec with { YLabel=main.Label, YAxis=main.YAxis, YMin=main.YMin, YMax=main.YMax, YMinSpan=main.YMinSpan, YSymmetric=main.YSymmetric, YFormat=main.YFormat, YReversed=main.YReversed, YZones=main.YZones,
+        return spec with { YLabel=main.Label, YAxis=main.YAxis, YMin=main.YMin, YMax=main.YMax, YMinSpan=main.YMinSpan, YSymmetric=main.YSymmetric, YFormat=main.YFormat, YReversed=main.YReversed, YZones=main.YZones, YTickValues=main.YTickValues, YUnit=main.YUnit,
             YTickLabels=main.YTickLabels ?? Spec.YTickLabels, Panes=spec.Panes.Select(p=>p with {YTickLabels=p.YTickLabels ?? Spec.YTickLabels}).ToArray(),
             Y2Label=main.Y2Label, Y2Axis=main.Y2Axis, Y2Min=main.Y2Min, Y2Max=main.Y2Max, Y2Format=main.Y2Format, Y2Reversed=main.Y2Reversed, Annotations=Spec.Annotations.Where(a=>a?.Axis!=AnnotationAxis.Y).ToArray() };
     }

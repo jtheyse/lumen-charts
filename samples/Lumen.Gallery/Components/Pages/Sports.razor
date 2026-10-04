@@ -10,7 +10,7 @@
         <a class="nav-item" href="/#playground"><span>▦</span> Chart explorer <b>22</b></a>
         <a class="nav-item" href="/#network"><span>⌘</span> Network graphs <b>2</b></a>
         <a class="nav-item" href="/#integration"><span>⌁</span> Developer API</a>
-        <a class="nav-item active" href="sports" aria-current="page"><span>∿</span> Sports &amp; performance <b>25</b></a>
+        <a class="nav-item active" href="sports" aria-current="page"><span>∿</span> Sports &amp; performance <b>27</b></a>
         <div class="nav-label">ON THIS PAGE</div>
         @foreach (var section in Sections)
         { <a class="purpose" href="sports#@section.Id">@section.Name<span>↓</span></a> }
@@ -58,7 +58,7 @@
                             }
                             else
                             {
-                                @Branded(@<LumenChart Spec="Spec(card)" FitWidth="true"/>)
+                                @Branded(@<LumenChart Spec="Spec(card)" FitWidth="true" ShowLegend="card.ShowLegend" ShowToolbar="card.ShowToolbar"/>)
                             }
                         </article>
                     }
@@ -76,7 +76,7 @@
         ("session", "Latest session", "Sunday's hilly progression run.", ""),
         ("ride", "Long ride", "Two hours on the bike, channel by channel.", "An invented long ride recorded once a second, apart from the simulated season: heart rate, power, cadence, speed, elevation and temperature, each in a plot of its own."),
         ("fitness", "Fitness and recovery", "What the training built.", "Power and pace at their best, and how the body is absorbing the work."),
-        ("racing", "Racing", "Where each race finished.", "An invented season of five races beside the simulated training: the place each finished in its field, the series points it earned, and how the whole field of the last race finished."),
+        ("racing", "Racing", "Where each race finished.", "An invented season of five races beside the simulated training: the place each finished in its field, the series points it earned, and how the whole field of the last race finished; then an invented season's arc through its fields, and an invented race's gaps to the leader."),
         ("sleep", "Sleep and recovery", "How the nights went.", "Last night's sleep stages, two weeks of bedtimes and each day's heart rate, from the nights the HRV chart and the readiness score read.")
     ];
     private static readonly (BrandDemo Brand, string Name)[] Brands =

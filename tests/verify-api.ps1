@@ -7,7 +7,7 @@ foreach($path in @('/health','/_framework/blazor.web.js','/_content/Lumen.Charts
  Verify ($r.StatusCode -eq 200) "Asset/health $path"
 }
 $r=Invoke-WebRequest "$BaseUrl/sports" -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 22 -and $r.Content.Contains('id="ride-channels"') -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'") -and $r.Content.Contains('id="laps"') -and $r.Content.Contains('id="next-session"') -and $r.Content.Contains('id="field"') -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 31) 'The Sports & performance page answers 200 and prerenders its twenty-two charts, each set to fit its card, the ride channels, last night''s sleep stages, the training calendar, the run''s four laps, the next session''s ten steps and the seventeen bins of how the field finished among them'
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 24 -and $r.Content.Contains('id="ride-channels"') -and $r.Content.Contains('id="season-arc"') -and $r.Content.Contains('id="gap"') -and ([regex]::Matches($r.Content,"class='lumen-end'")).Count -eq 8 -and $r.Content.Contains('not real training data') -and $r.Content.Contains('id="hypnogram"') -and $r.Content.Contains("class='lumen-span'") -and $r.Content.Contains('id="training-calendar"') -and $r.Content.Contains("class='lumen-day'") -and $r.Content.Contains('id="laps"') -and $r.Content.Contains('id="next-session"') -and $r.Content.Contains('id="field"') -and ([regex]::Matches($r.Content,"class='lumen-block'")).Count -eq 31) 'The Sports & performance page answers 200 and prerenders its twenty-four charts, each set to fit its card, the season arc, the gap to the leader with its eight end labels, the ride channels, last night''s sleep stages, the training calendar, the run''s four laps, the next session''s ten steps and the seventeen bins of how the field finished among them'
 $r=Invoke-WebRequest "$BaseUrl/" -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('class="lumen-chart lumen-fit"') -and $r.Content.Contains('<b>22</b><span>Chart types</span>') -and $r.Content.Contains('>Calendar</button>') -and $r.Content.Contains('>Blocks</button>')) 'The home page answers 200, its chart explorer set to fit its card, with twenty-two chart types and a calendar and blocks among them'
 Verify (([regex]::Matches($r.Content,'class="lumen-chart lumen-fit"')).Count -eq 2 -and $r.Content.Contains("data-node='sources'") -and $r.Content.Contains("viewBox='0 0 900 460'")) 'The home page prerenders its network graph set to fit its card too, drawn at its own width until the browser measures the card'
@@ -410,6 +410,30 @@ foreach($bad in @(@{body=$seventh;reason='at most six plots';name='A seventh plo
   @{body=$averaged.Replace('"sampling":"Average"','"sampling":"Median"');reason='';name='An unknown sampling method'},
   @{body=$channels.Replace('"paneTitles":"Above"','"paneTitles":"Below"');reason='';name='An unknown pane title placement'},
   @{body=$channels.Replace(',"yTickLabels":"All"',',"yTickLabels":"Some"');reason='';name='An unknown pane tick labelling'})){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
+}
+# 0.38.0: ticks set by hand, a unit after every value, end labels, and their refusals.
+$gap='{"title":"Gap","kind":"Line","width":340,"height":320,"yReversed":true,"yMin":0,"yFormat":"Signed","yUnit":"s","yTickValues":[{"value":0,"label":"Leader"},{"value":10},{"value":99,"label":"Outside"}],"series":[{"name":"Rider A","endLabel":"A","endNote":"leader","points":[{"x":0,"y":0},{"x":1,"y":0}]},{"name":"You","endLabel":"You","endNote":"+12s","points":[{"x":0,"y":0},{"x":1,"y":12}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $gap -SkipHttpErrorCheck
+$doc=[xml]$r.Content
+$ticks=@($doc.SelectNodes('//*[local-name()="text"][@text-anchor="end"][@class="lumen-muted"]')|ForEach-Object{$_.InnerText})
+Verify ($r.StatusCode -eq 200 -and ($ticks -join ',') -eq 'Leader,+10s') 'Ticks posted as "yTickValues" stand where they are set, a label written as given, an unlabelled one in the signed format with its "yUnit", and one outside the axis left out'
+$ends=@($doc.SelectNodes('//*[local-name()="g"][@class="lumen-end"]'))
+$named=@($doc.SelectNodes('//*[local-name()="g"][@data-series="1"]')|ForEach-Object{$_.GetAttribute('aria-label')})
+Verify ($ends.Count -eq 2 -and $ends[1].InnerText.Contains('You +12s') -and $named[-1] -eq ('You: 1, +12s, labelled You {0} +12s' -f [char]0x00B7)) '"endLabel" and "endNote" posted as JSON are written at the end of each line and said in its last point''s name, its value with its unit'
+$pane='{"title":"Paned","kind":"Line","panes":[{"label":"Power","yUnit":" W","yTickValues":[{"value":250,"label":"FTP"}]}],"series":[{"name":"HR","points":[{"x":0,"y":140},{"x":1,"y":150}]},{"name":"Power","pane":1,"points":[{"x":0,"y":200},{"x":1,"y":300}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $pane -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('>FTP</text>') -and $r.Content.Contains("aria-label='Power: 1, 300 W'") -and $r.Content.Contains("aria-label='HR: 1, 150'")) 'A pane posted with its own "yUnit" and "yTickValues" writes them on its own axis alone'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/csv" -Method Post -ContentType application/json -Body $gap -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('"You",1,12') -and -not $r.Content.Contains('12s')) 'CSV keeps raw numbers whatever the "yUnit"'
+foreach($bad in @(@{body=$gap.Replace('{"value":10}','{"value":0}');reason='Each value in YTickValues stands once';name='A tick value posted twice'},
+  @{body=$gap.Replace('"yUnit":"s"','"yUnit":"seconds!!"');reason='YUnit is written after every value';name='A unit past 8 characters'},
+  @{body=$gap.Replace('"endLabel":"A"','"endLabel":"A rider name far too long"');reason='at most 24 characters';name='An end label past 24 characters'},
+  @{body=$gap.Replace('"endLabel":"A",','');reason='EndNote is written after';name='An end note without its label'},
+  @{body='{"kind":"Column","series":[{"name":"C","endLabel":"C","points":[{"x":0,"y":1}]}]}';reason='applies to series drawn as lines, areas or scatter points';name='An end label on columns'},
+  @{body='{"kind":"Donut","yUnit":"%","series":[{"name":"D","points":[{"x":0,"y":1}]}]}';reason='YUnit follows the values a Y axis measures';name='A unit on a donut'},
+  @{body='{"kind":"Histogram","yTickValues":[{"value":1}],"series":[{"name":"H","points":[{"x":0,"y":1}]}]}';reason='YTickValues sets the ticks';name='Ticks set by hand on a histogram'})){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
 }
