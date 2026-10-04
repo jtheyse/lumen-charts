@@ -1164,7 +1164,7 @@ if (await sportsLink.CountAsync() > 0)
         await shown.ScrollIntoViewIfNeededAsync();
         var box = (await shown.Locator(".lumen-viewport > svg").BoundingBoxAsync())!;
         await target.Mouse.MoveAsync(box.X + box.Width * .5f, box.Y + box.Height * .5f);
-        await shown.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        await shown.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 60000 });
     }
     await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page", async () => { await Hovered(sports); await SweepOf(sports); });
 
@@ -1180,7 +1180,9 @@ if (await sportsLink.CountAsync() > 0)
     await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page in the Midnight brand", async () =>
     {
         await sports.GetByRole(AriaRole.Button, new() { Name = "Midnight", Exact = true }).ClickAsync();
-        await sports.WaitForFunctionAsync("() => [...document.querySelectorAll('.lumen-viewport > svg')].every(s => s.getAttribute('style')?.includes('background:#0B0E14'))");
+        // Every chart on the page is redrawn on the server, the ride's six channels among them, which takes longer than the default
+        // wait on a slow runner.
+        await sports.WaitForFunctionAsync("() => [...document.querySelectorAll('.lumen-viewport > svg')].every(s => s.getAttribute('style')?.includes('background:#0B0E14'))", null, new() { Timeout = 60000 });
         await Hovered(sports);
         await SweepOf(sports);
     });
