@@ -23,8 +23,26 @@ The `JsonStringEnumConverter` matters: specs name enums as strings (`"kind":"Col
 | POST | `/api/charts/graph/svg` | GraphSpec JSON → SVG |
 | POST | `/api/charts/graph/layout` | GraphSpec JSON → node positions |
 | POST | `/api/charts/graph/routes` | GraphSpec JSON → edge polylines |
+| POST | `/api/charts/planner/svg` | PlannerRequest JSON (`spec`, optional `view`, `layout`) → SVG |
 
-An invalid chart answers 400 with problem details naming the rule; malformed JSON is rejected by ASP.NET Core. The endpoints fetch nothing, run no supplied code and store nothing — but add your own authorization and rate limits before exposing them publicly, and cap request size (the sample uses 16 MiB).
+An invalid chart or planner answers 400 with problem details naming the rule; malformed JSON is rejected by ASP.NET Core. The endpoints fetch nothing, run no supplied code and store nothing — but add your own authorization and rate limits before exposing them publicly, and cap request size (the sample uses 16 MiB).
+
+## Season planner (0.43.0)
+
+`POST /api/charts/planner/svg` takes a `PlannerRequest` and answers the SVG of a `PlannerSpec` as the whole period, a month or a day, wide or narrow. Send `from` and `to` (a field left out reads as its default, so a period left unset is the single day `0001-01-01`); dates are `"2027-03-01"`, enums are strings (so the `JsonStringEnumConverter` above is needed), `view` is `{"zoom":"Year"|"Month"|"Day","date":"…"}` (the whole period when left out; the date is ignored for `Year`, any day of the month for `Month`) and `layout` is `"Wide"` (default) or `"Narrow"`. A broken spec or a view outside the period is answered 400 with the rule's message. Add `"width"` to draw at the width the page shows it (320–4096), and `"layout":"Narrow"` for a box under 640 px.
+
+```json
+{"spec":{"title":"Season planner","description":"Invented organizers' events","from":"2027-01-01","to":"2027-12-31","width":1100,
+ "regions":[{"code":"ZA","name":"South Africa"},{"code":"ZA-GP","name":"Gauteng","parent":"ZA"},{"code":"ZA-WC","name":"Western Cape","parent":"ZA"}],
+ "periods":[{"from":"2027-04-27","name":"Freedom Day","kind":"PublicHoliday","region":"ZA"},{"from":"2027-06-26","to":"2027-07-18","name":"Invented school holiday","kind":"SchoolHoliday","region":"ZA"}],
+ "events":[{"id":"e1","name":"Hilltop XCO","start":"2027-03-13","region":"ZA-GP","category":"XCO","audience":"Kids","relevance":"Clash"},
+           {"id":"e2","name":"Coast Stage Race","start":"2027-03-12","end":"2027-03-14","region":"ZA-WC","status":"Provisional"},
+           {"id":"mine","name":"Our Spring Enduro","start":"2027-09-18","region":"ZA-GP","mine":true}],
+ "filter":{"regions":["ZA-GP"]}},
+ "view":{"zoom":"Month","date":"2027-03-01"},"layout":"Wide"}
+```
+
+`relevance` is `Other`, `Near` or `Clash`, `status` `Confirmed`, `Provisional` or `Cancelled`, `kind` `PublicHoliday`, `SchoolHoliday` or `Other`; an event may also send `note` (≤ 120 characters) and `url`. A filter sends `regions`, `categories`, `audiences`, `statuses` and `relevances`. The relevance is yours to decide: the planner draws what it is told.
 
 ## Your own endpoints
 

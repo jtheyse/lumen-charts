@@ -16,6 +16,7 @@ Every public type a chart needs, by namespace `Lumen.Charts` unless stated. All 
 - Statistics
 - Zones
 - Graphs
+- Season planner
 - Blazor components (`Lumen.Charts.Blazor`)
 
 ## ChartSpec
@@ -174,6 +175,33 @@ Static class `Training`; power in watts, time in seconds, samples uniformly spac
 `Direction = GraphDirection.TopToBottom` (0.30.0) puts a layered graph's levels in rows down the drawing, each level spread across the width, arrows pointing down; edges leave from under a node's label, edge labels stand beside their edge and a self-loop at its node's right. Circular graphs ignore it. `GraphEngine.Fit(graph, width)` returns the graph as it should be drawn in a box that wide (clamped 320–4096): unchanged when it fits; a layered graph turns top to bottom when its levels would stand closer than its widest label (cut to 22 characters) plus 16 px, or 70 px, and grows 110 px a level up to 2160; a level too full for the width even then takes the narrowest width that holds it; a circular graph grows taller instead, and widens where two nodes at one height cannot stand their labels 16 px apart. Never shorter than its own `Height`.
 
 In every layout (0.31.0) an edge whose straight run from a node would cross that node's label meets the node at the foot of the label, 50 px below its centre, instead of running through the words; an edge's label takes the first place along its edge, from the middle outwards, above then below it (top to bottom: right then left), that keeps off every node, node label and earlier edge label, and otherwise stands at the middle as before. A circle stands in from the sides by half its widest label (or a node's radius) plus 24 px. An edge can still cross another node's label in a crowded graph, and an edge label can sit on another edge's line.
+
+## Season planner
+
+All in `Lumen.Charts` (0.43.0), immutable records like the chart specs: build with an object initializer, change with `with { … }`. Described in the README's "Planning a season"; the recipe is "Season planner" in `recipes-race-face.md`.
+
+| Type | Members |
+|---|---|
+| `PlannerSpec` | `Title` (required: the heading and the accessible name), `Description`, `From`, `To` (at most 399 days after `From`, so at most 400 days), `WeekStart` (Monday), `Weekend` (Saturday and Sunday; at least one day, each once), `Regions`, `Periods`, `Events`, `Filter` (null shows all), `Theme`, `Style` (any `ChartStyle`; replaces `Theme`), `Width` (320–4096, 1100), `DrawTitles` (true), `PaintBackground` (true). `PlannerSpec.ForYear(year)` is 1 January to 31 December. |
+| `PlannerRegion(Code, Name, Parent = null)` | A place in a hierarchy; it includes itself and every region below it; codes compared ordinally, unique, and a parent must exist and not loop. |
+| `PlannerPeriod(From, To, Name, Kind, Region = null)` | A holiday or other run of days; `To` null is one day; `Region` null is everywhere, else it applies to that region and every region below it. |
+| `PlannerEvent(Id, Name, Start)` | Plus `End` (null: one day), `Region` (null shows under every region), `Category`, `Audience` (free text, filtered on and said in its name), `Status`, `Relevance`, `Mine`, `Note` (≤ 120 characters, said in its name and the day view), `Url` (for the host; the static drawing does not follow it). `Id` is unique and given back when selected; the event must overlap the period. |
+| `PlannerFilter` | `Regions`, `Categories`, `Audiences`, `Statuses`, `Relevances`: lists, empty meaning every value. A region includes those below it, and a period or event set for a region above the filtered one still shows (a country's holiday under a province). |
+| `PlannerView(Zoom, Date)` | `PlannerView.WholePeriod`, `PlannerView.Month(year, month)`, `PlannerView.Day(date)`; it must lie inside the period. |
+| `PlannerRequest(Spec, View = null, Layout = Wide)` | The body of `POST /api/charts/planner/svg`; a null `View` is the whole period. |
+| `PeriodKind` | `PublicHoliday` (a diamond on its day, counted towards long weekends), `SchoolHoliday` (a band along the top of its days), `Other`. |
+| `PlannerStatus` | `Confirmed` (solid), `Provisional` (outline and hatching, said "provisional"), `Cancelled` (outline and a strike line, said "cancelled"; counts as neither clash nor close). |
+| `PlannerRelevance` | `Other` (thin, muted), `Near` (dashed, said "close"), `Clash` (bold, said "clash"): the host's own judgement for the viewer; the planner never computes it. |
+| `PlannerZoom` | `Year`, `Month`, `Day`. |
+| `PlannerLayout` | `Wide` (months aligned by weekday on 37 columns; a month as a grid of weeks) and `Narrow` (a bar of weekend slots per month with a month summary; a month as an agenda of the days that hold something) for a box under 640 px. The day is one drawing in both. |
+
+| Member | Returns |
+|---|---|
+| `PlannerSvg.Render(spec, view, layout = Wide)` | An accessible SVG string; checks the spec and the view first and throws `ArgumentException` saying why. Every event is a focusable `role=button` mark named in words (`data-event` holds its id); each day and week is a named `role=group`; each `+N` is `role=img` naming what it hid. Text is 10–12 units: render `Width` equal to the box's CSS width. |
+| `PlannerSvg.Table(spec, year, month)` | The month as an HTML `<table class="lumen-planner-table">` for static pages and screen readers: caption, a column per weekday, a row per week, each cell its day's holidays and events in words. |
+| `PlannerValidation.Validate(spec)` / `Validate(spec, view)` | Throws `ArgumentException` naming the rule; `PlannerValidation.MaxDays` is 400. |
+
+A cancelled event counts as neither clash nor close in any busy count (the wide year's weeks, the narrow year's slots and month summaries). Words clear 4.5:1 and marks 3:1 in Light, Dark and Midnight; run `style.ContrastIssues()` on a style of your own.
 
 ## Blazor components (`Lumen.Charts.Blazor`)
 

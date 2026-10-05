@@ -1,6 +1,6 @@
 # Race results recipes
 
-Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields, a race's gaps to the leader, a ride's effort zones as a strip of shares, a race's scores on meter bars, a ride's best efforts, a race's heart rate lap by lap and a team rider's season with a missed round written in, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.42.0, together with the recipes in `sports.md`.
+Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields, a race's gaps to the leader, a ride's effort zones as a strip of shares, a race's scores on meter bars, a ride's best efforts, a race's heart rate lap by lap, a team rider's season with a missed round written in and an organizers' season planner, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.43.0, together with the recipes in `sports.md`.
 
 ```csharp
 using System.Globalization;
@@ -662,6 +662,47 @@ string teamRiderSvg = ChartSvg.Render(teamRider);
 - **Values and names.** `YUnit = "%"` writes `89%` after each value, and `ValueNote` adds the place and field, so a round reads `Share: Round 3, 89% · 5th of 37`. `YTickValues` labels 0, 50 and 100 as given. At 340 the axis writes every other round's name so none touch (`Round 1`, `Round 3`, `Round 6`, `Round 8`), and every round keeps its name in its mark; label the points `R3` instead and all seven fit, at the cost of names that read `Share: R3, 89% · 5th of 37`.
 - **Never colour alone.** `absent` is a word, not only a gold mark, and the series is named in its legend and in every mark's name.
 - **Keys.** From 0.42.0 a card whose drawing fits it is one tab stop, the roving point; its viewport takes a stop of its own, as a `role=region`, only while the drawing is wider than the card and scrolls.
+
+## Season planner
+
+Organizers choosing a date see the year at a glance: months aligned by weekday so the weekends line up down the page, public holidays, school holidays and long weekends marked, and other organizers' events drawn by how much they compete with yours — the app decides that, Lumen only draws it. Zoom by drawing a month or a day. Every event is invented here. The planner is for PCs and tablets, so the wide layout is the main one (0.43.0).
+
+```csharp
+// The app's regions, holidays and events. The relevance is the app's own rule, worked out for the organizer viewing:
+// same day, same province and same discipline or audience is a clash; an adjacent weekend or a neighbouring province is close.
+PlannerRegion[] seasonRegions = [new("ZA", "South Africa"), new("ZA-GP", "Gauteng", "ZA"), new("ZA-WC", "Western Cape", "ZA")];
+PlannerPeriod[] seasonDays =
+[
+    new(new(2027, 4, 27), null, "Freedom Day", PeriodKind.PublicHoliday, "ZA"),
+    new(new(2027, 6, 26), new DateOnly(2027, 7, 18), "Invented school holiday", PeriodKind.SchoolHoliday, "ZA")
+];
+PlannerEvent[] seasonEvents =
+[
+    new("e1", "Hilltop XCO", new(2027, 3, 13)) { Region = "ZA-GP", Category = "XCO", Audience = "Kids", Relevance = PlannerRelevance.Clash },
+    new("e2", "Coast Stage Race", new(2027, 3, 12)) { End = new DateOnly(2027, 3, 14), Region = "ZA-WC", Category = "Stage", Status = PlannerStatus.Provisional },
+    new("mine", "Our Spring Enduro", new(2027, 9, 18)) { Region = "ZA-GP", Category = "Enduro", Mine = true }
+];
+var seasonPlanner = PlannerSpec.ForYear(2027) with
+{
+    Title = "Season planner", Description = "Gauteng and the country's holidays", Style = raceFace, Width = 1100,
+    Regions = seasonRegions, Periods = seasonDays, Events = seasonEvents,
+    Filter = new() { Regions = ["ZA-GP"] }   // the organizer's province; the country's holidays still show, Western Cape's events drop out
+};
+string seasonYear = PlannerSvg.Render(seasonPlanner, PlannerView.WholePeriod);
+string seasonMarch = PlannerSvg.Render(seasonPlanner, PlannerView.Month(2027, 3));
+string seasonDay = PlannerSvg.Render(seasonPlanner, PlannerView.Day(new(2027, 3, 13)));
+string seasonPhone = PlannerSvg.Render(seasonPlanner with { Width = 340 }, PlannerView.WholePeriod, PlannerLayout.Narrow);
+string seasonTable = PlannerSvg.Table(seasonPlanner, 2027, 3);   // the month for screen readers and static pages
+```
+
+- **Relevance is yours to decide.** `Clash`, `Near` and `Other` are drawn by weight and dash, not colour: a clash bold and solid, a close event dashed, any other thin and muted. Each is said in words in the event's name and tooltip, `Hilltop XCO, Saturday 13 March 2027, Gauteng, XCO, Kids, clash`, and a `Near` one says `close`. The planner never computes relevance, so the rule can change without a Lumen release. A cancelled event counts as neither clash nor close in any busy count (the year's weekly counts, a phone's month slots and summaries), though it is still drawn and named as cancelled.
+- **The year.** Twelve rows, one per month, aligned by weekday on 37 columns so every Saturday and Sunday stands in one column down the page; the month and its year are written on two lines. Weekends are bands, public holidays diamonds, school holidays a band along the top of their days, and a long weekend a bracket under it (derived: weekend days and public holidays joined, three days or more, at least one a holiday). Each event is a stripe across its days, up to three to a day; a day with more writes `+N`, which names the ones it hid, and each week writes the number of clashes and close events it holds, named in words for a screen reader.
+- **The month and the day.** A month is a grid of weeks with each day's events under it as lines of words, `Name · word · day N of M · Region code`: a multi-day event is listed under every day it covers, its line ending `day 2 of 3`; a line too long for its cell is cut at its end with `…`, so the region code goes first, the whole text staying in its tooltip and name, and a full day writes `+N more` naming the rest. A day is a list of its holidays and events with their region, category, audience, status and relevance in words.
+- **Regions.** A filter on a province still shows the country's holidays and the events set for the whole country or for no region; events in other provinces drop out. Filter by `Categories`, `Audiences`, `Statuses` and `Relevances` the same way, and leave `Filter` null to see everything.
+- **Phones.** For a box under 640 pixels draw `PlannerLayout.Narrow` at the box's width (`Width = 340` here): the year becomes a bar of weekend slots per month, a weekend across a month's end shown in both bars and named by its full span, with the month's clash and close events counted once each in words; a month becomes an agenda of only the days that hold something.
+- **Sizes.** The drawing's text is 10 to 12 units, so for readable text on screen render `Width` equal to the box's CSS width. The interactive `<LumenPlanner>` of 0.44.0 does this itself; until then draw the width the page has.
+- **Not colour.** Provisional is an outline with hatching, cancelled an outline with a strike line, yours an outline in the text colour, and every one is also said in words. On the card, words clear 4.5:1 (`hi` 16.70:1, `low` 4.87:1) and every mark 3:1, including on a weekend band, where `hi` stands 12.70:1 and `low` 3.71:1; check a style of your own with `ContrastIssues()`.
+- **Limits.** View only, no editing; at most 400 days; at most three stripes a day in the year; a month's lines cut long names; `PlannerSvg.Table` is the month's words for a static page. Interactive zoom comes with `<LumenPlanner>` in 0.44.0; until then draw the view the page asks for.
 
 ## Rendering notes
 

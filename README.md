@@ -431,6 +431,56 @@ A calendar refuses what has no meaning on it, each with its reason: an X axis ot
 
 Limits. One series is one calendar: a ride and a run on one day are added together, so sports kept apart are separate calendars, and a day carries no rings, no icons and no text of its own. There are no streaks, no weekly totals beside the grid and no planned days drawn differently; a day after the last point but inside `XMax` is an empty cell like a rest day. The ramp is linear between the lowest and highest active totals, not GitHub's four quantile levels, so one outlier pales the rest, and it cannot be fixed across two calendars, since `YMin` and `YMax` are refused. The ramp's steps are close together on the dark presets, whose grid colour is near the background; tiers in `YZones` stay the choice where the tiers mean something, such as easy and hard days. A long span makes small cells: a year is about 15 pixels a day at 900 pixels wide and 5 at a phone's width, where the weekday names are left out and month names thin out.
 
+### Planning a season
+
+An organizer choosing a date for next year's race needs to see the year at a glance: where the weekends fall, which days are public or school holidays, which of them make a long weekend, and which other organizers' events already stand on or near the date. 0.43.0 draws that as a static, accessible SVG: `PlannerSvg.Render(spec, view, layout)` draws a `PlannerSpec` as a whole period, one month or one day, wide for a PC or tablet or narrow for a phone. It is a view of the data the app passes in: nothing in it edits, fetches or computes, and the interactive `<LumenPlanner>` that zooms between the three views is 0.44.0.
+
+```csharp
+// A year of an invented organizer's season: the regions, the holidays, the other organizers' events, and the viewer's own.
+PlannerRegion[] regions = [new("ZA", "South Africa"), new("ZA-GP", "Gauteng", "ZA"), new("ZA-WC", "Western Cape", "ZA")];
+PlannerPeriod[] periods =
+[
+    new(new(2027, 4, 27), null, "Freedom Day", PeriodKind.PublicHoliday, "ZA"),
+    new(new(2027, 6, 26), new DateOnly(2027, 7, 18), "Invented school holiday", PeriodKind.SchoolHoliday, "ZA")
+];
+PlannerEvent[] events =
+[
+    // The app decides how much each event competes with the organizer viewing: Lumen only draws what it is told.
+    new("e1", "Hilltop XCO", new(2027, 3, 13)) { Region = "ZA-GP", Category = "XCO", Audience = "Kids", Relevance = PlannerRelevance.Clash },
+    new("e2", "Coast Stage Race", new(2027, 3, 12)) { End = new DateOnly(2027, 3, 14), Region = "ZA-WC", Status = PlannerStatus.Provisional },
+    new("mine", "Our Spring Enduro", new(2027, 9, 18)) { Region = "ZA-GP", Mine = true }
+];
+var planner = PlannerSpec.ForYear(2027) with
+{
+    Title = "Season planner", Description = "Gauteng and the country's holidays", Width = 1100,
+    Regions = regions, Periods = periods, Events = events,
+    Filter = new() { Regions = ["ZA-GP"] }   // Gauteng's events and the country's holidays; the Western Cape's drop out
+};
+string year = PlannerSvg.Render(planner, PlannerView.WholePeriod);
+string march = PlannerSvg.Render(planner, PlannerView.Month(2027, 3));
+string day = PlannerSvg.Render(planner, PlannerView.Day(new(2027, 3, 13)));
+string phone = PlannerSvg.Render(planner with { Width = 340 }, PlannerView.WholePeriod, PlannerLayout.Narrow);
+string table = PlannerSvg.Table(planner, 2027, 3);   // March as an HTML table, for static pages and screen readers
+```
+
+**The data.** A `PlannerSpec` is a period of at most 400 days, `From` to `To` inclusive (`PlannerSpec.ForYear(2027)` is 1 January to 31 December; a season may cross a year end, September to August, and its months then carry their years), with a `Title` that is its heading and its accessible name, a `Description`, a `WeekStart` (Monday unless set), the `Weekend` days (Saturday and Sunday unless set), a `Width` of 320 to 4096 units (1100 unless set), a `Theme` or a `Style` (any `ChartStyle`, so a brand's colours and typeface apply), and `DrawTitles` and `PaintBackground` as on a chart. A `PlannerRegion(Code, Name, Parent)` is a place in a hierarchy, a country, its provinces, their districts; a region includes itself and every region below it, codes are compared ordinally and a parent that is missing or loops is refused. A `PlannerPeriod(From, To, Name, Kind, Region)` is a holiday or other day or run of days: `PeriodKind.PublicHoliday` (marked on its day and counted towards long weekends), `SchoolHoliday` (a band along the top of its days) or `Other`; a null `Region` means everywhere, and a null `To` one day. A `PlannerEvent(Id, Name, Start)` is someone's race or ride, with an `End` for several days, a `Region`, a free-text `Category` and `Audience`, a `Status` (`Confirmed`, `Provisional`, `Cancelled`), a `Relevance` (`Other`, `Near`, `Clash`) that is the app's judgement of how strongly it competes with the viewer's plans, `Mine` for the viewer's own, a `Note` of at most 120 characters and a `Url` for the host to open, which the static drawing does not follow. Ids are unique and every region an item names must be in the planner's `Regions`; an event wholly outside the period is refused, one that straddles its edge is drawn from the first day shown.
+
+**Regions and filters.** A `PlannerFilter` of `Regions`, `Categories`, `Audiences`, `Statuses` and `Relevances` chooses what is shown, an empty list meaning every value; a null `Filter` shows everything. A region filter includes the regions below it, and an item set for a region above the filtered one still shows, so filtering on Gauteng keeps the country's holidays and the events held for the whole country (or for no region), and drops the Western Cape's.
+
+**The views.** `PlannerView.WholePeriod` is the year: a row per month, months aligned by weekday on 37 columns so every Saturday and Sunday stands in one column down the page, each month named on two lines (month, then year), with weekend bands, a diamond on each public holiday, a band along the top of school holidays, a bracket under each long weekend (derived: weekend days and public holidays joined, three days or more, at least one a holiday), and each event a stripe across its days, up to three stripes a day and then `+N`, which names the events it hid. Each week writes how many clashes and close events it holds. `PlannerView.Month(year, month)` is a grid of weeks with each day's holidays and events written under its date, one line per event: its name, `clash` or `close`, `day N of M` for an event over several days, which is listed under every day it covers, and its region code, cut at the end with `…` where the line is too long (the region code goes first) and `+N more` for the events that do not fit. `PlannerView.Day(date)` is a list of that day's holidays and periods and a block per event, with its region's full name, category, audience, status and relevance in words and its note. A view outside the period is refused.
+
+**Narrow, for a phone.** `PlannerLayout.Narrow`, for a box under 640 pixels, draws the year as a bar per month holding a slot for each weekend (a weekend across a month's end shows in both bars, each slot named by the whole weekend's span), a diamond on a public holiday, a solid mark under a weekend that has a clash and a dashed one where there are only close events, and a summary of the month's distinct clash and close events in words; and the month as an agenda of only the days that hold a period or an event. The day is one drawing for both layouts. A cancelled event counts as neither clash nor close in any count, in the wide year's weekly counts and the narrow year's slots and summaries alike, though it is still drawn and named as cancelled.
+
+**Words and patterns, never colour alone.** A clash is drawn bold and solid, a close event dashed and medium, any other thin and muted; a provisional event is an outline with hatching, a cancelled one an outline with a strike line, and the viewer's own is outlined in the text colour. Every state is also said in words, in each mark's accessible name and tooltip: `Hilltop XCO, Saturday 13 March 2027, Gauteng, XCO, Kids, clash`, with `provisional`, `cancelled`, `close` or `yours` where they apply and the note last. Every event is a focusable mark, a button named so, with its id in `data-event`; each day and each week is a named group, and a `+N` is an image with the names it hid. The year, in either layout, and the wide month end with a legend of the patterns in words. In the Light, Dark and Midnight presets every word clears 4.5:1 and every mark 3:1 against what lies behind it, weekend bands included; check a style of your own with `ContrastIssues()`.
+
+**The table.** `PlannerSvg.Table(spec, year, month)` is the month as an HTML table, `lumen-planner-table`, for a static page or a screen reader: a caption, a column per weekday and a row per week, each cell its day's holidays and events in the words of their names.
+
+**Sizes.** The drawing's text is 10 to 12 units, so for readable text on screen render it at the width it is shown at: set `Width` to the box's CSS width (the interactive `<LumenPlanner>` will do this itself), and pass `PlannerLayout.Narrow` for a box under 640 pixels. A planner is meant for PCs and tablets, so the wide layout is the primary one; the narrow layouts keep it usable on a phone.
+
+**HTTP.** `POST /api/charts/planner/svg` takes a `PlannerRequest`, `{ "spec": …, "view": …, "layout": … }`, the view the whole period when left out and the layout `Wide`, and answers `image/svg+xml`; a spec that breaks a rule is answered 400 with the rule's message. Dates are `"2027-03-01"`, enums are strings, and a view is `{"zoom":"Month","date":"2027-03-01"}`. See [HTTP API](#http-api).
+
+Limits. The planner is a view only: no editing, dragging or adding, and `Url` is for the host, not followed. It never computes relevance, since the host decides it for the viewer. A period is at most 400 days. The year draws at most three stripes a day and says `+N` for the rest; a month's lines cut long names and regions (the whole text stays in the tooltip, the name and the table). A multi-day event in the month view is listed on each of its days, not drawn as one bar across them. Public holidays, school terms and regions are the app's data: the planner holds no calendar of any country.
+
 ### Blocks
 
 Two charts that endurance apps draw are made of blocks whose width means something. Strava's lap chart sizes each lap by its distance and raises it to its pace, faster higher, with the average pace across them; TrainingPeaks and Zwift draw a structured workout as steps as long as they last and as high as their target, coloured by power level, with the ride laid over them to check how closely it was followed.
@@ -1003,6 +1053,7 @@ app.MapLumenCharts();
 | POST | `/api/charts/graph/svg` | GraphSpec JSON → SVG |
 | POST | `/api/charts/graph/layout` | GraphSpec JSON → node positions |
 | POST | `/api/charts/graph/routes` | GraphSpec JSON → edge polylines |
+| POST | `/api/charts/planner/svg` | PlannerRequest JSON (`spec`, optional `view`, `layout`) → SVG |
 
 ```json
 {"title":"Revenue","kind":"Column","series":[{"name":"Sales","points":[{"x":1,"y":24,"label":"Jan"},{"x":2,"y":38,"label":"Feb"}]}]}
@@ -1021,6 +1072,7 @@ app.MapLumenCharts();
 {"title":"September","kind":"Calendar","xAxis":"Time","calendarLayout":"Months","calendarCell":"Bubble","weekStart":"Sunday","series":[{"name":"Distance (km)","points":[{"x":1789387200000,"y":8.6},{"x":1789560000000,"y":14}]}]}
 {"title":"Laps","kind":"Blocks","yFormat":"Duration","yReversed":true,"annotations":[{"axis":"Y","from":306,"label":"Average"}],"series":[{"name":"Laps","points":[{"x":0,"xEnd":2,"y":336,"label":"Lap 1"},{"x":2,"xEnd":4,"y":318,"label":"Lap 2"},{"x":4,"xEnd":5.5,"y":301,"label":"Lap 3"}]}]}
 {"title":"Workout","kind":"Blocks","xFormat":"Duration","includeZero":true,"series":[{"name":"Plan","zones":{"zones":[{"name":"Easy","upper":187.5},{"name":"Tempo","upper":225},{"name":"Threshold","upper":"Infinity"}]},"points":[{"x":0,"xEnd":600,"y":150,"label":"Warm-up"},{"x":600,"xEnd":1080,"y":250,"label":"Interval 1"}]},{"name":"Power","kind":"Line","points":[{"x":0,"y":118},{"x":300,"y":152},{"x":800,"y":256}]}]}
+{"spec":{"title":"Season planner","description":"Invented organizers' events","from":"2027-01-01","to":"2027-12-31","regions":[{"code":"ZA","name":"South Africa"},{"code":"ZA-GP","name":"Gauteng","parent":"ZA"}],"periods":[{"from":"2027-04-27","name":"Freedom Day","kind":"PublicHoliday","region":"ZA"}],"events":[{"id":"e1","name":"Hilltop XCO","start":"2027-03-13","region":"ZA-GP","category":"XCO","audience":"Kids","relevance":"Clash"}],"filter":{"regions":["ZA-GP"]}},"view":{"zoom":"Month","date":"2027-03-01"},"layout":"Wide"}
 ```
 
 Invalid chart semantics return HTTP 400 problem details. Malformed JSON is rejected by ASP.NET Core. The endpoints do not fetch URLs, execute supplied code, save submitted data, or contact outside services. Add application-specific authorization and rate limits when hosting publicly. The sample limits request bodies to 16 MiB.
@@ -1078,9 +1130,16 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - On a narrow screen a chart keeps at least 640 pixels and scrolls sideways in a viewport that is keyboard-focusable while it scrolls, so its labels stay legible, unless it sets `FitWidth`, which draws it at the width of its container, down to 320 pixels, with its text at its own size. A sparkline is drawn at its own width, never wider than its container, and in the component fits down to 60 pixels. A graph keeps the scrolling viewport too unless it sets `FitWidth`, which draws it at its container's width and turns a layered graph top to bottom where its levels cannot stand side by side; a graph whose fullest level needs more still scrolls.
 - HTML tooltips on hover and keyboard focus in the component, native SVG tooltips in exported and server-rendered charts, keyboard-focusable data marks, point selection, tables, and accessible labels. See [Accessibility](#accessibility) for what is measured and what is not. This is not a claim of WCAG certification.
 - SVG, PNG and CSV exports. PNG is rasterized in the browser from the same SVG, so it needs an interactive render mode; there is no server-side PNG or PDF rendering, 3D, or streaming transport yet.
+- A season planner (0.43.0) is a view of data the app passes in: no editing, no calendar of any country's holidays, and relevance is the app's to decide. It covers at most 400 days, draws at most three stripes a day in the year and cuts a month's long names (the full text is in each mark's name, tooltip and the month's table). Its text is 10 to 12 units, so render it at the width it is shown at, with `PlannerLayout.Narrow` under 640 pixels; the interactive `<LumenPlanner>` is 0.44.0.
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.43.0 additions
+
+The season planner: the first of a race-results app's event planner, a year at a glance for an organizer choosing a date. `PlannerSpec` describes a period of at most 400 days with its regions (`PlannerRegion`, a hierarchy), its holidays (`PlannerPeriod`: public holidays, school holidays and other periods) and its events (`PlannerEvent`, each with a status, a relevance the app decides, a category, an audience and a flag for the viewer's own); `PlannerFilter` chooses what shows by region, category, audience, status and relevance; `PlannerSvg.Render(spec, view, layout)` draws the whole period, a month (`PlannerView.Month`) or a day (`PlannerView.Day`), wide for a PC or tablet and narrow for a phone (`PlannerLayout.Narrow`, under 640 pixels); `PlannerSvg.Table(spec, year, month)` writes a month as an HTML table; `PlannerValidation` checks a spec and its view and refuses a broken one with its reason. The year is aligned by weekday so the weekends line up down the page, with public-holiday diamonds, school-holiday bands, long-weekend brackets, up to three stripes a day and busy-week counts; the month lists each day's events in words, a multi-day event under each day it covers as `day N of M`. Relevance is drawn by weight and dash (clash bold, close dashed, other thin and muted), provisional as an outline with hatching, cancelled as an outline with a strike line and the viewer's own outlined in the text colour, each also said in words in every name and tooltip; a cancelled event counts as neither clash nor close in any busy count. Described under [Planning a season](#planning-a-season). `POST /api/charts/planner/svg` takes a `PlannerRequest` as JSON and answers the SVG.
+
+Every chart drawn before renders as it did: v0.42.0's 373 hashed renderings match byte for byte in both finishes, and twelve new rows hash the planner (the year, a month and a day in each of Light, Dark and Midnight, a phone's year and month, and the year filtered to Gauteng). The home page adds a season planner, drawn on the server at three widths with the one that fits the section shown, and the Claude Code skill's `references/recipes-race-face.md` adds "Season planner". Limits: a view only, with no editing, and the interactive `<LumenPlanner>` that zooms between the year, a month and a day is 0.44.0; relevance is the app's to decide; at most 400 days and three stripes a day in the year; a month's lines cut long names and a multi-day event is listed on each of its days; for readable text render `Width` equal to the box's width.
 
 ## 0.42.0 additions
 
