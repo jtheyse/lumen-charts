@@ -9059,6 +9059,12 @@ Test("Planner: renders byte for byte the same under Thai, Arabic, Persian, Frenc
         }
     }finally{CultureInfo.CurrentCulture=culture;CultureInfo.CurrentUICulture=ui;}
 });
+Test("Planner month view: a cancelled clash or close event says \"cancelled\" on its line, not \"clash\" or \"close\", as the agenda does",()=>{
+    var spec=PlanYear(s=>s with{Width=1400,Events=[new("x","Called Off",new(2027,6,19)){Status=PlannerStatus.Cancelled,Relevance=PlannerRelevance.Clash},
+        new("y","Called Off Close",new(2027,6,20)){Status=PlannerStatus.Cancelled,Relevance=PlannerRelevance.Near},new("z","Still On",new(2027,6,20)){Relevance=PlannerRelevance.Clash}]});
+    var lines=PlanMarks(PlanSvg(spec,PlannerView.Month(2027,6))).Select(m=>m.Descendants(ns+"text").Single().Value).ToArray();
+    Check(lines.SequenceEqual(["Called Off · cancelled","Still On · clash","Called Off Close · cancelled"]),string.Join(" | ",lines));
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

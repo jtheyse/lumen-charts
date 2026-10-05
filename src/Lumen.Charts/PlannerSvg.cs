@@ -130,6 +130,10 @@ public static class PlannerSvg
     /// <summary>Whether <paramref name="e"/> counts as a clash or close event of <paramref name="relevance"/>: a cancelled one counts as
     /// neither, though it is still drawn and named as cancelled.</summary>
     private static bool CountsAs(PlannerEvent e, PlannerRelevance relevance) => e.Relevance == relevance && e.Status != PlannerStatus.Cancelled;
+    /// <summary>The word after an event's name on a month or agenda line: a cancelled event is neither a clash nor close, and says it
+    /// is cancelled.</summary>
+    private static string Word(PlannerEvent e) => e.Status == PlannerStatus.Cancelled ? " · cancelled"
+        : e.Relevance switch { PlannerRelevance.Clash => " · clash", PlannerRelevance.Near => " · close", _ => "" };
     private static DateOnly Max(DateOnly a, DateOnly b) => a > b ? a : b;
     private static DateOnly Min(DateOnly a, DateOnly b) => a < b ? a : b;
     private static IEnumerable<DateOnly> Days(DateOnly from, DateOnly to) { for (var d = from; d <= to; d = d.AddDays(1)) yield return d; }
@@ -325,7 +329,7 @@ public static class PlannerSvg
                 var e = events[i];
                 var ly = y + 44 + i * LineH;
                 var span = (e.End ?? e.Start).DayNumber - e.Start.DayNumber + 1;
-                var word = e.Relevance switch { PlannerRelevance.Clash => " · clash", PlannerRelevance.Near => " · close", _ => "" };
+                var word = Word(e);
                 var dayOf = span > 1 ? $" · day {d.DayNumber - e.Start.DayNumber + 1} of {span}" : "";
                 var region = e.Region is null ? "" : " · " + e.Region;
                 var name = plan.Name(e);
@@ -438,9 +442,7 @@ public static class PlannerSvg
             foreach (var e in events)
             {
                 var name = plan.Name(e);
-                // A cancelled event is neither a clash nor close, and says it is cancelled.
-                var word = e.Status == PlannerStatus.Cancelled ? " · cancelled"
-                    : e.Relevance switch { PlannerRelevance.Clash => " · clash", PlannerRelevance.Near => " · close", _ => "" };
+                var word = Word(e);
                 w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
                 Marker(w, style, e, 26, y - 9);
                 w.Text(36, y, Fit(e.Name + (e.Region is null ? "" : " · " + e.Region) + word, spec.Width - 60, 11), "font-size='11'");
