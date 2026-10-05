@@ -8498,6 +8498,74 @@ Test("Planner calendar: names say every field in words, leave out empty ones, an
     Check(PlannerCalendar.DayName(spec,new(2027,3,13))=="Saturday 13 March 2027, 2 events",PlannerCalendar.DayName(spec,new(2027,3,13)));
     Check(PlannerCalendar.DayName(spec,new(2027,3,29)).StartsWith("Monday 29 March 2027, School holiday (school holiday)"),PlannerCalendar.DayName(spec,new(2027,3,29)));
 });
+XDocument PlanSvg(PlannerSpec spec,PlannerView? view=null,PlannerLayout layout=PlannerLayout.Wide)=>XDocument.Parse(PlannerSvg.Render(spec,view??PlannerView.WholePeriod,layout));
+IEnumerable<XElement> PlanMarks(XDocument doc)=>doc.Descendants().Where(e=>(string?)e.Attribute("class")=="lumen-datum");
+Test("Planner year view: valid SVG named by its title and description, one month row each, every event a named focusable mark",()=>{
+    var doc=PlanSvg(PlanYear());
+    Check(doc.Root!.Name==ns+"svg"&&doc.Root.Attribute("aria-label")!.Value=="Season planner. Invented organizers' events");
+    Check(doc.Descendants(ns+"text").Count(t=>t.Value is "January 2027" or "December 2027")==2);
+    var marks=PlanMarks(doc).ToArray();
+    Check(marks.Length==2,$"{marks.Length} marks");
+    Check(marks.All(m=>m.Attribute("tabindex")!.Value=="0"&&m.Attribute("role")!.Value=="button"));
+    Check(marks.Any(m=>m.Attribute("aria-label")!.Value=="Hilltop XCO, Saturday 13 March 2027, Gauteng, XCO, Kids, clash"&&m.Element(ns+"title")!.Value==m.Attribute("aria-label")!.Value));
+    Check(doc.Descendants().Any(e=>(string?)e.Attribute("data-day")=="2027-04-27"&&e.Attribute("aria-label")!.Value.Contains("Freedom Day (public holiday)")));
+    Check(!doc.ToString().Contains("NaN")&&!doc.ToString().Contains("Infinity"));
+});
+Test("Planner year view: draws a mark across a multi-day event's days and a Saturday in a weekend band",()=>{
+    var doc=PlanSvg(PlanYear());
+    var stage=PlanMarks(doc).Single(m=>m.Attribute("data-event")!.Value=="e2");
+    var rects=stage.Descendants(ns+"rect").Select(r=>double.Parse(r.Attribute("width")!.Value,CultureInfo.InvariantCulture)).ToArray();
+    Check(rects.Max()>2.5*(1100-76-24)/37.0,"a three-day event is not three days wide");
+    Check(doc.Descendants(ns+"rect").Count(r=>(string?)r.Attribute("class")=="lumen-weekend")==104,"52 weekends of two days");
+});
+Test("Planner year view: ten events on one day draw three stripes and a +7 that names the rest",()=>{
+    var many=Enumerable.Range(0,10).Select(i=>new PlannerEvent($"m{i}",$"Invented ride {i}",new(2027,5,8)){Region="ZA-GP"}).ToArray();
+    var doc=PlanSvg(PlanYear(s=>s with{Events=many}));
+    Check(PlanMarks(doc).Count()==3,$"{PlanMarks(doc).Count()} stripes");
+    var more=doc.Descendants().Single(e=>((string?)e.Attribute("class")??"").Split(' ').Contains("lumen-more"));
+    Check(more.Value.Contains("+7")&&more.Attribute("aria-label")!.Value.StartsWith("7 more on Saturday 8 May 2027: Invented ride 3"),more.Attribute("aria-label")!.Value);
+});
+Test("Planner year view: an event that starts before the period is drawn from its first day and named with its full dates",()=>{
+    var doc=PlanSvg(PlanYear(s=>s with{Events=[new("x","New Year Tour",new(2026,12,30)){End=new DateOnly(2027,1,2)}]}));
+    var mark=PlanMarks(doc).Single();
+    Check(mark.Attribute("aria-label")!.Value.StartsWith("New Year Tour, Wednesday 30 December 2026 to Saturday 2 January 2027"),mark.Attribute("aria-label")!.Value);
+    var x=double.Parse(mark.Descendants(ns+"rect").First().Attribute("x")!.Value,CultureInfo.InvariantCulture);
+    var col=(1100-76-24)/37.0;
+    Check(Math.Abs(x-(76+4*col+1))<0.01,$"starts at {x}, not at 1 January's column");
+});
+Test("Planner year view: each week is named with its clashes and close events, and a busy week writes its count",()=>{
+    var spec=PlanYear(s=>s with{Events=[..s.Events,new("e3","Club Ride",new(2027,3,10)){Relevance=PlannerRelevance.Near}]});
+    var doc=PlanSvg(spec);
+    var week=doc.Descendants().Single(e=>(string?)e.Attribute("class")=="lumen-week"&&e.Attribute("aria-label")!.Value.StartsWith("Week of 8 March 2027"));
+    Check(week.Attribute("aria-label")!.Value=="Week of 8 March 2027: 1 clash, 1 close",week.Attribute("aria-label")!.Value);
+    Check(week.Descendants(ns+"text").Single().Value=="2");
+    var quiet=doc.Descendants().Single(e=>(string?)e.Attribute("class")=="lumen-week"&&e.Attribute("aria-label")!.Value.StartsWith("Week of 15 March 2027"));
+    Check(quiet.Attribute("aria-label")!.Value=="Week of 15 March 2027: no clashes"&&!quiet.Descendants(ns+"text").Any());
+});
+Test("Planner year view: a September-to-August season draws its rows in order with leap-year February",()=>{
+    var doc=PlanSvg(PlanYear(s=>s with{From=new(2027,9,1),To=new(2028,8,31),Events=[],Periods=[]}));
+    var months=doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("class")=="lumen-muted lumen-month").Select(t=>t.Value).ToArray();
+    Check(months.First()=="September 2027"&&months[4]=="January 2028"&&months.Last()=="August 2028",string.Join(",",months));
+    Check(doc.Descendants().Any(e=>(string?)e.Attribute("data-day")=="2028-02-29"));
+});
+Test("Planner year view: a 60-character name is cut in nothing it draws (the year view writes no event words) and kept whole in its name",()=>{
+    var name=new string('L',60);
+    var doc=PlanSvg(PlanYear(s=>s with{Events=[new("x",name,new(2027,6,5))]}));
+    Check(PlanMarks(doc).Single().Attribute("aria-label")!.Value.StartsWith(name+", Saturday 5 June 2027"));
+});
+Test("Planner year view: every drawn word clears 4.5:1 and every stripe and symbol 3:1 in Light, Dark and Midnight, and the render is byte-stable",()=>{
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight}){
+        Check(Lumen.Charts.Contrast.Ratio(style.Text,style.Background)>=4.5&&Lumen.Charts.Contrast.Ratio(style.Muted,style.Background)>=4.5,"text colours");
+        Check(Lumen.Charts.Contrast.Ratio(style.Muted,style.Background)>=3,"stripes and bands");
+        var spec=PlanYear(s=>s with{Style=style});
+        Check(PlannerSvg.Render(spec,PlannerView.WholePeriod)==PlannerSvg.Render(spec,PlannerView.WholePeriod));
+    }
+});
+Test("Planner: the legend says every pattern in words",()=>{
+    var words=PlanSvg(PlanYear()).Descendants(ns+"text").Select(t=>t.Value).ToArray();
+    foreach(var word in new[]{"clash","close","other","provisional","cancelled","yours","public holiday","school holiday","long weekend","weekend"})
+        Check(words.Contains(word),$"the legend lacks '{word}'");
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

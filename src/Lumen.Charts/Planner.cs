@@ -124,7 +124,7 @@ public readonly record struct PlannerView(PlannerZoom Zoom, DateOnly Date)
     public static PlannerView Day(DateOnly day) => new(PlannerZoom.Day, day);
 }
 
-/// <summary>A planner: a period of days with weekends, holidays and events by region, drawn by <c>PlannerSvg.Render</c>.</summary>
+/// <summary>A planner: a period of days with weekends, holidays and events by region, drawn by <see cref="PlannerSvg.Render"/>.</summary>
 public sealed record PlannerSpec
 {
     /// <summary>The heading and the drawing's accessible name.</summary>
