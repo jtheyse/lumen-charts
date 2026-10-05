@@ -8439,6 +8439,65 @@ Test("Planner: a view must lie inside the period",()=>{
     Reject(()=>PlannerValidation.Validate(spec,PlannerView.Month(2028,1)));
     Reject(()=>PlannerValidation.Validate(spec,PlannerView.Day(new(2026,12,31))));
 });
+Test("Planner calendar: a year has twelve months in order, and a season crossing a year end runs September to August with its years",()=>{
+    Check(PlannerCalendar.Months(PlanYear()).Count==12);
+    var season=PlanYear(s=>s with{From=new(2026,9,1),To=new(2027,8,31),Events=[]});
+    var months=PlannerCalendar.Months(season);
+    Check(months.Count==12&&months[0]==(2026,9)&&months[3]==(2026,12)&&months[4]==(2027,1)&&months[^1]==(2027,8),string.Join(",",months));
+});
+Test("Planner calendar: rows align by weekday, so every Saturday stands in one of five columns",()=>{
+    // 1 January 2027 is a Friday: four blank columns before it when weeks start on Monday, five when they start on Sunday.
+    Check(PlannerCalendar.Lead(2027,1,DayOfWeek.Monday)==4,$"{PlannerCalendar.Lead(2027,1,DayOfWeek.Monday)}");
+    Check(PlannerCalendar.Lead(2027,1,DayOfWeek.Sunday)==5);
+    for(var m=1;m<=12;m++)for(var d=1;d<=DateTime.DaysInMonth(2027,m);d++){
+        var day=new DateOnly(2027,m,d);var column=PlannerCalendar.Lead(2027,m,DayOfWeek.Monday)+d-1;
+        Check(column<PlannerCalendar.Columns,$"{day} in column {column}");
+        Check((column%7==5)==(day.DayOfWeek==DayOfWeek.Saturday),$"{day} column {column}");
+    }
+});
+Test("Planner calendar: a country's holiday shows under one of its provinces, a province's event under its country, and a filtered-out province's event does not",()=>{
+    var spec=PlanYear(s=>s with{Filter=new(){Regions=["ZA-GP"]}});
+    Check(PlannerCalendar.Includes(spec,"ZA","ZA-GP")&&!PlannerCalendar.Includes(spec,"ZA-GP","ZA"));
+    Check(PlannerCalendar.Periods(spec).Any(p=>p.Name=="Freedom Day"),"the national holiday is missing under Gauteng");
+    var events=PlannerCalendar.Events(spec).Select(e=>e.Id).ToArray();
+    Check(events.SequenceEqual(["e1"]),string.Join(",",events));
+    var national=PlanYear(s=>s with{Filter=new(){Regions=["ZA"]}});
+    Check(PlannerCalendar.Events(national).Count==2);
+});
+Test("Planner calendar: filters by category, audience, status and relevance, and orders a day's events clash first",()=>{
+    var spec=PlanYear(s=>s with{Events=[..s.Events,new("e3","Club Ride",new(2027,3,13)){Region="ZA-GP",Category="Road",Relevance=PlannerRelevance.Near}]});
+    Check(PlannerCalendar.Events(spec with{Filter=new(){Categories=["XCO"]}}).Single().Id=="e1");
+    Check(PlannerCalendar.Events(spec with{Filter=new(){Audiences=["Open"]}}).Single().Id=="e2");
+    Check(PlannerCalendar.Events(spec with{Filter=new(){Statuses=[PlannerStatus.Provisional]}}).Single().Id=="e2");
+    Check(PlannerCalendar.Events(spec with{Filter=new(){Relevances=[PlannerRelevance.Clash,PlannerRelevance.Near]}}).Select(e=>e.Id).SequenceEqual(["e1","e3"]));
+    var day=PlannerCalendar.On(spec,new(2027,3,13)).Events.Select(e=>e.Id).ToArray();
+    Check(day.SequenceEqual(["e1","e3","e2"]),string.Join(",",day));
+});
+Test("Planner calendar: long weekends join a public holiday to its weekend, three days or more, and a multi-day event is on every day it spans",()=>{
+    // 27 April 2027 is a Tuesday: no long weekend. Add Monday 26 April as a holiday and Saturday 24 to Tuesday 27 becomes one.
+    var plain=PlannerCalendar.LongWeekends(PlanYear());
+    Check(!plain.Any(w=>w.From<=new DateOnly(2027,4,27)&&new DateOnly(2027,4,27)<=w.To),"a lone Tuesday holiday made a long weekend");
+    var spec=PlanYear(s=>s with{Periods=[..s.Periods,new(new(2027,4,26),null,"Invented Monday",PeriodKind.PublicHoliday,"ZA")]});
+    Check(PlannerCalendar.LongWeekends(spec).Contains((new DateOnly(2027,4,24),new DateOnly(2027,4,27))),string.Join(";",PlannerCalendar.LongWeekends(spec)));
+    // A holiday on a Friday: Friday to Sunday.
+    var friday=PlanYear(s=>s with{Periods=[new(new(2027,7,16),null,"Invented Friday",PeriodKind.PublicHoliday)]});
+    Check(PlannerCalendar.LongWeekends(friday).Contains((new DateOnly(2027,7,16),new DateOnly(2027,7,18))));
+    Check(PlannerCalendar.On(PlanYear(),new(2027,3,14)).Events.Any(e=>e.Id=="e2")&&!PlannerCalendar.On(PlanYear(),new(2027,3,15)).Events.Any(e=>e.Id=="e2"));
+});
+Test("Planner calendar: names say every field in words, leave out empty ones, and say status, relevance and yours",()=>{
+    var spec=PlanYear();
+    var e1=PlannerCalendar.Name(spec,spec.Events[0]);
+    Check(e1=="Hilltop XCO, Saturday 13 March 2027, Gauteng, XCO, Kids, clash",e1);
+    var e2=PlannerCalendar.Name(spec,spec.Events[1]);
+    Check(e2=="Coast Stage Race, Friday 12 to Sunday 14 March 2027, Western Cape, Stage, Open, provisional",e2);
+    var bare=PlannerCalendar.Name(spec,new PlannerEvent("b","Bare",new(2027,6,5)){Mine=true,Status=PlannerStatus.Cancelled,Note="Moved to June"});
+    Check(bare=="Bare, Saturday 5 June 2027, cancelled, yours, Moved to June",bare);
+    Check(!bare.Contains(", ,")&&!bare.Contains("null"));
+    Check(PlannerCalendar.DayName(spec,new(2027,4,27))=="Tuesday 27 April 2027, Freedom Day (public holiday), no events",PlannerCalendar.DayName(spec,new(2027,4,27)));
+    // 13 March is outside the school holiday (27 March to 5 April) and holds two events: Hilltop XCO and day 2 of the stage race.
+    Check(PlannerCalendar.DayName(spec,new(2027,3,13))=="Saturday 13 March 2027, 2 events",PlannerCalendar.DayName(spec,new(2027,3,13)));
+    Check(PlannerCalendar.DayName(spec,new(2027,3,29)).StartsWith("Monday 29 March 2027, School holiday (school holiday)"),PlannerCalendar.DayName(spec,new(2027,3,29)));
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

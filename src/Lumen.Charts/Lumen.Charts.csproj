@@ -5,5 +5,6 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
+  <ItemGroup><InternalsVisibleTo Include="Lumen.Charts.Tests" /></ItemGroup>
   <ItemGroup><None Include="../../README.md" Pack="true" PackagePath="/" /></ItemGroup>
 </Project>
