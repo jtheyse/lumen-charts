@@ -93,7 +93,7 @@ Public records in `src/Lumen.Charts/Planner.cs`, each with XML documentation.
 
 - A month grid: 7 columns from `WeekStart`, 5 or 6 weeks.
 - Each day: the date, its holiday names at the top, then its events stacked underneath each other, each a line with name, region and a relevance word ("clash", "close"); a "+N more" line when they do not fit, naming the rest.
-- School holidays and other periods as bands across the weeks they cover; multi-day events as one bar across their days.
+- School holidays as a band along the top of each day they cover; other periods named in their days. A multi-day event is listed under each day it covers, its line ending "day 2 of 3", which keeps the stacking simple and readable in a month grid; the year view draws it as one stripe across its days.
 - Readable as a table: rows are weeks, columns weekdays, cells the day's holidays and events.
 
 ### Day view
