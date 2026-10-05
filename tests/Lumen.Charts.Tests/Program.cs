@@ -8811,6 +8811,14 @@ Test("Planner narrow layouts: at 320 wide, with long names, holidays and a long 
     var september=PlanSvg(spec,PlannerView.Month(2027,9),PlannerLayout.Narrow);
     Check(september.Descendants(ns+"text").Any(t=>t.Value.StartsWith("LLL")&&t.Value.EndsWith("…")),"the long name is not cut");
 });
+Test("Planner: every named group, a day's or a week's as well as an event's, has a role that permits its name",()=>{
+    var spec=PlanYear(s=>s);
+    foreach(var (view,layout) in new[]{(PlannerView.WholePeriod,PlannerLayout.Wide),(PlannerView.Month(2027,3),PlannerLayout.Wide),(PlannerView.WholePeriod,PlannerLayout.Narrow),(PlannerView.Month(2027,3),PlannerLayout.Narrow),(PlannerView.Day(new DateOnly(2027,3,13)),PlannerLayout.Wide)})
+    {
+        var bare=PlanSvg(spec,view,layout).Descendants(ns+"g").Where(g=>g.Attribute("aria-label") is not null&&g.Attribute("role") is null).ToArray();
+        Check(bare.Length==0,$"{view.Zoom} {layout}: {bare.Length} named groups without a role, the first {(string?)bare.FirstOrDefault()?.Attribute("class")}");
+    }
+});
 Test("Planner narrow layouts: each drawing is as tall as its content, whatever the description's lines and titles",()=>{
     var wordy=string.Join(" ",Enumerable.Repeat("Invented organizers' events across regions",5));
     foreach(var (description,titles) in new[]{("Short",true),(wordy,true),(wordy,false)}){

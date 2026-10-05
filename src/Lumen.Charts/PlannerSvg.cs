@@ -61,7 +61,7 @@ public static class PlannerSvg
             {
                 if (d < spec.From || d > spec.To) continue;
                 var x = X(d);
-                w.Add($"<g class='lumen-day' data-day='{d:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, d))}'>");
+                w.Add($"<g class='lumen-day' role='group' data-day='{d:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, d))}'>");
                 if (PlannerCalendar.IsWeekend(spec, d)) w.Add($"<rect class='lumen-weekend' x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(RowH - 2)}' fill='{style.Grid}'/>");
                 foreach (var p in periods.Where(p => p.From <= d && d <= (p.To ?? p.From)))
                 {
@@ -112,7 +112,7 @@ public static class PlannerSvg
                 if (clashes > 0) words.Add(clashes == 1 ? "1 clash" : $"{clashes} clashes");
                 if (near > 0) words.Add($"{near} close");
                 var label = $"Week of {weekFirst.ToString("d MMMM yyyy", Invariant)}: {(words.Count == 0 ? "no clashes" : string.Join(", ", words))}";
-                w.Add($"<g class='lumen-week' aria-label='{E(label)}'>");
+                w.Add($"<g class='lumen-week' role='group' aria-label='{E(label)}'>");
                 if (clashes + near > 0) w.Text(Left + (k * 7 + 3.5) * col, y + 54, (clashes + near).ToString(Invariant), "font-size='10' text-anchor='middle'");
                 w.Add("</g>");
             }
@@ -261,7 +261,7 @@ public static class PlannerSvg
                     : from.ToString("d MMMM yyyy", Invariant);
                 var label = $"Weekend of {span}: {(words.Count == 0 ? "nothing" : string.Join(", ", words))}";
                 // Not focusable in the static drawing; the interactive planner gives weekends focus.
-                w.Add($"<g class='lumen-week' data-weekend='{from:yyyy-MM-dd}' aria-label='{E(label)}'><title>{E(label)}</title>");
+                w.Add($"<g class='lumen-week' role='group' data-weekend='{from:yyyy-MM-dd}' aria-label='{E(label)}'><title>{E(label)}</title>");
                 // The grid colour barely shows on the background, so a muted outline that clears 3:1 draws the slot.
                 w.Add($"<rect x='{N(x)}' y='{N(y + 4)}' width='10' height='12' fill='{style.Grid}' stroke='{style.Muted}' stroke-width='1'{w.Fixed}/>");
                 if (periods.Any(p => p.Kind == PeriodKind.PublicHoliday))
@@ -302,7 +302,7 @@ public static class PlannerSvg
             var cell = lead + d.Day - 1;
             var x = 24 + cell % 7 * col; var y = top + 20 + cell / 7 * CellH;
             var weekend = PlannerCalendar.IsWeekend(spec, d);
-            w.Add($"<g class='lumen-day' data-day='{d:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, d))}'>");
+            w.Add($"<g class='lumen-day' role='group' data-day='{d:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, d))}'>");
             w.Add(weekend
                 ? $"<rect class='lumen-weekend' x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(CellH)}' fill='{style.Grid}' stroke='{style.Grid}' stroke-width='1'{w.Fixed}/>"
                 : $"<rect x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(CellH)}' fill='none' stroke='{style.Grid}' stroke-width='1'{w.Fixed}/>");
@@ -413,7 +413,7 @@ public static class PlannerSvg
         if (days.Count == 0) w.Text(24, y, "Nothing scheduled", "class='lumen-muted' font-size='11'");
         foreach (var (day, periods, events) in days)
         {
-            w.Add($"<g class='lumen-day' data-day='{day:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, day))}'>");
+            w.Add($"<g class='lumen-day' role='group' data-day='{day:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, day))}'>");
             var head = day.ToString("dddd d MMMM", Invariant);
             w.Text(24, y, head, "class='lumen-agenda-day' font-size='12' font-weight='600'");
             if (periods.Count > 0)
@@ -452,7 +452,7 @@ public static class PlannerSvg
         var w = Writer(spec, style);
         ChartSvg.Begin(w, spec.Width, height, spec.Title, spec.Description);
         double y = 78 + w.Head + 14;
-        w.Add($"<g class='lumen-day' data-day='{day:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, day))}'>");
+        w.Add($"<g class='lumen-day' role='group' data-day='{day:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, day))}'>");
         w.Text(24, y, PlannerCalendar.Day(day), "font-size='15' font-weight='600'");
         y += 20;
         foreach (var p in periods) { w.Text(24, y, Fit($"{p.Name} ({PlannerCalendar.KindWords(p.Kind)})", spec.Width - 48, 11), "class='lumen-muted' font-size='11'"); y += 16; }
