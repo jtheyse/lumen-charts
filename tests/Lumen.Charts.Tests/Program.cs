@@ -8553,12 +8553,42 @@ Test("Planner year view: a 60-character name is cut in nothing it draws (the yea
     var doc=PlanSvg(PlanYear(s=>s with{Events=[new("x",name,new(2027,6,5))]}));
     Check(PlanMarks(doc).Single().Attribute("aria-label")!.Value.StartsWith(name+", Saturday 5 June 2027"));
 });
-Test("Planner year view: every drawn word clears 4.5:1 and every stripe and symbol 3:1 in Light, Dark and Midnight, and the render is byte-stable",()=>{
-    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight}){
-        Check(Lumen.Charts.Contrast.Ratio(style.Text,style.Background)>=4.5&&Lumen.Charts.Contrast.Ratio(style.Muted,style.Background)>=4.5,"text colours");
-        Check(Lumen.Charts.Contrast.Ratio(style.Muted,style.Background)>=3,"stripes and bands");
-        var spec=PlanYear(s=>s with{Style=style});
-        Check(PlannerSvg.Render(spec,PlannerView.WholePeriod)==PlannerSvg.Render(spec,PlannerView.WholePeriod));
+Test("Planner year view: every drawn word clears 4.5:1 and every stripe and symbol 3:1 against what lies behind it in Light, Dark and Midnight, and the render is byte-stable",()=>{
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight})
+    // A week starting on Wednesday puts each week's count on the Saturday and Sunday columns.
+    foreach(var weekStart in new[]{DayOfWeek.Monday,DayOfWeek.Wednesday}){
+        var spec=PlanYear(s=>s with{Style=style,WeekStart=weekStart,Events=[..s.Events,
+            new("n1","Club Ride",new(2027,3,10)){Relevance=PlannerRelevance.Near},
+            new("c1","Called Off",new(2027,6,12)){Status=PlannerStatus.Cancelled,Relevance=PlannerRelevance.Clash},
+            new("c2","Called Off Too",new(2027,6,19)){Status=PlannerStatus.Cancelled},
+            new("c3","Close Called Off",new(2027,6,26)){Status=PlannerStatus.Cancelled,Relevance=PlannerRelevance.Near},
+            new("p1","Pencilled Clash",new(2027,8,21)){Status=PlannerStatus.Provisional,Relevance=PlannerRelevance.Clash},
+            new("y1","Our Enduro",new(2027,5,15)){Mine=true,Relevance=PlannerRelevance.Clash},
+            ..Enumerable.Range(0,5).Select(i=>new PlannerEvent($"m{i}",$"Invented ride {i}",new(2027,5,8)))]});
+        var svg=PlannerSvg.Render(spec,PlannerView.WholePeriod);
+        Check(svg==PlannerSvg.Render(spec,PlannerView.WholePeriod),"the render is not byte-stable");
+        var doc=XDocument.Parse(svg);
+        double A(XElement e,string name)=>double.Parse((string?)e.Attribute(name)??"0",CultureInfo.InvariantCulture);
+        var bands=doc.Descendants(ns+"rect").Where(r=>(string?)r.Attribute("class")=="lumen-weekend")
+            .Select(r=>(L:A(r,"x"),T:A(r,"y"),R:A(r,"x")+A(r,"width"),B:A(r,"y")+A(r,"height"))).ToArray();
+        // A word stands where its glyphs' middle does: its anchor, three pixels above its baseline.
+        bool OnBand(XElement t)=>bands.Any(b=>b.L<=A(t,"x")&&A(t,"x")<=b.R&&b.T<=A(t,"y")-3&&A(t,"y")-3<=b.B);
+        var texts=doc.Descendants(ns+"text").ToArray();
+        Check(texts.Any(t=>((string?)t.Attribute("class")??"").Split(' ').Contains("lumen-more")&&OnBand(t)),"no +N on a weekend band to check");
+        if(weekStart==DayOfWeek.Wednesday)
+            Check(doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("class")=="lumen-week").SelectMany(g=>g.Elements(ns+"text")).Any(OnBand),"no week count on a weekend band to check");
+        foreach(var t in texts){
+            var ink=(string?)t.Attribute("fill")??(((string?)t.Attribute("class")??"").Split(' ').Contains("lumen-muted")?style.Muted:style.Text);
+            var behind=OnBand(t)?style.Grid:style.Background;
+            Check(Lumen.Charts.Contrast.Ratio(ink,behind)>=4.5,$"'{t.Value}' in {ink} on {behind}: {Lumen.Charts.Contrast.Ratio(ink,behind):0.00}");
+        }
+        // Every stripe and symbol is checked against both grounds it may stand on; the weekend bands themselves are the grid colour.
+        foreach(var mark in doc.Descendants().Where(e=>e.Name==ns+"rect"||e.Name==ns+"path"||e.Name==ns+"line")){
+            Check(mark.Attribute("opacity") is null&&mark.Attribute("fill-opacity") is null&&mark.Attribute("stroke-opacity") is null,$"a faded mark: {mark}");
+            foreach(var paint in new[]{(string?)mark.Attribute("fill"),(string?)mark.Attribute("stroke")}.OfType<string>().Where(p=>p!="none"&&p!=style.Grid))
+                foreach(var behind in new[]{style.Background,style.Grid})
+                    Check(Lumen.Charts.Contrast.Ratio(paint,behind)>=3,$"{mark.Name.LocalName} in {paint} on {behind}: {Lumen.Charts.Contrast.Ratio(paint,behind):0.00}");
+        }
     }
 });
 Test("Planner: the legend says every pattern in words",()=>{

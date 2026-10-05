@@ -96,9 +96,10 @@ public static class PlannerSvg
             foreach (var (day, rest) in hidden)
             {
                 var label = $"{rest.Count} more on {PlannerCalendar.Day(day)}: {string.Join("; ", rest.Select(e => e.Name))}";
-                w.Add($"<text class='lumen-more lumen-muted' x='{N(X(day) + col / 2)}' y='{N(y + 44)}' font-size='10' text-anchor='middle' aria-label='{E(label)}'><title>{E(label)}</title>+{rest.Count}</text>");
+                w.Add($"<text class='lumen-more' x='{N(X(day) + col / 2)}' y='{N(y + 44)}' font-size='10' text-anchor='middle' aria-label='{E(label)}'><title>{E(label)}</title>+{rest.Count}</text>");
             }
-            // Busy weeks: each week of the row is named with its clash and close events; a busy one writes its count.
+            // Busy weeks: each week of the row is named with its clash and close events; a busy one writes its count. That count and
+            // "+N" are written in the text colour, since they may stand on a weekend band, where the muted colour falls below 4.5:1.
             for (var k = 0; k * 7 < lead + last.Day; k++)
             {
                 var weekFirst = Max(Max(first, spec.From), first.AddDays(k * 7 - lead));
@@ -112,7 +113,7 @@ public static class PlannerSvg
                 if (near > 0) words.Add($"{near} close");
                 var label = $"Week of {weekFirst.ToString("d MMMM yyyy", Invariant)}: {(words.Count == 0 ? "no clashes" : string.Join(", ", words))}";
                 w.Add($"<g class='lumen-week' aria-label='{E(label)}'>");
-                if (clashes + near > 0) w.Text(Left + (k * 7 + 3.5) * col, y + 54, (clashes + near).ToString(Invariant), "class='lumen-muted' font-size='10' text-anchor='middle'");
+                if (clashes + near > 0) w.Text(Left + (k * 7 + 3.5) * col, y + 54, (clashes + near).ToString(Invariant), "font-size='10' text-anchor='middle'");
                 w.Add("</g>");
             }
         }
@@ -135,8 +136,9 @@ public static class PlannerSvg
         w.Add("</g>");
     }
 
-    /// <summary>A stripe's shapes: weight and dash by relevance, hatch or strike by status, an outline when it is the viewer's own.
-    /// The legend draws its samples with them too.</summary>
+    /// <summary>A stripe's shapes: weight and dash by relevance, an outline with hatching when provisional or with a strike when
+    /// cancelled (never faded, so every mark keeps 3:1), and an outline in the text colour when it is the viewer's own. The legend
+    /// draws its samples with them too.</summary>
     private static void Shapes(SvgWriter w, ChartStyle style, PlannerEvent e, double x, double y, double width)
     {
         var (ink, height) = e.Relevance switch
@@ -146,19 +148,16 @@ public static class PlannerSvg
             _ => (style.Muted, 2.0)
         };
         var inset = 1.0; x += inset; width = Math.Max(2, width - 2 * inset);
-        if (e.Mine) w.Add($"<rect x='{N(x - 1.5)}' y='{N(y - 1.5)}' width='{N(width + 3)}' height='{N(height + 3)}' rx='1.5' fill='none' stroke='{style.Series[0]}' stroke-width='1'{w.Fixed}/>");
-        var opacity = e.Status == PlannerStatus.Cancelled ? " fill-opacity='.4'" : "";
-        if (e.Status == PlannerStatus.Provisional)
-        {
+        if (e.Mine) w.Add($"<rect x='{N(x - 1.5)}' y='{N(y - 1.5)}' width='{N(width + 3)}' height='{N(height + 3)}' rx='1.5' fill='none' stroke='{style.Text}' stroke-width='1'{w.Fixed}/>");
+        if (e.Status != PlannerStatus.Confirmed)
             w.Add($"<rect x='{N(x)}' y='{N(y)}' width='{N(width)}' height='{N(height)}' fill='none' stroke='{ink}' stroke-width='1'{w.Fixed}/>");
+        if (e.Status == PlannerStatus.Provisional)
             for (var hx = x + 2; hx < x + width; hx += 3) w.Add($"<line x1='{N(hx)}' y1='{N(y + height)}' x2='{N(Math.Min(hx + height, x + width))}' y2='{N(y)}' stroke='{ink}' stroke-width='.8'/>");
-        }
+        else if (e.Status == PlannerStatus.Cancelled)
+            w.Add($"<line x1='{N(x)}' y1='{N(y + height / 2)}' x2='{N(x + width)}' y2='{N(y + height / 2)}' stroke='{style.Text}' stroke-width='1'/>");
         else if (e.Relevance == PlannerRelevance.Near)
-        {
-            for (var sx = x; sx < x + width; sx += 6) w.Add($"<rect x='{N(sx)}' y='{N(y)}' width='{N(Math.Min(4, x + width - sx))}' height='{N(height)}' fill='{ink}'{opacity}/>");
-        }
-        else w.Add($"<rect x='{N(x)}' y='{N(y)}' width='{N(width)}' height='{N(height)}' rx='1' fill='{ink}'{opacity}/>");
-        if (e.Status == PlannerStatus.Cancelled) w.Add($"<line x1='{N(x)}' y1='{N(y + height / 2)}' x2='{N(x + width)}' y2='{N(y + height / 2)}' stroke='{style.Text}' stroke-width='1'/>");
+            for (var sx = x; sx < x + width; sx += 6) w.Add($"<rect x='{N(sx)}' y='{N(y)}' width='{N(Math.Min(4, x + width - sx))}' height='{N(height)}' fill='{ink}'/>");
+        else w.Add($"<rect x='{N(x)}' y='{N(y)}' width='{N(width)}' height='{N(height)}' rx='1' fill='{ink}'/>");
     }
 
     private static readonly (string Word, string Kind)[] LegendItems =
