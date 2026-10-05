@@ -662,8 +662,8 @@ if (await fittedGraph.CountAsync() > 0)
 else Console.WriteLine("SKIP fitted graph checks: this host's graph does not set FitWidth");
 
 // The season planner is static SVG drawn on the server three times, and the page shows one by the width of its own section: narrow
-// (340 wide, the phone layout) below 640 pixels, medium (720 wide) below 1000 and wide (1100) from there, so its 10-pixel words are
-// never shown smaller than 9 pixels.
+// (340 wide, the phone layout) below 480 pixels, medium (560 wide, the grids) below 1000 and wide (1100) from there, so a tablet held
+// either way round gets the grids and the 10-pixel words are never shown smaller than 9 pixels.
 if (await page.Locator("#planner").CountAsync() > 0)
 {
     // The section's width, the drawings it shows, the smallest a 10-unit word is shown in them, the words that run outside their
@@ -686,8 +686,9 @@ if (await page.Locator("#planner").CountAsync() > 0)
         await page.Locator("#planner details summary").ClickAsync();
         Check(await page.Locator("#planner table td").CountAsync() >= 31);
     });
-    // A phone, a tablet either way round, and two desktops: the drawing for the section's width, its words at 9 pixels or more.
-    foreach (var (width, height, phone) in new[] { (375, 812, true), (768, 1024, false), (1024, 768, false), (1280, 900, false), (1440, 900, false) })
+    // A phone, a tablet either way round, and two desktops: the drawing for the section's width, its words at 9 pixels or more. The
+    // phone gets the narrow layout and a portrait tablet's 512-pixel section the grids, whatever else the gallery's layout does.
+    foreach (var (width, height, phone, must) in new[] { (375, 812, true, "narrow"), (768, 1024, false, "medium"), (1024, 768, false, null), (1280, 900, false, null), (1440, 900, false, null) })
         await Test($"Planner: at {width} by {height} the drawing for the section's width shows its words at 9 pixels or more, the page does not scroll sideways and no word runs outside its drawing", async () =>
         {
             await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = height }, IsMobile = phone, HasTouch = phone, DeviceScaleFactor = phone ? 2 : 1 });
@@ -695,8 +696,8 @@ if (await page.Locator("#planner").CountAsync() > 0)
             await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
             var m = (await tab.EvaluateAsync<string>(plannerShown)).Split('|');
             var section = double.Parse(m[0], CultureInfo.InvariantCulture);
-            var expected = section < 640 ? "narrow" : section < 1000 ? "medium" : "wide";
-            Check(m[6] == expected && m[1] == "2", $"a {section:0}-pixel section shows {m[6]} ({m[1]} drawings), not {expected}");
+            var expected = section < 480 ? "narrow" : section < 1000 ? "medium" : "wide";
+            Check(m[6] == expected && (must is null || m[6] == must) && m[1] == "2", $"a {section:0}-pixel section shows {m[6]} ({m[1]} drawings), not {expected}");
             Check(double.Parse(m[2], CultureInfo.InvariantCulture) >= 9, $"a 10-unit word is shown {double.Parse(m[2], CultureInfo.InvariantCulture):0.0} pixels tall");
             Check(int.Parse(m[5]) <= width, $"the page is {m[5]} pixels wide");
             Check(int.Parse(m[3]) > 0 && m[4] == "0", $"{m[4]} of {m[3]} words outside");

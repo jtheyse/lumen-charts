@@ -98,8 +98,8 @@
         _ => content
     };
     // The planner is drawn three times on the server and the section's width picks one in app.css, so its words are never shown
-    // under 9 pixels: wide from 1000 pixels, medium from 640, and the phone layout below.
-    private static readonly (string Shown, int Width, PlannerLayout Layout)[] PlannerDrawings = [("wide", 1100, PlannerLayout.Wide), ("medium", 720, PlannerLayout.Wide), ("narrow", 340, PlannerLayout.Narrow)];
+    // under 9 pixels: wide from 1000 pixels, medium (the same grids) from 480, so a portrait tablet gets the grids, and the phone layout below.
+    private static readonly (string Shown, int Width, PlannerLayout Layout)[] PlannerDrawings = [("wide", 1100, PlannerLayout.Wide), ("medium", 560, PlannerLayout.Wide), ("narrow", 340, PlannerLayout.Narrow)];
     private GraphLayout layout=GraphLayout.Layered;
     private int revision;private string? selection;private string? node;private GraphSpec? graphCache;
     private GraphSpec Graph=>graphCache ??= DemoData.Graph(layout,Theme);
