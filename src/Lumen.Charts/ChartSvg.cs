@@ -1372,8 +1372,9 @@ public static partial class ChartSvg
     private static double Broad(string text) => Wide(text) * 12 / 11;
     /// <summary>A generous width for 11 px text, so a label judged to fit does: digits and most letters at .62 em, wider
     /// than in the common sans and serif faces, punctuation narrower and the widest letters wider.</summary>
-    internal static double Wide(string text) =>
-        text.Sum(c => c is '.' or ',' or ':' or ' ' ? .3 : c is '-' ? .36 : c is 'm' or 'M' or 'w' or 'W' ? .9 : .62) * 11;
+    internal static double Wide(string text) => text.Sum(Glyph) * 11;
+    /// <summary>One character's share of <see cref="Wide"/>, in ems; the planner adds them up to cut a line in one pass.</summary>
+    internal static double Glyph(char c) => c is '.' or ',' or ':' or ' ' ? .3 : c is '-' ? .36 : c is 'm' or 'M' or 'w' or 'W' ? .9 : .62;
 
     private enum End { Top, Bottom, Right, Left }
 

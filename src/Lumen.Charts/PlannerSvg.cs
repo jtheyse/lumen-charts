@@ -13,21 +13,24 @@ public static class PlannerSvg
     public static string Render(PlannerSpec spec, PlannerView view, PlannerLayout layout = PlannerLayout.Wide)
     {
         PlannerValidation.Validate(spec, view);
+        if (!Enum.IsDefined(layout)) throw new ArgumentException($"A planner's layout must be Wide or Narrow, not {((int)layout).ToString(Invariant)}.");
         var style = spec.Style ?? ChartSvg.Preset(spec.Theme);
+        // The filtered periods and events, long weekends and region names are worked out once, and each day's looked up by day.
+        var plan = new PlannerIndex(spec);
         return (view.Zoom, layout) switch
         {
-            (PlannerZoom.Year, PlannerLayout.Wide) => Year(spec, style),
-            (PlannerZoom.Year, PlannerLayout.Narrow) => YearNarrow(spec, style),
-            (PlannerZoom.Month, PlannerLayout.Wide) => Month(spec, style, view.Date.Year, view.Date.Month),
-            (PlannerZoom.Month, PlannerLayout.Narrow) => Agenda(spec, style, view.Date.Year, view.Date.Month),
-            _ => DayList(spec, style, view.Date)
+            (PlannerZoom.Year, PlannerLayout.Wide) => Year(spec, plan, style),
+            (PlannerZoom.Year, PlannerLayout.Narrow) => YearNarrow(spec, plan, style),
+            (PlannerZoom.Month, PlannerLayout.Wide) => Month(spec, plan, style, view.Date.Year, view.Date.Month),
+            (PlannerZoom.Month, PlannerLayout.Narrow) => Agenda(spec, plan, style, view.Date.Year, view.Date.Month),
+            _ => DayList(spec, plan, style, view.Date)
         };
     }
 
     private static SvgWriter Writer(PlannerSpec spec, ChartStyle style) =>
         new() { Style = style, Painted = spec.PaintBackground, Titled = spec.DrawTitles };
 
-    private static string Year(PlannerSpec spec, ChartStyle style)
+    private static string Year(PlannerSpec spec, PlannerIndex plan, ChartStyle style)
     {
         var months = PlannerCalendar.Months(spec);
         var width = spec.Width;
@@ -44,9 +47,8 @@ public static class PlannerSvg
             var dow = (DayOfWeek)(((int)spec.WeekStart + c) % 7);
             w.Text(Left + (c + .5) * col, top + 11, dow.ToString()[..1], "class='lumen-muted' font-size='10' text-anchor='middle'");
         }
-        var longs = PlannerCalendar.LongWeekends(spec);
-        var periods = PlannerCalendar.Periods(spec);
-        var events = PlannerCalendar.Events(spec);
+        var longs = plan.LongWeekends;
+        var events = plan.Events;
         for (var r = 0; r < months.Count; r++)
         {
             var (year, month) = months[r];
@@ -61,9 +63,9 @@ public static class PlannerSvg
             {
                 if (d < spec.From || d > spec.To) continue;
                 var x = X(d);
-                w.Add($"<g class='lumen-day' role='group' data-day='{d:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, d))}'>");
-                if (PlannerCalendar.IsWeekend(spec, d)) w.Add($"<rect class='lumen-weekend' x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(RowH - 2)}' fill='{style.Grid}'/>");
-                foreach (var p in periods.Where(p => p.From <= d && d <= (p.To ?? p.From)))
+                w.Add($"<g class='lumen-day' role='group' data-day='{Iso(d)}' aria-label='{E(plan.DayName(d))}'>");
+                if (plan.IsWeekend(d)) w.Add($"<rect class='lumen-weekend' x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(RowH - 2)}' fill='{style.Grid}'/>");
+                foreach (var p in plan.On(d).Periods)
                 {
                     if (p.Kind == PeriodKind.SchoolHoliday) w.Add($"<rect x='{N(x)}' y='{N(y + 2)}' width='{N(col)}' height='3' fill='{style.Muted}'/>");
                     if (p.Kind == PeriodKind.PublicHoliday) w.Add($"<path d='M{N(x + col / 2)},{N(y + 7.5)} l3.5,3.5 l-3.5,3.5 l-3.5,-3.5 Z' fill='{style.Text}'/>");
@@ -91,7 +93,7 @@ public static class PlannerSvg
                     if (lane >= 3) (hidden.TryGetValue(d, out var list) ? list : hidden[d] = []).Add(e);
                 }
                 if (lane >= 3) continue;
-                Stripe(w, spec, style, e, X(start), y + 18 + lane * 7, X(end) + col - X(start));
+                Stripe(w, plan, style, e, X(start), y + 18 + lane * 7, X(end) + col - X(start));
             }
             foreach (var (day, rest) in hidden)
             {
@@ -122,6 +124,8 @@ public static class PlannerSvg
         return w.ToString();
     }
 
+    /// <summary>A day as written in data attributes, 2027-03-13, in the Gregorian calendar whatever the host's culture.</summary>
+    private static string Iso(DateOnly d) => d.ToString("yyyy-MM-dd", Invariant);
     private static int Head(PlannerSpec spec) => !spec.DrawTitles ? -ChartSvg.Untitled : 14 * (ChartSvg.Wrap(spec.Description, spec.Width - 48d).Length - 1);
     /// <summary>Whether <paramref name="e"/> counts as a clash or close event of <paramref name="relevance"/>: a cancelled one counts as
     /// neither, though it is still drawn and named as cancelled.</summary>
@@ -131,9 +135,9 @@ public static class PlannerSvg
     private static IEnumerable<DateOnly> Days(DateOnly from, DateOnly to) { for (var d = from; d <= to; d = d.AddDays(1)) yield return d; }
 
     /// <summary>One event's mark: a focusable group named in words around the stripe <see cref="Shapes"/> draws.</summary>
-    private static void Stripe(SvgWriter w, PlannerSpec spec, ChartStyle style, PlannerEvent e, double x, double y, double width)
+    private static void Stripe(SvgWriter w, PlannerIndex plan, ChartStyle style, PlannerEvent e, double x, double y, double width)
     {
-        var name = PlannerCalendar.Name(spec, e);
+        var name = plan.Name(e);
         w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
         Shapes(w, style, e, x, y, width);
         w.Add("</g>");
@@ -224,18 +228,18 @@ public static class PlannerSvg
     /// the month's clash and close events counted in words on the right, each once, weekdays included; cancelled events count as
     /// neither. A weekend is a run of consecutive weekend days; one across a month's end shows in both bars, each slot covering and
     /// naming the whole weekend. Each weekend is a group named with its counts and periods.</summary>
-    private static string YearNarrow(PlannerSpec spec, ChartStyle style)
+    private static string YearNarrow(PlannerSpec spec, PlannerIndex plan, ChartStyle style)
     {
         var months = PlannerCalendar.Months(spec);
         var height = 78 + Head(spec) + months.Count * 34 + LegendLines(spec.Width) * 18 + 24;
         var w = Writer(spec, style);
         ChartSvg.Begin(w, spec.Width, height, spec.Title, spec.Description);
         var top = 78 + w.Head;
-        var holidays = PlannerCalendar.Periods(spec);
-        var all = PlannerCalendar.Events(spec);
+        var holidays = plan.Periods;
+        var all = plan.Events;
         var weekends = new List<(DateOnly From, DateOnly To)>();
         for (var d = spec.From; d <= spec.To; d = d.AddDays(1))
-            if (PlannerCalendar.IsWeekend(spec, d))
+            if (plan.IsWeekend(d))
                 if (weekends.Count > 0 && weekends[^1].To.DayNumber == d.DayNumber - 1) weekends[^1] = (weekends[^1].From, d);
                 else weekends.Add((d, d));
         static string Words(int clashes, int close, string and) =>
@@ -261,7 +265,7 @@ public static class PlannerSvg
                     : from.ToString("d MMMM yyyy", Invariant);
                 var label = $"Weekend of {span}: {(words.Count == 0 ? "nothing" : string.Join(", ", words))}";
                 // Not focusable in the static drawing; the interactive planner gives weekends focus.
-                w.Add($"<g class='lumen-week' role='group' data-weekend='{from:yyyy-MM-dd}' aria-label='{E(label)}'><title>{E(label)}</title>");
+                w.Add($"<g class='lumen-week' role='group' data-weekend='{Iso(from)}' aria-label='{E(label)}'><title>{E(label)}</title>");
                 // The grid colour barely shows on the background, so a muted outline that clears 3:1 draws the slot.
                 w.Add($"<rect x='{N(x)}' y='{N(y + 4)}' width='10' height='12' fill='{style.Grid}' stroke='{style.Muted}' stroke-width='1'{w.Fixed}/>");
                 if (periods.Any(p => p.Kind == PeriodKind.PublicHoliday))
@@ -282,7 +286,7 @@ public static class PlannerSvg
     }
     private const double CellH = 104, LineH = 14;
 
-    private static string Month(PlannerSpec spec, ChartStyle style, int year, int month)
+    private static string Month(PlannerSpec spec, PlannerIndex plan, ChartStyle style, int year, int month)
     {
         var first = new DateOnly(year, month, 1);
         var lead = PlannerCalendar.Lead(year, month, spec.WeekStart);
@@ -301,14 +305,14 @@ public static class PlannerSvg
         {
             var cell = lead + d.Day - 1;
             var x = 24 + cell % 7 * col; var y = top + 20 + cell / 7 * CellH;
-            var weekend = PlannerCalendar.IsWeekend(spec, d);
-            w.Add($"<g class='lumen-day' role='group' data-day='{d:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, d))}'>");
+            var weekend = plan.IsWeekend(d);
+            w.Add($"<g class='lumen-day' role='group' data-day='{Iso(d)}' aria-label='{E(plan.DayName(d))}'>");
             w.Add(weekend
                 ? $"<rect class='lumen-weekend' x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(CellH)}' fill='{style.Grid}' stroke='{style.Grid}' stroke-width='1'{w.Fixed}/>"
                 : $"<rect x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(CellH)}' fill='none' stroke='{style.Grid}' stroke-width='1'{w.Fixed}/>");
             w.Text(x + 6, y + 15, d.Day.ToString(Invariant), "font-size='12' font-weight='600'");
             if (d < spec.From || d > spec.To) { w.Add("</g>"); continue; }
-            var (onDay, events) = PlannerCalendar.On(spec, d);
+            var (onDay, events) = plan.On(d);
             if (onDay.Any(p => p.Kind == PeriodKind.SchoolHoliday)) w.Add($"<rect x='{N(x)}' y='{N(y)}' width='{N(col)}' height='3' fill='{style.Muted}'/>");
             var named = onDay.Where(p => p.Kind != PeriodKind.SchoolHoliday).Select(p => p.Name).ToArray();
             // Muted words fall below 4.5:1 on a weekend cell's grid colour, so there the holidays and "+N more" are in the text colour.
@@ -324,7 +328,7 @@ public static class PlannerSvg
                 var word = e.Relevance switch { PlannerRelevance.Clash => " · clash", PlannerRelevance.Near => " · close", _ => "" };
                 var dayOf = span > 1 ? $" · day {d.DayNumber - e.Start.DayNumber + 1} of {span}" : "";
                 var region = e.Region is null ? "" : " · " + e.Region;
-                var name = PlannerCalendar.Name(spec, e);
+                var name = plan.Name(e);
                 w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
                 Marker(w, style, e, x + 6, ly - 9);
                 // The region comes last: where the cell is narrow it is cut first, and it is said whole in the name and the day view.
@@ -346,13 +350,21 @@ public static class PlannerSvg
     }
 
     /// <summary><paramref name="text"/> cut with "…" to fit <paramref name="room"/> units at <paramref name="size"/> pixels.</summary>
+    /// <remarks>It keeps the longest start that fits with the "…" after it (one character at least), found in one pass by adding up the
+    /// characters' widths as <see cref="ChartSvg.Wide"/> does, and never ends between the two halves of a surrogate pair.</remarks>
     private static string Fit(string text, double room, double size)
     {
-        double Width(string t) => ChartSvg.Wide(t) * size / 11;
-        if (Width(text) <= room) return text;
-        var cut = text;
-        while (cut.Length > 1 && Width(cut + "…") > room) cut = cut[..^1];
-        return cut.TrimEnd() + "…";
+        if (ChartSvg.Wide(text) * size / 11 <= room) return text;
+        // The same sums, in the same order, as the width of each start with "…" after it, so the cut is the one a search would find.
+        double sum = 0; var keep = 1;
+        for (var i = 0; i < text.Length - 1; i++)
+        {
+            sum += ChartSvg.Glyph(text[i]);
+            if ((sum + ChartSvg.Glyph('…')) * 11 * size / 11 > room) break;
+            keep = i + 1;
+        }
+        if (keep > 0 && char.IsHighSurrogate(text[keep - 1])) keep--;
+        return text[..keep].TrimEnd() + "…";
     }
 
     /// <summary>The month <paramref name="year"/>-<paramref name="month"/> as an HTML table for static pages: rows are weeks, columns
@@ -360,6 +372,7 @@ public static class PlannerSvg
     public static string Table(PlannerSpec spec, int year, int month)
     {
         PlannerValidation.Validate(spec, PlannerView.Month(year, month));
+        var plan = new PlannerIndex(spec);
         var first = new DateOnly(year, month, 1);
         var lead = PlannerCalendar.Lead(year, month, spec.WeekStart);
         var days = DateTime.DaysInMonth(year, month);
@@ -379,9 +392,9 @@ public static class PlannerSvg
                 // As in the drawing, a day outside the period is its date alone.
                 if (d >= spec.From && d <= spec.To)
                 {
-                    var (periods, events) = PlannerCalendar.On(spec, d);
+                    var (periods, events) = plan.On(d);
                     words.AddRange(periods.Select(p => $"{p.Name} ({PlannerCalendar.KindWords(p.Kind)})"));
-                    words.AddRange(events.Select(e => PlannerCalendar.Name(spec, e)));
+                    words.AddRange(events.Select(plan.Name));
                 }
                 b.Append($"<td>{E(string.Join(" · ", words))}</td>");
             }
@@ -392,14 +405,14 @@ public static class PlannerSvg
     }
     /// <summary>A month on a phone, as an agenda of only the days that hold a period or an event: each a bold header with its periods
     /// muted after it, then its events one per line (marker, name, region and relevance), cut to fit. An empty month says so.</summary>
-    private static string Agenda(PlannerSpec spec, ChartStyle style, int year, int month)
+    private static string Agenda(PlannerSpec spec, PlannerIndex plan, ChartStyle style, int year, int month)
     {
         var first = new DateOnly(year, month, 1);
         var days = new List<(DateOnly Day, IReadOnlyList<PlannerPeriod> Periods, IReadOnlyList<PlannerEvent> Events)>();
         for (var d = first; d.Month == month; d = d.AddDays(1))
         {
             if (d < spec.From || d > spec.To) continue;
-            var (periods, events) = PlannerCalendar.On(spec, d);
+            var (periods, events) = plan.On(d);
             if (periods.Count > 0 || events.Count > 0) days.Add((d, periods, events));
         }
         var description = $"{first.ToString("MMMM yyyy", Invariant)}{(spec.Description.Length > 0 ? " · " + spec.Description : "")}";
@@ -413,7 +426,7 @@ public static class PlannerSvg
         if (days.Count == 0) w.Text(24, y, "Nothing scheduled", "class='lumen-muted' font-size='11'");
         foreach (var (day, periods, events) in days)
         {
-            w.Add($"<g class='lumen-day' role='group' data-day='{day:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, day))}'>");
+            w.Add($"<g class='lumen-day' role='group' data-day='{Iso(day)}' aria-label='{E(plan.DayName(day))}'>");
             var head = day.ToString("dddd d MMMM", Invariant);
             w.Text(24, y, head, "class='lumen-agenda-day' font-size='12' font-weight='600'");
             if (periods.Count > 0)
@@ -424,7 +437,7 @@ public static class PlannerSvg
             y += 18;
             foreach (var e in events)
             {
-                var name = PlannerCalendar.Name(spec, e);
+                var name = plan.Name(e);
                 // A cancelled event is neither a clash nor close, and says it is cancelled.
                 var word = e.Status == PlannerStatus.Cancelled ? " · cancelled"
                     : e.Relevance switch { PlannerRelevance.Clash => " · clash", PlannerRelevance.Near => " · close", _ => "" };
@@ -443,29 +456,29 @@ public static class PlannerSvg
 
     /// <summary>A day as a list: its date, its holidays and periods as muted lines, then a block for each event (46 high, 58 with a note)
     /// with its marker, name and a muted line of region, category, audience, status, relevance and who it is for in words.</summary>
-    private static string DayList(PlannerSpec spec, ChartStyle style, DateOnly day)
+    private static string DayList(PlannerSpec spec, PlannerIndex plan, ChartStyle style, DateOnly day)
     {
-        var (periods, events) = PlannerCalendar.On(spec, day);
+        var (periods, events) = plan.On(day);
         double Block(PlannerEvent e) => string.IsNullOrWhiteSpace(e.Note) ? 46 : 58;
         var body = 30 + periods.Count * 16 + (events.Count == 0 ? 20 : events.Sum(Block));
         var height = (int)Math.Ceiling(78 + Head(spec) + body + 16);
         var w = Writer(spec, style);
         ChartSvg.Begin(w, spec.Width, height, spec.Title, spec.Description);
         double y = 78 + w.Head + 14;
-        w.Add($"<g class='lumen-day' role='group' data-day='{day:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, day))}'>");
+        w.Add($"<g class='lumen-day' role='group' data-day='{Iso(day)}' aria-label='{E(plan.DayName(day))}'>");
         w.Text(24, y, PlannerCalendar.Day(day), "font-size='15' font-weight='600'");
         y += 20;
         foreach (var p in periods) { w.Text(24, y, Fit($"{p.Name} ({PlannerCalendar.KindWords(p.Kind)})", spec.Width - 48, 11), "class='lumen-muted' font-size='11'"); y += 16; }
         if (events.Count == 0) w.Text(24, y + 4, "No events", "class='lumen-muted' font-size='11'");
         foreach (var e in events)
         {
-            var name = PlannerCalendar.Name(spec, e);
+            var name = plan.Name(e);
             w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
             Marker(w, style, e, 24, y + 4);
             w.Text(34, y + 14, Fit(e.Name, spec.Width - 58, 13), "font-size='13' font-weight='600'");
             var facts = new[]
             {
-                PlannerCalendar.RegionName(spec, e.Region), e.Category, e.Audience,
+                plan.RegionName(e.Region), e.Category, e.Audience,
                 e.Status switch { PlannerStatus.Provisional => "provisional", PlannerStatus.Cancelled => "cancelled", _ => null },
                 e.Relevance switch { PlannerRelevance.Clash => "clash", PlannerRelevance.Near => "close", _ => null },
                 e.Mine ? "yours" : null,
