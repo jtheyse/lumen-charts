@@ -59,6 +59,19 @@
                 <div class="chart-card">@Branded(@<LumenChart Spec="DemoData.TeamRider(Theme)" FitWidth="true" ShowLegend="false"/>)<p class="fit-note"><code>GapLabel = "absent"</code>: a round the rider missed is written and named, not left blank; round 4 was not held, so it has no point and the line joins over it.</p></div>
             </div>
         </section>
+        <section id="planner" class="card">
+            <h2>Planning a season</h2>
+            <p>A <code>PlannerSpec</code> drawn by <code>PlannerSvg.Render</code>: months aligned by weekday so weekends line up down the year, public holidays ◆, a school holiday band, and invented events by relevance — clash bold, close dashed, other thin, provisional hatched, cancelled struck through, yours outlined — each named in full.</p>
+            <div class="planner-wide">
+                @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme), PlannerView.WholePeriod))
+                @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme), PlannerView.Month(2027, 3)))
+            </div>
+            <div class="planner-narrow">
+                @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme, 340), PlannerView.WholePeriod, PlannerLayout.Narrow))
+                @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme, 340), PlannerView.Month(2027, 3), PlannerLayout.Narrow))
+            </div>
+            <details><summary>March as a table</summary>@((MarkupString)PlannerSvg.Table(PlannerData.Season(Theme), 2027, 3))</details>
+        </section>
         <section class="lower-grid">
             <article class="small-card"><div class="eyebrow">DESIGNED TO COMMUNICATE</div><h3>Good defaults.<br/>Honest comparisons.</h3><p>Zero baselines for bars. Explicit gaps for missing data. Readable labels and an underlying data table.</p><div class="mini-tags"><span>No charting JS dependencies</span><span>Typed data binding</span></div></article>
             <article class="small-card accent"><div class="eyebrow">TAKE YOUR WORK WITH YOU</div><h3>Ready for the<br/>next conversation.</h3><p>Export crisp SVG graphics for reports or the original observations as CSV. Your data stays yours.</p><a href="#integration">Explore the rendering API ↗</a></article>

@@ -661,6 +661,50 @@ if (await fittedGraph.CountAsync() > 0)
 }
 else Console.WriteLine("SKIP fitted graph checks: this host's graph does not set FitWidth");
 
+// The season planner is static SVG drawn on the server, wide and narrow, and the page shows one by its width: the narrow one only
+// below 640 pixels, so a tablet either way round gets the wide one.
+if (await page.Locator("#planner").CountAsync() > 0)
+{
+    // Every word of the planner shown at this width, against the drawing it belongs to.
+    const string plannerOutside = "shown => [...document.querySelectorAll(`#planner ${shown} svg text`)].filter(t => { const s = t.ownerSVGElement.getBoundingClientRect(), b = t.getBoundingClientRect(); return b.left < s.left - 0.5 || b.right > s.right + 0.5; }).length";
+    await Test("Planner: the year and March are drawn, every event a named focusable mark, the table holds every day", async () =>
+    {
+        var marks = page.Locator("#planner .planner-wide svg .lumen-datum");
+        Check(await marks.CountAsync() > 10, $"{await marks.CountAsync()} marks");
+        var label = await marks.First.GetAttributeAsync("aria-label");
+        // An event is named with its day in full, as in "Hilltop XCO #1, Saturday 13 February 2027, Gauteng, …".
+        Check(label is not null && Regex.IsMatch(label, @", \w+day \d{1,2} \w+ 2027"), label ?? "no label");
+        Check(await page.Locator("#planner .planner-wide svg .lumen-datum:not([tabindex='0'])").CountAsync() == 0, "a mark cannot be focused");
+        await page.Locator("#planner details summary").ClickAsync();
+        Check(await page.Locator("#planner table td").CountAsync() >= 31);
+    });
+    await Test("Planner: on a 375-pixel phone the narrow layout shows, the page does not scroll sideways and no word runs outside its drawing", async () =>
+    {
+        await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+        var tab = await phone.NewPageAsync();
+        await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+        Check(await tab.Locator("#planner .planner-narrow").IsVisibleAsync() && !await tab.Locator("#planner .planner-wide").IsVisibleAsync(), "the wide planner shows");
+        var wide = await tab.EvaluateAsync<int>("() => document.documentElement.scrollWidth");
+        Check(wide <= 375, $"the page is {wide} pixels wide");
+        var outside = await tab.EvaluateAsync<int>(plannerOutside, ".planner-narrow");
+        Check(outside == 0, $"{outside} words outside");
+    });
+    // A tablet either way round, and a desktop: the wide planner, fitted to its box.
+    foreach (var (width, height) in new[] { (1280, 900), (1024, 768), (768, 1024) })
+        await Test($"Planner: at {width} by {height} the wide layout shows, the page does not scroll sideways and no word runs outside its drawing", async () =>
+        {
+            await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = height } });
+            var tab = await context.NewPageAsync();
+            await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+            Check(await tab.Locator("#planner .planner-wide").IsVisibleAsync() && !await tab.Locator("#planner .planner-narrow").IsVisibleAsync(), "the narrow planner shows");
+            var wide = await tab.EvaluateAsync<int>("() => document.documentElement.scrollWidth");
+            Check(wide <= width, $"the page is {wide} pixels wide");
+            var outside = await tab.EvaluateAsync<int>(plannerOutside, ".planner-wide");
+            Check(outside == 0, $"{outside} words outside");
+        });
+}
+else Console.WriteLine("SKIP planner checks: this host shows no planner");
+
 // Only a host that wraps its charts in LumenBrand can prove the page's own colours reach the chart.
 if (await page.Locator("[data-lumen-brand]").CountAsync() > 0)
 {
