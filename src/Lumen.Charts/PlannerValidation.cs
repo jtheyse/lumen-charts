@@ -23,8 +23,9 @@ public static class PlannerValidation
         }
         var parents = spec.Regions.ToDictionary(r => r.Code, r => r.Parent, StringComparer.Ordinal);
         foreach (var region in spec.Regions)
-        {
             if (region.Parent is not null && !codes.Contains(region.Parent)) throw new ArgumentException($"The region '{region.Code}' names a parent, '{region.Parent}', that is not in the list.");
+        foreach (var region in spec.Regions)
+        {
             var seen = new HashSet<string>(StringComparer.Ordinal) { region.Code };
             for (var up = region.Parent; up is not null; up = parents[up])
                 if (!seen.Add(up)) throw new ArgumentException($"The region '{region.Code}' lies inside itself: its parents loop.");

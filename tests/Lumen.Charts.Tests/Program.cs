@@ -8417,6 +8417,7 @@ Test("Planner: refuses duplicate, blank or unknown region codes and a parent cha
     Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=[..s.Regions,new(" ","Blank")]})));
     Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=[..s.Regions,new("ZA-KZN","KwaZulu-Natal","ZZ")]})));
     Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=[new("A","A","B"),new("B","B","A")]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=[new("A","A","B"),new("B","B","C")]})));
     Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Periods=[new(new(2027,1,1),null,"Day",PeriodKind.Other,"XX")]})));
     Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=[new("x","Ride",new(2027,5,1)){Region="XX"}]})));
 });
