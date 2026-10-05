@@ -216,7 +216,59 @@ public static class PlannerSvg
         w.Add("</g>");
     }
 
-    private static string YearNarrow(PlannerSpec spec, ChartStyle style) => throw new NotImplementedException("Task 6");
+    /// <summary>The whole period on a phone: a 34-high block per month with its name, a slot for each of its weekends (the grid colour,
+    /// a diamond on a public holiday, a solid mark under it for a clash and a dashed one for only close events), and its weekends'
+    /// clashes and close events counted in words on the right. Each weekend is a group named with its counts and periods.</summary>
+    private static string YearNarrow(PlannerSpec spec, ChartStyle style)
+    {
+        var months = PlannerCalendar.Months(spec);
+        var height = 78 + Head(spec) + months.Count * 34 + LegendLines(spec.Width) * 18 + 24;
+        var w = Writer(spec, style);
+        ChartSvg.Begin(w, spec.Width, height, spec.Title, spec.Description);
+        var top = 78 + w.Head;
+        var holidays = PlannerCalendar.Periods(spec);
+        var all = PlannerCalendar.Events(spec);
+        for (var r = 0; r < months.Count; r++)
+        {
+            var (year, month) = months[r];
+            var y = top + r * 34;
+            var first = new DateOnly(year, month, 1);
+            w.Text(24, y + 14, first.ToString("MMM yyyy", Invariant), "class='lumen-month' font-size='12'");
+            var weekends = new List<DateOnly>();
+            for (var d = first; d.Month == month; d = d.AddDays(1))
+                if (d >= spec.From && d <= spec.To && PlannerCalendar.IsWeekend(spec, d) && (weekends.Count == 0 || d.DayNumber - weekends[^1].DayNumber > 1)) weekends.Add(d);
+            double x = 96;
+            int clashes = 0, close = 0;
+            foreach (var start in weekends)
+            {
+                var days = Enumerable.Range(0, 7).Select(start.AddDays).TakeWhile(d => d.Month == month && d <= spec.To && PlannerCalendar.IsWeekend(spec, d)).ToArray();
+                var events = all.Where(e => days.Any(d => e.Start <= d && d <= (e.End ?? e.Start))).ToArray();
+                var c = events.Count(e => e.Relevance == PlannerRelevance.Clash); var n = events.Count(e => e.Relevance == PlannerRelevance.Near);
+                clashes += c; close += n;
+                var periods = holidays.Where(p => days.Any(d => p.From <= d && d <= (p.To ?? p.From))).Select(p => p.Name).Distinct();
+                var words = new List<string>();
+                if (c > 0) words.Add(c == 1 ? "1 clash" : $"{c} clashes");
+                if (n > 0) words.Add($"{n} close");
+                words.AddRange(periods);
+                var label = $"Weekend of {start.ToString("d MMMM yyyy", Invariant)}: {(words.Count == 0 ? "nothing" : string.Join(", ", words))}";
+                // Not focusable in the static drawing; the interactive planner gives weekends focus.
+                w.Add($"<g class='lumen-week' data-weekend='{start:yyyy-MM-dd}' aria-label='{E(label)}'><title>{E(label)}</title>");
+                w.Add($"<rect x='{N(x)}' y='{N(y + 4)}' width='10' height='12' fill='{style.Grid}'/>");
+                if (holidays.Any(p => p.Kind == PeriodKind.PublicHoliday && days.Any(d => p.From <= d && d <= (p.To ?? p.From))))
+                    w.Add($"<path d='M{N(x + 5)},{N(y + 5)} l3.5,3.5 l-3.5,3.5 l-3.5,-3.5 Z' fill='{style.Text}'/>");
+                if (c > 0) w.Add($"<rect x='{N(x)}' y='{N(y + 19)}' width='10' height='4' fill='{style.Text}'/>");
+                else if (n > 0) w.Add($"<rect x='{N(x)}' y='{N(y + 19)}' width='4' height='2' fill='{style.Text}'/><rect x='{N(x + 6)}' y='{N(y + 19)}' width='4' height='2' fill='{style.Text}'/>");
+                w.Add("</g>");
+                x += 14;
+            }
+            var summary = string.Join(" · ", new[] { clashes > 0 ? (clashes == 1 ? "1 clash" : $"{clashes} clashes") : null, close > 0 ? $"{close} close" : null }.OfType<string>());
+            // The counts stand on the background right of the slots, cut where a weekend of odd days leaves them less room.
+            if (summary.Length > 0) w.Text(spec.Width - 24, y + 14, Fit(summary, spec.Width - 24 - (x + 8), 11), "class='lumen-muted' font-size='11' text-anchor='end'");
+        }
+        Legend(w, spec, style, top + months.Count * 34 + 8);
+        w.Add("</svg>");
+        return w.ToString();
+    }
     private const double CellH = 104, LineH = 14;
 
     private static string Month(PlannerSpec spec, ChartStyle style, int year, int month)
@@ -327,7 +379,54 @@ public static class PlannerSvg
         b.Append("</tbody></table>");
         return b.ToString();
     }
-    private static string Agenda(PlannerSpec spec, ChartStyle style, int year, int month) => throw new NotImplementedException("Task 6");
+    /// <summary>A month on a phone, as an agenda of only the days that hold a period or an event: each a bold header with its periods
+    /// muted after it, then its events one per line (marker, name, region and relevance), cut to fit. An empty month says so.</summary>
+    private static string Agenda(PlannerSpec spec, ChartStyle style, int year, int month)
+    {
+        var first = new DateOnly(year, month, 1);
+        var days = new List<(DateOnly Day, IReadOnlyList<PlannerPeriod> Periods, IReadOnlyList<PlannerEvent> Events)>();
+        for (var d = first; d.Month == month; d = d.AddDays(1))
+        {
+            if (d < spec.From || d > spec.To) continue;
+            var (periods, events) = PlannerCalendar.On(spec, d);
+            if (periods.Count > 0 || events.Count > 0) days.Add((d, periods, events));
+        }
+        var description = $"{first.ToString("MMMM yyyy", Invariant)}{(spec.Description.Length > 0 ? " · " + spec.Description : "")}";
+        var body = days.Count == 0 ? 24 : days.Sum(x => 22 + x.Events.Count * 18 + 6);
+        // As in the month grid, the description is set in two lines at most, each cut to the width, and the room is that of the
+        // month-led line Begin draws.
+        var height = 78 + Head(spec with { Description = description }) + body + 16;
+        var w = Writer(spec, style);
+        ChartSvg.Begin(w, spec.Width, height, spec.Title, description);
+        var y = 78 + w.Head + 12;
+        if (days.Count == 0) w.Text(24, y, "Nothing scheduled", "class='lumen-muted' font-size='11'");
+        foreach (var (day, periods, events) in days)
+        {
+            w.Add($"<g class='lumen-day' data-day='{day:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, day))}'>");
+            var head = day.ToString("dddd d MMMM", Invariant);
+            w.Text(24, y, head, "class='lumen-agenda-day' font-size='12' font-weight='600'");
+            if (periods.Count > 0)
+            {
+                var headWide = ChartSvg.Wide(head) * 12 / 11 + 8;
+                w.Text(24 + headWide, y, Fit(string.Join(" · ", periods.Select(p => p.Name)), spec.Width - 48 - headWide, 10), "class='lumen-muted' font-size='10'");
+            }
+            y += 18;
+            foreach (var e in events)
+            {
+                var name = PlannerCalendar.Name(spec, e);
+                var word = e.Relevance switch { PlannerRelevance.Clash => " · clash", PlannerRelevance.Near => " · close", _ => "" };
+                w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
+                Marker(w, style, e, 26, y - 9);
+                w.Text(36, y, Fit(e.Name + (e.Region is null ? "" : " · " + e.Region) + word, spec.Width - 60, 11), "font-size='11'");
+                w.Add("</g>");
+                y += 18;
+            }
+            w.Add("</g>");
+            y += 10;
+        }
+        w.Add("</svg>");
+        return w.ToString();
+    }
 
     /// <summary>A day as a list: its date, its holidays and periods as muted lines, then a block for each event (46 high, 58 with a note)
     /// with its marker, name and a muted line of region, category, audience, status, relevance and who it is for in words.</summary>
