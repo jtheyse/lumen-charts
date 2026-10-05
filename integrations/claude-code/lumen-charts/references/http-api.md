@@ -42,7 +42,7 @@ An invalid chart or planner answers 400 with problem details naming the rule; ma
  "view":{"zoom":"Month","date":"2027-03-01"},"layout":"Wide"}
 ```
 
-`relevance` is `Other`, `Near` or `Clash`, `status` `Confirmed`, `Provisional` or `Cancelled`, `kind` `PublicHoliday`, `SchoolHoliday` or `Other`; an event may also send `note` (≤ 120 characters) and `url`. A filter sends `regions`, `categories`, `audiences`, `statuses` and `relevances`. The relevance is yours to decide: the planner draws what it is told.
+`relevance` is `Other`, `Near` or `Clash`, `status` `Confirmed`, `Provisional` or `Cancelled`, `kind` `PublicHoliday`, `SchoolHoliday` or `Other`; an event may also send `note` (≤ 120 characters) and `url`. A filter sends `regions`, `categories`, `audiences`, `statuses` and `relevances`. The relevance is yours to decide: the planner draws what it is told. A request takes at most 2000 events, 1000 periods and 500 regions, and a title, description or name of at most 200 characters; a list or item sent as `null`, or an undefined enum number, is answered 400 with the rule, like any other broken spec.
 
 ## Your own endpoints
 

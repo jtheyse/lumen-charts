@@ -7,7 +7,8 @@ public enum PeriodKind
     PublicHoliday,
     /// <summary>A school holiday: a band along the top of its days.</summary>
     SchoolHoliday,
-    /// <summary>Anything else worth seeing when choosing a date, such as exam weeks or a large external event.</summary>
+    /// <summary>Anything else worth seeing when choosing a date, such as exam weeks or a large external event: a dotted band under
+    /// the school holiday's in the year, over the weekend's slot in the narrow year, and its name written in the month.</summary>
     Other
 }
 
@@ -24,6 +25,8 @@ public enum PlannerStatus
 
 /// <summary>How strongly an event competes with the viewer's plans, as the host decides it; the planner draws it by weight and
 /// dash and says it in words, never by colour alone.</summary>
+/// <remarks>The values are in order of severity, least first: a day lists its events most severe first by this order, so a value
+/// added later must be placed, and numbered, deliberately where its severity puts it.</remarks>
 public enum PlannerRelevance
 {
     /// <summary>Unrelated: drawn thin and muted.</summary>
@@ -133,9 +136,9 @@ public sealed record PlannerRequest(PlannerSpec Spec, PlannerView? View = null, 
 /// <summary>A planner: a period of days with weekends, holidays and events by region, drawn by <see cref="PlannerSvg.Render"/>.</summary>
 public sealed record PlannerSpec
 {
-    /// <summary>The heading and the drawing's accessible name.</summary>
+    /// <summary>The heading and the drawing's accessible name; at most 200 characters.</summary>
     public string Title { get; init; } = "Planner";
-    /// <summary>A line under the title, also said.</summary>
+    /// <summary>A line under the title, also said; at most 200 characters, empty but not null.</summary>
     public string Description { get; init; } = "";
     /// <summary>The first day shown.</summary>
     public DateOnly From { get; init; }
@@ -145,11 +148,11 @@ public sealed record PlannerSpec
     public DayOfWeek WeekStart { get; init; } = DayOfWeek.Monday;
     /// <summary>The weekend days: Saturday and Sunday by default.</summary>
     public IReadOnlyList<DayOfWeek> Weekend { get; init; } = [DayOfWeek.Saturday, DayOfWeek.Sunday];
-    /// <summary>The regions periods and events refer to.</summary>
+    /// <summary>The regions periods and events refer to: at most 500, each name at most 200 characters.</summary>
     public IReadOnlyList<PlannerRegion> Regions { get; init; } = [];
-    /// <summary>Holidays and other periods.</summary>
+    /// <summary>Holidays and other periods: at most 1000, each name at most 200 characters.</summary>
     public IReadOnlyList<PlannerPeriod> Periods { get; init; } = [];
-    /// <summary>The events.</summary>
+    /// <summary>The events: at most 2000, each name at most 200 characters.</summary>
     public IReadOnlyList<PlannerEvent> Events { get; init; } = [];
     /// <summary>Which periods and events to show; null for all.</summary>
     public PlannerFilter? Filter { get; init; }

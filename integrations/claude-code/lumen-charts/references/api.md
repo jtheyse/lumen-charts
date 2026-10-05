@@ -187,19 +187,19 @@ All in `Lumen.Charts` (0.43.0), immutable records like the chart specs: build wi
 | `PlannerPeriod(From, To, Name, Kind, Region = null)` | A holiday or other run of days; `To` null is one day; `Region` null is everywhere, else it applies to that region and every region below it. |
 | `PlannerEvent(Id, Name, Start)` | Plus `End` (null: one day), `Region` (null shows under every region), `Category`, `Audience` (free text, filtered on and said in its name), `Status`, `Relevance`, `Mine`, `Note` (≤ 120 characters, said in its name and the day view), `Url` (for the host; the static drawing does not follow it). `Id` is unique and given back when selected; the event must overlap the period. |
 | `PlannerFilter` | `Regions`, `Categories`, `Audiences`, `Statuses`, `Relevances`: lists, empty meaning every value. A region includes those below it, and a period or event set for a region above the filtered one still shows (a country's holiday under a province). |
-| `PlannerView(Zoom, Date)` | `PlannerView.WholePeriod`, `PlannerView.Month(year, month)`, `PlannerView.Day(date)`; it must lie inside the period. |
+| `PlannerView(Zoom, Date)` | `PlannerView.WholePeriod`, `PlannerView.Month(year, month)`, `PlannerView.Day(date)`; a month must overlap the period, a day must lie inside it. |
 | `PlannerRequest(Spec, View = null, Layout = Wide)` | The body of `POST /api/charts/planner/svg`; a null `View` is the whole period. |
-| `PeriodKind` | `PublicHoliday` (a diamond on its day, counted towards long weekends), `SchoolHoliday` (a band along the top of its days), `Other`. |
+| `PeriodKind` | `PublicHoliday` (a diamond on its day, counted towards long weekends), `SchoolHoliday` (a band along the top of its days), `Other` (exams, a large outside event: a dotted band under the school band in the year and over the weekend's slot in the narrow year, its name written in the month; said "period"). |
 | `PlannerStatus` | `Confirmed` (solid), `Provisional` (outline and hatching, said "provisional"), `Cancelled` (outline and a strike line, said "cancelled"; counts as neither clash nor close). |
-| `PlannerRelevance` | `Other` (thin, muted), `Near` (dashed, said "close"), `Clash` (bold, said "clash"): the host's own judgement for the viewer; the planner never computes it. |
+| `PlannerRelevance` | `Other` (thin, muted), `Near` (dashed, said "close"), `Clash` (bold, said "clash"): the host's own judgement for the viewer; the planner never computes it. The order is severity, least first. |
 | `PlannerZoom` | `Year`, `Month`, `Day`. |
 | `PlannerLayout` | `Wide` (months aligned by weekday on 37 columns; a month as a grid of weeks) and `Narrow` (a bar of weekend slots per month with a month summary; a month as an agenda of the days that hold something) for a box under 640 px. The day is one drawing in both. |
 
 | Member | Returns |
 |---|---|
-| `PlannerSvg.Render(spec, view, layout = Wide)` | An accessible SVG string; checks the spec and the view first and throws `ArgumentException` saying why. Every event is a focusable `role=button` mark named in words (`data-event` holds its id); each day and week is a named `role=group`; each `+N` is `role=img` naming what it hid. Text is 10–12 units: render `Width` equal to the box's CSS width. |
+| `PlannerSvg.Render(spec, view, layout = Wide)` | An accessible SVG string; checks the spec and the view first and throws `ArgumentException` saying why. Every event is a focusable `role=button` mark named in words (`data-event` holds its id); each day and week is a named `role=group`; each `+N` is `role=img` naming what it hid. The root carries the class `lumen-planner`; a focused line of words is ringed in the text colour, its words unstroked. Text is 10–12 units: render `Width` equal to the box's CSS width. |
 | `PlannerSvg.Table(spec, year, month)` | The month as an HTML `<table class="lumen-planner-table">` for static pages and screen readers: caption, a column per weekday, a row per week, each cell its day's holidays and events in words. |
-| `PlannerValidation.Validate(spec)` / `Validate(spec, view)` | Throws `ArgumentException` naming the rule; `PlannerValidation.MaxDays` is 400. |
+| `PlannerValidation.Validate(spec)` / `Validate(spec, view)` | Throws `ArgumentException` naming the rule, a null list or item and an undefined enum value included; `PlannerValidation.MaxDays` is 400, `MaxEvents` 2000, `MaxPeriods` 1000, `MaxRegions` 500, `MaxText` (a title, description or name) 200 characters and `MaxNote` 120. |
 
 A cancelled event counts as neither clash nor close in any busy count (the wide year's weeks, the narrow year's slots and month summaries). Words clear 4.5:1 and marks 3:1 in Light, Dark and Midnight; run `style.ContrastIssues()` on a style of your own.
 
