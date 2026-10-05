@@ -8716,6 +8716,15 @@ Test("Planner day view: the drawing is as tall as its content, whatever the desc
         Check(Y(date)-11>above,$"the date at {Y(date)} under text at {above}");
     }
 });
+Test("Planner day view: a 60-character period name is cut with … to stay inside a 340-wide drawing, and whole in the day's name",()=>{
+    var name=new string('P',60);
+    var spec=PlanYear(s=>s with{Width=340,Periods=[..s.Periods,new(new(2027,6,5),null,name,PeriodKind.PublicHoliday,"ZA")]});
+    var doc=PlanSvg(spec,PlannerView.Day(new(2027,6,5)));
+    var line=doc.Descendants(ns+"text").Single(t=>t.Value.StartsWith("PPP"));
+    Check(line.Value.EndsWith("…"),line.Value);
+    Check(Lumen.Charts.ChartSvg.Wide(line.Value)<=340-48,$"'{line.Value}' is {Lumen.Charts.ChartSvg.Wide(line.Value):0} wide");
+    Check(doc.Descendants().Single(e=>(string?)e.Attribute("class")=="lumen-day").Attribute("aria-label")!.Value.Contains($"{name} (public holiday)"));
+});
 Test("Planner day view: every word clears 4.5:1 and every marker 3:1 against the background in Light, Dark and Midnight, and the render is byte-stable",()=>{
     foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight}){
         var spec=PlanYear(s=>s with{Style=style,

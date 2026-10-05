@@ -343,7 +343,7 @@ public static class PlannerSvg
         w.Add($"<g class='lumen-day' data-day='{day:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, day))}'>");
         w.Text(24, y, PlannerCalendar.Day(day), "font-size='15' font-weight='600'");
         y += 20;
-        foreach (var p in periods) { w.Text(24, y, $"{p.Name} ({PlannerCalendar.KindWords(p.Kind)})", "class='lumen-muted' font-size='11'"); y += 16; }
+        foreach (var p in periods) { w.Text(24, y, Fit($"{p.Name} ({PlannerCalendar.KindWords(p.Kind)})", spec.Width - 48, 11), "class='lumen-muted' font-size='11'"); y += 16; }
         if (events.Count == 0) w.Text(24, y + 4, "No events", "class='lumen-muted' font-size='11'");
         foreach (var e in events)
         {
