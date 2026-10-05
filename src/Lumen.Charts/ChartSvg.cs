@@ -387,15 +387,15 @@ public static partial class ChartSvg
     /// too wide. A chart's description too wide for one line goes on over a second, as <see cref="Wrap"/> sets it, and the chart's body
     /// moves down by that line. With <paramref name="wrap"/>, a graph's description of clauses parted by <c> · </c> that is too wide,
     /// as its own may be on a phone, goes on over a second line as it always has: as many clauses as fit on the first and the rest
-    /// on the second.</summary>
-    internal static void Begin(SvgWriter w, int width, int height, string title, string description, bool wrap = false)
+    /// on the second. <paramref name="kind"/> adds a class to the root, as the planner does to scope its own style.</summary>
+    internal static void Begin(SvgWriter w, int width, int height, string title, string description, bool wrap = false, string? kind = null)
     {
         var style = w.Style;
         // A chart fills the width of its box. A sparkline is shown at its own width, as a word is, and never wider than its box.
         var shown = w.Bare ? $"width:{width}px;max-width:100%" : "width:100%";
         // Left unpainted, the drawing carries its background colour, which its halos are drawn in, for a host's script to read instead.
         var ground = w.Painted ? $"background:{style.Background}" : $"--lumen-ground:{style.Background}";
-        w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{style.Grid};--lumen-muted:{style.Muted};{shown};height:auto;display:block;{ground};color:{style.Text};font-family:{style.FontFamily};font-size:12px' fill='currentColor'>");
+        w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg{(kind is null ? "" : " " + kind)}' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{style.Grid};--lumen-muted:{style.Muted};{shown};height:auto;display:block;{ground};color:{style.Text};font-family:{style.FontFamily};font-size:12px' fill='currentColor'>");
         w.Add($"<title>{SvgWriter.E(title)}</title><desc>{SvgWriter.E(description)}</desc>");
         // A refined line marker is drawn but transparent, so it is hovered and focused where a visible one would be, and
         // appears while it is.

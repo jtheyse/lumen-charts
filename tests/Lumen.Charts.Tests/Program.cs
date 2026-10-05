@@ -9065,6 +9065,27 @@ Test("Planner month view: a cancelled clash or close event says \"cancelled\" on
     var lines=PlanMarks(PlanSvg(spec,PlannerView.Month(2027,6))).Select(m=>m.Descendants(ns+"text").Single().Value).ToArray();
     Check(lines.SequenceEqual(["Called Off · cancelled","Still On · clash","Called Off Close · cancelled"]),string.Join(" | ",lines));
 });
+Test("Planner: a focused line keeps its words unstroked and is ringed, in its own scoped style, while charts keep theirs",()=>{
+    var spec=PlanYear(s=>s with{Events=[..s.Events,new("n","Freedom Ride",new(2027,3,13)){Note="Invented note"}]});
+    foreach(var (view,layout,ringed) in new[]{(PlannerView.WholePeriod,PlannerLayout.Wide,false),(PlannerView.Month(2027,3),PlannerLayout.Wide,true),(PlannerView.Month(2027,3),PlannerLayout.Narrow,true),(PlannerView.Day(new(2027,3,13)),PlannerLayout.Wide,true),(PlannerView.WholePeriod,PlannerLayout.Narrow,false)}){
+        var doc=PlanSvg(spec,view,layout);
+        Check(((string?)doc.Root!.Attribute("class")??"").Split(' ').SequenceEqual(["lumen-svg","lumen-planner"]),$"{view.Zoom} {layout}: root class {(string?)doc.Root.Attribute("class")}");
+        var style=string.Concat(doc.Root.Elements(ns+"style").Select(s=>s.Value));
+        Check(style.Contains(".lumen-planner .lumen-datum:focus text{stroke:none}")&&style.Contains(".lumen-planner .lumen-datum:focus .lumen-focus{stroke:currentColor;stroke-width:2}"),$"{view.Zoom} {layout}: {style}");
+        foreach(var mark in PlanMarks(doc)){
+            var ring=mark.Elements(ns+"rect").SingleOrDefault(r=>(string?)r.Attribute("class")=="lumen-focus");
+            Check(ringed==(ring is not null),$"{view.Zoom} {layout}: ring {(ring is null?"missing":"present")} on {(string?)mark.Attribute("data-event")}");
+            if(ring is null)continue;
+            Check((string?)ring.Attribute("stroke")=="none"&&(string?)ring.Attribute("fill")=="none","the ring shows before focus");
+            double A(XElement e,string name)=>double.Parse((string?)e.Attribute(name)??"0",CultureInfo.InvariantCulture);
+            // Every word of the line, from its baseline up to its size, lies inside the ring.
+            foreach(var t in mark.Elements(ns+"text"))
+                Check(A(ring,"x")<=A(t,"x")&&A(t,"x")<A(ring,"x")+A(ring,"width")&&A(ring,"y")<=A(t,"y")-A(t,"font-size")&&A(t,"y")<=A(ring,"y")+A(ring,"height"),$"{view.Zoom} {layout}: '{t.Value}' at {A(t,"x")},{A(t,"y")} outside its ring");
+        }
+    }
+    var chart=ChartSvg.Render(Spec());
+    Check(chart.Contains("class='lumen-svg' ")&&!chart.Contains("lumen-planner")&&chart.Contains(".lumen-svg .lumen-datum:focus{stroke:currentColor;stroke-width:3}"),"a chart's root or focus style moved");
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

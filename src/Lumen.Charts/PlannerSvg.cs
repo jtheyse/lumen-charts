@@ -30,6 +30,26 @@ public static class PlannerSvg
     private static SvgWriter Writer(PlannerSpec spec, ChartStyle style) =>
         new() { Style = style, Painted = spec.PaintBackground, Titled = spec.DrawTitles };
 
+    /// <summary>The planner's own style, scoped by its root's class: the charts' focus stroke would thicken a focused line's words into
+    /// a blot, so they keep no stroke, and a ring round the line in the text colour shows the focus instead.</summary>
+    internal const string FocusStyle = "<style>.lumen-planner .lumen-datum:focus text{stroke:none}.lumen-planner .lumen-datum:focus .lumen-focus{stroke:currentColor;stroke-width:2}</style>";
+
+    /// <summary>Opens a planner drawing: the charts' opening with the planner's class on its root, then <see cref="FocusStyle"/>.</summary>
+    private static void Open(SvgWriter w, int width, int height, string title, string description)
+    {
+        ChartSvg.Begin(w, width, height, title, description, kind: "lumen-planner");
+        w.Add(FocusStyle);
+    }
+
+    /// <summary>Opens an event's focusable group, named in words; with a ring, the box (x, y, width, height) its focus is drawn round,
+    /// for a line of words whose own shapes would not show it.</summary>
+    private static void Datum(SvgWriter w, PlannerIndex plan, PlannerEvent e, (double X, double Y, double Width, double Height)? ring = null)
+    {
+        var name = plan.Name(e);
+        w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
+        if (ring is { } r) w.Add($"<rect class='lumen-focus' x='{N(r.X)}' y='{N(r.Y)}' width='{N(r.Width)}' height='{N(r.Height)}' rx='2' fill='none' stroke='none'{w.Fixed}/>");
+    }
+
     private static string Year(PlannerSpec spec, PlannerIndex plan, ChartStyle style)
     {
         var months = PlannerCalendar.Months(spec);
@@ -38,7 +58,7 @@ public static class PlannerSvg
         // Height is fixed by content; Begin draws the titles and sets Head, which Head(spec) works out beforehand.
         var height = (int)Math.Ceiling(78 + Head(spec) + HeaderH + months.Count * RowH + 8 + legend * 18 + 16);
         var w = Writer(spec, style);
-        ChartSvg.Begin(w, width, height, spec.Title, spec.Description);
+        Open(w, width, height, spec.Title, spec.Description);
         var top = 78 + w.Head;
         var col = (width - Left - Right) / PlannerCalendar.Columns;
         // Weekday initials along the top.
@@ -141,8 +161,7 @@ public static class PlannerSvg
     /// <summary>One event's mark: a focusable group named in words around the stripe <see cref="Shapes"/> draws.</summary>
     private static void Stripe(SvgWriter w, PlannerIndex plan, ChartStyle style, PlannerEvent e, double x, double y, double width)
     {
-        var name = plan.Name(e);
-        w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
+        Datum(w, plan, e);
         Shapes(w, style, e, x, y, width);
         w.Add("</g>");
     }
@@ -237,7 +256,7 @@ public static class PlannerSvg
         var months = PlannerCalendar.Months(spec);
         var height = 78 + Head(spec) + months.Count * 34 + LegendLines(spec.Width) * 18 + 24;
         var w = Writer(spec, style);
-        ChartSvg.Begin(w, spec.Width, height, spec.Title, spec.Description);
+        Open(w, spec.Width, height, spec.Title, spec.Description);
         var top = 78 + w.Head;
         var holidays = plan.Periods;
         var all = plan.Events;
@@ -300,7 +319,7 @@ public static class PlannerSvg
         // The month leads the description, so its room is worked out on that longer line.
         var height = (int)Math.Ceiling(78 + Head(spec with { Description = description }) + 20 + weeks * CellH + LegendLines(spec.Width) * 18 + 24);
         var w = Writer(spec, style);
-        ChartSvg.Begin(w, spec.Width, height, spec.Title, description);
+        Open(w, spec.Width, height, spec.Title, description);
         var top = 78 + w.Head;
         var col = (spec.Width - 48) / 7.0;
         for (var c = 0; c < 7; c++)
@@ -332,8 +351,7 @@ public static class PlannerSvg
                 var word = Word(e);
                 var dayOf = span > 1 ? $" · day {d.DayNumber - e.Start.DayNumber + 1} of {span}" : "";
                 var region = e.Region is null ? "" : " · " + e.Region;
-                var name = plan.Name(e);
-                w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
+                Datum(w, plan, e, (x + 3, ly - 11, col - 6, 14));
                 Marker(w, style, e, x + 6, ly - 9);
                 // The region comes last: where the cell is narrow it is cut first, and it is said whole in the name and the day view.
                 w.Text(x + 14, ly, Fit(e.Name + word + dayOf + region, col - 20, 10), "font-size='10'");
@@ -425,7 +443,7 @@ public static class PlannerSvg
         // month-led line Begin draws.
         var height = 78 + Head(spec with { Description = description }) + body + 16;
         var w = Writer(spec, style);
-        ChartSvg.Begin(w, spec.Width, height, spec.Title, description);
+        Open(w, spec.Width, height, spec.Title, description);
         var y = 78 + w.Head + 12;
         if (days.Count == 0) w.Text(24, y, "Nothing scheduled", "class='lumen-muted' font-size='11'");
         foreach (var (day, periods, events) in days)
@@ -441,9 +459,8 @@ public static class PlannerSvg
             y += 18;
             foreach (var e in events)
             {
-                var name = plan.Name(e);
                 var word = Word(e);
-                w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
+                Datum(w, plan, e, (22, y - 12, spec.Width - 44, 16));
                 Marker(w, style, e, 26, y - 9);
                 w.Text(36, y, Fit(e.Name + (e.Region is null ? "" : " · " + e.Region) + word, spec.Width - 60, 11), "font-size='11'");
                 w.Add("</g>");
@@ -465,7 +482,7 @@ public static class PlannerSvg
         var body = 30 + periods.Count * 16 + (events.Count == 0 ? 20 : events.Sum(Block));
         var height = (int)Math.Ceiling(78 + Head(spec) + body + 16);
         var w = Writer(spec, style);
-        ChartSvg.Begin(w, spec.Width, height, spec.Title, spec.Description);
+        Open(w, spec.Width, height, spec.Title, spec.Description);
         double y = 78 + w.Head + 14;
         w.Add($"<g class='lumen-day' role='group' data-day='{Iso(day)}' aria-label='{E(plan.DayName(day))}'>");
         w.Text(24, y, PlannerCalendar.Day(day), "font-size='15' font-weight='600'");
@@ -474,8 +491,7 @@ public static class PlannerSvg
         if (events.Count == 0) w.Text(24, y + 4, "No events", "class='lumen-muted' font-size='11'");
         foreach (var e in events)
         {
-            var name = plan.Name(e);
-            w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
+            Datum(w, plan, e, (20, y + 1, spec.Width - 40, Block(e) - 8));
             Marker(w, style, e, 24, y + 4);
             w.Text(34, y + 14, Fit(e.Name, spec.Width - 58, 13), "font-size='13' font-weight='600'");
             var facts = new[]

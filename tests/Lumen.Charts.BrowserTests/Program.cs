@@ -686,6 +686,23 @@ if (await page.Locator("#planner").CountAsync() > 0)
         await page.Locator("#planner details summary").ClickAsync();
         Check(await page.Locator("#planner table td").CountAsync() >= 31);
     });
+    // The charts' focus stroke would thicken a focused line's words into a blot: the planner keeps its words unstroked and rings the line.
+    await Test("Planner: a focused month line keeps its words unstroked and shows a ring in the text colour", async () =>
+    {
+        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1440, Height = 900 } });
+        var tab = await context.NewPageAsync();
+        await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+        var m = (await tab.EvaluateAsync<string>(@"() => {
+            const g = [...document.querySelectorAll('#planner .planner-wide svg .lumen-datum')].find(g => g.querySelector('text') && g.querySelector('.lumen-focus'));
+            if (!g) return 'none found';
+            const ring = g.querySelector('.lumen-focus'), before = getComputedStyle(ring).stroke;
+            g.focus();
+            const text = g.querySelector('text'), after = getComputedStyle(ring);
+            return [document.activeElement === g, getComputedStyle(text).stroke, before, after.stroke, after.strokeWidth, after.stroke === getComputedStyle(g.ownerSVGElement).color].join('|'); }")).Split('|');
+        Check(m.Length == 6 && m[0] == "true", string.Join("|", m));
+        Check(m[1] == "none", $"the focused line's words are stroked {m[1]}");
+        Check(m[2] == "none" && m[3] != "none" && m[4] == "2px" && m[5] == "true", $"the ring is {m[2]} before focus and {m[3]} {m[4]} after");
+    });
     // A phone, a tablet either way round, and two desktops: the drawing for the section's width, its words at 9 pixels or more. The
     // phone gets the narrow layout and a portrait tablet's 512-pixel section the grids, whatever else the gallery's layout does.
     foreach (var (width, height, phone, must) in new[] { (375, 812, true, "narrow"), (768, 1024, false, "medium"), (1024, 768, false, null), (1280, 900, false, null), (1440, 900, false, null) })
