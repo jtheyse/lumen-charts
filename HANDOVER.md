@@ -45,11 +45,11 @@ Where it stands (4 October 2026):
 | #7 ride channels | 0.37.0 | live (same deploy) |
 | #9 season arc, #10 gap to the leader | 0.38.0 | live (same deploy) |
 | #12 effort zones, #14 score bars | 0.39.0 | live (same deploy) |
-| #11 best efforts, #13 heart rate per lap | 0.40.0 | live on production API and Web (c39bfa83, 4 Oct 2026 22:14, Lumen 0.42); Perform's FitLab still on 0.39 until the owner deploys Perform |
+| #11 best efforts, #13 heart rate per lap | 0.40.0 | live on production API and Web (c39bfa83, 4 Oct 2026 22:14, Lumen 0.42) and Perform's FitLab (894f498f, Lumen 0.42) |
 | #15 team rider share | 0.42.0 | live on production Web (c39bfa83, 4 Oct 2026 22:14) |
 | Season planner (owner's request, 5 Oct 2026) | 0.43.0 static; 0.44.0 interactive | not started in Race Face (needs its own spec) |
 | #16–#20 (P3) | from 0.45.0 | — |
-Production Race Face API and Web run Lumen 0.42 (c39bfa83); Perform runs 0.39 until the owner says "deploy Perform".
+Last confirmed production (5 Oct 2026): API and Web c39bfa83 and Perform 894f498f, all on Lumen 0.42; Web has been deployed again since by other sessions. Race Face's local master moved to Lumen 0.43.0 at 63391ce2 (package-only, not pushed or deployed). Perform consumes the shared `RaceSense.Components` project, so it moves with every Lumen bump; deploying it stays the owner's call.
 
 **After each release** the owner wants the Claude session **"RACEFACE RUNNING EXPANSION 2"** told to upgrade: `SendMessage` to that name (check `ListAgents` first). The message gives the release URL, what it adds for which charts, and steps:
 1. Refresh the skill: `git -C "D:/CHATGPT/.NET GRAPH API" archive vX.Y.Z integrations/claude-code/lumen-charts | tar -x --strip-components=2 -C ~/.claude/skills`.
