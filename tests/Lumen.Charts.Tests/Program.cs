@@ -8687,6 +8687,67 @@ Test("Planner month view: every word clears 4.5:1 and every mark 3:1 against its
         }
     }
 });
+Test("Planner day view: the day's holidays, then every event with its region's full name, category, audience, status and relevance in words",()=>{
+    var spec=PlanYear(s=>s with{Events=[..s.Events,new("e4","Freedom Ride",new(2027,4,27)){Region="ZA-GP",Note="Invented charity ride",Mine=true}]});
+    var doc=PlanSvg(spec,PlannerView.Day(new(2027,4,27)));
+    var words=doc.Descendants(ns+"text").Select(t=>t.Value).ToArray();
+    Check(words.Contains("Tuesday 27 April 2027")&&words.Any(w=>w=="Freedom Day (public holiday)"),string.Join(" | ",words));
+    Check(words.Contains("Freedom Ride")&&words.Any(w=>w.StartsWith("Gauteng")&&w.Contains("yours"))&&words.Contains("Invented charity ride"),string.Join(" | ",words));
+    Check(PlanMarks(doc).Single().Attribute("aria-label")!.Value.StartsWith("Freedom Ride, Tuesday 27 April 2027, Gauteng"));
+});
+Test("Planner day view: a day with nothing says so, and empty optional fields leave no stray separators",()=>{
+    var doc=PlanSvg(PlanYear(s=>s with{Events=[new("b","Bare",new(2027,6,5))]}),PlannerView.Day(new(2027,6,6)));
+    Check(doc.Descendants(ns+"text").Any(t=>t.Value=="No events"));
+    var bare=PlanSvg(PlanYear(s=>s with{Events=[new("b","Bare",new(2027,6,5))]}),PlannerView.Day(new(2027,6,5)));
+    Check(!bare.Descendants(ns+"text").Any(t=>t.Value.Contains(" ·  ")||t.Value.StartsWith(" · ")||t.Value.EndsWith(" · ")));
+});
+Test("Planner day view: the drawing is as tall as its content, whatever the description's lines and titles, and the date sits below them",()=>{
+    var wordy=string.Join(" ",Enumerable.Repeat("Invented organizers' events across regions",5));
+    foreach(var (description,titles) in new[]{("Short",true),(wordy,true),(wordy,false)}){
+        var spec=PlanYear(s=>s with{Description=description,DrawTitles=titles,Periods=[..s.Periods,new(new(2027,4,27),null,"Invented Tuesday",PeriodKind.Other)],
+            Events=[new("a","With note",new(2027,4,27)){Note="A note"},new("b","Without",new(2027,4,27)){Category="Road"},new("c","Two days",new(2027,4,26)){End=new DateOnly(2027,4,27)}]});
+        var doc=PlanSvg(spec,PlannerView.Day(new(2027,4,27)));
+        double Y(XElement t)=>double.Parse(t.Attribute("y")!.Value,CultureInfo.InvariantCulture);
+        var height=double.Parse(doc.Root!.Attribute("viewBox")!.Value.Split(' ')[3],CultureInfo.InvariantCulture);
+        var lowest=doc.Descendants(ns+"text").Max(Y);
+        Check(lowest+6<=height&&lowest+30>=height,$"lowest word at {lowest} in a drawing {height} high (titles {titles}, description {description.Length} characters)");
+        var date=doc.Descendants(ns+"text").Single(t=>t.Value=="Tuesday 27 April 2027");
+        var above=doc.Root!.Elements(ns+"text").Select(Y).DefaultIfEmpty(0).Max();
+        Check(Y(date)-11>above,$"the date at {Y(date)} under text at {above}");
+    }
+});
+Test("Planner day view: every word clears 4.5:1 and every marker 3:1 against the background in Light, Dark and Midnight, and the render is byte-stable",()=>{
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight}){
+        var spec=PlanYear(s=>s with{Style=style,
+            Periods=[..s.Periods,new(new(2027,4,27),null,"Invented Tuesday",PeriodKind.Other),new(new(2027,4,26),new DateOnly(2027,4,28),"Invented break",PeriodKind.SchoolHoliday,"ZA")],
+            Events=[
+                new("a","Clash Ride",new(2027,4,27)){Relevance=PlannerRelevance.Clash,Region="ZA-GP",Category="XCO",Audience="Kids",Note="Invented note"},
+                new("b","Close Ride",new(2027,4,27)){Relevance=PlannerRelevance.Near},
+                new("c","Other Ride",new(2027,4,27)),
+                new("d","Called Off",new(2027,4,27)){Status=PlannerStatus.Cancelled,Relevance=PlannerRelevance.Clash},
+                new("e","Called Off Other",new(2027,4,27)){Status=PlannerStatus.Cancelled},
+                new("f","Pencilled Close",new(2027,4,27)){Status=PlannerStatus.Provisional,Relevance=PlannerRelevance.Near},
+                new("g","Pencilled Other",new(2027,4,27)){Status=PlannerStatus.Provisional},
+                new("h","Our Enduro",new(2027,4,26)){End=new DateOnly(2027,4,28),Mine=true,Relevance=PlannerRelevance.Clash},
+                new("i","Our Quiet Ride",new(2027,4,27)){Mine=true}]});
+        var svg=PlannerSvg.Render(spec,PlannerView.Day(new(2027,4,27)));
+        Check(svg==PlannerSvg.Render(spec,PlannerView.Day(new(2027,4,27))),"the render is not byte-stable");
+        var doc=XDocument.Parse(svg);
+        var texts=doc.Descendants(ns+"text").ToArray();
+        Check(texts.Count(t=>((string?)t.Attribute("class")??"").Split(' ').Contains("lumen-muted"))>=9,"too few muted lines to check");
+        foreach(var t in texts){
+            var ink=(string?)t.Attribute("fill")??(((string?)t.Attribute("class")??"").Split(' ').Contains("lumen-muted")?style.Muted:style.Text);
+            Check(Lumen.Charts.Contrast.Ratio(ink,style.Background)>=4.5,$"'{t.Value}' in {ink} on {style.Background}: {Lumen.Charts.Contrast.Ratio(ink,style.Background):0.00}");
+        }
+        var markers=doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("class")=="lumen-datum").SelectMany(g=>g.Elements()).Where(e=>e.Name==ns+"rect"||e.Name==ns+"line").ToArray();
+        Check(markers.Length>=14,$"{markers.Length} marker shapes to check");
+        foreach(var mark in doc.Descendants().Where(e=>e.Name==ns+"rect"||e.Name==ns+"path"||e.Name==ns+"line")){
+            Check(mark.Attribute("opacity") is null&&mark.Attribute("fill-opacity") is null&&mark.Attribute("stroke-opacity") is null,$"a faded mark: {mark}");
+            foreach(var paint in new[]{(string?)mark.Attribute("fill"),(string?)mark.Attribute("stroke")}.OfType<string>().Where(p=>p!="none"))
+                Check(Lumen.Charts.Contrast.Ratio(paint,style.Background)>=3,$"{mark.Name.LocalName} in {paint} on {style.Background}: {Lumen.Charts.Contrast.Ratio(paint,style.Background):0.00}");
+        }
+    }
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

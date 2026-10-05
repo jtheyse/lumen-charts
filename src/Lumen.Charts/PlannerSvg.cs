@@ -328,5 +328,44 @@ public static class PlannerSvg
         return b.ToString();
     }
     private static string Agenda(PlannerSpec spec, ChartStyle style, int year, int month) => throw new NotImplementedException("Task 6");
-    private static string DayList(PlannerSpec spec, ChartStyle style, DateOnly day) => throw new NotImplementedException("Task 5");
+
+    /// <summary>A day as a list: its date, its holidays and periods as muted lines, then a block for each event (46 high, 58 with a note)
+    /// with its marker, name and a muted line of region, category, audience, status, relevance and who it is for in words.</summary>
+    private static string DayList(PlannerSpec spec, ChartStyle style, DateOnly day)
+    {
+        var (periods, events) = PlannerCalendar.On(spec, day);
+        double Block(PlannerEvent e) => string.IsNullOrWhiteSpace(e.Note) ? 46 : 58;
+        var body = 30 + periods.Count * 16 + (events.Count == 0 ? 20 : events.Sum(Block));
+        var height = (int)Math.Ceiling(78 + Head(spec) + body + 16);
+        var w = Writer(spec, style);
+        ChartSvg.Begin(w, spec.Width, height, spec.Title, spec.Description);
+        double y = 78 + w.Head + 14;
+        w.Add($"<g class='lumen-day' data-day='{day:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, day))}'>");
+        w.Text(24, y, PlannerCalendar.Day(day), "font-size='15' font-weight='600'");
+        y += 20;
+        foreach (var p in periods) { w.Text(24, y, $"{p.Name} ({PlannerCalendar.KindWords(p.Kind)})", "class='lumen-muted' font-size='11'"); y += 16; }
+        if (events.Count == 0) w.Text(24, y + 4, "No events", "class='lumen-muted' font-size='11'");
+        foreach (var e in events)
+        {
+            var name = PlannerCalendar.Name(spec, e);
+            w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
+            Marker(w, style, e, 24, y + 4);
+            w.Text(34, y + 14, Fit(e.Name, spec.Width - 58, 13), "font-size='13' font-weight='600'");
+            var facts = new[]
+            {
+                PlannerCalendar.RegionName(spec, e.Region), e.Category, e.Audience,
+                e.Status switch { PlannerStatus.Provisional => "provisional", PlannerStatus.Cancelled => "cancelled", _ => null },
+                e.Relevance switch { PlannerRelevance.Clash => "clash", PlannerRelevance.Near => "close", _ => null },
+                e.Mine ? "yours" : null,
+                e.End is { } end && end != e.Start ? PlannerCalendar.Span(e.Start, end) : null
+            }.Where(f => !string.IsNullOrWhiteSpace(f));
+            var line = string.Join(" · ", facts);
+            if (line.Length > 0) w.Text(34, y + 30, Fit(line, spec.Width - 58, 11), "class='lumen-muted' font-size='11'");
+            if (!string.IsNullOrWhiteSpace(e.Note)) w.Text(34, y + 44, Fit(e.Note!, spec.Width - 58, 11), "font-size='11'");
+            w.Add("</g>");
+            y += Block(e);
+        }
+        w.Add("</g></svg>");
+        return w.ToString();
+    }
 }
