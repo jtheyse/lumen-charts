@@ -8819,6 +8819,20 @@ Test("Planner: every named group, a day's or a week's as well as an event's, has
         Check(bare.Length==0,$"{view.Zoom} {layout}: {bare.Length} named groups without a role, the first {(string?)bare.FirstOrDefault()?.Attribute("class")}");
     }
 });
+Test("Planner: a day too full to draw whole writes \"+N\" with a role that permits its name, in the year and the month",()=>{
+    // Five events on one day: the year draws three lanes and "+2", the month three lines and "+2 more".
+    var spec=PlanYear(s=>s with{Events=[..s.Events,..Enumerable.Range(0,5).Select(i=>new PlannerEvent($"f{i}",$"Invented full {i}",new(2027,3,10)))]});
+    foreach(var view in new[]{PlannerView.WholePeriod,PlannerView.Month(2027,3)})
+    {
+        var doc=PlanSvg(spec,view,PlannerLayout.Wide);
+        Check(doc.Descendants(ns+"text").Any(t=>((string?)t.Attribute("class")??"").Split(' ').Contains("lumen-more")),$"{view.Zoom}: no +N to check");
+        var bare=doc.Descendants().Where(e=>e.Attribute("aria-label") is not null&&e.Attribute("role") is null).ToArray();
+        Check(bare.Length==0,$"{view.Zoom}: {bare.Length} named elements without a role, the first {bare.FirstOrDefault()?.Name.LocalName} {(string?)bare.FirstOrDefault()?.Attribute("class")}");
+    }
+    // The month's "+N more" keeps its tooltip on the group around it.
+    var more=PlanSvg(spec,PlannerView.Month(2027,3),PlannerLayout.Wide).Descendants(ns+"text").Single(t=>((string?)t.Attribute("class")??"").Contains("lumen-more"));
+    Check((string?)more.Attribute("role")=="img"&&(string?)more.Parent!.Attribute("role")=="presentation"&&more.Parent.Element(ns+"title")?.Value==(string?)more.Attribute("aria-label"),"the tooltip left the +N more");
+});
 Test("Planner narrow layouts: each drawing is as tall as its content, whatever the description's lines and titles",()=>{
     var wordy=string.Join(" ",Enumerable.Repeat("Invented organizers' events across regions",5));
     foreach(var (description,titles) in new[]{("Short",true),(wordy,true),(wordy,false)}){

@@ -96,7 +96,7 @@ public static class PlannerSvg
             foreach (var (day, rest) in hidden)
             {
                 var label = $"{rest.Count} more on {PlannerCalendar.Day(day)}: {string.Join("; ", rest.Select(e => e.Name))}";
-                w.Add($"<text class='lumen-more' x='{N(X(day) + col / 2)}' y='{N(y + 44)}' font-size='10' text-anchor='middle' aria-label='{E(label)}'><title>{E(label)}</title>+{rest.Count}</text>");
+                w.Add($"<text class='lumen-more' role='img' x='{N(X(day) + col / 2)}' y='{N(y + 44)}' font-size='10' text-anchor='middle' aria-label='{E(label)}'><title>{E(label)}</title>+{rest.Count}</text>");
             }
             // Busy weeks: each week of the row is named with its clash and close events; a busy one writes its count. That count and
             // "+N" are written in the text colour, since they may stand on a weekend band, where the muted colour falls below 4.5:1.
@@ -336,7 +336,7 @@ public static class PlannerSvg
                 var rest = events.Skip(shown).ToArray();
                 var label = $"{rest.Length} more on {PlannerCalendar.Day(d)}: {string.Join("; ", rest.Select(e => e.Name))}";
                 // The tooltip sits on a presentational group, so the text's own value is just "+N more" and it is named once.
-                w.Add($"<g role='presentation'><title>{E(label)}</title><text class='lumen-more{(weekend ? "" : " lumen-muted")}' x='{N(x + 6)}' y='{N(y + 44 + shown * LineH)}' font-size='10' aria-label='{E(label)}'>+{rest.Length} more</text></g>");
+                w.Add($"<g role='presentation'><title>{E(label)}</title><text class='lumen-more{(weekend ? "" : " lumen-muted")}' role='img' x='{N(x + 6)}' y='{N(y + 44 + shown * LineH)}' font-size='10' aria-label='{E(label)}'>+{rest.Length} more</text></g>");
             }
             w.Add("</g>");
         }
