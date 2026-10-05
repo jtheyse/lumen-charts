@@ -8596,6 +8596,97 @@ Test("Planner: the legend says every pattern in words",()=>{
     foreach(var word in new[]{"clash","close","other","provisional","cancelled","yours","public holiday","school holiday","long weekend","weekend"})
         Check(words.Contains(word),$"the legend lacks '{word}'");
 });
+Test("Planner month view: a grid of weeks from Monday, each day's events stacked underneath each other with words",()=>{
+    // 1400 wide gives each day 193 units, room for "Coast Stage Race · day 2 of 3" before the region is cut.
+    var spec=PlanYear(s=>s with{Width=1400,Events=[..s.Events,new("e3","Club Ride",new(2027,3,13)){Region="ZA-GP",Relevance=PlannerRelevance.Near}]});
+    var doc=PlanSvg(spec,PlannerView.Month(2027,3));
+    var heads=doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("class")=="lumen-muted lumen-weekday").Select(t=>t.Value).ToArray();
+    Check(heads.SequenceEqual(["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]),string.Join(",",heads));
+    var day=doc.Descendants().Single(e=>(string?)e.Attribute("data-day")=="2027-03-13");
+    var lines=day.Descendants().Where(e=>(string?)e.Attribute("class")=="lumen-datum").Select(e=>e.Attribute("aria-label")!.Value).ToArray();
+    Check(lines.Length==3&&lines[0].StartsWith("Hilltop XCO")&&lines[1].StartsWith("Club Ride")&&lines[2].StartsWith("Coast Stage Race"),string.Join(" | ",lines));
+    var drawn=day.Descendants(ns+"text").Select(t=>t.Value).ToArray();
+    Check(drawn.Any(t=>t.Contains("clash"))&&drawn.Any(t=>t.Contains("close"))&&drawn.Any(t=>t.Contains("day 2 of 3")),string.Join(" | ",drawn));
+});
+Test("Planner month view: twelve events on a day show what fits and +N more naming the rest, inside the cell",()=>{
+    var many=Enumerable.Range(0,12).Select(i=>new PlannerEvent($"m{i}",$"Invented ride {i}",new(2027,5,8))).ToArray();
+    var doc=PlanSvg(PlanYear(s=>s with{Events=many}),PlannerView.Month(2027,5));
+    var day=doc.Descendants().Single(e=>(string?)e.Attribute("data-day")=="2027-05-08");
+    var shown=day.Descendants().Count(e=>(string?)e.Attribute("class")=="lumen-datum");
+    var more=day.Descendants().Single(e=>((string?)e.Attribute("class")??"").Contains("lumen-more"));
+    Check(shown is >=2 and <12&&more.Value==$"+{12-shown} more",$"{shown} shown, '{more.Value}'");
+    var cellTop=double.Parse(day.Elements(ns+"rect").First().Attribute("y")!.Value,CultureInfo.InvariantCulture);
+    var lowest=day.Descendants(ns+"text").Max(t=>double.Parse(t.Attribute("y")!.Value,CultureInfo.InvariantCulture));
+    Check(lowest<=cellTop+104,$"text at {lowest} runs out of a cell starting at {cellTop}");
+});
+Test("Planner month view: a 60-character name is cut with … in its line and whole in its name, and holidays are written in their cell",()=>{
+    var name=new string('L',60);
+    var doc=PlanSvg(PlanYear(s=>s with{Events=[new("x",name,new(2027,4,27))]}),PlannerView.Month(2027,4));
+    var day=doc.Descendants().Single(e=>(string?)e.Attribute("data-day")=="2027-04-27");
+    Check(day.Descendants(ns+"text").Any(t=>t.Value=="Freedom Day"));
+    var mark=day.Descendants().Single(e=>(string?)e.Attribute("class")=="lumen-datum");
+    Check(mark.Attribute("aria-label")!.Value.StartsWith(name)&&mark.Descendants(ns+"text").Single().Value.EndsWith("…"));
+});
+Test("Planner month view: an event running from one month into the next is listed on its days in each, counted day by day",()=>{
+    var spec=PlanYear(s=>s with{Width=1400,Events=[new("x","Tour",new(2027,3,30)){End=new DateOnly(2027,4,2)}]});
+    var april=PlanSvg(spec,PlannerView.Month(2027,4));
+    var first=april.Descendants().Single(e=>(string?)e.Attribute("data-day")=="2027-04-01");
+    Check(first.Descendants(ns+"text").Any(t=>t.Value.Contains("day 3 of 4")),string.Join(" | ",first.Descendants(ns+"text").Select(t=>t.Value)));
+    Check(april.Descendants().Where(e=>(string?)e.Attribute("data-event")=="x").Count()==2,"listed on 1 and 2 April");
+    Check(PlanSvg(spec,PlannerView.Month(2027,3)).Descendants().Count(e=>(string?)e.Attribute("data-event")=="x")==2,"listed on 30 and 31 March");
+});
+Test("Planner month table: rows are weeks, columns weekdays, each cell its day's holidays and events in words",()=>{
+    var html=PlannerSvg.Table(PlanYear(),2027,3);
+    var doc=XDocument.Parse(html);
+    Check(doc.Root!.Name.LocalName=="table"&&doc.Descendants("caption").Single().Value=="Season planner, March 2027");
+    Check(doc.Descendants("th").Count(th=>(string?)th.Attribute("scope")=="col")==7);
+    var cell=doc.Descendants("td").Single(td=>td.Value.StartsWith("13 "));
+    Check(cell.Value.Contains("Hilltop XCO, Saturday 13 March 2027, Gauteng, XCO, Kids, clash"),cell.Value);
+});
+Test("Planner month view: every word clears 4.5:1 and every mark 3:1 against its cell (the grid colour in a weekend cell) in Light, Dark and Midnight, and the render is byte-stable",()=>{
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight}){
+        // Saturday 20 March: a holiday, clashes (one cancelled, one yours) and more than fit. Sunday 21 March: close, provisional and
+        // cancelled marks. Wednesday 17 March: a holiday and more than fit, on the plain background.
+        var spec=PlanYear(s=>s with{Style=style,
+            Periods=[..s.Periods,new(new(2027,3,20),null,"Invented Saturday",PeriodKind.PublicHoliday,"ZA"),new(new(2027,3,17),null,"Invented Wednesday",PeriodKind.Other)],
+            Events=[..s.Events,
+                new("s1","Clash Ride",new(2027,3,20)){Relevance=PlannerRelevance.Clash},
+                new("s2","Called Off",new(2027,3,20)){Status=PlannerStatus.Cancelled,Relevance=PlannerRelevance.Clash},
+                new("s3","Our Enduro",new(2027,3,20)){Mine=true,Relevance=PlannerRelevance.Clash},
+                new("s4","Hidden Ride",new(2027,3,20)),new("s5","Hidden Too",new(2027,3,20)),
+                new("u1","Close Ride",new(2027,3,21)){Relevance=PlannerRelevance.Near},
+                new("u2","Pencilled Close",new(2027,3,21)){Status=PlannerStatus.Provisional,Relevance=PlannerRelevance.Near},
+                new("u3","Called Off Close",new(2027,3,21)){Status=PlannerStatus.Cancelled,Relevance=PlannerRelevance.Near},
+                new("u4","Pencilled Ride",new(2027,3,21)){Status=PlannerStatus.Provisional},
+                ..Enumerable.Range(0,6).Select(i=>new PlannerEvent($"w{i}",$"Invented ride {i}",new(2027,3,17)))]});
+        var svg=PlannerSvg.Render(spec,PlannerView.Month(2027,3));
+        Check(svg==PlannerSvg.Render(spec,PlannerView.Month(2027,3)),"the render is not byte-stable");
+        var doc=XDocument.Parse(svg);
+        double A(XElement e,string name)=>double.Parse((string?)e.Attribute(name)??"0",CultureInfo.InvariantCulture);
+        var cells=doc.Descendants(ns+"rect").Where(r=>(string?)r.Attribute("class")=="lumen-weekend")
+            .Select(r=>(L:A(r,"x"),T:A(r,"y"),R:A(r,"x")+A(r,"width"),B:A(r,"y")+A(r,"height"))).ToArray();
+        Check(cells.Length==8,$"{cells.Length} weekend cells in March 2027");
+        // A word stands where its glyphs' middle does: its anchor, three pixels above its baseline.
+        bool InWeekend(XElement t)=>cells.Any(b=>b.L<=A(t,"x")&&A(t,"x")<=b.R&&b.T<=A(t,"y")-3&&A(t,"y")-3<=b.B);
+        string[] Classes(XElement e)=>((string?)e.Attribute("class")??"").Split(' ');
+        var texts=doc.Descendants(ns+"text").ToArray();
+        Check(texts.Any(t=>t.Value=="Invented Saturday"&&InWeekend(t)),"no holiday name in a weekend cell to check");
+        Check(texts.Any(t=>Classes(t).Contains("lumen-more")&&InWeekend(t))&&texts.Any(t=>Classes(t).Contains("lumen-more")&&!InWeekend(t)),"no +N more in a weekend cell and in a weekday cell to check");
+        Check(texts.Count(t=>(string?)t.Parent!.Attribute("class")=="lumen-datum"&&InWeekend(t))>=7,"too few event lines in weekend cells to check");
+        foreach(var t in texts){
+            var ink=(string?)t.Attribute("fill")??(Classes(t).Contains("lumen-muted")?style.Muted:style.Text);
+            var behind=InWeekend(t)?style.Grid:style.Background;
+            Check(Lumen.Charts.Contrast.Ratio(ink,behind)>=4.5,$"'{t.Value}' in {ink} on {behind}: {Lumen.Charts.Contrast.Ratio(ink,behind):0.00}");
+        }
+        // Every marker, band and symbol against both grounds; the cells' fills and borders are the grid colour, the ground itself.
+        foreach(var mark in doc.Descendants().Where(e=>e.Name==ns+"rect"||e.Name==ns+"path"||e.Name==ns+"line")){
+            Check(mark.Attribute("opacity") is null&&mark.Attribute("fill-opacity") is null&&mark.Attribute("stroke-opacity") is null,$"a faded mark: {mark}");
+            foreach(var paint in new[]{(string?)mark.Attribute("fill"),(string?)mark.Attribute("stroke")}.OfType<string>().Where(p=>p!="none"&&p!=style.Grid))
+                foreach(var behind in new[]{style.Background,style.Grid})
+                    Check(Lumen.Charts.Contrast.Ratio(paint,behind)>=3,$"{mark.Name.LocalName} in {paint} on {behind}: {Lumen.Charts.Contrast.Ratio(paint,behind):0.00}");
+        }
+    }
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

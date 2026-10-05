@@ -136,28 +136,44 @@ public static class PlannerSvg
         w.Add("</g>");
     }
 
-    /// <summary>A stripe's shapes: weight and dash by relevance, an outline with hatching when provisional or with a strike when
-    /// cancelled (never faded, so every mark keeps 3:1), and an outline in the text colour when it is the viewer's own. The legend
-    /// draws its samples with them too.</summary>
+    /// <summary>A stripe's shapes: weight and dash by relevance, drawn by <see cref="Mark"/>. The legend draws its samples with them too.</summary>
     private static void Shapes(SvgWriter w, ChartStyle style, PlannerEvent e, double x, double y, double width)
     {
-        var (ink, height) = e.Relevance switch
-        {
-            PlannerRelevance.Clash => (style.Text, 5.0),
-            PlannerRelevance.Near => (style.Text, 3.0),
-            _ => (style.Muted, 2.0)
-        };
-        var inset = 1.0; x += inset; width = Math.Max(2, width - 2 * inset);
-        if (e.Mine) w.Add($"<rect x='{N(x - 1.5)}' y='{N(y - 1.5)}' width='{N(width + 3)}' height='{N(height + 3)}' rx='1.5' fill='none' stroke='{style.Text}' stroke-width='1'{w.Fixed}/>");
+        var height = e.Relevance switch { PlannerRelevance.Clash => 5.0, PlannerRelevance.Near => 3.0, _ => 2.0 };
+        var inset = 1.0;
+        Mark(w, style, e, x + inset, y, Math.Max(2, width - 2 * inset), height, upright: false);
+    }
+
+    /// <summary>The marker before an event's line in a month or day list: 10 high, 4 wide when it clashes or is close, 2 when other,
+    /// drawn by <see cref="Mark"/> standing up.</summary>
+    private static void Marker(SvgWriter w, ChartStyle style, PlannerEvent e, double x, double y) =>
+        Mark(w, style, e, x, y, 10, e.Relevance == PlannerRelevance.Other ? 2 : 4, upright: true);
+
+    /// <summary>An event's mark, <paramref name="length"/> along and <paramref name="thick"/> across, lying from (x, y) or standing up
+    /// from it: the text colour when it clashes or is close, muted when other; dashed when close; an outline with hatching when
+    /// provisional or with a strike in the text colour when cancelled (never faded, so every mark keeps 3:1); and an outline in the
+    /// text colour round it when it is the viewer's own.</summary>
+    private static void Mark(SvgWriter w, ChartStyle style, PlannerEvent e, double x, double y, double length, double thick, bool upright)
+    {
+        var ink = e.Relevance == PlannerRelevance.Other ? style.Muted : style.Text;
+        // Positions are worked out along the mark (a) and across it (c), then written as x and y, swapped when it stands up.
+        var (a, c) = upright ? (y, x) : (x, y);
+        string Box(double a0, double c0, double along, double across) => upright
+            ? $"x='{N(c0)}' y='{N(a0)}' width='{N(across)}' height='{N(along)}'"
+            : $"x='{N(a0)}' y='{N(c0)}' width='{N(along)}' height='{N(across)}'";
+        string Segment(double a1, double c1, double a2, double c2) => upright
+            ? $"x1='{N(c1)}' y1='{N(a1)}' x2='{N(c2)}' y2='{N(a2)}'"
+            : $"x1='{N(a1)}' y1='{N(c1)}' x2='{N(a2)}' y2='{N(c2)}'";
+        if (e.Mine) w.Add($"<rect {Box(a - 1.5, c - 1.5, length + 3, thick + 3)} rx='1.5' fill='none' stroke='{style.Text}' stroke-width='1'{w.Fixed}/>");
         if (e.Status != PlannerStatus.Confirmed)
-            w.Add($"<rect x='{N(x)}' y='{N(y)}' width='{N(width)}' height='{N(height)}' fill='none' stroke='{ink}' stroke-width='1'{w.Fixed}/>");
+            w.Add($"<rect {Box(a, c, length, thick)} fill='none' stroke='{ink}' stroke-width='1'{w.Fixed}/>");
         if (e.Status == PlannerStatus.Provisional)
-            for (var hx = x + 2; hx < x + width; hx += 3) w.Add($"<line x1='{N(hx)}' y1='{N(y + height)}' x2='{N(Math.Min(hx + height, x + width))}' y2='{N(y)}' stroke='{ink}' stroke-width='.8'/>");
+            for (var h = a + 2; h < a + length; h += 3) w.Add($"<line {Segment(h, c + thick, Math.Min(h + thick, a + length), c)} stroke='{ink}' stroke-width='.8'/>");
         else if (e.Status == PlannerStatus.Cancelled)
-            w.Add($"<line x1='{N(x)}' y1='{N(y + height / 2)}' x2='{N(x + width)}' y2='{N(y + height / 2)}' stroke='{style.Text}' stroke-width='1'/>");
+            w.Add($"<line {Segment(a, c + thick / 2, a + length, c + thick / 2)} stroke='{style.Text}' stroke-width='1'/>");
         else if (e.Relevance == PlannerRelevance.Near)
-            for (var sx = x; sx < x + width; sx += 6) w.Add($"<rect x='{N(sx)}' y='{N(y)}' width='{N(Math.Min(4, x + width - sx))}' height='{N(height)}' fill='{ink}'/>");
-        else w.Add($"<rect x='{N(x)}' y='{N(y)}' width='{N(width)}' height='{N(height)}' rx='1' fill='{ink}'/>");
+            for (var s = a; s < a + length; s += 6) w.Add($"<rect {Box(s, c, Math.Min(4, a + length - s), thick)} fill='{ink}'/>");
+        else w.Add($"<rect {Box(a, c, length, thick)} rx='1' fill='{ink}'/>");
     }
 
     private static readonly (string Word, string Kind)[] LegendItems =
@@ -201,7 +217,116 @@ public static class PlannerSvg
     }
 
     private static string YearNarrow(PlannerSpec spec, ChartStyle style) => throw new NotImplementedException("Task 6");
-    private static string Month(PlannerSpec spec, ChartStyle style, int year, int month) => throw new NotImplementedException("Task 4");
+    private const double CellH = 104, LineH = 14;
+
+    private static string Month(PlannerSpec spec, ChartStyle style, int year, int month)
+    {
+        var first = new DateOnly(year, month, 1);
+        var lead = PlannerCalendar.Lead(year, month, spec.WeekStart);
+        var days = DateTime.DaysInMonth(year, month);
+        var weeks = (lead + days + 6) / 7;
+        var description = $"{first.ToString("MMMM yyyy", Invariant)}{(spec.Description.Length > 0 ? " · " + spec.Description : "")}";
+        // The month leads the description, so its room is worked out on that longer line.
+        var height = (int)Math.Ceiling(78 + Head(spec with { Description = description }) + 20 + weeks * CellH + LegendLines(spec.Width) * 18 + 24);
+        var w = Writer(spec, style);
+        ChartSvg.Begin(w, spec.Width, height, spec.Title, description);
+        var top = 78 + w.Head;
+        var col = (spec.Width - 48) / 7.0;
+        for (var c = 0; c < 7; c++)
+            w.Text(24 + c * col + 6, top + 13, ((DayOfWeek)(((int)spec.WeekStart + c) % 7)).ToString(), "class='lumen-muted lumen-weekday' font-size='11'");
+        for (var d = first; d.Month == month; d = d.AddDays(1))
+        {
+            var cell = lead + d.Day - 1;
+            var x = 24 + cell % 7 * col; var y = top + 20 + cell / 7 * CellH;
+            var weekend = PlannerCalendar.IsWeekend(spec, d);
+            w.Add($"<g class='lumen-day' data-day='{d:yyyy-MM-dd}' aria-label='{E(PlannerCalendar.DayName(spec, d))}'>");
+            w.Add(weekend
+                ? $"<rect class='lumen-weekend' x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(CellH)}' fill='{style.Grid}' stroke='{style.Grid}' stroke-width='1'{w.Fixed}/>"
+                : $"<rect x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(CellH)}' fill='none' stroke='{style.Grid}' stroke-width='1'{w.Fixed}/>");
+            w.Text(x + 6, y + 15, d.Day.ToString(Invariant), "font-size='12' font-weight='600'");
+            if (d < spec.From || d > spec.To) { w.Add("</g>"); continue; }
+            var (onDay, events) = PlannerCalendar.On(spec, d);
+            if (onDay.Any(p => p.Kind == PeriodKind.SchoolHoliday)) w.Add($"<rect x='{N(x)}' y='{N(y)}' width='{N(col)}' height='3' fill='{style.Muted}'/>");
+            var named = onDay.Where(p => p.Kind != PeriodKind.SchoolHoliday).Select(p => p.Name).ToArray();
+            // Muted words fall below 4.5:1 on a weekend cell's grid colour, so there the holidays and "+N more" are in the text colour.
+            if (named.Length > 0) w.Text(x + 6, y + 29, Fit(string.Join(" · ", named), col - 12, 10), weekend ? "font-size='10'" : "class='lumen-muted' font-size='10'");
+            // Four lines fit under the date and holidays; a day with more writes three and "+N more" naming the rest.
+            var room = (int)Math.Floor((CellH - 44 - 4) / LineH);
+            var shown = events.Count <= room ? events.Count : room - 1;
+            for (var i = 0; i < shown; i++)
+            {
+                var e = events[i];
+                var ly = y + 44 + i * LineH;
+                var span = (e.End ?? e.Start).DayNumber - e.Start.DayNumber + 1;
+                var word = e.Relevance switch { PlannerRelevance.Clash => " · clash", PlannerRelevance.Near => " · close", _ => "" };
+                var dayOf = span > 1 ? $" · day {d.DayNumber - e.Start.DayNumber + 1} of {span}" : "";
+                var region = e.Region is null ? "" : " · " + e.Region;
+                var name = PlannerCalendar.Name(spec, e);
+                w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
+                Marker(w, style, e, x + 6, ly - 9);
+                // The region comes last: where the cell is narrow it is cut first, and it is said whole in the name and the day view.
+                w.Text(x + 14, ly, Fit(e.Name + word + dayOf + region, col - 20, 10), "font-size='10'");
+                w.Add("</g>");
+            }
+            if (shown < events.Count)
+            {
+                var rest = events.Skip(shown).ToArray();
+                var label = $"{rest.Length} more on {PlannerCalendar.Day(d)}: {string.Join("; ", rest.Select(e => e.Name))}";
+                // The tooltip sits on a presentational group, so the text's own value is just "+N more" and it is named once.
+                w.Add($"<g role='presentation'><title>{E(label)}</title><text class='lumen-more{(weekend ? "" : " lumen-muted")}' x='{N(x + 6)}' y='{N(y + 44 + shown * LineH)}' font-size='10' aria-label='{E(label)}'>+{rest.Length} more</text></g>");
+            }
+            w.Add("</g>");
+        }
+        Legend(w, spec, style, top + 20 + weeks * CellH + 12);
+        w.Add("</svg>");
+        return w.ToString();
+    }
+
+    /// <summary><paramref name="text"/> cut with "…" to fit <paramref name="room"/> units at <paramref name="size"/> pixels.</summary>
+    private static string Fit(string text, double room, double size)
+    {
+        double Width(string t) => ChartSvg.Wide(t) * size / 11;
+        if (Width(text) <= room) return text;
+        var cut = text;
+        while (cut.Length > 1 && Width(cut + "…") > room) cut = cut[..^1];
+        return cut.TrimEnd() + "…";
+    }
+
+    /// <summary>The month <paramref name="year"/>-<paramref name="month"/> as an HTML table for static pages: rows are weeks, columns
+    /// weekdays, each cell its day's holidays and events in words. Checks the spec and the month first.</summary>
+    public static string Table(PlannerSpec spec, int year, int month)
+    {
+        PlannerValidation.Validate(spec, PlannerView.Month(year, month));
+        var first = new DateOnly(year, month, 1);
+        var lead = PlannerCalendar.Lead(year, month, spec.WeekStart);
+        var days = DateTime.DaysInMonth(year, month);
+        var b = new System.Text.StringBuilder();
+        b.Append($"<table class='lumen-planner-table'><caption>{E(spec.Title)}, {first.ToString("MMMM yyyy", Invariant)}</caption><thead><tr>");
+        for (var c = 0; c < 7; c++) b.Append($"<th scope='col'>{(DayOfWeek)(((int)spec.WeekStart + c) % 7)}</th>");
+        b.Append("</tr></thead><tbody>");
+        for (var cell = 0; cell < (lead + days + 6) / 7 * 7; cell++)
+        {
+            if (cell % 7 == 0) b.Append("<tr>");
+            var day = cell - lead + 1;
+            if (day < 1 || day > days) b.Append("<td></td>");
+            else
+            {
+                var d = new DateOnly(year, month, day);
+                var words = new List<string> { day.ToString(Invariant) };
+                // As in the drawing, a day outside the period is its date alone.
+                if (d >= spec.From && d <= spec.To)
+                {
+                    var (periods, events) = PlannerCalendar.On(spec, d);
+                    words.AddRange(periods.Select(p => $"{p.Name} ({PlannerCalendar.KindWords(p.Kind)})"));
+                    words.AddRange(events.Select(e => PlannerCalendar.Name(spec, e)));
+                }
+                b.Append($"<td>{E(string.Join(" · ", words))}</td>");
+            }
+            if (cell % 7 == 6) b.Append("</tr>");
+        }
+        b.Append("</tbody></table>");
+        return b.ToString();
+    }
     private static string Agenda(PlannerSpec spec, ChartStyle style, int year, int month) => throw new NotImplementedException("Task 6");
     private static string DayList(PlannerSpec spec, ChartStyle style, DateOnly day) => throw new NotImplementedException("Task 5");
 }
