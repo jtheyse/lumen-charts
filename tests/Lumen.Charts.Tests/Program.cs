@@ -9142,6 +9142,18 @@ Test("Planner year view: a busy day in a long weekend writes \"+N\" clear of the
             Check(!Word(count).Overlaps(brackets[0]),$"the count {Word(count)} and the bracket {brackets[0]}");
     }
 });
+Test("Planner: each view's legend names only what that view draws",()=>{
+    string[] Words(XDocument doc)=>doc.Descendants(ns+"g").Single(g=>(string?)g.Attribute("class")=="lumen-legend").Elements(ns+"text").Select(t=>t.Value).ToArray();
+    var spec=PlanYear();
+    var year=Words(PlanSvg(spec));
+    Check(year.SequenceEqual(["clash","close","other","provisional","cancelled","yours","public holiday","school holiday","other period","long weekend","weekend"]),string.Join(",",year));
+    // The month writes holidays and other periods in words and draws no long weekends.
+    var month=Words(PlanSvg(spec,PlannerView.Month(2027,3)));
+    Check(month.SequenceEqual(["clash","close","other","provisional","cancelled","yours","school holiday","weekend"]),string.Join(",",month));
+    // The narrow year marks a weekend's clashes and close events, its holiday and other periods, and nothing else.
+    var narrow=Words(PlanSvg(spec with{Width=340},PlannerView.WholePeriod,PlannerLayout.Narrow));
+    Check(narrow.SequenceEqual(["clash","close","public holiday","other period","weekend"]),string.Join(",",narrow));
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

@@ -57,7 +57,7 @@ public static class PlannerSvg
     {
         var months = PlannerCalendar.Months(spec);
         var width = spec.Width;
-        var legend = LegendLines(width);
+        var legend = LegendLines(width, YearLegend);
         // Height is fixed by content; Begin draws the titles and sets Head, which Head(spec) works out beforehand.
         var height = (int)Math.Ceiling(78 + Head(spec) + HeaderH + months.Count * RowH + 8 + legend * 18 + 16);
         var w = Writer(spec, style);
@@ -146,7 +146,7 @@ public static class PlannerSvg
                 w.Add("</g>");
             }
         }
-        Legend(w, spec, style, top + HeaderH + months.Count * RowH + 8);
+        Legend(w, spec, style, top + HeaderH + months.Count * RowH + 8, YearLegend);
         w.Add("</svg>");
         return w.ToString();
     }
@@ -217,24 +217,38 @@ public static class PlannerSvg
         else w.Add($"<rect {Box(a, c, length, thick)} rx='1' fill='{ink}'/>");
     }
 
-    private static readonly (string Word, string Kind)[] LegendItems =
+    // Each view's legend names only the marks it draws.
+    /// <summary>The wide year's legend: every mark.</summary>
+    private static readonly (string Word, string Kind)[] YearLegend =
     [
         ("clash", "clash"), ("close", "near"), ("other", "other"), ("provisional", "provisional"), ("cancelled", "cancelled"),
         ("yours", "mine"), ("public holiday", "holiday"), ("school holiday", "school"), ("other period", "period"), ("long weekend", "long"),
         ("weekend", "weekend")
     ];
+    /// <summary>The month grid's legend: its markers, the school holiday's band and the weekend; it writes holidays and other periods
+    /// in words and draws no long weekends.</summary>
+    private static readonly (string Word, string Kind)[] MonthLegend =
+    [
+        ("clash", "clash"), ("close", "near"), ("other", "other"), ("provisional", "provisional"), ("cancelled", "cancelled"),
+        ("yours", "mine"), ("school holiday", "school"), ("weekend", "weekend")
+    ];
+    /// <summary>The narrow year's legend: a weekend's clash and close marks, its holiday diamond and other-period dots, and the slot.</summary>
+    private static readonly (string Word, string Kind)[] NarrowLegend =
+    [
+        ("clash", "clash"), ("close", "near"), ("public holiday", "holiday"), ("other period", "period"), ("weekend", "weekend")
+    ];
     private static double LegendItemWidth(string word) => 22 + ChartSvg.Wide(word) + 16;
-    private static int LegendLines(int width)
+    private static int LegendLines(int width, (string Word, string Kind)[] items)
     {
         double x = 24; var lines = 1;
-        foreach (var (word, _) in LegendItems) { var wide = LegendItemWidth(word); if (x + wide > width - 24) { lines++; x = 24; } x += wide; }
+        foreach (var (word, _) in items) { var wide = LegendItemWidth(word); if (x + wide > width - 24) { lines++; x = 24; } x += wide; }
         return lines;
     }
-    private static void Legend(SvgWriter w, PlannerSpec spec, ChartStyle style, double y)
+    private static void Legend(SvgWriter w, PlannerSpec spec, ChartStyle style, double y, (string Word, string Kind)[] items)
     {
         double x = 24;
         w.Add("<g class='lumen-legend' aria-hidden='true'>");
-        foreach (var (word, kind) in LegendItems)
+        foreach (var (word, kind) in items)
         {
             var wide = LegendItemWidth(word);
             if (x + wide > spec.Width - 24) { x = 24; y += 18; }
@@ -268,7 +282,7 @@ public static class PlannerSvg
     private static string YearNarrow(PlannerSpec spec, PlannerIndex plan, ChartStyle style)
     {
         var months = PlannerCalendar.Months(spec);
-        var height = 78 + Head(spec) + months.Count * 34 + LegendLines(spec.Width) * 18 + 24;
+        var height = 78 + Head(spec) + months.Count * 34 + LegendLines(spec.Width, NarrowLegend) * 18 + 24;
         var w = Writer(spec, style);
         Open(w, spec.Width, height, spec.Title, spec.Description);
         var top = 78 + w.Head;
@@ -319,7 +333,7 @@ public static class PlannerSvg
             // The counts stand on the background right of the slots, cut where a weekend of odd days leaves them less room.
             if (summary.Length > 0) w.Text(spec.Width - 24, y + 14, Fit(summary, spec.Width - 24 - (x + 8), 11), "class='lumen-muted' font-size='11' text-anchor='end'");
         }
-        Legend(w, spec, style, top + months.Count * 34 + 8);
+        Legend(w, spec, style, top + months.Count * 34 + 8, NarrowLegend);
         w.Add("</svg>");
         return w.ToString();
     }
@@ -333,7 +347,7 @@ public static class PlannerSvg
         var weeks = (lead + days + 6) / 7;
         var description = $"{first.ToString("MMMM yyyy", Invariant)}{(spec.Description.Length > 0 ? " · " + spec.Description : "")}";
         // The month leads the description, so its room is worked out on that longer line.
-        var height = (int)Math.Ceiling(78 + Head(spec with { Description = description }) + 20 + weeks * CellH + LegendLines(spec.Width) * 18 + 24);
+        var height = (int)Math.Ceiling(78 + Head(spec with { Description = description }) + 20 + weeks * CellH + LegendLines(spec.Width, MonthLegend) * 18 + 24);
         var w = Writer(spec, style);
         Open(w, spec.Width, height, spec.Title, description);
         var top = 78 + w.Head;
@@ -382,7 +396,7 @@ public static class PlannerSvg
             }
             w.Add("</g>");
         }
-        Legend(w, spec, style, top + 20 + weeks * CellH + 12);
+        Legend(w, spec, style, top + 20 + weeks * CellH + 12, MonthLegend);
         w.Add("</svg>");
         return w.ToString();
     }
