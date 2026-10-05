@@ -8386,6 +8386,58 @@ Test("Race Face recipe: the team rider's gold word stands 8.41:1 on the card and
 });
 // A colour a fraction of the way from one to another, channel by channel, as the library blends a gradient.
 string Blend40(string from,string to,double t){int C(string h,int at)=>int.Parse(h.AsSpan(at,2),NumberStyles.HexNumber,CultureInfo.InvariantCulture);return "#"+string.Concat(new[]{1,3,5}.Select(at=>((int)(C(from,at)+(C(to,at)-C(from,at))*t)).ToString("X2",CultureInfo.InvariantCulture)));}
+// ---- 0.43.0: event planner (static) ----
+PlannerSpec PlanYear(Func<PlannerSpec,PlannerSpec>? change=null)
+{
+    var spec=PlannerSpec.ForYear(2027) with{
+        Title="Season planner",Description="Invented organizers' events",
+        Regions=[new("ZA","South Africa"),new("ZA-GP","Gauteng","ZA"),new("ZA-WC","Western Cape","ZA")],
+        Periods=[new(new(2027,4,27),null,"Freedom Day",PeriodKind.PublicHoliday,"ZA"),
+                 new(new(2027,3,27),new DateOnly(2027,4,5),"School holiday",PeriodKind.SchoolHoliday,"ZA")],
+        Events=[new("e1","Hilltop XCO",new(2027,3,13)){Region="ZA-GP",Category="XCO",Audience="Kids",Relevance=PlannerRelevance.Clash},
+                new("e2","Coast Stage Race",new(2027,3,12)){End=new DateOnly(2027,3,14),Region="ZA-WC",Category="Stage",Audience="Open",Status=PlannerStatus.Provisional}]};
+    return change is null?spec:change(spec);
+}
+Test("Planner: a valid year passes validation and a year spans 1 January to 31 December",()=>{
+    var spec=PlanYear();PlannerValidation.Validate(spec);
+    Check(spec.From==new DateOnly(2027,1,1)&&spec.To==new DateOnly(2027,12,31),$"{spec.From}..{spec.To}");
+    Check(spec.WeekStart==DayOfWeek.Monday&&spec.Weekend.SequenceEqual([DayOfWeek.Saturday,DayOfWeek.Sunday]));
+});
+Test("Planner: refuses a period that ends before it starts, is longer than 400 days, a blank title, and too narrow a width",()=>{
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{To=s.From.AddDays(-1)})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{To=s.From.AddDays(400)})));
+    PlannerValidation.Validate(PlanYear(s=>s with{To=s.From.AddDays(399)}));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Title=" "})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Width=319})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Weekend=[]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Weekend=[DayOfWeek.Saturday,DayOfWeek.Saturday]})));
+});
+Test("Planner: refuses duplicate, blank or unknown region codes and a parent chain that loops",()=>{
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=[..s.Regions,new("ZA","Again")]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=[..s.Regions,new(" ","Blank")]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=[..s.Regions,new("ZA-KZN","KwaZulu-Natal","ZZ")]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=[new("A","A","B"),new("B","B","A")]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Periods=[new(new(2027,1,1),null,"Day",PeriodKind.Other,"XX")]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=[new("x","Ride",new(2027,5,1)){Region="XX"}]})));
+});
+Test("Planner: refuses periods and events with blank names, ends before starts, duplicate event ids and events wholly outside the period",()=>{
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Periods=[new(new(2027,1,2),new DateOnly(2027,1,1),"Back",PeriodKind.Other)]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Periods=[new(new(2027,1,2),null," ",PeriodKind.Other)]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=[new("x","A",new(2027,5,2)){End=new DateOnly(2027,5,1)}]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=[new("x","A",new(2027,5,2)),new("x","B",new(2027,5,3))]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=[new("x"," ",new(2027,5,2))]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=[new("x","Old",new(2026,5,2))]})));
+    PlannerValidation.Validate(PlanYear(s=>s with{Events=[new("x","Straddles",new(2026,12,30)){End=new DateOnly(2027,1,2)}]}));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=[new("x","Long note",new(2027,5,2)){Note=new string('n',121)}]})));
+});
+Test("Planner: a view must lie inside the period",()=>{
+    var spec=PlanYear();
+    PlannerValidation.Validate(spec,PlannerView.WholePeriod);
+    PlannerValidation.Validate(spec,PlannerView.Month(2027,3));
+    PlannerValidation.Validate(spec,PlannerView.Day(new(2027,12,31)));
+    Reject(()=>PlannerValidation.Validate(spec,PlannerView.Month(2028,1)));
+    Reject(()=>PlannerValidation.Validate(spec,PlannerView.Day(new(2026,12,31))));
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;
