@@ -3,13 +3,14 @@ using Lumen.Charts;
 namespace Lumen.Gallery;
 
 /// <summary>An invented season of events by invented organizers, with South Africa's provinces and its 2027 public holidays,
-/// for the home page's planner.</summary>
+/// for the home page's planner. The page heads the drawings itself, so they draw no titles; the title still names
+/// each one, so the year and March are told apart.</summary>
 public static class PlannerData
 {
-    public static PlannerSpec Season(ChartTheme theme, int width = 1100) => PlannerSpec.ForYear(2027) with
+    public static PlannerSpec Season(ChartTheme theme, int width = 1100, string title = "Season planner") => PlannerSpec.ForYear(2027) with
     {
-        Title = "Planning a season", Description = "Invented organizers' events in Gauteng and the Western Cape",
-        Theme = theme, Width = width,
+        Title = title, Description = "Invented organizers' events in Gauteng and the Western Cape",
+        Theme = theme, Width = width, DrawTitles = false,
         Regions = [new("ZA", "South Africa"), new("ZA-GP", "Gauteng", "ZA"), new("ZA-WC", "Western Cape", "ZA")],
         Periods =
         [

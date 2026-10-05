@@ -661,12 +661,20 @@ if (await fittedGraph.CountAsync() > 0)
 }
 else Console.WriteLine("SKIP fitted graph checks: this host's graph does not set FitWidth");
 
-// The season planner is static SVG drawn on the server, wide and narrow, and the page shows one by its width: the narrow one only
-// below 640 pixels, so a tablet either way round gets the wide one.
+// The season planner is static SVG drawn on the server three times, and the page shows one by the width of its own section: narrow
+// (340 wide, the phone layout) below 640 pixels, medium (720 wide) below 1000 and wide (1100) from there, so its 10-pixel words are
+// never shown smaller than 9 pixels.
 if (await page.Locator("#planner").CountAsync() > 0)
 {
-    // Every word of the planner shown at this width, against the drawing it belongs to.
-    const string plannerOutside = "shown => [...document.querySelectorAll(`#planner ${shown} svg text`)].filter(t => { const s = t.ownerSVGElement.getBoundingClientRect(), b = t.getBoundingClientRect(); return b.left < s.left - 0.5 || b.right > s.right + 0.5; }).length";
+    // The section's width, the drawings it shows, the smallest a 10-unit word is shown in them, the words that run outside their
+    // drawing, and the page's width.
+    const string plannerShown = @"() => { const section = document.querySelector('#planner'), width = section.getBoundingClientRect().width;
+        const shown = ['narrow', 'medium', 'wide'].filter(v => getComputedStyle(section.querySelector('.planner-' + v)).display !== 'none');
+        const svgs = [...section.querySelectorAll('svg')].filter(s => s.getBoundingClientRect().width > 0);
+        const smallest = Math.min(...svgs.map(s => s.getBoundingClientRect().width / Number(s.getAttribute('viewBox').split(' ')[2]) * 10));
+        const words = svgs.flatMap(s => [...s.querySelectorAll('text')]);
+        const outside = words.filter(t => { const s = t.ownerSVGElement.getBoundingClientRect(), b = t.getBoundingClientRect(); return b.left < s.left - 0.5 || b.right > s.right + 0.5; }).length;
+        return [width, svgs.length, smallest, words.length, outside, document.documentElement.scrollWidth, shown.join(',')].join('|'); }";
     await Test("Planner: the year and March are drawn, every event a named focusable mark, the table holds every day", async () =>
     {
         var marks = page.Locator("#planner .planner-wide svg .lumen-datum");
@@ -678,29 +686,20 @@ if (await page.Locator("#planner").CountAsync() > 0)
         await page.Locator("#planner details summary").ClickAsync();
         Check(await page.Locator("#planner table td").CountAsync() >= 31);
     });
-    await Test("Planner: on a 375-pixel phone the narrow layout shows, the page does not scroll sideways and no word runs outside its drawing", async () =>
-    {
-        await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
-        var tab = await phone.NewPageAsync();
-        await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-        Check(await tab.Locator("#planner .planner-narrow").IsVisibleAsync() && !await tab.Locator("#planner .planner-wide").IsVisibleAsync(), "the wide planner shows");
-        var wide = await tab.EvaluateAsync<int>("() => document.documentElement.scrollWidth");
-        Check(wide <= 375, $"the page is {wide} pixels wide");
-        var outside = await tab.EvaluateAsync<int>(plannerOutside, ".planner-narrow");
-        Check(outside == 0, $"{outside} words outside");
-    });
-    // A tablet either way round, and a desktop: the wide planner, fitted to its box.
-    foreach (var (width, height) in new[] { (1280, 900), (1024, 768), (768, 1024) })
-        await Test($"Planner: at {width} by {height} the wide layout shows, the page does not scroll sideways and no word runs outside its drawing", async () =>
+    // A phone, a tablet either way round, and two desktops: the drawing for the section's width, its words at 9 pixels or more.
+    foreach (var (width, height, phone) in new[] { (375, 812, true), (768, 1024, false), (1024, 768, false), (1280, 900, false), (1440, 900, false) })
+        await Test($"Planner: at {width} by {height} the drawing for the section's width shows its words at 9 pixels or more, the page does not scroll sideways and no word runs outside its drawing", async () =>
         {
-            await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = height } });
+            await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = height }, IsMobile = phone, HasTouch = phone, DeviceScaleFactor = phone ? 2 : 1 });
             var tab = await context.NewPageAsync();
             await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            Check(await tab.Locator("#planner .planner-wide").IsVisibleAsync() && !await tab.Locator("#planner .planner-narrow").IsVisibleAsync(), "the narrow planner shows");
-            var wide = await tab.EvaluateAsync<int>("() => document.documentElement.scrollWidth");
-            Check(wide <= width, $"the page is {wide} pixels wide");
-            var outside = await tab.EvaluateAsync<int>(plannerOutside, ".planner-wide");
-            Check(outside == 0, $"{outside} words outside");
+            var m = (await tab.EvaluateAsync<string>(plannerShown)).Split('|');
+            var section = double.Parse(m[0], CultureInfo.InvariantCulture);
+            var expected = section < 640 ? "narrow" : section < 1000 ? "medium" : "wide";
+            Check(m[6] == expected && m[1] == "2", $"a {section:0}-pixel section shows {m[6]} ({m[1]} drawings), not {expected}");
+            Check(double.Parse(m[2], CultureInfo.InvariantCulture) >= 9, $"a 10-unit word is shown {double.Parse(m[2], CultureInfo.InvariantCulture):0.0} pixels tall");
+            Check(int.Parse(m[5]) <= width, $"the page is {m[5]} pixels wide");
+            Check(int.Parse(m[3]) > 0 && m[4] == "0", $"{m[4]} of {m[3]} words outside");
         });
 }
 else Console.WriteLine("SKIP planner checks: this host shows no planner");

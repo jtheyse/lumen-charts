@@ -62,14 +62,15 @@
         <section id="planner" class="card">
             <h2>Planning a season</h2>
             <p>A <code>PlannerSpec</code> drawn by <code>PlannerSvg.Render</code>: months aligned by weekday so weekends line up down the year, public holidays ◆, a school holiday band, and invented events by relevance — clash bold, close dashed, other thin, provisional hatched, cancelled struck through, yours outlined — each named in full.</p>
-            <div class="planner-wide">
-                @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme), PlannerView.WholePeriod))
-                @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme), PlannerView.Month(2027, 3)))
-            </div>
-            <div class="planner-narrow">
-                @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme, 340), PlannerView.WholePeriod, PlannerLayout.Narrow))
-                @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme, 340), PlannerView.Month(2027, 3), PlannerLayout.Narrow))
-            </div>
+            @foreach (var (shown, width, drawn) in PlannerDrawings)
+            {
+                <div class="planner-@shown">
+                    <h3>The year 2027</h3>
+                    @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme, width, "Season planner: the year 2027"), PlannerView.WholePeriod, drawn))
+                    <h3>March 2027</h3>
+                    @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme, width), PlannerView.Month(2027, 3), drawn))
+                </div>
+            }
             <details><summary>March as a table</summary>@((MarkupString)PlannerSvg.Table(PlannerData.Season(Theme), 2027, 3))</details>
         </section>
         <section class="lower-grid">
@@ -96,6 +97,9 @@
         BrandDemo.Harbour => @<CascadingValue Value="DemoData.Harbour">@content</CascadingValue>,
         _ => content
     };
+    // The planner is drawn three times on the server and the section's width picks one in app.css, so its words are never shown
+    // under 9 pixels: wide from 1000 pixels, medium from 640, and the phone layout below.
+    private static readonly (string Shown, int Width, PlannerLayout Layout)[] PlannerDrawings = [("wide", 1100, PlannerLayout.Wide), ("medium", 720, PlannerLayout.Wide), ("narrow", 340, PlannerLayout.Narrow)];
     private GraphLayout layout=GraphLayout.Layered;
     private int revision;private string? selection;private string? node;private GraphSpec? graphCache;
     private GraphSpec Graph=>graphCache ??= DemoData.Graph(layout,Theme);
