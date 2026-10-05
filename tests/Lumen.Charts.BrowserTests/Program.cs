@@ -662,7 +662,7 @@ if (await fittedGraph.CountAsync() > 0)
 else Console.WriteLine("SKIP fitted graph checks: this host's graph does not set FitWidth");
 
 // The season planner is static SVG drawn on the server three times, and the page shows one by the width of its own section: narrow
-// (340 wide, the phone layout) below 480 pixels, medium (560 wide, the grids) below 1000 and wide (1100) from there, so a tablet held
+// (340 wide, the phone layout) below 480 pixels, medium (520 wide, the grids) below 1000 and wide (1100) from there, so a tablet held
 // either way round gets the grids and the 10-pixel words are never shown smaller than 9 pixels.
 if (await page.Locator("#planner").CountAsync() > 0)
 {
@@ -702,6 +702,26 @@ if (await page.Locator("#planner").CountAsync() > 0)
             Check(int.Parse(m[5]) <= width, $"the page is {m[5]} pixels wide");
             Check(int.Parse(m[3]) > 0 && m[4] == "0", $"{m[4]} of {m[3]} words outside");
         });
+    // The narrowest section that still gets the grids: 480 pixels is the cutoff and the medium drawing is 520 wide, so its words are
+    // 9.2 pixels there. The gallery drops its sidebar at 760 pixels, so a window of about 520 gives a section of about 485 (a 768
+    // window with a classic scrollbar gives 497, in the same band).
+    await Test("Planner: a section of about 485 pixels shows the grids, its words at 9 pixels or more, the page does not scroll sideways and no word runs outside its drawing", async () =>
+    {
+        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 540, Height = 900 } });
+        var tab = await context.NewPageAsync();
+        await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+        var first = double.Parse((await tab.EvaluateAsync<string>(plannerShown)).Split('|')[0], CultureInfo.InvariantCulture);
+        var viewport = 540 - (int)Math.Round(first - 485);
+        await tab.SetViewportSizeAsync(viewport, 900);
+        await tab.WaitForTimeoutAsync(300);
+        var m = (await tab.EvaluateAsync<string>(plannerShown)).Split('|');
+        var section = double.Parse(m[0], CultureInfo.InvariantCulture);
+        Check(section is >= 480 and < 504, $"a {viewport}-pixel window gave a {section:0}-pixel section, not about 485");
+        Check(m[6] == "medium" && m[1] == "2", $"a {section:0}-pixel section shows {m[6]} ({m[1]} drawings), not medium");
+        Check(double.Parse(m[2], CultureInfo.InvariantCulture) >= 9, $"a 10-unit word is shown {double.Parse(m[2], CultureInfo.InvariantCulture):0.0} pixels tall");
+        Check(int.Parse(m[5]) <= viewport, $"the page is {m[5]} pixels wide in a {viewport}-pixel window");
+        Check(int.Parse(m[3]) > 0 && m[4] == "0", $"{m[4]} of {m[3]} words outside");
+    });
 }
 else Console.WriteLine("SKIP planner checks: this host shows no planner");
 
