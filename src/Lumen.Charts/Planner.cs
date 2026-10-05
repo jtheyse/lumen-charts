@@ -124,6 +124,12 @@ public readonly record struct PlannerView(PlannerZoom Zoom, DateOnly Date)
     public static PlannerView Day(DateOnly day) => new(PlannerZoom.Day, day);
 }
 
+/// <summary>The body of <c>POST planner/svg</c>: a planner, the view to draw (the whole period when null) and the layout.</summary>
+/// <param name="Spec">The planner.</param>
+/// <param name="View">What to draw; null for the whole period.</param>
+/// <param name="Layout">Wide or narrow.</param>
+public sealed record PlannerRequest(PlannerSpec Spec, PlannerView? View = null, PlannerLayout Layout = PlannerLayout.Wide);
+
 /// <summary>A planner: a period of days with weekends, holidays and events by region, drawn by <see cref="PlannerSvg.Render"/>.</summary>
 public sealed record PlannerSpec
 {

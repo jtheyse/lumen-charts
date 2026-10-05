@@ -8922,6 +8922,15 @@ Test("Planner narrow year: a Friday-to-Sunday weekend is one slot, named from it
     Check(march.SequenceEqual(["2027-03-05","2027-03-12","2027-03-19","2027-03-26"]),string.Join(",",march));
     Check(PlanWeekends(doc,"2027-03-12").Single().Attribute("aria-label")!.Value=="Weekend of 12 March 2027: 1 clash",PlanWeekends(doc,"2027-03-12").Single().Attribute("aria-label")!.Value);
 });
+Test("Planner: a spec round-trips through the HTTP API's JSON and draws the same SVG",()=>{
+    var json=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+    json.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    var request=new PlannerRequest(PlanYear(),PlannerView.Month(2027,3));
+    var back=System.Text.Json.JsonSerializer.Deserialize<PlannerRequest>(System.Text.Json.JsonSerializer.Serialize(request,json),json)!;
+    Check(PlannerSvg.Render(back.Spec,back.View!.Value,back.Layout)==PlannerSvg.Render(request.Spec,request.View!.Value));
+    var text=System.Text.Json.JsonSerializer.Serialize(request,json);
+    Check(text.Contains("\"zoom\":\"Month\"")&&text.Contains("\"relevance\":\"Clash\""),text[..200]);
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

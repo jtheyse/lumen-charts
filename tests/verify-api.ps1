@@ -573,6 +573,14 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType a
 Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('Layered layout top to bottom')) 'A graph set top to bottom says so in its description'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/layout" -Method Post -ContentType application/json -Body $spanning.Replace('"layout":"Layered"','"layout":"Layered","direction":"Sideways"') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400) 'An unknown graph direction is rejected'
+# 0.43.0: the season planner.
+$planner='{"spec":{"title":"Season planner","from":"2027-01-01","to":"2027-12-31","regions":[{"code":"ZA","name":"South Africa"},{"code":"ZA-GP","name":"Gauteng","parent":"ZA"}],"periods":[{"from":"2027-04-27","name":"Freedom Day","kind":"PublicHoliday","region":"ZA"}],"events":[{"id":"e1","name":"Hilltop XCO","start":"2027-03-13","region":"ZA-GP","relevance":"Clash"}]},"view":{"zoom":"Month","date":"2027-03-01"}}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/planner/svg" -Method Post -ContentType application/json -Body $planner -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Headers['Content-Type'] -like 'image/svg+xml*' -and $r.Content.Contains("aria-label='Hilltop XCO, Saturday 13 March 2027, Gauteng, clash'")) 'Planner month draws the event named in words'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/planner/svg" -Method Post -ContentType application/json -Body '{"spec":{"title":"Bad","from":"2027-01-02","to":"2027-01-01"}}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) 'Planner refuses a period that ends before it starts'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/planner/svg" -Method Post -ContentType application/json -Body ($planner.Replace(',"view":{"zoom":"Month","date":"2027-03-01"}',',"layout":"Narrow"')) -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains("class='lumen-month'")) 'Planner draws the narrow year'
 foreach($bad in @('{"kind":"Donut","series":[{"name":"Bad","points":[{"x":0,"y":-1}]}]}','{"width":99999}','{"series":null}','{"kind":"Bogus"}','{not json')){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400) 'Invalid request rejected'

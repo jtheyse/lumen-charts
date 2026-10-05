@@ -817,6 +817,27 @@ lines.Add($"recipe/team-rider-340 {Hash(Render(new ChartSpec { Title = "Team rid
     Series = [new("Share", teamRounds42.Select((r, i) => r.Place is int place
         ? new ChartPoint(i, Math.Round(100d * (r.Field - place) / (r.Field - 1), MidpointRounding.AwayFromZero), $"Round {r.Round}") { ValueNote = $" · {Ordinal42(place)} of {r.Field}" }
         : new ChartPoint(i, null, $"Round {r.Round}") { GapLabel = "absent", Color = "#e0a800" }).ToArray(), "#22d3ee") { StrokeWidth = 2, Markers = MarkerStyle.Filled }] }))}");
+// 0.43.0: the event planner.
+PlannerSpec Planned(ChartTheme theme, ChartStyle? style = null) => PlannerSpec.ForYear(2027) with
+{
+    Title = "Season planner", Description = "Invented organizers", Theme = theme, Style = Finished(style, theme),
+    Regions = [new("ZA", "South Africa"), new("ZA-GP", "Gauteng", "ZA"), new("ZA-WC", "Western Cape", "ZA")],
+    Periods = [new(new(2027, 4, 27), null, "Freedom Day", PeriodKind.PublicHoliday, "ZA"), new(new(2027, 6, 26), new DateOnly(2027, 7, 18), "School holiday", PeriodKind.SchoolHoliday, "ZA")],
+    Events = Enumerable.Range(0, 30).Select(i => new PlannerEvent($"e{i}", $"Invented event {i}", new DateOnly(2027, 1, 2).AddDays(i * 11))
+    {
+        End = i % 7 == 0 ? new DateOnly(2027, 1, 2).AddDays(i * 11 + 2) : null, Region = i % 2 == 0 ? "ZA-GP" : "ZA-WC", Category = i % 3 == 0 ? "XCO" : "Road",
+        Status = (PlannerStatus)(i % 3), Relevance = (PlannerRelevance)(i % 3), Mine = i == 5
+    }).ToArray()
+};
+foreach (var (name, theme, style) in new[] { ("light", ChartTheme.Light, (ChartStyle?)null), ("dark", ChartTheme.Dark, null), ("midnight", ChartTheme.Light, ChartStyle.Midnight) })
+{
+    lines.Add($"planner/year-{name} {Hash(PlannerSvg.Render(Planned(theme, style), PlannerView.WholePeriod))}");
+    lines.Add($"planner/month-{name} {Hash(PlannerSvg.Render(Planned(theme, style), PlannerView.Month(2027, 3)))}");
+    lines.Add($"planner/day-{name} {Hash(PlannerSvg.Render(Planned(theme, style), PlannerView.Day(new DateOnly(2027, 1, 13))))}");
+}
+lines.Add($"planner/year-narrow-340 {Hash(PlannerSvg.Render(Planned(ChartTheme.Light) with { Width = 340 }, PlannerView.WholePeriod, PlannerLayout.Narrow))}");
+lines.Add($"planner/month-narrow-340 {Hash(PlannerSvg.Render(Planned(ChartTheme.Light) with { Width = 340 }, PlannerView.Month(2027, 3), PlannerLayout.Narrow))}");
+lines.Add($"planner/gauteng {Hash(PlannerSvg.Render(Planned(ChartTheme.Light) with { Filter = new() { Regions = ["ZA-GP"] } }, PlannerView.WholePeriod))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);
