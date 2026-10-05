@@ -581,6 +581,11 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/planner/svg" -Method Post -ContentType
 Verify ($r.StatusCode -eq 400) 'Planner refuses a period that ends before it starts'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/planner/svg" -Method Post -ContentType application/json -Body ($planner.Replace(',"view":{"zoom":"Month","date":"2027-03-01"}',',"layout":"Narrow"')) -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and $r.Content.Contains("class='lumen-month'")) 'Planner draws the narrow year'
+# A missing list, a missing event or an undefined status is the caller's mistake: 400 with the rule, never a 500.
+foreach($bad in @($planner.Replace('"events":[{"id"','"events":null,"x":[{"id"'),$planner.Replace('"regions":[{"code"','"regions":null,"x":[{"code"'),$planner.Replace('"events":[','"events":[null,'),$planner.Replace('"relevance":"Clash"','"relevance":9'),$planner.Replace('"title":"Season planner",','"title":"Season planner","filter":{"regions":null},'))){
+ $r=Invoke-WebRequest "$BaseUrl/api/charts/planner/svg" -Method Post -ContentType application/json -Body $bad -SkipHttpErrorCheck
+ Verify ($r.StatusCode -eq 400) "Planner refuses a missing list, element or undefined value with 400 ($($r.StatusCode))"
+}
 foreach($bad in @('{"kind":"Donut","series":[{"name":"Bad","points":[{"x":0,"y":-1}]}]}','{"width":99999}','{"series":null}','{"kind":"Bogus"}','{not json')){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400) 'Invalid request rejected'

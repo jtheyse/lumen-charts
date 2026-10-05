@@ -8702,7 +8702,7 @@ Test("Planner day view: a day with nothing says so, and empty optional fields le
     Check(!bare.Descendants(ns+"text").Any(t=>t.Value.Contains(" ·  ")||t.Value.StartsWith(" · ")||t.Value.EndsWith(" · ")));
 });
 Test("Planner day view: the drawing is as tall as its content, whatever the description's lines and titles, and the date sits below them",()=>{
-    var wordy=string.Join(" ",Enumerable.Repeat("Invented organizers' events across regions",5));
+    var wordy=string.Join(" ",Enumerable.Repeat("Invented organizers' events across regions",4)); // 171 characters: a description is at most 200.
     foreach(var (description,titles) in new[]{("Short",true),(wordy,true),(wordy,false)}){
         var spec=PlanYear(s=>s with{Description=description,DrawTitles=titles,Periods=[..s.Periods,new(new(2027,4,27),null,"Invented Tuesday",PeriodKind.Other)],
             Events=[new("a","With note",new(2027,4,27)){Note="A note"},new("b","Without",new(2027,4,27)){Category="Road"},new("c","Two days",new(2027,4,26)){End=new DateOnly(2027,4,27)}]});
@@ -8792,7 +8792,7 @@ void PlanInside(XDocument doc,double width){
     }
 }
 Test("Planner narrow layouts: at 320 wide, with long names, holidays and a long description, every word of the year and the agenda stays inside",()=>{
-    var wordy=string.Join(" ",Enumerable.Repeat("Invented organizers' events across regions",5));
+    var wordy=string.Join(" ",Enumerable.Repeat("Invented organizers' events across regions",4)); // 171 characters: a description is at most 200.
     var spec=PlanYear(s=>s with{Width=320,Description=wordy,
         Periods=[..s.Periods,new(new(2027,9,25),new DateOnly(2027,9,26),new string('P',60),PeriodKind.PublicHoliday,"ZA")],
         Events=[..s.Events,
@@ -8834,7 +8834,7 @@ Test("Planner: a day too full to draw whole writes \"+N\" with a role that permi
     Check((string?)more.Attribute("role")=="img"&&(string?)more.Parent!.Attribute("role")=="presentation"&&more.Parent.Element(ns+"title")?.Value==(string?)more.Attribute("aria-label"),"the tooltip left the +N more");
 });
 Test("Planner narrow layouts: each drawing is as tall as its content, whatever the description's lines and titles",()=>{
-    var wordy=string.Join(" ",Enumerable.Repeat("Invented organizers' events across regions",5));
+    var wordy=string.Join(" ",Enumerable.Repeat("Invented organizers' events across regions",4)); // 171 characters: a description is at most 200.
     foreach(var (description,titles) in new[]{("Short",true),(wordy,true),(wordy,false)}){
         var spec=PlanYear(s=>s with{Width=340,Description=description,DrawTitles=titles});
         foreach(var (doc,first) in new[]{(PlanSvg(spec,PlannerView.WholePeriod,PlannerLayout.Narrow),"Jan 2027"),(PlanSvg(spec,PlannerView.Month(2027,3),PlannerLayout.Narrow),"Friday 12 March")}){
@@ -8952,6 +8952,112 @@ Test("Planner: a spec round-trips through the HTTP API's JSON and draws the same
     Check(PlannerSvg.Render(back.Spec,back.View!.Value,back.Layout)==PlannerSvg.Render(request.Spec,request.View!.Value));
     var text=System.Text.Json.JsonSerializer.Serialize(request,json);
     Check(text.Contains("\"zoom\":\"Month\"")&&text.Contains("\"relevance\":\"Clash\""),text[..200]);
+});
+// ---- 0.43.0 final review: refusals, scale, culture ----
+Test("Planner: refuses a missing list or a missing element in it, as JSON's null gives, with ArgumentException",()=>{
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Weekend=null!})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=null!})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Periods=null!})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=null!})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Description=null!})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=[..s.Regions,null!]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Periods=[..s.Periods,null!]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=[..s.Events,null!]})));
+    foreach(var filter in new PlannerFilter[]{new(){Regions=null!},new(){Categories=null!},new(){Audiences=null!},new(){Statuses=null!},new(){Relevances=null!},
+        new(){Regions=[null!]},new(){Categories=["XCO",null!]},new(){Audiences=[null!]}})
+        Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Filter=filter})));
+    Reject(()=>PlannerSvg.Render(PlanYear(s=>s with{Events=null!}),PlannerView.WholePeriod));
+});
+Test("Planner: takes at most 2000 events, 1000 periods, 500 regions and 200 characters in a title, description or name",()=>{
+    PlannerEvent Ride(int i)=>new($"r{i}",$"Invented ride {i}",new DateOnly(2027,1,1).AddDays(i%365));
+    PlannerValidation.Validate(PlanYear(s=>s with{Events=Enumerable.Range(0,2000).Select(Ride).ToArray()}));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=Enumerable.Range(0,2001).Select(Ride).ToArray()})));
+    PlannerPeriod Break(int i)=>new(new DateOnly(2027,1,1).AddDays(i%365),null,$"Invented day {i}",PeriodKind.Other);
+    PlannerValidation.Validate(PlanYear(s=>s with{Periods=Enumerable.Range(0,1000).Select(Break).ToArray()}));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Periods=Enumerable.Range(0,1001).Select(Break).ToArray()})));
+    PlannerRegion Place(int i)=>new($"P{i}",$"Invented place {i}");
+    PlannerValidation.Validate(PlanYear(s=>s with{Regions=[..s.Regions,..Enumerable.Range(0,497).Select(Place)]}));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=[..s.Regions,..Enumerable.Range(0,498).Select(Place)]})));
+    var fits=new string('n',200);var over=new string('n',201);
+    PlannerValidation.Validate(PlanYear(s=>s with{Title=fits,Description=fits,Regions=[..s.Regions,new("X",fits)],Periods=[new(new(2027,5,1),null,fits,PeriodKind.Other)],Events=[new("x",fits,new(2027,5,1))]}));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Title=over})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Description=over})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Regions=[..s.Regions,new("X",over)]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Periods=[new(new(2027,5,1),null,over,PeriodKind.Other)]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=[new("x",over,new(2027,5,1))]})));
+});
+Test("Planner: refuses an undefined zoom, layout, week start, weekend day, period kind, status or relevance",()=>{
+    Reject(()=>PlannerValidation.Validate(PlanYear(),new PlannerView((PlannerZoom)7,new(2027,3,1))));
+    Reject(()=>PlannerSvg.Render(PlanYear(),PlannerView.WholePeriod,(PlannerLayout)2));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{WeekStart=(DayOfWeek)7})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Weekend=[DayOfWeek.Saturday,(DayOfWeek)9]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Periods=[new(new(2027,5,1),null,"Odd",(PeriodKind)5)]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=[new("x","Odd",new(2027,5,1)){Status=(PlannerStatus)3}]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Events=[new("x","Odd",new(2027,5,1)){Relevance=(PlannerRelevance)3}]})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Filter=new(){Statuses=[(PlannerStatus)4]}})));
+    Reject(()=>PlannerValidation.Validate(PlanYear(s=>s with{Filter=new(){Relevances=[(PlannerRelevance)4]}})));
+});
+Test("Planner: a year of 2000 events over 60 regions filtered to two draws in well under a second, and a month of 200-character names quickly",()=>{
+    var regions=new List<PlannerRegion>{new("ZA","South Africa")};
+    for(var i=0;i<59;i++)regions.Add(new($"R{i}",$"Invented region {i}",i<9?"ZA":$"R{i%9}"));
+    var events=Enumerable.Range(0,2000).Select(i=>new PlannerEvent($"e{i}",$"Invented event {i}",new DateOnly(2027,1,1).AddDays(i*7%365)){
+        End=i%5==0?new DateOnly(2027,1,1).AddDays(i*7%365+2):null,Region=regions[i%60].Code,Relevance=(PlannerRelevance)(i%3),Status=(PlannerStatus)(i%3/2)}).ToArray();
+    var periods=Enumerable.Range(0,300).Select(i=>new PlannerPeriod(new DateOnly(2027,1,1).AddDays(i%360),i%4==0?new DateOnly(2027,1,1).AddDays(i%360+4):null,$"Invented period {i}",(PeriodKind)(i%3),regions[i%60].Code)).ToArray();
+    var spec=PlanYear(s=>s with{Regions=regions,Periods=periods,Events=events,Filter=new(){Regions=["R3","R40"]}});
+    PlannerSvg.Render(PlanYear(),PlannerView.WholePeriod);
+    var timer=Stopwatch.StartNew();
+    var year=PlannerSvg.Render(spec,PlannerView.WholePeriod);
+    timer.Stop();
+    Console.WriteLine($"     year of 2000 events, 60 regions, 2-region filter: {timer.ElapsedMilliseconds} ms");
+    Check(timer.Elapsed.TotalSeconds<1.5,$"{timer.ElapsedMilliseconds} ms");
+    Check(PlanMarks(XDocument.Parse(year)).Any(),"nothing drawn");
+    timer.Restart();
+    foreach(var (view,layout) in new[]{(PlannerView.Month(2027,3),PlannerLayout.Wide),(PlannerView.WholePeriod,PlannerLayout.Narrow),(PlannerView.Month(2027,3),PlannerLayout.Narrow),(PlannerView.Day(new(2027,3,13)),PlannerLayout.Wide)})
+        PlannerSvg.Render(spec with{Filter=null},view,layout);
+    timer.Stop();
+    Console.WriteLine($"     month, narrow year, agenda and day of 2000 unfiltered events: {timer.ElapsedMilliseconds} ms");
+    Check(timer.Elapsed.TotalSeconds<1.5,$"{timer.ElapsedMilliseconds} ms");
+    var long200=Enumerable.Range(0,40).Select(i=>new PlannerEvent($"l{i}",new string((char)('A'+i%26),200),new(2027,3,1+i%31)){Note=new string('n',120)}).ToArray();
+    var wordy=PlanYear(s=>s with{Title=new string('T',200),Description=new string('D',200),Width=4096,Events=long200});
+    timer.Restart();
+    var month=PlannerSvg.Render(wordy,PlannerView.Month(2027,3));
+    PlannerSvg.Render(wordy with{Width=320},PlannerView.Month(2027,3),PlannerLayout.Narrow);
+    PlannerSvg.Render(wordy with{Width=320},PlannerView.Day(new(2027,3,1)));
+    timer.Stop();
+    Console.WriteLine($"     month, agenda and day of 200-character names: {timer.ElapsedMilliseconds} ms");
+    Check(timer.Elapsed.TotalSeconds<0.5,$"{timer.ElapsedMilliseconds} ms");
+    Check(XDocument.Parse(month).Descendants(ns+"text").Any(t=>t.Value.StartsWith("AAAA")&&t.Value.EndsWith("…")),"no long name cut");
+});
+Test("Planner: a cut never parts the two halves of a character outside the Basic Multilingual Plane",()=>{
+    foreach(var lead in new[]{"","a"})
+    foreach(var width in new[]{320,333,347}){
+        var name=lead+string.Concat(Enumerable.Repeat("\U0001F6B4",60));
+        var svg=PlannerSvg.Render(PlanYear(s=>s with{Width=width,Events=[new("x",name,new(2027,3,3))]}),PlannerView.Month(2027,3),PlannerLayout.Narrow);
+        var line=PlanMarks(XDocument.Parse(svg)).Single().Element(ns+"text")!.Value;
+        Check(line.EndsWith("…")&&!line.Contains('�'),line);
+        for(var i=0;i<line.Length;i++)
+            Check(!char.IsSurrogate(line[i])||char.IsHighSurrogate(line[i])&&i+1<line.Length&&char.IsLowSurrogate(line[i+1])||char.IsLowSurrogate(line[i])&&i>0&&char.IsHighSurrogate(line[i-1]),$"a lone half at {i} in '{line}'");
+    }
+});
+Test("Planner: renders byte for byte the same under Thai, Arabic, Persian, French and Swedish cultures as under the invariant one",()=>{
+    var spec=PlanYear(s=>s with{Periods=[..s.Periods,new(new(2027,5,10),new DateOnly(2027,5,14),"Invented exams",PeriodKind.Other,"ZA")],
+        Events=[..s.Events,new("n","Invented ride",new(2027,3,10)){End=new DateOnly(2027,3,11),Relevance=PlannerRelevance.Near,Note="Invented note 1,5 km"}]});
+    var views=new[]{(PlannerView.WholePeriod,PlannerLayout.Wide,1100),(PlannerView.Month(2027,3),PlannerLayout.Wide,1100),(PlannerView.Day(new(2027,3,13)),PlannerLayout.Wide,1100),
+        (PlannerView.WholePeriod,PlannerLayout.Narrow,340),(PlannerView.Month(2027,3),PlannerLayout.Narrow,340)};
+    string[] All()=>views.Select(v=>PlannerSvg.Render(spec with{Width=v.Item3},v.Item1,v.Item2)).Append(PlannerSvg.Table(spec,2027,3)).ToArray();
+    string Refusal(){try{PlannerValidation.Validate(spec,PlannerView.Day(new(2028,1,5)));}catch(ArgumentException x){return x.Message;}return "";}
+    var (culture,ui)=(CultureInfo.CurrentCulture,CultureInfo.CurrentUICulture);
+    try{
+        CultureInfo.CurrentCulture=CultureInfo.CurrentUICulture=CultureInfo.InvariantCulture;
+        var expected=All();var message=Refusal();
+        Check(message.Contains("2028-01-05"),message);
+        foreach(var name in new[]{"th-TH","ar-SA","fa-IR","fr-FR","sv-SE"}){
+            CultureInfo.CurrentCulture=CultureInfo.CurrentUICulture=new CultureInfo(name);
+            var drawn=All();
+            for(var i=0;i<drawn.Length;i++)Check(drawn[i]==expected[i],$"{name}: drawing {i} differs");
+            Check(Refusal()==message,$"{name}: '{Refusal()}'");
+        }
+    }finally{CultureInfo.CurrentCulture=culture;CultureInfo.CurrentUICulture=ui;}
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
