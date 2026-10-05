@@ -98,19 +98,20 @@ public static class PlannerSvg
                 var x1 = X(Max(from, first)); var x2 = X(Min(to, last)) + col;
                 w.Add($"<path d='M{N(x1 + 1)},{N(y + 41)} v3 H{N(x2 - 1)} v-3' fill='none' stroke='{style.Muted}' stroke-width='1.5'{w.Fixed}/>");
             }
-            // Events: up to three lanes per day; a day with more writes "+N" naming the ones it could not draw.
-            var lanes = new Dictionary<DateOnly, int>();
+            // Events: up to three lanes per day, each event in the lowest lane free on every one of its days; a day with more writes
+            // "+N" naming the ones it could not draw.
+            var taken = new Dictionary<DateOnly, bool[]>();
             var hidden = new SortedDictionary<DateOnly, List<PlannerEvent>>();
             foreach (var e in events)
             {
                 var start = Max(e.Start, Max(first, spec.From));
                 var end = Min(e.End ?? e.Start, Min(last, spec.To));
                 if (end < start) continue;
-                var lane = Days(start, end).Max(d => lanes.GetValueOrDefault(d));
+                var lane = Enumerable.Range(0, 3).FirstOrDefault(l => Days(start, end).All(d => !(taken.TryGetValue(d, out var t) && t[l])), 3);
                 foreach (var d in Days(start, end))
                 {
-                    lanes[d] = lane + 1;
-                    if (lane >= 3) (hidden.TryGetValue(d, out var list) ? list : hidden[d] = []).Add(e);
+                    if (lane < 3) (taken.TryGetValue(d, out var t) ? t : taken[d] = new bool[3])[lane] = true;
+                    else (hidden.TryGetValue(d, out var list) ? list : hidden[d] = []).Add(e);
                 }
                 if (lane >= 3) continue;
                 Stripe(w, plan, style, e, X(start), y + 18 + lane * 7, X(end) + col - X(start));

@@ -9086,6 +9086,15 @@ Test("Planner: a focused line keeps its words unstroked and is ringed, in its ow
     var chart=ChartSvg.Render(Spec());
     Check(chart.Contains("class='lumen-svg' ")&&!chart.Contains("lumen-planner")&&chart.Contains(".lumen-svg .lumen-datum:focus{stroke:currentColor;stroke-width:3}"),"a chart's root or focus style moved");
 });
+Test("Planner year view: each event takes the lowest lane free on all its days, so a day beside a span reuses the top lane",()=>{
+    // Monday 8 March: a one-day ride and a three-day span to Wednesday; Tuesday and Wednesday one ride each. The span takes the
+    // second lane; the Tuesday and Wednesday rides find the top lane free and take it, as counting a day's events would not.
+    var spec=PlanYear(s=>s with{Events=[new("a","A Single",new(2027,3,8)),new("c","C Span",new(2027,3,8)){End=new DateOnly(2027,3,10)},
+        new("d","D Tuesday",new(2027,3,9)),new("b","B Wednesday",new(2027,3,10))]});
+    var doc=PlanSvg(spec);
+    double Top(string id)=>double.Parse(PlanMarks(doc).Single(m=>(string?)m.Attribute("data-event")==id).Descendants(ns+"rect").First().Attribute("y")!.Value,CultureInfo.InvariantCulture);
+    Check(Top("c")==Top("a")+7&&Top("d")==Top("a")&&Top("b")==Top("a"),$"a {Top("a")}, c {Top("c")}, d {Top("d")}, b {Top("b")}");
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;
