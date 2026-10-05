@@ -8525,6 +8525,37 @@ Test("Planner year view: ten events on one day draw three stripes and a +7 that 
     var more=doc.Descendants().Single(e=>((string?)e.Attribute("class")??"").Split(' ').Contains("lumen-more"));
     Check(more.Value.Contains("+7")&&more.Attribute("aria-label")!.Value.StartsWith("7 more on Saturday 8 May 2027: Invented ride 3"),more.Attribute("aria-label")!.Value);
 });
+// A "+N" lists at most 20 hidden names then "and N more", so a crowded day cannot make the drawing grow with every event it hides.
+void CheckCappedMore(XElement more,string what)
+{
+    var label=more.Attribute("aria-label")!.Value;
+    var hidden=int.Parse(label[..label.IndexOf(' ')],CultureInfo.InvariantCulture);
+    Check(hidden>20,$"{what}: only {hidden} hidden");
+    var names=label[(label.IndexOf(": ",StringComparison.Ordinal)+2)..].Split("; ");
+    Check(names.Length==21&&names[^1]==$"and {hidden-20} more"&&names.Take(20).All(n=>n.StartsWith("Invented ride ")),$"{what}: {label}");
+    var title=more.Parent!.Name==ns+"g"&&more.Parent.Attribute("role")?.Value=="presentation"?more.Parent.Element(ns+"title")!.Value:more.Element(ns+"title")!.Value;
+    Check(title==label,$"{what}: the tooltip differs from the label");
+}
+Test("Planner year and month views: a day with 100 events writes +N naming the first 20 hidden and \"and N more\" for the rest",()=>{
+    var many=Enumerable.Range(0,100).Select(i=>new PlannerEvent($"m{i}",$"Invented ride {i:000}",new(2027,5,8))).ToArray();
+    var spec=PlanYear(s=>s with{Events=many});
+    var year=PlanSvg(spec).Descendants().Single(e=>((string?)e.Attribute("class")??"").Split(' ').Contains("lumen-more"));
+    Check(year.Value.EndsWith("+97")&&year.Attribute("aria-label")!.Value.StartsWith("97 more on Saturday 8 May 2027: Invented ride 003; Invented ride 004;")&&year.Attribute("aria-label")!.Value.EndsWith("; Invented ride 022; and 77 more"),year.Attribute("aria-label")!.Value);
+    CheckCappedMore(year,"year");
+    var month=PlanSvg(spec,PlannerView.Month(2027,5)).Descendants(ns+"text").Single(t=>((string?)t.Attribute("class")??"").Split(' ').Contains("lumen-more"));
+    CheckCappedMore(month,"month");
+    // Twenty or fewer hidden are all listed, with no "and N more".
+    var few=PlanSvg(PlanYear(s=>s with{Events=many.Take(23).ToArray()})).Descendants().Single(e=>((string?)e.Attribute("class")??"").Split(' ').Contains("lumen-more"));
+    Check(few.Attribute("aria-label")!.Value.StartsWith("20 more on Saturday 8 May 2027: Invented ride 003;")&&few.Attribute("aria-label")!.Value.EndsWith("; Invented ride 022")&&!few.Attribute("aria-label")!.Value.Contains("and "),few.Attribute("aria-label")!.Value);
+});
+Test("Planner: 2000 events with 200-character names on one 365-day span render the year and the month well under 10 MB",()=>{
+    var many=Enumerable.Range(0,PlannerValidation.MaxEvents).Select(i=>new PlannerEvent($"m{i}",$"Invented ride {i} ".PadRight(PlannerValidation.MaxText,'x'),new(2027,1,1)){End=new DateOnly(2027,12,31)}).ToArray();
+    var spec=PlanYear(s=>s with{Events=many});
+    var year=PlannerSvg.Render(spec,PlannerView.WholePeriod).Length;
+    var month=PlannerSvg.Render(spec,PlannerView.Month(2027,3)).Length;
+    Check(year<10_000_000,$"the year is {year:N0} characters");
+    Check(month<10_000_000,$"the month is {month:N0} characters");
+});
 Test("Planner year view: an event that starts before the period is drawn from its first day and named with its full dates",()=>{
     var doc=PlanSvg(PlanYear(s=>s with{Events=[new("x","New Year Tour",new(2026,12,30)){End=new DateOnly(2027,1,2)}]}));
     var mark=PlanMarks(doc).Single();
