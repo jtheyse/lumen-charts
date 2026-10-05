@@ -467,8 +467,12 @@ public static class PlannerSvg
         b.Append("</tbody></table>");
         return b.ToString();
     }
+    /// <summary>The most events one day of the agenda draws a line for; a busier day writes "+N more" naming the rest.</summary>
+    internal const int AgendaEvents = 20;
+
     /// <summary>A month on a phone, as an agenda of only the days that hold a period or an event: each a bold header with its periods
-    /// muted after it, then its events one per line (marker, name, region and relevance), cut to fit. An empty month says so.</summary>
+    /// muted after it, then its events one per line (marker, name, region and relevance), cut to fit, at most <see cref="AgendaEvents"/>
+    /// a day and then "+N more". An empty month says so.</summary>
     private static string Agenda(PlannerSpec spec, PlannerIndex plan, ChartStyle style, int year, int month)
     {
         var first = new DateOnly(year, month, 1);
@@ -480,7 +484,7 @@ public static class PlannerSvg
             if (periods.Count > 0 || events.Count > 0) days.Add((d, periods, events));
         }
         var description = $"{first.ToString("MMMM yyyy", Invariant)}{(spec.Description.Length > 0 ? " · " + spec.Description : "")}";
-        var body = days.Count == 0 ? 24 : days.Sum(x => 22 + x.Events.Count * 18 + 6);
+        var body = days.Count == 0 ? 24 : days.Sum(x => 22 + (Math.Min(x.Events.Count, AgendaEvents) + (x.Events.Count > AgendaEvents ? 1 : 0)) * 18 + 6);
         // As in the month grid, the description is set in two lines at most, each cut to the width, and the room is that of the
         // month-led line Begin draws.
         var height = 78 + Head(spec with { Description = description }) + body + 16;
@@ -499,13 +503,21 @@ public static class PlannerSvg
                 w.Text(24 + headWide, y, Fit(string.Join(" · ", periods.Select(p => p.Name)), spec.Width - 48 - headWide, 10), "class='lumen-muted' font-size='10'");
             }
             y += 18;
-            foreach (var e in events)
+            foreach (var e in events.Take(AgendaEvents))
             {
                 var word = Word(e);
                 Datum(w, plan, e, (22, y - 12, spec.Width - 44, 16));
                 Marker(w, style, e, 26, y - 9);
                 w.Text(36, y, Fit(e.Name + (e.Region is null ? "" : " · " + e.Region) + word, spec.Width - 60, 11), "font-size='11'");
                 w.Add("</g>");
+                y += 18;
+            }
+            if (events.Count > AgendaEvents)
+            {
+                var rest = events.Skip(AgendaEvents).ToArray();
+                var label = MoreLabel(rest.Length, day, rest.Select(e => e.Name));
+                // As in the month grid, the tooltip sits on a presentational group and the text names itself once.
+                w.Add($"<g role='presentation'><title>{E(label)}</title><text class='lumen-more lumen-muted' role='img' x='36' y='{N(y)}' font-size='11' aria-label='{E(label)}'>+{rest.Length} more</text></g>");
                 y += 18;
             }
             w.Add("</g>");

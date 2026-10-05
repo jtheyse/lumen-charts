@@ -8548,13 +8548,28 @@ Test("Planner year and month views: a day with 100 events writes +N naming the f
     var few=PlanSvg(PlanYear(s=>s with{Events=many.Take(23).ToArray()})).Descendants().Single(e=>((string?)e.Attribute("class")??"").Split(' ').Contains("lumen-more"));
     Check(few.Attribute("aria-label")!.Value.StartsWith("20 more on Saturday 8 May 2027: Invented ride 003;")&&few.Attribute("aria-label")!.Value.EndsWith("; Invented ride 022")&&!few.Attribute("aria-label")!.Value.Contains("and "),few.Attribute("aria-label")!.Value);
 });
-Test("Planner: 2000 events with 200-character names on one 365-day span render the year and the month well under 10 MB",()=>{
+Test("Planner: 2000 events with 200-character names on one 365-day span render the year, the month and the agenda well under 10 MB",()=>{
     var many=Enumerable.Range(0,PlannerValidation.MaxEvents).Select(i=>new PlannerEvent($"m{i}",$"Invented ride {i} ".PadRight(PlannerValidation.MaxText,'x'),new(2027,1,1)){End=new DateOnly(2027,12,31)}).ToArray();
     var spec=PlanYear(s=>s with{Events=many});
     var year=PlannerSvg.Render(spec,PlannerView.WholePeriod).Length;
     var month=PlannerSvg.Render(spec,PlannerView.Month(2027,3)).Length;
+    var agenda=PlannerSvg.Render(spec,PlannerView.Month(2027,3),PlannerLayout.Narrow).Length;
     Check(year<10_000_000,$"the year is {year:N0} characters");
     Check(month<10_000_000,$"the month is {month:N0} characters");
+    Check(agenda<10_000_000,$"the agenda is {agenda:N0} characters");
+});
+Test("Planner agenda: a day with 100 events draws 20 event lines and one +80 more line with the capped label",()=>{
+    var many=Enumerable.Range(0,100).Select(i=>new PlannerEvent($"m{i}",$"Invented ride {i:000}",new(2027,5,8))).ToArray();
+    var doc=PlanSvg(PlanYear(s=>s with{Events=many}),PlannerView.Month(2027,5),PlannerLayout.Narrow);
+    Check(PlanMarks(doc).Count()==20,$"{PlanMarks(doc).Count()} event lines");
+    var more=doc.Descendants(ns+"text").Single(t=>((string?)t.Attribute("class")??"").Split(' ').Contains("lumen-more"));
+    Check(more.Value=="+80 more"&&more.Attribute("aria-label")!.Value.StartsWith("80 more on Saturday 8 May 2027: Invented ride 020; Invented ride 021;")&&more.Attribute("aria-label")!.Value.EndsWith("; Invented ride 039; and 60 more"),more.Attribute("aria-label")!.Value);
+    CheckCappedMore(more,"agenda");
+    var height=double.Parse(doc.Root!.Attribute("viewBox")!.Value.Split(" ")[3],CultureInfo.InvariantCulture);
+    var last=doc.Descendants(ns+"text").Where(t=>t.Attribute("y")!=null).Max(t=>double.Parse(t.Attribute("y")!.Value,CultureInfo.InvariantCulture));
+    Check(last<height,$"the last line at {last} is outside the height {height}");
+    var twenty=PlanSvg(PlanYear(s=>s with{Events=many.Take(20).ToArray()}),PlannerView.Month(2027,5),PlannerLayout.Narrow);
+    Check(PlanMarks(twenty).Count()==20&&!twenty.Descendants(ns+"text").Any(t=>((string?)t.Attribute("class")??"").Contains("lumen-more")),"twenty events are all drawn with no +N more");
 });
 Test("Planner year view: an event that starts before the period is drawn from its first day and named with its full dates",()=>{
     var doc=PlanSvg(PlanYear(s=>s with{Events=[new("x","New Year Tour",new(2026,12,30)){End=new DateOnly(2027,1,2)}]}));
