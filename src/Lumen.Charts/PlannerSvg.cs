@@ -6,7 +6,10 @@ namespace Lumen.Charts;
 /// <summary>Draws a <see cref="PlannerSpec"/> as a self-contained, accessible SVG: the whole period, a month or a day.</summary>
 public static class PlannerSvg
 {
-    private const double Left = 76, Right = 24, RowH = 56, HeaderH = 16;
+    // A year row, from its top: the school holiday's solid band (2–5), another period's dotted band (6.5–8.5), the public holiday's
+    // diamond (10–17), three lanes of stripes (20, 27 and 34), "+N" (baseline 46), the long-weekend bracket (47–49.75) and the
+    // week's count (baseline 58), each clear of the next.
+    private const double Left = 76, Right = 24, RowH = 60, HeaderH = 16;
     private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
 
     /// <summary>Draws <paramref name="spec"/> at <paramref name="view"/>, wide or narrow. Checks the spec and the view first.</summary>
@@ -85,18 +88,21 @@ public static class PlannerSvg
                 var x = X(d);
                 w.Add($"<g class='lumen-day' role='group' data-day='{Iso(d)}' aria-label='{E(plan.DayName(d))}'>");
                 if (plan.IsWeekend(d)) w.Add($"<rect class='lumen-weekend' x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(RowH - 2)}' fill='{style.Grid}'/>");
-                foreach (var p in plan.On(d).Periods)
+                var periods = plan.On(d).Periods;
+                foreach (var p in periods)
                 {
                     if (p.Kind == PeriodKind.SchoolHoliday) w.Add($"<rect x='{N(x)}' y='{N(y + 2)}' width='{N(col)}' height='3' fill='{style.Muted}'/>");
-                    if (p.Kind == PeriodKind.PublicHoliday) w.Add($"<path d='M{N(x + col / 2)},{N(y + 7.5)} l3.5,3.5 l-3.5,3.5 l-3.5,-3.5 Z' fill='{style.Text}'/>");
+                    if (p.Kind == PeriodKind.PublicHoliday) w.Add($"<path d='M{N(x + col / 2)},{N(y + 10)} l3.5,3.5 l-3.5,3.5 l-3.5,-3.5 Z' fill='{style.Text}'/>");
                 }
+                // Any other period (exams, a large outside event) is a dotted band under the school holiday's solid one.
+                if (periods.Any(p => p.Kind == PeriodKind.Other)) w.Add(Dots(x, x + col, y + 7.5, style));
                 w.Add("</g>");
             }
-            // A long weekend that runs into the next month is drawn in both rows, each up to its own edge.
+            // A long weekend that runs into the next month is drawn in both rows, each up to its own edge, under the "+N" words.
             foreach (var (from, to) in longs.Where(l => l.From <= last && l.To >= first))
             {
                 var x1 = X(Max(from, first)); var x2 = X(Min(to, last)) + col;
-                w.Add($"<path d='M{N(x1 + 1)},{N(y + 41)} v3 H{N(x2 - 1)} v-3' fill='none' stroke='{style.Muted}' stroke-width='1.5'{w.Fixed}/>");
+                w.Add($"<path d='M{N(x1 + 1)},{N(y + 47)} v2 H{N(x2 - 1)} v-2' fill='none' stroke='{style.Muted}' stroke-width='1.5'{w.Fixed}/>");
             }
             // Events: up to three lanes per day, each event in the lowest lane free on every one of its days; a day with more writes
             // "+N" naming the ones it could not draw.
@@ -114,12 +120,12 @@ public static class PlannerSvg
                     else (hidden.TryGetValue(d, out var list) ? list : hidden[d] = []).Add(e);
                 }
                 if (lane >= 3) continue;
-                Stripe(w, plan, style, e, X(start), y + 18 + lane * 7, X(end) + col - X(start));
+                Stripe(w, plan, style, e, X(start), y + 20 + lane * 7, X(end) + col - X(start));
             }
             foreach (var (day, rest) in hidden)
             {
                 var label = $"{rest.Count} more on {PlannerCalendar.Day(day)}: {string.Join("; ", rest.Select(e => e.Name))}";
-                w.Add($"<text class='lumen-more' role='img' x='{N(X(day) + col / 2)}' y='{N(y + 44)}' font-size='10' text-anchor='middle' aria-label='{E(label)}'><title>{E(label)}</title>+{rest.Count}</text>");
+                w.Add($"<text class='lumen-more' role='img' x='{N(X(day) + col / 2)}' y='{N(y + 46)}' font-size='10' text-anchor='middle' aria-label='{E(label)}'><title>{E(label)}</title>+{rest.Count}</text>");
             }
             // Busy weeks: each week of the row is named with its clash and close events; a busy one writes its count. That count and
             // "+N" are written in the text colour, since they may stand on a weekend band, where the muted colour falls below 4.5:1.
@@ -136,7 +142,7 @@ public static class PlannerSvg
                 if (near > 0) words.Add($"{near} close");
                 var label = $"Week of {weekFirst.ToString("d MMMM yyyy", Invariant)}: {(words.Count == 0 ? "no clashes" : string.Join(", ", words))}";
                 w.Add($"<g class='lumen-week' role='group' aria-label='{E(label)}'>");
-                if (clashes + near > 0) w.Text(Left + (k * 7 + 3.5) * col, y + 54, (clashes + near).ToString(Invariant), "font-size='10' text-anchor='middle'");
+                if (clashes + near > 0) w.Text(Left + (k * 7 + 3.5) * col, y + 58, (clashes + near).ToString(Invariant), "font-size='10' text-anchor='middle'");
                 w.Add("</g>");
             }
         }
@@ -145,6 +151,10 @@ public static class PlannerSvg
         return w.ToString();
     }
 
+    /// <summary>Another period's band: 2-unit dots, 2 apart, in the muted colour (3:1 or more on the background and the weekend band),
+    /// along y from x1 to x2, where a school holiday's band is solid.</summary>
+    private static string Dots(double x1, double x2, double y, ChartStyle style) =>
+        $"<line class='lumen-other-period' x1='{N(x1)}' y1='{N(y)}' x2='{N(x2)}' y2='{N(y)}' stroke='{style.Muted}' stroke-width='2' stroke-dasharray='2 2'/>";
     /// <summary>A day as written in data attributes, 2027-03-13, in the Gregorian calendar whatever the host's culture.</summary>
     private static string Iso(DateOnly d) => d.ToString("yyyy-MM-dd", Invariant);
     private static int Head(PlannerSpec spec) => !spec.DrawTitles ? -ChartSvg.Untitled : 14 * (ChartSvg.Wrap(spec.Description, spec.Width - 48d).Length - 1);
@@ -210,7 +220,8 @@ public static class PlannerSvg
     private static readonly (string Word, string Kind)[] LegendItems =
     [
         ("clash", "clash"), ("close", "near"), ("other", "other"), ("provisional", "provisional"), ("cancelled", "cancelled"),
-        ("yours", "mine"), ("public holiday", "holiday"), ("school holiday", "school"), ("long weekend", "long"), ("weekend", "weekend")
+        ("yours", "mine"), ("public holiday", "holiday"), ("school holiday", "school"), ("other period", "period"), ("long weekend", "long"),
+        ("weekend", "weekend")
     ];
     private static double LegendItemWidth(string word) => 22 + ChartSvg.Wide(word) + 16;
     private static int LegendLines(int width)
@@ -237,7 +248,8 @@ public static class PlannerSvg
             {
                 case "holiday": w.Add($"<path d='M{N(x + 8)},{N(y + 2)} l3.5,3.5 l-3.5,3.5 l-3.5,-3.5 Z' fill='{style.Text}'/>"); break;
                 case "school": w.Add($"<rect x='{N(x)}' y='{N(y + 4)}' width='16' height='3' fill='{style.Muted}'/>"); break;
-                case "long": w.Add($"<path d='M{N(x + 1)},{N(y + 3)} v3 H{N(x + 15)} v-3' fill='none' stroke='{style.Muted}' stroke-width='1.5'/>"); break;
+                case "period": w.Add(Dots(x, x + 16, y + 5.5, style)); break;
+                case "long": w.Add($"<path d='M{N(x + 1)},{N(y + 3)} v2 H{N(x + 15)} v-2' fill='none' stroke='{style.Muted}' stroke-width='1.5'/>"); break;
                 case "weekend": w.Add($"<rect x='{N(x)}' y='{N(y)}' width='16' height='10' fill='{style.Grid}'/>"); break;
                 default: Shapes(w, style, sample, x, y + 3, 16); break;
             }
@@ -248,7 +260,8 @@ public static class PlannerSvg
     }
 
     /// <summary>The whole period on a phone: a 34-high block per month with its name, a slot for each of its weekends (the grid colour,
-    /// a muted outline, a diamond on a public holiday, a solid mark under it for a clash and a dashed one for only close events), and
+    /// a muted outline, a diamond on a public holiday, a dotted band over it for another period, a solid mark under it for a clash and
+    /// a dashed one for only close events), and
     /// the month's clash and close events counted in words on the right, each once, weekdays included; cancelled events count as
     /// neither. A weekend is a run of consecutive weekend days; one across a month's end shows in both bars, each slot covering and
     /// naming the whole weekend. Each weekend is a group named with its counts and periods.</summary>
@@ -294,6 +307,8 @@ public static class PlannerSvg
                 w.Add($"<rect x='{N(x)}' y='{N(y + 4)}' width='10' height='12' fill='{style.Grid}' stroke='{style.Muted}' stroke-width='1'{w.Fixed}/>");
                 if (periods.Any(p => p.Kind == PeriodKind.PublicHoliday))
                     w.Add($"<path d='M{N(x + 5)},{N(y + 5)} l3.5,3.5 l-3.5,3.5 l-3.5,-3.5 Z' fill='{style.Text}'/>");
+                // Another period (exams, a large outside event) is a dotted band over the slot, as in the wide year.
+                if (periods.Any(p => p.Kind == PeriodKind.Other)) w.Add(Dots(x, x + 10, y + 1, style));
                 if (c > 0) w.Add($"<rect x='{N(x)}' y='{N(y + 19)}' width='10' height='4' fill='{style.Text}'/>");
                 else if (n > 0) w.Add($"<rect x='{N(x)}' y='{N(y + 19)}' width='4' height='2' fill='{style.Text}'/><rect x='{N(x + 6)}' y='{N(y + 19)}' width='4' height='2' fill='{style.Text}'/>");
                 w.Add("</g>");

@@ -9095,6 +9095,53 @@ Test("Planner year view: each event takes the lowest lane free on all its days, 
     double Top(string id)=>double.Parse(PlanMarks(doc).Single(m=>(string?)m.Attribute("data-event")==id).Descendants(ns+"rect").First().Attribute("y")!.Value,CultureInfo.InvariantCulture);
     Check(Top("c")==Top("a")+7&&Top("d")==Top("a")&&Top("b")==Top("a"),$"a {Top("a")}, c {Top("c")}, d {Top("d")}, b {Top("b")}");
 });
+Test("Planner years: another period is a dotted band, unlike the school holiday's solid one, named in the day and in the legend, 3:1 on both grounds",()=>{
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight}){
+        // Monday 10 to Sunday 16 May 2027: invented exams, the weekend included.
+        var spec=PlanYear(s=>s with{Style=style,Periods=[..s.Periods,new(new(2027,5,10),new DateOnly(2027,5,16),"Invented exams",PeriodKind.Other,"ZA")]});
+        var wide=PlanSvg(spec);
+        XElement Day(string day)=>wide.Descendants().Single(e=>(string?)e.Attribute("data-day")==day);
+        foreach(var day in new[]{"2027-05-10","2027-05-15"}){
+            var dots=Day(day).Elements(ns+"line").SingleOrDefault(l=>(string?)l.Attribute("class")=="lumen-other-period");
+            Check(dots is not null&&(string?)dots.Attribute("stroke-dasharray")=="2 2"&&(string?)dots.Attribute("stroke")==style.Muted,$"{day}: {dots}");
+            foreach(var behind in new[]{style.Background,style.Grid})Check(Lumen.Charts.Contrast.Ratio(style.Muted,behind)>=3,$"dots on {behind}");
+            Check(Day(day).Attribute("aria-label")!.Value.Contains("Invented exams (period)"),Day(day).Attribute("aria-label")!.Value);
+        }
+        Check(!Day("2027-05-17").Elements(ns+"line").Any(),"the day after the exams is dotted");
+        // A school holiday day keeps its solid band and no dots.
+        var school=Day("2027-03-29");
+        Check(school.Elements(ns+"rect").Any(r=>(string?)r.Attribute("height")=="3"&&(string?)r.Attribute("fill")==style.Muted)&&!school.Elements(ns+"line").Any(),school.ToString());
+        var legend=wide.Descendants(ns+"g").Single(g=>(string?)g.Attribute("class")=="lumen-legend");
+        Check(legend.Elements(ns+"text").Any(t=>t.Value=="other period")&&legend.Elements(ns+"line").Any(l=>(string?)l.Attribute("stroke-dasharray")=="2 2"),"the legend lacks the other period");
+        var narrow=PlanSvg(spec with{Width=340},PlannerView.WholePeriod,PlannerLayout.Narrow);
+        var slot=narrow.Descendants().Single(e=>(string?)e.Attribute("data-weekend")=="2027-05-15");
+        Check(slot.Elements(ns+"line").Any(l=>(string?)l.Attribute("class")=="lumen-other-period")&&slot.Attribute("aria-label")!.Value.Contains("Invented exams"),slot.ToString());
+        Check(!narrow.Descendants().Single(e=>(string?)e.Attribute("data-weekend")=="2027-05-22").Elements(ns+"line").Any(),"the weekend after the exams is dotted");
+        Check(narrow.Descendants(ns+"text").Any(t=>t.Value=="other period"),"the narrow legend lacks the other period");
+    }
+});
+Test("Planner year view: a busy day in a long weekend writes \"+N\" clear of the weekend's bracket, and the week's count is clear of it too",()=>{
+    foreach(var weekStart in new[]{DayOfWeek.Monday,DayOfWeek.Wednesday}){
+        // Monday 26 and Tuesday 27 April 2027 are holidays, so Saturday 24 to Tuesday 27 is a long weekend; five rides on Sunday 25.
+        var spec=PlanYear(s=>s with{WeekStart=weekStart,Periods=[..s.Periods,new(new(2027,4,26),null,"Invented Monday",PeriodKind.PublicHoliday,"ZA")],
+            Events=Enumerable.Range(0,5).Select(i=>new PlannerEvent($"r{i}",$"Invented ride {i}",new(2027,4,25)){Relevance=PlannerRelevance.Clash}).ToArray()});
+        var doc=PlanSvg(spec);
+        double A(XElement e,string name)=>double.Parse((string?)e.Attribute(name)??"0",CultureInfo.InvariantCulture);
+        // A text's own words, without the tooltip inside it.
+        string Own(XElement t)=>string.Concat(t.Nodes().OfType<XText>().Select(n=>n.Value));
+        // A word's box: its estimated width about its anchor, from its baseline up 0.75 of its size.
+        Bounds Word(XElement t){var size=A(t,"font-size");var wide=ChartSvg.Wide(Own(t))*size/11;return new(A(t,"x")-wide/2,A(t,"y")-.75*size,A(t,"x")+wide/2,A(t,"y"));}
+        var brackets=doc.Descendants(ns+"path").Where(p=>(string?)p.Attribute("fill")=="none"&&((string?)p.Attribute("d")??"").Contains(" H")&&p.Ancestors().All(a=>(string?)a.Attribute("class")!="lumen-legend")).Select(p=>{
+            var d=p.Attribute("d")!.Value;var m=System.Text.RegularExpressions.Regex.Match(d,@"^M([\d.]+),([\d.]+) v([\d.]+) H([\d.]+)");
+            double V(int i)=>double.Parse(m.Groups[i].Value,CultureInfo.InvariantCulture);
+            return new Bounds(V(1)-.75,V(2),V(4)+.75,V(2)+V(3)+.75);}).ToArray();
+        Check(brackets.Length==1,$"{brackets.Length} long-weekend brackets");
+        var more=doc.Descendants(ns+"text").Single(t=>(string?)t.Attribute("class")=="lumen-more");
+        Check(Own(more)=="+2"&&Word(more).Overlaps(brackets[0])==false&&Word(more).Left<brackets[0].Right&&brackets[0].Left<Word(more).Right,$"+N {Word(more)} and the bracket {brackets[0]}");
+        foreach(var count in doc.Descendants(ns+"g").Where(g=>(string?)g.Attribute("class")=="lumen-week").SelectMany(g=>g.Elements(ns+"text")))
+            Check(!Word(count).Overlaps(brackets[0]),$"the count {Word(count)} and the bracket {brackets[0]}");
+    }
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;
