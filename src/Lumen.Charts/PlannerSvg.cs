@@ -106,8 +106,8 @@ public static class PlannerSvg
                 var weekLast = Min(Min(last, spec.To), first.AddDays(k * 7 - lead + 6));
                 if (weekLast < weekFirst) continue;
                 var inWeek = events.Where(e => e.Start <= weekLast && (e.End ?? e.Start) >= weekFirst).ToArray();
-                var clashes = inWeek.Count(e => e.Relevance == PlannerRelevance.Clash);
-                var near = inWeek.Count(e => e.Relevance == PlannerRelevance.Near);
+                var clashes = inWeek.Count(e => CountsAs(e, PlannerRelevance.Clash));
+                var near = inWeek.Count(e => CountsAs(e, PlannerRelevance.Near));
                 var words = new List<string>();
                 if (clashes > 0) words.Add(clashes == 1 ? "1 clash" : $"{clashes} clashes");
                 if (near > 0) words.Add($"{near} close");
@@ -123,6 +123,9 @@ public static class PlannerSvg
     }
 
     private static int Head(PlannerSpec spec) => !spec.DrawTitles ? -ChartSvg.Untitled : 14 * (ChartSvg.Wrap(spec.Description, spec.Width - 48d).Length - 1);
+    /// <summary>Whether <paramref name="e"/> counts as a clash or close event of <paramref name="relevance"/>: a cancelled one counts as
+    /// neither, though it is still drawn and named as cancelled.</summary>
+    private static bool CountsAs(PlannerEvent e, PlannerRelevance relevance) => e.Relevance == relevance && e.Status != PlannerStatus.Cancelled;
     private static DateOnly Max(DateOnly a, DateOnly b) => a > b ? a : b;
     private static DateOnly Min(DateOnly a, DateOnly b) => a < b ? a : b;
     private static IEnumerable<DateOnly> Days(DateOnly from, DateOnly to) { for (var d = from; d <= to; d = d.AddDays(1)) yield return d; }
@@ -217,8 +220,10 @@ public static class PlannerSvg
     }
 
     /// <summary>The whole period on a phone: a 34-high block per month with its name, a slot for each of its weekends (the grid colour,
-    /// a diamond on a public holiday, a solid mark under it for a clash and a dashed one for only close events), and its weekends'
-    /// clashes and close events counted in words on the right. Each weekend is a group named with its counts and periods.</summary>
+    /// a muted outline, a diamond on a public holiday, a solid mark under it for a clash and a dashed one for only close events), and
+    /// the month's clash and close events counted in words on the right, each once, weekdays included; cancelled events count as
+    /// neither. A weekend is a run of consecutive weekend days; one across a month's end shows in both bars, each slot covering and
+    /// naming the whole weekend. Each weekend is a group named with its counts and periods.</summary>
     private static string YearNarrow(PlannerSpec spec, ChartStyle style)
     {
         var months = PlannerCalendar.Months(spec);
@@ -228,40 +233,46 @@ public static class PlannerSvg
         var top = 78 + w.Head;
         var holidays = PlannerCalendar.Periods(spec);
         var all = PlannerCalendar.Events(spec);
+        var weekends = new List<(DateOnly From, DateOnly To)>();
+        for (var d = spec.From; d <= spec.To; d = d.AddDays(1))
+            if (PlannerCalendar.IsWeekend(spec, d))
+                if (weekends.Count > 0 && weekends[^1].To.DayNumber == d.DayNumber - 1) weekends[^1] = (weekends[^1].From, d);
+                else weekends.Add((d, d));
+        static string Words(int clashes, int close, string and) =>
+            string.Join(and, new[] { clashes > 0 ? (clashes == 1 ? "1 clash" : $"{clashes} clashes") : null, close > 0 ? $"{close} close" : null }.OfType<string>());
         for (var r = 0; r < months.Count; r++)
         {
             var (year, month) = months[r];
             var y = top + r * 34;
             var first = new DateOnly(year, month, 1);
+            var last = new DateOnly(year, month, DateTime.DaysInMonth(year, month));
             w.Text(24, y + 14, first.ToString("MMM yyyy", Invariant), "class='lumen-month' font-size='12'");
-            var weekends = new List<DateOnly>();
-            for (var d = first; d.Month == month; d = d.AddDays(1))
-                if (d >= spec.From && d <= spec.To && PlannerCalendar.IsWeekend(spec, d) && (weekends.Count == 0 || d.DayNumber - weekends[^1].DayNumber > 1)) weekends.Add(d);
             double x = 96;
-            int clashes = 0, close = 0;
-            foreach (var start in weekends)
+            foreach (var (from, to) in weekends.Where(k => k.From <= last && k.To >= first))
             {
-                var days = Enumerable.Range(0, 7).Select(start.AddDays).TakeWhile(d => d.Month == month && d <= spec.To && PlannerCalendar.IsWeekend(spec, d)).ToArray();
-                var events = all.Where(e => days.Any(d => e.Start <= d && d <= (e.End ?? e.Start))).ToArray();
-                var c = events.Count(e => e.Relevance == PlannerRelevance.Clash); var n = events.Count(e => e.Relevance == PlannerRelevance.Near);
-                clashes += c; close += n;
-                var periods = holidays.Where(p => days.Any(d => p.From <= d && d <= (p.To ?? p.From))).Select(p => p.Name).Distinct();
+                var events = all.Where(e => e.Start <= to && (e.End ?? e.Start) >= from).ToArray();
+                int c = events.Count(e => CountsAs(e, PlannerRelevance.Clash)), n = events.Count(e => CountsAs(e, PlannerRelevance.Near));
+                var periods = holidays.Where(p => p.From <= to && (p.To ?? p.From) >= from).ToArray();
                 var words = new List<string>();
-                if (c > 0) words.Add(c == 1 ? "1 clash" : $"{c} clashes");
-                if (n > 0) words.Add($"{n} close");
-                words.AddRange(periods);
-                var label = $"Weekend of {start.ToString("d MMMM yyyy", Invariant)}: {(words.Count == 0 ? "nothing" : string.Join(", ", words))}";
+                if (c + n > 0) words.Add(Words(c, n, ", "));
+                words.AddRange(periods.Select(p => p.Name).Distinct());
+                var span = from.Year != to.Year ? $"{from.ToString("d MMMM yyyy", Invariant)} to {to.ToString("d MMMM yyyy", Invariant)}"
+                    : from.Month != to.Month ? $"{from.ToString("d MMMM", Invariant)} to {to.ToString("d MMMM yyyy", Invariant)}"
+                    : from.ToString("d MMMM yyyy", Invariant);
+                var label = $"Weekend of {span}: {(words.Count == 0 ? "nothing" : string.Join(", ", words))}";
                 // Not focusable in the static drawing; the interactive planner gives weekends focus.
-                w.Add($"<g class='lumen-week' data-weekend='{start:yyyy-MM-dd}' aria-label='{E(label)}'><title>{E(label)}</title>");
-                w.Add($"<rect x='{N(x)}' y='{N(y + 4)}' width='10' height='12' fill='{style.Grid}'/>");
-                if (holidays.Any(p => p.Kind == PeriodKind.PublicHoliday && days.Any(d => p.From <= d && d <= (p.To ?? p.From))))
+                w.Add($"<g class='lumen-week' data-weekend='{from:yyyy-MM-dd}' aria-label='{E(label)}'><title>{E(label)}</title>");
+                // The grid colour barely shows on the background, so a muted outline that clears 3:1 draws the slot.
+                w.Add($"<rect x='{N(x)}' y='{N(y + 4)}' width='10' height='12' fill='{style.Grid}' stroke='{style.Muted}' stroke-width='1'{w.Fixed}/>");
+                if (periods.Any(p => p.Kind == PeriodKind.PublicHoliday))
                     w.Add($"<path d='M{N(x + 5)},{N(y + 5)} l3.5,3.5 l-3.5,3.5 l-3.5,-3.5 Z' fill='{style.Text}'/>");
                 if (c > 0) w.Add($"<rect x='{N(x)}' y='{N(y + 19)}' width='10' height='4' fill='{style.Text}'/>");
                 else if (n > 0) w.Add($"<rect x='{N(x)}' y='{N(y + 19)}' width='4' height='2' fill='{style.Text}'/><rect x='{N(x + 6)}' y='{N(y + 19)}' width='4' height='2' fill='{style.Text}'/>");
                 w.Add("</g>");
                 x += 14;
             }
-            var summary = string.Join(" · ", new[] { clashes > 0 ? (clashes == 1 ? "1 clash" : $"{clashes} clashes") : null, close > 0 ? $"{close} close" : null }.OfType<string>());
+            var inMonth = all.Where(e => e.Start <= Min(last, spec.To) && (e.End ?? e.Start) >= Max(first, spec.From)).ToArray();
+            var summary = Words(inMonth.Count(e => CountsAs(e, PlannerRelevance.Clash)), inMonth.Count(e => CountsAs(e, PlannerRelevance.Near)), " · ");
             // The counts stand on the background right of the slots, cut where a weekend of odd days leaves them less room.
             if (summary.Length > 0) w.Text(spec.Width - 24, y + 14, Fit(summary, spec.Width - 24 - (x + 8), 11), "class='lumen-muted' font-size='11' text-anchor='end'");
         }
@@ -414,7 +425,9 @@ public static class PlannerSvg
             foreach (var e in events)
             {
                 var name = PlannerCalendar.Name(spec, e);
-                var word = e.Relevance switch { PlannerRelevance.Clash => " · clash", PlannerRelevance.Near => " · close", _ => "" };
+                // A cancelled event is neither a clash nor close, and says it is cancelled.
+                var word = e.Status == PlannerStatus.Cancelled ? " · cancelled"
+                    : e.Relevance switch { PlannerRelevance.Clash => " · clash", PlannerRelevance.Near => " · close", _ => "" };
                 w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-event='{E(e.Id)}' aria-label='{E(name)}'><title>{E(name)}</title>");
                 Marker(w, style, e, 26, y - 9);
                 w.Text(36, y, Fit(e.Name + (e.Region is null ? "" : " · " + e.Region) + word, spec.Width - 60, 11), "font-size='11'");

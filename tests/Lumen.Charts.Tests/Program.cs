@@ -8802,9 +8802,9 @@ Test("Planner narrow layouts: at 320 wide, with long names, holidays and a long 
             ..Enumerable.Range(0,3).Select(i=>new PlannerEvent($"r{i}",$"Invented close {i}",new(2027,9,5+7*i)){Relevance=PlannerRelevance.Near})]});
     var year=PlanSvg(spec,PlannerView.WholePeriod,PlannerLayout.Narrow);
     PlanInside(year,320);
-    // March's weekends hold one clash and one close event; September's four weekends four clashes and three close (the 60-L one is on a Wednesday).
+    // March holds one clash and one close event; September five clashes (four on its weekends, the 60-L one on a Wednesday) and three close.
     var summaries=year.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="end").Select(t=>t.Value).ToArray();
-    Check(summaries.Contains("1 clash · 1 close")&&summaries.Contains("4 clashes · 3 close"),string.Join(" | ",summaries));
+    Check(summaries.Contains("1 clash · 1 close")&&summaries.Contains("5 clashes · 3 close"),string.Join(" | ",summaries));
     Check(year.Descendants().Single(e=>(string?)e.Attribute("data-weekend")=="2027-09-25").Attribute("aria-label")!.Value=="Weekend of 25 September 2027: 1 clash, "+new string('P',60),"the holiday is not named in its weekend");
     Check(year.Descendants().Where(e=>(string?)e.Attribute("class")=="lumen-week").All(g=>g.Attribute("tabindex") is null),"a static weekend is focusable");
     foreach(var month in new[]{3,9}) PlanInside(PlanSvg(spec,PlannerView.Month(2027,month),PlannerLayout.Narrow),320);
@@ -8866,12 +8866,61 @@ Test("Planner narrow layouts: every word clears 4.5:1 and every mark 3:1 against
             }
             foreach(var mark in doc.Descendants().Where(e=>e.Name==ns+"rect"||e.Name==ns+"path"||e.Name==ns+"line")){
                 Check(mark.Attribute("opacity") is null&&mark.Attribute("fill-opacity") is null&&mark.Attribute("stroke-opacity") is null,$"a faded mark: {mark}");
-                foreach(var paint in new[]{(string?)mark.Attribute("fill"),(string?)mark.Attribute("stroke")}.OfType<string>().Where(p=>p!="none"&&p!=style.Grid))
+                var fill=(string?)mark.Attribute("fill");var stroke=(string?)mark.Attribute("stroke");
+                // A grid-coloured weekend slot is seen by its outline, checked below like any mark; only the legend's weekend sample is
+                // a bare swatch of the grid colour.
+                var legend=mark.Ancestors().Any(a=>(string?)a.Attribute("class")=="lumen-legend");
+                if(fill==style.Grid)Check(legend||stroke is not null&&stroke!="none",$"a grid-coloured shape with no outline: {mark}");
+                foreach(var paint in new[]{fill==style.Grid?null:fill,stroke}.OfType<string>().Where(p=>p!="none"))
                     foreach(var behind in new[]{style.Background,style.Grid})
                         Check(Lumen.Charts.Contrast.Ratio(paint,behind)>=3,$"{mark.Name.LocalName} in {paint} on {behind}: {Lumen.Charts.Contrast.Ratio(paint,behind):0.00}");
             }
         }
     }
+});
+string[] PlanSums(XDocument doc)=>doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="end").Select(t=>t.Value).ToArray();
+XElement[] PlanWeekends(XDocument doc,string start)=>doc.Descendants().Where(e=>(string?)e.Attribute("data-weekend")==start).ToArray();
+Test("Planner narrow year: a month's counts take each of its clash and close events once, weekdays included, and a slot marks only its own weekend",()=>{
+    // 12 May 2027 is a Wednesday.
+    var mid=PlanSvg(PlanYear(s=>s with{Width=340,Events=[new("w","Midweek Clash",new(2027,5,12)){Relevance=PlannerRelevance.Clash}]}),PlannerView.WholePeriod,PlannerLayout.Narrow);
+    Check(PlanSums(mid).SequenceEqual(["1 clash"]),string.Join(" | ",PlanSums(mid)));
+    var may=mid.Descendants().Where(e=>((string?)e.Attribute("data-weekend")??"").StartsWith("2027-05")).ToArray();
+    Check(may.Length>0&&may.All(g=>g.Attribute("aria-label")!.Value.EndsWith(": nothing")&&g.Elements(ns+"rect").Count()==1),string.Join(" | ",may.Select(g=>g.Attribute("aria-label")!.Value)));
+    // Saturday 5 to Sunday 13 June: one race over two weekends.
+    var stage=PlanSvg(PlanYear(s=>s with{Width=340,Events=[new("r","Two Weekend Race",new(2027,6,5)){End=new DateOnly(2027,6,13),Relevance=PlannerRelevance.Clash}]}),PlannerView.WholePeriod,PlannerLayout.Narrow);
+    Check(PlanSums(stage).SequenceEqual(["1 clash"]),string.Join(" | ",PlanSums(stage)));
+    foreach(var (start,name) in new[]{("2027-06-05","5 June 2027"),("2027-06-12","12 June 2027")})
+        Check(PlanWeekends(stage,start).Single().Attribute("aria-label")!.Value==$"Weekend of {name}: 1 clash",PlanWeekends(stage,start).Single().Attribute("aria-label")!.Value);
+});
+Test("Planner: a cancelled event counts as neither clash nor close in the narrow year or the wide year's weeks, and is listed as cancelled",()=>{
+    // Saturday 19 and Sunday 20 June 2027.
+    var spec=PlanYear(s=>s with{Width=340,Events=[new("x","Called Off",new(2027,6,19)){Status=PlannerStatus.Cancelled,Relevance=PlannerRelevance.Clash},
+        new("y","Called Off Close",new(2027,6,20)){Status=PlannerStatus.Cancelled,Relevance=PlannerRelevance.Near}]});
+    var narrow=PlanSvg(spec,PlannerView.WholePeriod,PlannerLayout.Narrow);
+    var slot=PlanWeekends(narrow,"2027-06-19").Single();
+    Check(slot.Attribute("aria-label")!.Value=="Weekend of 19 June 2027: nothing"&&slot.Elements(ns+"rect").Count()==1,slot.ToString());
+    Check(PlanSums(narrow).Length==0,string.Join(" | ",PlanSums(narrow)));
+    var wide=PlanSvg(spec with{Width=1100});
+    var week=wide.Descendants().Single(e=>(string?)e.Attribute("class")=="lumen-week"&&e.Attribute("aria-label")!.Value.StartsWith("Week of 14 June 2027"));
+    Check(week.Attribute("aria-label")!.Value=="Week of 14 June 2027: no clashes"&&!week.Descendants(ns+"text").Any(),week.ToString());
+    var agenda=PlanSvg(spec,PlannerView.Month(2027,6),PlannerLayout.Narrow);
+    var lines=PlanMarks(agenda).Select(m=>m.Descendants(ns+"text").Single().Value).ToArray();
+    Check(lines.SequenceEqual(["Called Off · cancelled","Called Off Close · cancelled"]),string.Join(" | ",lines));
+});
+Test("Planner narrow year: a weekend across two months shows in both bars, each slot covering and naming the whole weekend",()=>{
+    // Saturday 31 July and Sunday 1 August 2027.
+    var doc=PlanSvg(PlanYear(s=>s with{Width=340,Events=[new("j","Month End Clash",new(2027,7,31)){Relevance=PlannerRelevance.Clash}]}),PlannerView.WholePeriod,PlannerLayout.Narrow);
+    var slots=PlanWeekends(doc,"2027-07-31");
+    Check(slots.Length==2&&slots.All(g=>g.Attribute("aria-label")!.Value=="Weekend of 31 July to 1 August 2027: 1 clash"),string.Join(" | ",slots.Select(g=>g.Attribute("aria-label")!.Value)));
+    Check(slots.All(g=>g.Elements(ns+"rect").Any(r=>r.Attribute("height")!.Value=="4")),"a slot lacks the weekend's clash mark");
+    Check(slots.Select(g=>g.Elements(ns+"rect").First().Attribute("y")!.Value).Distinct().Count()==2,"both slots stand in one month's bar");
+    Check(PlanWeekends(doc,"2027-08-01").Length==0,"1 August is a weekend of its own");
+});
+Test("Planner narrow year: a Friday-to-Sunday weekend is one slot, named from its Friday",()=>{
+    var doc=PlanSvg(PlanYear(s=>s with{Width=340,Weekend=[DayOfWeek.Friday,DayOfWeek.Saturday,DayOfWeek.Sunday],Events=[new("f","Sunday Clash",new(2027,3,14)){Relevance=PlannerRelevance.Clash}]}),PlannerView.WholePeriod,PlannerLayout.Narrow);
+    var march=doc.Descendants().Select(e=>(string?)e.Attribute("data-weekend")).OfType<string>().Where(d=>d.StartsWith("2027-03")).ToArray();
+    Check(march.SequenceEqual(["2027-03-05","2027-03-12","2027-03-19","2027-03-26"]),string.Join(",",march));
+    Check(PlanWeekends(doc,"2027-03-12").Single().Attribute("aria-label")!.Value=="Weekend of 12 March 2027: 1 clash",PlanWeekends(doc,"2027-03-12").Single().Attribute("aria-label")!.Value);
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
