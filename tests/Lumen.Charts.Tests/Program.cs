@@ -9240,6 +9240,7 @@ Task PlanStep(LumenPlanner p,int by)=>(Task)typeof(LumenPlanner).GetMethod("Step
 void PlanChoose(LumenPlanner p,string group,string value)=>typeof(LumenPlanner).GetMethod("Choose",BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(p,[group,value]);
 void PlanClear(LumenPlanner p)=>typeof(LumenPlanner).GetMethod("ClearFilters",BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(p,null);
 string Where(string text)=>$"<span class=\"lumen-planner-where\">{text}</span>";
+Task PlanSpec(LumenPlanner p,PlannerSpec spec)=>p.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",spec}}));
 
 Test("LumenPlanner: prerender draws the year with its toolbar, filters, keys and status, and calls no script",()=>{
     var html=PlanComponent(PlanYear());   // NoJs throws if the component calls the script while prerendering
@@ -9304,6 +9305,7 @@ Test("LumenPlanner: a day outside the period stays shut, and a new period return
         await p.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",PlanYear(s=>s with{From=new(2028,1,1),To=new(2028,12,31),Periods=[],Events=[]})}}));
         var next=await html();
         Check(next.Contains("data-zoom=\"year\"")&&next.Contains(Where("2028")),"a new period starts at the whole period");
+        Check(next.Contains("Showing 2028"),"and says so");
     });
     Exception? caught=null;
     try{PlanComponent(PlanYear(),null,new(){{"View",PlannerView.Month(2028,1)}});}catch(Exception e){caught=e;}
@@ -9356,7 +9358,8 @@ Test("LumenPlanner: a chip filters the drawing, says it is pressed, and Clear fi
         Check(gauteng.Contains("aria-pressed=\"true\" aria-label=\"Gauteng, in South Africa\""),"pressed");
         Check(gauteng.Contains("Filter Gauteng on")&&Regex.IsMatch(gauteng,"<button type=\"button\">Clear filters</button>"),"status and clear");
         PlanChoose(p,"Status","Provisional");
-        Check(!(await html()).Contains("data-event="),"filtered to nothing still draws the year");
+        var nothing=await html();
+        Check(!nothing.Contains("data-event=")&&nothing.Contains("class='lumen-svg lumen-planner'")&&nothing.Contains("viewBox='"),"filtered to nothing still draws the year");
         PlanClear(p);
     });
     Check(html.Contains("data-event='e2'")&&html.Contains("Filters cleared")&&!html.Contains("aria-pressed=\"true\""),"cleared");
@@ -9367,12 +9370,56 @@ Test("LumenPlanner: the spec's filter is where the reader starts, and a new spec
         var first=await html();
         Check(Regex.IsMatch(first,"aria-pressed=\"true\"[^>]*>XCO</button>")&&!first.Contains("data-event='e2'"),"starts filtered to XCO");
         PlanChoose(p,"Region","ZA-WC");
-        // The next spec drops the Western Cape and its event (an event in an unknown region would be refused).
-        await p.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",start with{Regions=[new("ZA","South Africa"),new("ZA-GP","Gauteng","ZA")],Events=[start.Events[0]]}}}));
+        // The next spec drops the Western Cape (an event in an unknown region would be refused), so the second event moves to Gauteng.
+        await p.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",start with{Regions=[new("ZA","South Africa"),new("ZA-GP","Gauteng","ZA")],Events=[start.Events[0],start.Events[1] with{Region="ZA-GP"}]}}}));
     });
-    // The status line still reads "Filter Western Cape on" from the click, so the chip and the drawing are checked, not the whole markup.
-    Check(html.Contains("data-event='e1'")&&!html.Contains(">Western Cape</button>")&&!html.Contains("aria-label=\"Western Cape"),"Western Cape dropped from the filter with the region");
+    Check(html.Contains("data-event='e1'")&&!html.Contains("Western Cape"),"Western Cape dropped from the filter with the region");
+    Check(Regex.IsMatch(html,"aria-pressed=\"true\"[^>]*>XCO</button>")&&!html.Contains("data-event='e2'"),"XCO stays chosen, so the Stage event stays out");
+    Check(html.Contains("Filters updated"),"and the reader is told");
     Check(Regex.IsMatch(html,"<button type=\"button\">Clear filters</button>"),"XCO and the host's Track stay chosen");
+});
+Test("LumenPlanner: a host filter that changes by content becomes the reader's filter, and one that does not leaves the reader's choices",()=>{
+    var xco=PlanYear(s=>s with{Filter=new(){Categories=["XCO"]}});
+    PlanComponent(xco,async(p,html)=>{
+        await PlanSpec(p,xco with{Filter=new(){Categories=["Stage"]}});
+        var stage=await html();
+        Check(Regex.IsMatch(stage,"aria-pressed=\"true\"[^>]*>Stage</button>")&&!Regex.IsMatch(stage,"aria-pressed=\"true\"[^>]*>XCO</button>"),"Stage is pressed");
+        Check(stage.Contains("data-event='e2'")&&!stage.Contains("data-event='e1'"),"e2 drawn, e1 not");
+        Check(stage.Contains("Filters updated"),"the reader is told");
+        PlanChoose(p,"Audience","Open");
+        // A new filter object with the same content is not a change of the host's filter: the reader's Open stays.
+        await PlanSpec(p,xco with{Title="Season planner, later",Filter=new(){Categories=["Stage"]}});
+        var same=await html();
+        Check(Regex.IsMatch(same,"aria-pressed=\"true\"[^>]*>Open</button>")&&Regex.IsMatch(same,"aria-pressed=\"true\"[^>]*>Stage</button>"),"the reader's choice stays");
+        // Removing the host's filter is a change of its content: the reader's filter becomes none.
+        await PlanSpec(p,xco with{Filter=null});
+        var none=await html();
+        Check(!none.Contains("aria-pressed=\"true\"")&&none.Contains("data-event='e1'")&&none.Contains("data-event='e2'"),"no filter left");
+    });
+});
+Test("LumenPlanner: a chosen status or relevance that no event of a new spec uses is dropped with it",()=>{
+    PlanComponent(PlanYear(),async(p,html)=>{
+        PlanChoose(p,"Status","Provisional");
+        Check(!(await html()).Contains("data-event='e1'"),"e1 is hidden by the chosen status");
+        await PlanSpec(p,PlanYear(s=>s with{Events=[s.Events[0]]}));
+        var next=await html();
+        Check(next.Contains("data-event='e1'")&&!next.Contains("aria-pressed=\"true\""),"no hidden status filter left");
+    });
+    PlanComponent(PlanYear(),async(p,html)=>{
+        PlanChoose(p,"Relevance","Clash");
+        Check(!(await html()).Contains("data-event='e2'"),"e2 is hidden by the chosen relevance");
+        await PlanSpec(p,PlanYear(s=>s with{Events=[s.Events[1]]}));
+        var next=await html();
+        Check(next.Contains("data-event='e2'")&&!next.Contains("aria-pressed=\"true\""),"no hidden relevance filter left");
+    });
+});
+Test("LumenPlanner: on a phone a weekend whose later month lies outside the period stays shut and says so",()=>{
+    PlanComponent(PlanYear(s=>s with{To=new(2027,7,31)}),async(p,html)=>{
+        await p.Fit(400);
+        await p.Open("2027-07-31",true);
+        var shut=await html();
+        Check(shut.Contains("data-zoom=\"year\"")&&shut.Contains("August 2027 is outside the planner"),"outside");
+    });
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

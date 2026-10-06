@@ -60,6 +60,7 @@
     private PlannerView view = PlannerView.WholePeriod, given = PlannerView.WholePeriod;
     private PlannerSpec? source;
     private PlannerFilter filter = new();
+    private PlannerFilter? hostFilter;
     private string svg = "", status = "";
     private string? told;
     // The date whose cell should take the tab stop after the next drawing; sent once, then forgotten.
@@ -107,9 +108,16 @@
     {
         if (!ReferenceEquals(Spec, source))
         {
-            filter = source is null ? Spec.Filter ?? new() : Offered(filter);
+            // The reader's filter starts as the host's, follows the host when the host's filter changes by content, and is
+            // otherwise kept, less what the new spec no longer offers.
+            var before = filter;
+            var first = source is null;
+            var hostChanged = !first && !Same(Spec.Filter, hostFilter);
+            filter = first || hostChanged ? Spec.Filter ?? new() : Offered(filter);
+            hostFilter = Spec.Filter;
             source = Spec;
-            if (!Inside(view)) { view = PlannerView.WholePeriod; focus = null; }
+            if (!Inside(view)) { view = PlannerView.WholePeriod; focus = null; status = $"Showing {Where}"; }
+            else if (!first && !Same(before, filter)) status = "Filters updated";
         }
         // The host's view is taken when the host changes it; the reader's own zooming is kept across the host's renders.
         if (View != given)
@@ -177,6 +185,7 @@
             var month = later ? new DateOnly(day.Year, day.Month, 1).AddMonths(1) : day;
             var next = PlannerView.Month(month.Year, month.Month);
             if (Inside(next)) await Go(next, later ? month : day);
+            else { status = $"{month.ToString("MMMM yyyy", Invariant)} is outside the planner"; StateHasChanged(); }
         }
         else if (view.Zoom == PlannerZoom.Month)
         {
@@ -288,19 +297,29 @@
         StateHasChanged();
     }
 
+    // Two filters are the same when each of their lists holds the same items in the same order; a missing filter is an empty one.
+    private static bool Same(PlannerFilter? a, PlannerFilter? b)
+    {
+        a ??= new(); b ??= new();
+        return a.Regions.SequenceEqual(b.Regions) && a.Categories.SequenceEqual(b.Categories) && a.Audiences.SequenceEqual(b.Audiences)
+            && a.Statuses.SequenceEqual(b.Statuses) && a.Relevances.SequenceEqual(b.Relevances);
+    }
+
     // A new spec keeps the reader's choices it still offers, and any its own filter names.
     private PlannerFilter Offered(PlannerFilter chosen)
     {
-        IReadOnlyList<string> Keep(IReadOnlyList<string> on, IEnumerable<string?> offered, IReadOnlyList<string>? host)
+        IReadOnlyList<T> Keep<T>(IReadOnlyList<T> on, IEnumerable<T> offered, IReadOnlyList<T>? host)
         {
-            var allowed = offered.OfType<string>().Concat(host ?? []).ToHashSet(StringComparer.Ordinal);
+            var allowed = offered.Concat(host ?? []).ToHashSet();
             return on.Where(allowed.Contains).ToArray();
         }
         return chosen with
         {
             Regions = Keep(chosen.Regions, Spec.Regions.Select(r => r.Code), Spec.Filter?.Regions),
-            Categories = Keep(chosen.Categories, Spec.Events.Select(e => e.Category), Spec.Filter?.Categories),
-            Audiences = Keep(chosen.Audiences, Spec.Events.Select(e => e.Audience), Spec.Filter?.Audiences),
+            Categories = Keep(chosen.Categories, Spec.Events.Select(e => e.Category).OfType<string>(), Spec.Filter?.Categories),
+            Audiences = Keep(chosen.Audiences, Spec.Events.Select(e => e.Audience).OfType<string>(), Spec.Filter?.Audiences),
+            Statuses = Keep(chosen.Statuses, Spec.Events.Select(e => e.Status), Spec.Filter?.Statuses),
+            Relevances = Keep(chosen.Relevances, Spec.Events.Select(e => e.Relevance), Spec.Filter?.Relevances),
         };
     }
 
@@ -313,7 +332,7 @@
             await module.InvokeVoidAsync("attachPlanner", root, reference);
             await module.InvokeVoidAsync("fit", root, reference);
         }
-        if (module is not null && !ReferenceEquals(told, svg))
+        if (module is not null && !string.Equals(told, svg, StringComparison.Ordinal))
         {
             told = svg;
             var at = focus?.ToString("yyyy-MM-dd", Invariant);
