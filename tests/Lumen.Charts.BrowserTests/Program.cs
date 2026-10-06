@@ -1682,16 +1682,26 @@ if (await sportsLink.CountAsync() > 0)
     var charts = sports.Locator(".lumen-chart");
     // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
-        return svgs.length === 31 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+        return svgs.length === 32 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
-    await Test("The Sports & performance page renders its thirty-one charts, each live and drawn at the width it is shown", async () =>
+    await Test("The Sports & performance page renders its thirty-two charts, each live and drawn at the width it is shown", async () =>
     {
-        Check(await charts.CountAsync() == 31, $"the page shows {await charts.CountAsync()} charts");
-        for (var i = 0; i < 31; i++)
+        Check(await charts.CountAsync() == 32, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 32; i++)
             Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
-        // Each chart's script adds its tooltip, so thirty-one of them prove every chart, sparklines included, is interactive.
-        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31");
+        // Each chart's script adds its tooltip, so thirty-two of them prove every chart, sparklines included, is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32");
         await sports.WaitForFunctionAsync(drawnToFit);
+    });
+
+    await Test("The Sports & performance page draws its places and points with LumenPlacings, each place named with its series and its change", async () =>
+    {
+        var card = sports.Locator("#places-points .lumen-chart");
+        Check(await card.CountAsync() == 1, "one chart in the card");
+        var names = await card.Locator(".lumen-datum[data-point]").EvaluateAllAsync<string[]>("marks => marks.map(m => m.getAttribute('aria-label') ?? '')");
+        Check(names.Any(n => n.StartsWith("Place · Invented League: ") && n.Contains("14/42") && n.EndsWith("better than the previous")), string.Join(" | ", names));
+        Check(names.Any(n => n.StartsWith("Place · Invented Open: ") && n.EndsWith("worse than the previous")), "the open series compared with itself");
+        Check(names.Any(n => n.StartsWith("Points: ")), "the points pane");
     });
 
     await Test("Hovering a mark on the Sports & performance page shows its tooltip", async () =>
@@ -1738,7 +1748,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32", null, new() { Timeout = 120_000 });
             await Sparklines(tab, "phone");
         });
     }
@@ -1761,7 +1771,7 @@ if (await sportsLink.CountAsync() > 0)
                 var tab = await context.NewPageAsync();
                 tab.SetDefaultTimeout(15_000);
                 await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31", null, new() { Timeout = 120_000 });
+                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32", null, new() { Timeout = 120_000 });
                 await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
                 const string inside = @"(s, texts) => { const box = s.getBoundingClientRect();
                     return texts.filter(t => { const b = t.getBoundingClientRect(); return b.width === 0 || b.left < box.left - .5 || b.right > box.right + .5 || b.top < box.top - .5 || b.bottom > box.bottom + .5; }).length; }";
@@ -1793,7 +1803,7 @@ if (await sportsLink.CountAsync() > 0)
                 var tab = await context.NewPageAsync();
                 tab.SetDefaultTimeout(15_000);
                 await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31", null, new() { Timeout = 120_000 });
+                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32", null, new() { Timeout = 120_000 });
                 await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
                 foreach (var (id, count) in new[] { ("#lap-heart", 4), ("#best-efforts", 5) })
                 {
@@ -1865,7 +1875,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32", null, new() { Timeout = 120_000 });
             await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
             var card = tab.Locator("#ride-channels .lumen-chart");
             await card.ScrollIntoViewIfNeededAsync();
@@ -1967,7 +1977,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 31", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32", null, new() { Timeout = 120_000 });
             await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
             var card = tab.Locator("#field .lumen-chart");
             await card.ScrollIntoViewIfNeededAsync();
@@ -1983,7 +1993,7 @@ if (await sportsLink.CountAsync() > 0)
             Check(measured[0] > 10 && measured[1] == 0, $"{measured[1]} of the card's {measured[0]} texts run outside its drawing");
             // Its title, its description and its source on two lines, the card drawn at the width it is shown and the page not scrolling sideways.
             Check(measured[2] == 4 && measured[6] <= 375 && Math.Abs(measured[7] - measured[6]) < 1.5 && measured[8] <= 375, $"{measured[2]} lines written from the left, drawn {measured[6]} wide and shown {measured[7]:0.#}, the page {measured[8]} wide");
-            Check(measured[3] == 28 && measured[4] >= 82 && measured[5] == 0, $"{measured[5]} of the {measured[4]} titles, descriptions and sources of {measured[3]} charts run outside their drawings");
+            Check(measured[3] == 29 && measured[4] >= 82 && measured[5] == 0, $"{measured[5]} of the {measured[4]} titles, descriptions and sources of {measured[3]} charts run outside their drawings");
         });
     else Console.WriteLine("SKIP field phone check: this host's Sports & performance page has no How the field finished");
     await sports.CloseAsync();

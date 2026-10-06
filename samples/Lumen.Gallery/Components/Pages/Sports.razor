@@ -10,7 +10,7 @@
         <a class="nav-item" href="/#playground"><span>▦</span> Chart explorer <b>23</b></a>
         <a class="nav-item" href="/#network"><span>⌘</span> Network graphs <b>2</b></a>
         <a class="nav-item" href="/#integration"><span>⌁</span> Developer API</a>
-        <a class="nav-item active" href="sports" aria-current="page"><span>∿</span> Sports &amp; performance <b>31</b></a>
+        <a class="nav-item active" href="sports" aria-current="page"><span>∿</span> Sports &amp; performance <b>32</b></a>
         <div class="nav-label">ON THIS PAGE</div>
         @foreach (var section in Sections)
         { <a class="purpose" href="sports#@section.Id">@section.Name<span>↓</span></a> }
@@ -51,6 +51,10 @@
                                     @foreach (var line in lines)
                                     { <li>@Branded(@<LumenChart Spec="line.Spec"/>)<p><b>@line.Name</b> @line.Text</p></li> }
                                 </ul>
+                            }
+                            else if (card.Placings is { } placings)
+                            {
+                                @Branded(@<LumenPlacings Results="placings" Options="PlacesOptions" Adjust="SportsData.PlacesLook"/>)
                             }
                             else if (card.Beside is { } beside)
                             {
@@ -98,6 +102,8 @@
         BrandDemo.Harbour => DemoData.Harbour.Zones,
         _ => ChartStyle.Light.Zones
     };
+    // The Lumen brand cascades no style, so the card asks for the theme's own; the other brands cascade theirs.
+    private PlacingsOptions PlacesOptions => Look.Brand == BrandDemo.Lumen ? new() { Style = Look.Dark ? ChartStyle.Dark : ChartStyle.Light } : new();
     // As on the home page, bar ends belong to a brand: the Lumen brand draws the weekly load as capsules, Midnight draws every
     // bar that way, and Harbour and the page's CSS keep their square ends.
     // The session scores' bars take the brand's first series colour, which clears 3:1 against its track in every brand but the Lumen brand's

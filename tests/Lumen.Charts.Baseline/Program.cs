@@ -838,6 +838,17 @@ foreach (var (name, theme, style) in new[] { ("light", ChartTheme.Light, (ChartS
 lines.Add($"planner/year-narrow-340 {Hash(PlannerSvg.Render(Planned(ChartTheme.Light) with { Width = 340 }, PlannerView.WholePeriod, PlannerLayout.Narrow))}");
 lines.Add($"planner/month-narrow-340 {Hash(PlannerSvg.Render(Planned(ChartTheme.Light) with { Width = 340 }, PlannerView.Month(2027, 3), PlannerLayout.Narrow))}");
 lines.Add($"planner/gauteng {Hash(PlannerSvg.Render(Planned(ChartTheme.Light) with { Filter = new() { Regions = ["ZA-GP"] } }, PlannerView.WholePeriod))}");
+// 0.45.0: places and points.
+Placing[] placed = [
+    new(18) { Field = 40, Points = 33, Date = new(2027, 3, 13), Series = "Invented League" },
+    new(6) { Field = 22, Date = new(2027, 4, 3), Series = "Invented Open" },
+    new(14) { Field = 42, Points = 37, Date = new(2027, 4, 24), Series = "Invented League" },
+    new(16) { Field = 41, Points = 35, Date = new(2027, 6, 19), Series = "Invented League" },
+    new(11) { Field = 44, Points = 40, Date = new(2027, 8, 14), Series = "Invented League" }];
+var league = placed.Where(p => p.Series == "Invented League").Select(p => p with { Series = null }).ToArray();
+lines.Add($"placings/points {Hash(ChartSvg.Render(PlacingsChart.Build(league, new() { Style = Finished(null, ChartTheme.Light) })!))}");
+lines.Add($"placings/no-points {Hash(ChartSvg.Render(PlacingsChart.Build(league.Select(p => p with { Points = null }), new() { Style = Finished(null, ChartTheme.Light) })!))}");
+lines.Add($"placings/two-series {Hash(ChartSvg.Render(PlacingsChart.Build(placed, new() { Style = Finished(null, ChartTheme.Light) })!))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

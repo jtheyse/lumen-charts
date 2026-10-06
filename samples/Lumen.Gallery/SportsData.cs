@@ -56,6 +56,8 @@ public sealed record SportsCard(string Section, string Id, string Title, string 
     public bool ShowLegend { get; init; } = true;
     /// <summary>Whether the chart's component draws its toolbar: off for a card drawn as a phone app would, its status line kept out of sight.</summary>
     public bool ShowToolbar { get; init; } = true;
+    /// <summary>Results this card draws with <c>&lt;LumenPlacings&gt;</c> instead of its own spec.</summary>
+    public IReadOnlyList<Placing>? Placings { get; init; }
 }
 
 /// <summary>A sparkline on the Sports &amp; performance page and the words written beside it: what it measures, in bold, and what
@@ -99,6 +101,21 @@ public static class SportsData
         [(new(2026, 2, 7), "XCO", 18, 40), (new(2026, 2, 21), "XCC", 9, 32), (new(2026, 3, 14), "XCO", 12, 44), (new(2026, 3, 28), "XCM", 31, 60),
          (new(2026, 4, 18), "XCO", null, 41), (new(2026, 5, 9), "XCC", 6, 30), (new(2026, 5, 30), "XCO", 7, 42), (new(2026, 6, 20), "Enduro", 22, 55),
          (new(2026, 7, 11), "XCM", 19, 58), (new(2026, 8, 1), "XCO", 5, 40)];
+
+    /// <summary>An invented season in two series, a league and an open race, for the places and points card: the league's points are
+    /// earned, the open races score none.</summary>
+    public static readonly IReadOnlyList<Placing> Placings =
+    [
+        new(18) { Field = 40, Points = 33, Date = new(2026, 3, 14), Series = "Invented League" },
+        new(6) { Field = 22, Date = new(2026, 4, 4), Series = "Invented Open" },
+        new(14) { Field = 42, Points = 37, Date = new(2026, 4, 25), Series = "Invented League" },
+        new(9) { Field = 25, Date = new(2026, 5, 23), Series = "Invented Open" },
+        new(16) { Field = 41, Points = 35, Date = new(2026, 6, 20), Series = "Invented League" },
+        new(11) { Field = 44, Points = 40, Date = new(2026, 8, 15), Series = "Invented League" },
+    ];
+
+    /// <summary>The places and points card's size and words, on top of what <see cref="PlacingsChart.Build"/> draws.</summary>
+    public static ChartSpec PlacesLook(ChartSpec spec) => spec with { Width = 1100, Height = 400, Title = "Places and points, in two series", Source = Source };
 
     /// <summary>An invented race of eight riders over six laps, apart from the simulated training: each rider's name, the athlete last as
     /// "You", and their lap times in seconds.</summary>
@@ -1116,6 +1133,8 @@ public static class SportsData
             new("racing", "field", "How the field finished", "An invented field for the last race, its finish times in bins the page works out, each a `ChartPoint.Block` on an axis that `IncludeZero`; the athlete's bin in red with the `ValueNote` `· you`, so its tooltip says why, a bin of one kept 2 pixels tall, `TickLabels.Bounds` labelling only the ends of each axis, and the median a dashed X annotation `InFront` of the bins, its label drawn without its time by `ShowValue = false`; the finishers off the chart are counted in the source line.", true, finish),
             new("racing", "season-arc", "Season arc", "An invented season of ten races in three disciplines, each at its index in the season and as far back in its field as it finished, on a reversed axis whose `YTickValues` set `Front`, `Mid` and `Back` by hand; `YUnit` writes `%` after every value, each discipline's line joins only its own races, and a race not finished is a gap.", false, arc),
             new("racing", "gap", "Gap to the leader", "An invented race's eight riders lap by lap, `YReversed` from 0, the leader, written `+9.5s` by `ValueFormat.Signed` and `YUnit`; each line is named at its end by `EndLabel` and `EndNote`, moved apart where lines end close together, so the component's legend is off, and its toolbar too, as on a phone card, its status line kept for screen readers; `SharedReadout` reads every rider at the lap under the pointer. The athlete's line is green and wider and named \"You\".", false, gap with { SharedReadout = true }) { ShowLegend = false, ShowToolbar = false },
+            new("racing", "places-points", "Places and points", "The same invented kind of season in two series, built by one call, `PlacingsChart.Build`, and drawn by `<LumenPlacings>`: each series its own line, so a place is better or worse only than the previous race of the same series, the field after each place, and the league's points in a pane beneath, the open races' missing points gaps, never zeros.", true,
+                PlacesLook(PlacingsChart.Build(Placings, new() { Style = theme == ChartTheme.Dark ? ChartStyle.Dark : ChartStyle.Light })!)) { Placings = Placings },
             new("sleep", "hypnogram", "Last night's sleep stages", "A `ChartKind.Timeline`: one series per stage, each period a `ChartPoint.Span`, joined where the stage changes; the higher the HRV sits above its baseline, the more deep sleep.", true, hypnogram),
             new("sleep", "sleep-timing", "Sleep timing", "Bedtime to waking as `ChartKind.Range` bars on a reversed `ValueFormat.TimeOfDay` axis, its seconds running past 24 hours so a night never crosses zero.", false, timing),
             new("sleep", "heart-range", "Daily heart rate", "Each day's lowest and highest heart rate as `ChartPoint.Interval` range bars, the dot its average; today's highest is the run's.", false, heartRange)];

@@ -3709,13 +3709,13 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: thirty-one charts in twenty-eight cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+Test("Sports page: thirty-two charts in twenty-nine cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
     // 0.34.0's Getting faster? card draws three sparklines in place of one chart; they are checked on their own below. 0.35.0 adds
     // How the field finished to the Racing section, 0.37.0 Ride channels in a Long ride section of its own, and 0.38.0 Season arc and Gap to
     // the leader to the Racing section, 0.39.0 Time in zone, as shares, and Session scores to the Latest session section, and 0.40.0
-    // Heart rate by lap to the Latest session section and Best efforts to the Fitness section.
-    Check(sports.Count==28&&sports.Select(card=>card.Id).Distinct().Count()==28&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
-        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==31,"the page should have thirty-one charts in twenty-eight cards");
+    // Heart rate by lap to the Latest session section and Best efforts to the Fitness section, and 0.45.0 Places and points to the Racing section.
+    Check(sports.Count==29&&sports.Select(card=>card.Id).Distinct().Count()==29&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
+        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==32,"the page should have thirty-two charts in twenty-nine cards");
     // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order; 0.33.0's Racing section stands
     // before it.
     Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
@@ -6533,7 +6533,7 @@ Test("Sports page: Getting faster? rings each time faster than all before it, fr
             Check(!Svg(line.Spec with{Style=style}).Descendants(ns+"text").Any(),$"{line.Name} wrote a word");
         }
     // The page draws each at its own size beside its words, and its sparklines and charts number twenty-four.
-    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==31,"the page's count");
+    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==32,"the page's count");
 });
 // 0.35.0: how the field finished, and text that fits. Blocks keep a visible height; an annotation can draw its label without its value
 // and stand over the data; an X axis chooses which of its labels it writes, and either axis can label just its two ends; and a chart's
@@ -7566,7 +7566,7 @@ Test("Ticks, units and end labels round-trip through the HTTP API's JSON, a requ
 });
 Test("Sports page: Season arc and Gap to the leader close the Racing section, the arc's disciplines joined over each other's races and the gap's riders named at their ends with the legend off",()=>{
     var ids=sports.Where(card=>card.Section=="racing").Select(card=>card.Id).ToArray();
-    Check(ids.SequenceEqual(["race-results","field","season-arc","gap"])&&sports.Single(card=>card.Id=="gap").ShowLegend==false&&sports.Where(card=>card.Id is not ("gap" or "scores")).All(card=>card.ShowLegend),string.Join(",",ids));
+    Check(ids.SequenceEqual(["race-results","field","season-arc","gap","places-points"])&&sports.Single(card=>card.Id=="gap").ShowLegend==false&&sports.Where(card=>card.Id is not ("gap" or "scores")).All(card=>card.ShowLegend),string.Join(",",ids));
     var arc=Sports("season-arc");
     Check(arc is {YReversed:true,YMin:0,YMax:100,YUnit:"%"}&&arc.YTickValues!.Select(t=>t.Label).SequenceEqual(["Front","Mid","Back"])&&arc.Series.Select(s=>s.Name).SequenceEqual(["XCC","XCO","XCM","Other"]),"the arc");
     // Every race stands once, in one discipline, at its index in the season; the race not finished is a gap in its own line.
