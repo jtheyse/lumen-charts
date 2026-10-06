@@ -50,7 +50,8 @@ public static class PlacingsChart
     /// the others have no point.</summary>
     /// <exception cref="ArgumentException">A null result, a blank name or date format, an <see cref="PlacingsOptions.Unlabelled"/> that
     /// cannot be formatted, a <see cref="PlacingsOptions.DateFormat"/> that cannot parse, an empty <see cref="PlacingsOptions.PlaceColors"/>,
-    /// or a style with an empty <see cref="ChartStyle.Series"/> palette when one is needed.</exception>
+    /// or a style with an empty <see cref="ChartStyle.Series"/> palette when <see cref="PlacingsOptions.PlaceColors"/> is null and there
+    /// are multiple series, or when <see cref="PlacingsOptions.PointsColor"/> is null and there are points.</exception>
     public static ChartSpec? Build(IEnumerable<Placing> results, PlacingsOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(results);
@@ -63,7 +64,6 @@ public static class PlacingsChart
         try { string.Format(CultureInfo.InvariantCulture, o.Unlabelled, 1); } catch (FormatException) { throw new ArgumentException("Unlabelled must be a valid format string for string.Format, such as \"R{0}\"."); }
         if (o.PlaceColors is { Count: 0 }) throw new ArgumentException("PlaceColors must name at least one colour, or be null for the style's.");
         var style = o.Style ?? ChartStyle.Light;
-        if (style.Series.Count == 0) throw new ArgumentException("The style's Series palette must not be empty.");
         var placed = results.Select(r => r ?? throw new ArgumentException("A places chart's results may not contain null.")).Where(r => r.Place is > 0).ToList();
         if (placed.Count == 0) return null;
         // OrderBy is stable, so events on the same date keep the order they were given in.
@@ -72,6 +72,9 @@ public static class PlacingsChart
             ?? string.Format(CultureInfo.InvariantCulture, o.Unlabelled, i + 1)).ToArray();
         static string Key(Placing r) => r.Series?.Trim() ?? "";
         var keys = races.Select(Key).Distinct(StringComparer.Ordinal).ToList();
+        var anyPoints = races.Any(r => r.Points is not null);
+        if (style.Series.Count == 0 && ((o.PlaceColors is null && keys.Count > 1) || (o.PointsColor is null && anyPoints)))
+            throw new ArgumentException("The style's Series palette must not be empty when PlaceColors or PointsColor need it.");
         string Color(int k) => o.PlaceColors is { } colors ? colors[k % colors.Count] : k == 0 ? style.Text : style.Series[(k - 1) % style.Series.Count];
         // Each series is its own line, with points only at its own events, so a place is judged only against the previous event
         // of the same series. Races from other series are skipped, not nulled.
@@ -82,7 +85,6 @@ public static class PlacingsChart
                 Color(k))
             { ChangeColors = ChangeColors.LowerIsBetter, ValueLabels = true, Markers = MarkerStyle.Filled }).ToList();
         var best = races.Min(r => r.Place!.Value);
-        var anyPoints = races.Any(r => r.Points is not null);
         var spec = new ChartSpec
         {
             Kind = ChartKind.Line, Width = 340, Height = anyPoints ? 380 : 260, Style = style,

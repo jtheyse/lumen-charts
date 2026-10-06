@@ -9503,8 +9503,8 @@ Test("Placings: a place is compared only with the previous race of its own serie
 Test("Placings: races are ordered by date when all have one, else kept as given, and labelled by label, date or number",()=>{
     var sorted=PlacingsChart.Build([RacedResult(3,9,null,2),RacedResult(5,9,null,0),RacedResult(4,9,null,1)])!;
     Check(sorted.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{5,4,3}),"by date");
-    var same=PlacingsChart.Build([new Placing(8){Date=new(2027,3,1)},new Placing(2){Date=new(2027,3,1)}])!;
-    Check(same.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{8,2}),"same date keeps the given order");
+    var same=PlacingsChart.Build([new Placing(9){Date=new(2027,3,8)},new Placing(4){Date=new(2027,3,1)},new Placing(7){Date=new(2027,3,8)},new Placing(2){Date=new(2027,3,8)}])!;
+    Check(same.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{4,9,7,2}),"earlier date first, then same-date order");
     var mixed=PlacingsChart.Build([RacedResult(3,9,null,2),new Placing(5),new Placing(4){Label="Final"}])!;
     Check(mixed.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{3,5,4}),"an undated race keeps the given order");
     Check(mixed.Series[0].Points.Select(p=>p.Label).SequenceEqual(["15 Mar 2027","#2","Final"]),string.Join("|",mixed.Series[0].Points.Select(p=>p.Label)));
@@ -9537,18 +9537,31 @@ Test("Placings: blank label falls back to date then number",()=>{
     var undate=PlacingsChart.Build([new Placing(5){Label=""},new Placing(3){Series="S"}])!;
     Check(undate.Series[0].Points[0].Label=="#1"&&undate.Series[1].Points[0].Label=="#2","no date becomes number");
 });
-Test("Placings: seven series cycle through the style's palette",()=>{
+Test("Placings: eight series wrap around the style's palette",()=>{
     var light=ChartStyle.Light;
-    var seven=PlacingsChart.Build(Enumerable.Range(0,7).Select(i=>RacedResult(i+1,9,null,i,$"S{i}")))!;
-    for(var k=1;k<seven.Series.Count;k++)Check(seven.Series[k].Color==light.Series[(k-1)%light.Series.Count],$"series {k} uses palette color");
+    var eight=PlacingsChart.Build(Enumerable.Range(0,8).Select(i=>RacedResult(i+1,9,null,i,$"S{i}")))!;
+    for(var k=1;k<eight.Series.Count;k++)Check(eight.Series[k].Color==light.Series[(k-1)%light.Series.Count],$"series {k} uses palette color");
+    Check(eight.Series[7].Color==light.Series[0],"series 7 wraps to palette index 0");
 });
 Test("Placings: refusals say why",()=>{
+    string Refused(Func<object?> act){try{act();}catch(ArgumentException e){return e.Message;}throw new Exception("expected a refusal");}
     Reject(()=>PlacingsChart.Build(null!));
     Reject(()=>PlacingsChart.Build([new Placing(1),null!]));
     foreach(var bad in new PlacingsOptions[]{new(){PlaceName=" "},new(){PointsName=""},new(){DateFormat=""},new(){Unlabelled="R"},new(){PlaceColors=[]}})
         Reject(()=>PlacingsChart.Build([new Placing(1)],bad));
-    try{PlacingsChart.Build([new Placing(1)],new(){DateFormat="not-a-format"});}catch(ArgumentException e){Check(e.Message.Contains("DateFormat"),"DateFormat message");}
-    try{PlacingsChart.Build([new Placing(1)],new(){Unlabelled="{"});}catch(ArgumentException e){Check(e.Message.Contains("Unlabelled"),"Unlabelled message");}
+    Check(Refused(()=>PlacingsChart.Build([new Placing(1)],new(){DateFormat="not-a-format"})).Contains("DateFormat"),"DateFormat message");
+    Check(Refused(()=>PlacingsChart.Build([new Placing(1)],new(){Unlabelled="{0}{1}"})).Contains("Unlabelled"),"Unlabelled format probe");
+    Check(Refused(()=>PlacingsChart.Build([new Placing(1)],new(){PlaceColors=[]})).Contains("PlaceColors"),"PlaceColors message");
+});
+Test("Placings: empty style palette is ok when not needed",()=>{
+    var emptyPalette=ChartStyle.Dark with{Series=[]};
+    var ok=PlacingsChart.Build([RacedResult(1,9,1,0,"A"),RacedResult(2,9,2,1,"B")],new(){PlaceColors=["#ABC"],PointsColor="#DEF",Style=emptyPalette})!;
+    Check(ok.Series[0].Color=="#ABC"&&ok.Series[2].Color=="#DEF","all colors given");
+});
+Test("Placings: empty style palette is refused when needed",()=>{
+    string Refused(Func<object?> act){try{act();}catch(ArgumentException e){return e.Message;}throw new Exception("expected a refusal");}
+    var emptyPalette=ChartStyle.Dark with{Series=[]};
+    Check(Refused(()=>PlacingsChart.Build([RacedResult(1,9,null,0,"A"),RacedResult(2,9,null,1,"B")],new(){Style=emptyPalette})).Contains("Series"),"palette message for two series");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
