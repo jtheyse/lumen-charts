@@ -8,7 +8,7 @@ public sealed record Placing(int? Place)
 {
     /// <summary>The size of the field, written after the place as <c>/48</c> when it is above 0.</summary>
     public int? Field { get; init; }
-    /// <summary>The points the event earned; null draws a gap in the points line, never a zero.</summary>
+    /// <summary>The points the event earned; null gives the event no mark on the points line, never a zero, so the line joins the events that did score.</summary>
     public double? Points { get; init; }
     /// <summary>The event's date. When every result has one, the events are drawn in date order; it also labels the event.</summary>
     public DateOnly? Date { get; init; }
@@ -31,9 +31,9 @@ public sealed record PlacingsOptions
     public string DateFormat { get; init; } = "d MMM yyyy";
     /// <summary>The label of an event with neither a label nor a date; <c>{0}</c> is its number, from 1, in the drawn order. Default "#{0}".</summary>
     public string Unlabelled { get; init; } = "#{0}";
-    /// <summary>The places lines' colours, used in turn; null takes the style's text colour for the first line and its palette for the others.</summary>
+    /// <summary>The places lines' colours, used in turn; null takes the style's palette in turn, the first line its first colour.</summary>
     public IReadOnlyList<string>? PlaceColors { get; init; }
-    /// <summary>The points line's colour; null takes the style's second palette colour.</summary>
+    /// <summary>The points line's colour; null takes the style's next palette colour after the places lines' (wrapping round the palette).</summary>
     public string? PointsColor { get; init; }
     /// <summary>The chart's style; null is <see cref="ChartStyle.Light"/>.</summary>
     public ChartStyle? Style { get; init; }
@@ -47,11 +47,11 @@ public static class PlacingsChart
     /// <summary>The chart for <paramref name="results"/>, or null when no result has a place (so a page can show its own empty state).
     /// The result is an ordinary <see cref="ChartSpec"/>: render it with <see cref="ChartSvg.Render(ChartSpec, bool, bool)"/> or
     /// <c>&lt;LumenChart&gt;</c>, or change it with <c>with</c>. Each series draws only at its own races; where one series has a race,
-    /// the others have no point.</summary>
+    /// the others have no point, and a race without points has no mark on the points line.</summary>
     /// <exception cref="ArgumentException">A null result, a blank name or date format, an <see cref="PlacingsOptions.Unlabelled"/> that
     /// cannot be formatted, a <see cref="PlacingsOptions.DateFormat"/> that cannot parse, an empty <see cref="PlacingsOptions.PlaceColors"/>,
-    /// or a style with an empty <see cref="ChartStyle.Series"/> palette when <see cref="PlacingsOptions.PlaceColors"/> is null and there
-    /// are multiple series, or when <see cref="PlacingsOptions.PointsColor"/> is null and there are points.</exception>
+    /// or a style with an empty <see cref="ChartStyle.Series"/> palette when <see cref="PlacingsOptions.PlaceColors"/> is null,
+    /// or when <see cref="PlacingsOptions.PointsColor"/> is null and there are points.</exception>
     public static ChartSpec? Build(IEnumerable<Placing> results, PlacingsOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(results);
@@ -73,9 +73,9 @@ public static class PlacingsChart
         static string Key(Placing r) => r.Series?.Trim() ?? "";
         var keys = races.Select(Key).Distinct(StringComparer.Ordinal).ToList();
         var anyPoints = races.Any(r => r.Points is not null);
-        if (style.Series.Count == 0 && ((o.PlaceColors is null && keys.Count > 1) || (o.PointsColor is null && anyPoints)))
+        if (style.Series.Count == 0 && (o.PlaceColors is null || (o.PointsColor is null && anyPoints)))
             throw new ArgumentException("The style's Series palette must not be empty when PlaceColors or PointsColor need it.");
-        string Color(int k) => o.PlaceColors is { } colors ? colors[k % colors.Count] : k == 0 ? style.Text : style.Series[(k - 1) % style.Series.Count];
+        string Color(int k) => o.PlaceColors is { } colors ? colors[k % colors.Count] : style.Series[k % style.Series.Count];
         // Each series is its own line, with points only at its own events, so a place is judged only against the previous event
         // of the same series. Races from other series are skipped, not nulled.
         var lines = keys.Select((key, k) => new ChartSeries(
@@ -95,8 +95,8 @@ public static class PlacingsChart
             Series = lines,
         };
         if (!anyPoints) return spec;
-        var points = new ChartSeries(o.PointsName, races.Select((r, i) => new ChartPoint(i, r.Points, labels[i])).ToArray(),
-                o.PointsColor ?? style.Series[1 % style.Series.Count])
+        var points = new ChartSeries(o.PointsName, races.Select((r, i) => (r, i)).Where(x => x.r.Points is not null).Select(x => new ChartPoint(x.i, x.r.Points, labels[x.i])).ToArray(),
+                o.PointsColor ?? style.Series[lines.Count % style.Series.Count])
             { Pane = 1, ValueLabels = true, Markers = MarkerStyle.Filled };
         return spec with { Panes = [new ChartPane { Label = o.PointsName, Weight = 1 }], Series = [.. lines, points] };
     }

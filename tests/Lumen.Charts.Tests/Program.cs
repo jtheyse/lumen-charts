@@ -9479,10 +9479,13 @@ Test("Placings: places read up as better, carry their field, and say their chang
     var place=spec.Series[0];
     Check(place.ChangeColors==ChangeColors.LowerIsBetter&&place.ValueLabels&&place.Markers==MarkerStyle.Filled,"place line");
 });
-Test("Placings: a race without points is a gap, never a zero, and a real zero stays a zero",()=>{
-    var points=PlacingsChart.Build([RacedResult(5,20,40,0),RacedResult(6,20,0,1),RacedResult(4,20,null,2),RacedResult(3,20,52,3)])!.Series[^1];
+Test("Placings: a race without points has no points mark, never a zero, and a real zero stays a zero",()=>{
+    var spec=PlacingsChart.Build([RacedResult(5,20,40,0),RacedResult(6,20,0,1),RacedResult(4,20,null,2),RacedResult(3,20,52,3)])!;
+    var points=spec.Series[^1];
     Check(points.Name=="Points"&&points.Pane==1&&points.ValueLabels&&points.Markers==MarkerStyle.Filled,"points line");
-    Check(points.Points[1].Y==0&&points.Points[2].Y is null,"zero and gap");
+    Check(points.Points.Select(p=>p.X).SequenceEqual(new double[]{0,1,3}),"only the scored races, at their own index");
+    Check(points.Points.Select(p=>p.Y).SequenceEqual(new double?[]{40,0,52})&&points.Points.All(p=>p.Y.HasValue),"a real zero is Y 0, and no point has a null Y");
+    Check(points.Points.Select(p=>p.Label).SequenceEqual(spec.Series[0].Points.Where((_,i)=>i!=2).Select(p=>p.Label)),"the scored races' labels");
 });
 Test("Placings: with no points anywhere there is no points line and no empty pane",()=>{
     var spec=PlacingsChart.Build([RacedResult(5,20,null,0),RacedResult(4,22,null,1)])!;
@@ -9514,7 +9517,9 @@ Test("Placings: races are ordered by date when all have one, else kept as given,
 Test("Placings: colours come from the style, or cycle through the host's",()=>{
     var light=ChartStyle.Light;
     var two=PlacingsChart.Build([RacedResult(3,9,1,0,"A"),RacedResult(4,9,2,1,"B")])!;
-    Check(two.Series[0].Color==light.Text&&two.Series[1].Color==light.Series[0]&&two.Series[2].Color==light.Series[1]&&two.Style==light,"defaults");
+    Check(two.Series[0].Color==light.Series[0]&&two.Series[1].Color==light.Series[1]&&two.Series[2].Color==light.Series[2]&&two.Style==light,"defaults");
+    var one=PlacingsChart.Build([RacedResult(3,9,1,0)])!;
+    Check(one.Series[0].Color==light.Series[0]&&one.Series[1].Color==light.Series[1],"one series: the line, then the points");
     var five=PlacingsChart.Build(Enumerable.Range(0,5).Select(i=>RacedResult(i+1,9,null,i,$"S{i}")),new(){PlaceColors=["#F5F6F7","#F5B642"],PointsColor="#D7DDE5",Style=ChartStyle.Dark})!;
     Check(five.Series.Select(s=>s.Color).SequenceEqual(["#F5F6F7","#F5B642","#F5F6F7","#F5B642","#F5F6F7"]),"cycled");
     Check(five.Series.Select(s=>s.Name).Distinct().Count()==5&&five.Style==ChartStyle.Dark,"names and style");
@@ -9540,8 +9545,8 @@ Test("Placings: blank label falls back to date then number",()=>{
 Test("Placings: eight series wrap around the style's palette",()=>{
     var light=ChartStyle.Light;
     var eight=PlacingsChart.Build(Enumerable.Range(0,8).Select(i=>RacedResult(i+1,9,null,i,$"S{i}")))!;
-    for(var k=1;k<eight.Series.Count;k++)Check(eight.Series[k].Color==light.Series[(k-1)%light.Series.Count],$"series {k} uses palette color");
-    Check(eight.Series[7].Color==light.Series[0],"series 7 wraps to palette index 0");
+    for(var k=0;k<eight.Series.Count;k++)Check(eight.Series[k].Color==light.Series[k%light.Series.Count],$"series {k} uses palette color");
+    Check(eight.Series[6].Color==light.Series[0],"series 6 wraps to palette index 0");
 });
 Test("Placings: refusals say why",()=>{
     string Refused(Func<object?> act){try{act();}catch(ArgumentException e){return e.Message;}throw new Exception("expected a refusal");}
@@ -9557,11 +9562,14 @@ Test("Placings: empty style palette is ok when not needed",()=>{
     var emptyPalette=ChartStyle.Dark with{Series=[]};
     var ok=PlacingsChart.Build([RacedResult(1,9,1,0,"A"),RacedResult(2,9,2,1,"B")],new(){PlaceColors=["#ABC"],PointsColor="#DEF",Style=emptyPalette})!;
     Check(ok.Series[0].Color=="#ABC"&&ok.Series[2].Color=="#DEF","all colors given");
+    Check(PlacingsChart.Build([RacedResult(1,9,null,0,"A")],new(){PlaceColors=["#ABC"],Style=emptyPalette}) is not null,"no points, so no points colour needed");
 });
 Test("Placings: empty style palette is refused when needed",()=>{
     string Refused(Func<object?> act){try{act();}catch(ArgumentException e){return e.Message;}throw new Exception("expected a refusal");}
     var emptyPalette=ChartStyle.Dark with{Series=[]};
     Check(Refused(()=>PlacingsChart.Build([RacedResult(1,9,null,0,"A"),RacedResult(2,9,null,1,"B")],new(){Style=emptyPalette})).Contains("Series"),"palette message for two series");
+    Check(Refused(()=>PlacingsChart.Build([RacedResult(1,9,null,0)],new(){Style=emptyPalette})).Contains("Series"),"PlaceColors null is refused even with one series");
+    Check(Refused(()=>PlacingsChart.Build([RacedResult(1,9,5,0)],new(){PlaceColors=["#ABC"],Style=emptyPalette})).Contains("Series"),"PointsColor null is refused when a race has points");
 });
 string PlacingsMarkup(Dictionary<string,object?> parameters,ChartStyle? cascaded=null)
 {
