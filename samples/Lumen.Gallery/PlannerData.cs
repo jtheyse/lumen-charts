@@ -7,6 +7,8 @@ namespace Lumen.Gallery;
 /// each one, so the year and March are told apart.</summary>
 public static class PlannerData
 {
+    /// <summary>The 2027 season for the planner, in <paramref name="theme"/>, drawn at <paramref name="width"/> and named
+    /// <paramref name="title"/>.</summary>
     public static PlannerSpec Season(ChartTheme theme, int width = 1100, string title = "Season planner") => PlannerSpec.ForYear(2027) with
     {
         Title = title, Description = "Invented organizers' events in Gauteng and the Western Cape",

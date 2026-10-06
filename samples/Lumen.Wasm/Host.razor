@@ -26,6 +26,12 @@
 
     <h2 id="strip">Parts of a whole</h2>
     <div class="card"><LumenChart Spec="strip" FitWidth="true"/></div>
+
+    <section id="planner">
+        <h2>Season planner</h2>
+        <div class="card"><LumenPlanner Spec="season" EventSelected="OnPlannerEvent" DaySelected="OnPlannerDay"/></div>
+        <p class="state" role="status" id="planner-picked">@(plannerPicked ?? "Select an event, or open a day")</p>
+    </section>
 </LumenBrand>
 </main>
 @code {
@@ -35,6 +41,12 @@
     private void Select(ChartKind kind){selected=kind;point=null;}
     private void OnPoint(PointSelection selection)=>point=$"Selected series {selection.SeriesIndex+1}, observation {selection.PointIndex+1}";
     private void OnNode(string id)=>node=$"Selected node \"{id}\"";
+
+    // The gallery's invented season, shared as a file, so the planner's checks run on this host too.
+    private readonly PlannerSpec season=Lumen.Gallery.PlannerData.Season(ChartTheme.Light);
+    private string? plannerPicked;
+    private void OnPlannerEvent(PlannerEvent e)=>plannerPicked=$"Selected event {e.Name}";
+    private void OnPlannerDay(DateOnly day)=>plannerPicked=$"Opened {day.ToString("dddd d MMMM yyyy",System.Globalization.CultureInfo.InvariantCulture)}";
 
     private static readonly string[] months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     private static readonly Random random=new(7);

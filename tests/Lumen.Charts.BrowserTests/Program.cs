@@ -680,6 +680,8 @@ async Task PlannerHome()
     await PlannerAt(page, "year");
     await PlannerFitted(page);
 }
+// Focus leaves the planner for the page's first link, or, on a host with no links, for its first button outside the planner.
+async Task PlannerLeave() => await page.EvaluateAsync("() => (document.querySelector('a') ?? [...document.querySelectorAll('button')].find(b => !b.closest('#planner'))).focus()");
 async Task<string?> PlannerFocus() => await page.EvaluateAsync<string?>("() => document.activeElement?.dataset?.day ?? document.activeElement?.dataset?.event ?? null");
 async Task PlannerPicked(string words) => await page.WaitForFunctionAsync($"() => (document.querySelector('#planner-picked')?.textContent ?? '').includes({System.Text.Json.JsonSerializer.Serialize(words)})");
 if (await page.Locator("#planner .lumen-planner-box").CountAsync() > 0)
@@ -786,7 +788,7 @@ if (await page.Locator("#planner .lumen-planner-box").CountAsync() > 0)
         await page.Locator("#planner g.lumen-day[data-day='2027-11-10']").ClickAsync();
         await PlannerAt(page, "month");
         // Leaving the planner for a link ends its engagement, so the click on the toolbar alone must restore it.
-        await page.Locator("a").First.FocusAsync();
+        await PlannerLeave();
         await page.GetByRole(AriaRole.Button, new() { Name = "Next month" }).ClickAsync();
         await page.WaitForFunctionAsync("() => document.querySelector('#planner .lumen-planner-where')?.textContent === 'December 2027'");
         await page.WaitForTimeoutAsync(500);
@@ -803,7 +805,7 @@ if (await page.Locator("#planner .lumen-planner-box").CountAsync() > 0)
         await page.GetByRole(AriaRole.Button, new() { Name = "Gauteng, in South Africa" }).ClickAsync();
         await page.WaitForFunctionAsync("() => document.querySelectorAll('#planner .lumen-datum[data-event=\"cs\"]').length === 0");
         // Leaving the planner for a link ends its engagement, so the press on Clear filters alone must restore it.
-        await page.Locator("a").First.FocusAsync();
+        await PlannerLeave();
         var clear = page.GetByRole(AriaRole.Button, new() { Name = "Clear filters" });
         await clear.FocusAsync();
         await page.Keyboard.PressAsync("Enter");
@@ -849,6 +851,67 @@ if (await page.Locator("#planner .lumen-planner-box").CountAsync() > 0)
         {
             await page.Locator("#planner details summary").ClickAsync();
             Check(await page.Locator("#planner table td").CountAsync() >= 31, "31 days");
+        });
+    async Task<IPage> PlannerTab(IBrowserContext context)
+    {
+        var tab = await context.NewPageAsync();
+        await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+        await PlannerFitted(tab);
+        return tab;
+    }
+    foreach (var (width, height, phone) in new[] { (375, 812, true), (768, 1024, false), (1024, 768, false), (1280, 900, false), (1440, 900, false) })
+        await Test($"Planner: at {width} by {height} it is drawn at its box's width, narrow only below 640 pixels, its words at 9 pixels or more, and the page does not scroll sideways", async () =>
+        {
+            var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = height }, IsMobile = phone, HasTouch = phone, DeviceScaleFactor = phone ? 2 : 1 });
+            try
+            {
+                var tab = await PlannerTab(context);
+                var facts = await tab.EvaluateAsync<string>(@"() => {
+                    const box = document.querySelector('#planner .lumen-planner-box'), viewport = box.querySelector('.lumen-viewport'), svg = viewport.querySelector('svg');
+                    const expected = viewport.clientWidth < 640 ? 'narrow' : 'wide', scale = svg.getBoundingClientRect().width / svg.viewBox.baseVal.width, problems = [];
+                    if (box.dataset.layout !== expected) problems.push('layout ' + box.dataset.layout + ' at ' + viewport.clientWidth);
+                    if (10 * scale < 9) problems.push('10-unit words at ' + (10 * scale).toFixed(1) + ' px');
+                    if (document.documentElement.scrollWidth > window.innerWidth + 1) problems.push('the page scrolls sideways to ' + document.documentElement.scrollWidth);
+                    return problems.length ? problems.join('; ') : 'ok';
+                }");
+                Check(facts == "ok", facts);
+                if (phone) Check(await tab.Locator("#planner .lumen-planner-box[data-layout='narrow']").CountAsync() == 1, "a phone gets the narrow layout");
+            }
+            finally { await context.CloseAsync(); }
+        });
+    await Test("Planner: on a 375-pixel phone a weekend across a month's end stands in both months' bars, and the later bar opens the later month", async () =>
+    {
+        var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+        try
+        {
+            var tab = await PlannerTab(context);
+            var slots = tab.Locator("#planner g.lumen-week[data-weekend='2027-07-31']");
+            Check(await slots.CountAsync() == 2, "in July's bar and August's");
+            await slots.Nth(1).ClickAsync();
+            await PlannerAt(tab, "month");
+            await tab.WaitForFunctionAsync("() => document.querySelector('#planner .lumen-planner-where')?.textContent === 'August 2027'");
+        }
+        finally { await context.CloseAsync(); }
+    });
+    foreach (var (width, height, phone) in new[] { (768, 1024, false), (375, 812, true) })
+        await Test($"axe-core reports no WCAG A or AA violation at {width} by {height} in the planner's year, a month and a day", async () =>
+        {
+            var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = height }, IsMobile = phone, HasTouch = phone, DeviceScaleFactor = phone ? 2 : 1 });
+            try
+            {
+                var tab = await PlannerTab(context);
+                await SweepOf(tab);
+                await tab.EvaluateAsync("() => { const c = document.querySelector('#planner g.lumen-day[data-day], #planner g.lumen-week[data-weekend]'); c.focus(); }");
+                await tab.Keyboard.PressAsync("Enter");
+                await PlannerAt(tab, "month");
+                await PlannerFitted(tab);
+                await SweepOf(tab);
+                await tab.EvaluateAsync("() => document.querySelector('#planner g.lumen-day[data-day=\"2027-01-01\"]')?.focus()");
+                await tab.Keyboard.PressAsync("Enter");
+                await PlannerAt(tab, "day");
+                await SweepOf(tab);
+            }
+            finally { await context.CloseAsync(); }
         });
 }
 else Console.WriteLine("SKIP planner checks: this host shows no planner");
