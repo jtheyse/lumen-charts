@@ -9461,7 +9461,7 @@ Test("LumenPlanner: a call made in a zoom the planner has left is ignored, so a 
 });
 // 0.45.0: places and points.
 Placing RacedResult(int? place,int? field,double? points,int week,string? series=null)=>new(place){Field=field,Points=points,Date=new DateOnly(2027,3,1).AddDays(7*week),Series=series};
-string[] PlacedNames(ChartSpec spec)=>Regex.Matches(ChartSvg.Render(spec),"aria-label='([^']*)'").Select(m=>m.Groups[1].Value).ToArray();
+string[] PlacedNames(ChartSpec spec)=>Regex.Matches(ChartSvg.Render(spec),"aria-label='([^']*)'").Select(m=>System.Net.WebUtility.HtmlDecode(m.Groups[1].Value)).ToArray();
 Test("Placings: nothing placed is no chart, so the page shows its own empty state",()=>{
     Check(PlacingsChart.Build([])is null,"no results");
     Check(PlacingsChart.Build([new Placing(null){Points=10},new Placing(0){Field=20},new Placing(-3)])is null,"no place above 0");
