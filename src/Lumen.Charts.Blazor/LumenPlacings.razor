@@ -1,0 +1,40 @@
+@if (spec is { } chart)
+{
+    if (Static)
+    {
+        @((MarkupString)ChartSvg.Render(chart))
+    }
+    else
+    {
+        <LumenChart Spec="chart" FitWidth="true" ShowToolbar="false" />
+    }
+}
+else
+{
+    @Empty
+}
+@code {
+    /// <summary>The results to draw, one per event; see <see cref="PlacingsChart.Build"/>.</summary>
+    [Parameter, EditorRequired] public IEnumerable<Placing> Results { get; set; } = [];
+    /// <summary>The chart's words and colours. When it sets no <see cref="PlacingsOptions.Style"/>, a cascaded style is used.</summary>
+    [Parameter] public PlacingsOptions? Options { get; set; }
+    /// <summary>The host's last word on the chart, such as its title, axis label or a style for a raised card.</summary>
+    [Parameter] public Func<ChartSpec, ChartSpec>? Adjust { get; set; }
+    /// <summary>Writes the chart as plain SVG with no script, for a static page; otherwise it is an interactive
+    /// <see cref="LumenChart"/> that fits its box, without a toolbar.</summary>
+    [Parameter] public bool Static { get; set; }
+    /// <summary>What to show when no result has a place; nothing is shown without it.</summary>
+    [Parameter] public RenderFragment? Empty { get; set; }
+    /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style in <see cref="Options"/> wins.</summary>
+    [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }
+
+    private ChartSpec? spec;
+
+    protected override void OnParametersSet()
+    {
+        var options = Options ?? new PlacingsOptions();
+        if (options.Style is null && CascadingStyle is not null) options = options with { Style = CascadingStyle };
+        var built = PlacingsChart.Build(Results, options);
+        spec = built is null ? null : Adjust is null ? built : Adjust(built);
+    }
+}

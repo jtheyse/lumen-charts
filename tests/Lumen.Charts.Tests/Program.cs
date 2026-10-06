@@ -3973,7 +3973,7 @@ Test("The packages carry their XML documentation beside each assembly, and it co
     var properties=new[]{typeof(ChartSpec),typeof(ChartSeries),typeof(ChartPoint),typeof(ChartPane),typeof(ChartAnnotation),typeof(ChartStyle),typeof(ZoneScale),typeof(Zone),
             typeof(LoadDay),typeof(CriticalPowerFit),typeof(BoxSummary),typeof(LinearFit),typeof(RollingWindow),typeof(HistogramBin),typeof(PointSelection)}
         .SelectMany(t=>t.GetProperties(declared).Select(p=>$"P:{t.FullName}.{p.Name}"))
-        .Concat(new[]{typeof(LumenChart),typeof(LumenGraph),typeof(LumenBrand),typeof(LumenPlanner)}.SelectMany(t=>t.GetProperties(declared)
+        .Concat(new[]{typeof(LumenChart),typeof(LumenGraph),typeof(LumenBrand),typeof(LumenPlanner),typeof(LumenPlacings)}.SelectMany(t=>t.GetProperties(declared)
             .Where(p=>p.IsDefined(typeof(ParameterAttribute),false)||p.IsDefined(typeof(CascadingParameterAttribute),false)).Select(p=>$"P:{t.FullName}.{p.Name}")));
     var methods=new[]{typeof(Training),typeof(Statistics),typeof(ZoneScale),typeof(ChartStyle),typeof(ChartSeries),typeof(ChartPoint)}
         .SelectMany(t=>t.GetMethods(declared).Where(m=>!m.IsSpecialName&&!Generated(m)).Select(m=>$"M:{t.FullName}.{m.Name}"));
@@ -9562,6 +9562,40 @@ Test("Placings: empty style palette is refused when needed",()=>{
     string Refused(Func<object?> act){try{act();}catch(ArgumentException e){return e.Message;}throw new Exception("expected a refusal");}
     var emptyPalette=ChartStyle.Dark with{Series=[]};
     Check(Refused(()=>PlacingsChart.Build([RacedResult(1,9,null,0,"A"),RacedResult(2,9,null,1,"B")],new(){Style=emptyPalette})).Contains("Series"),"palette message for two series");
+});
+string PlacingsMarkup(Dictionary<string,object?> parameters,ChartStyle? cascaded=null)
+{
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try {
+        return renderer.Dispatcher.InvokeAsync(async()=>{
+            if(cascaded is null)return (await renderer.RenderComponentAsync<LumenPlacings>(ParameterView.FromDictionary(parameters))).ToHtmlString();
+            RenderFragment content=b=>{b.OpenComponent<LumenPlacings>(0);b.AddMultipleAttributes(1,parameters!);b.CloseComponent();};
+            return (await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",cascaded},{"ChildContent",content}}))).ToHtmlString();
+        }).GetAwaiter().GetResult();
+    } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
+}
+Placing[] PlacedSeason=[RacedResult(30,50,40,0),RacedResult(24,48,52,1),RacedResult(27,51,47,2)];
+Test("LumenPlacings: draws the chart as a fitted component without a toolbar, with the host's last word",()=>{
+    var html=PlacingsMarkup(new(){{"Results",PlacedSeason},{"Adjust",(Func<ChartSpec,ChartSpec>)(s=>s with{Title="Position & points by race"})}});
+    Check(html.Contains("class=\"lumen-chart lumen-fit\"")&&html.Contains("lumen-quiet"),"fitted, no toolbar");
+    Check(html.Contains("Position &amp; points by race")||html.Contains("Position & points by race"),"adjusted title");
+    Check(html.Contains("better than the previous"),"change words");
+});
+Test("LumenPlacings: shows its Empty slot when nothing is placed, and nothing without one",()=>{
+    RenderFragment empty=b=>b.AddMarkupContent(0,"<p class=\"none\">No races yet</p>");
+    Check(PlacingsMarkup(new(){{"Results",new[]{new Placing(null)}},{"Empty",empty}}).Contains("<p class=\"none\">No races yet</p>"),"slot");
+    Check(PlacingsMarkup(new(){{"Results",Array.Empty<Placing>()}}).Trim().Length==0,"nothing");
+});
+Test("LumenPlacings: Static writes the plain SVG with no component around it",()=>{
+    var html=PlacingsMarkup(new(){{"Results",PlacedSeason},{"Static",true}});
+    Check(html.TrimStart().StartsWith("<svg")&&!html.Contains("lumen-chart")&&!html.Contains("lumen-tools"),html[..Math.Min(80,html.Length)]);
+});
+Test("LumenPlacings: a cascaded style is used unless the options set one",()=>{
+    var midnight=PlacingsMarkup(new(){{"Results",PlacedSeason}},ChartStyle.Midnight);
+    Check(midnight.Contains(ChartStyle.Midnight.Background),"cascade");
+    var own=PlacingsMarkup(new(){{"Results",PlacedSeason},{"Options",new PlacingsOptions{Style=ChartStyle.Dark}}},ChartStyle.Midnight);
+    Check(own.Contains(ChartStyle.Dark.Background)&&!own.Contains(ChartStyle.Midnight.Background),"options win");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
