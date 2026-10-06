@@ -9495,7 +9495,8 @@ Test("Placings: a place is compared only with the previous race of its own serie
     var names=PlacedNames(spec);
     Check(names.Contains("Place · Invented League: 15 Mar 2027, 24/48, better than the previous"),"vs 30th, not vs the open race's 5th");
     Check(names.Contains("Place · Invented Open: 22 Mar 2027, 7/21, worse than the previous"),"open vs open");
-    Check(spec.Series[0].Points[1].Y is null&&spec.Series[1].Points[0].Y is null,"gaps at the other series' races");
+    Check(spec.Series[0].Points.Select(p=>p.X).SequenceEqual(new double[]{0,2})&&spec.Series[1].Points.Select(p=>p.X).SequenceEqual(new double[]{1,3}),"League at 0,2 Open at 1,3");
+    Check(spec.Series[0].Points.All(p=>p.Y.HasValue)&&spec.Series[1].Points.All(p=>p.Y.HasValue),"no null Y in place lines");
     var blank=PlacingsChart.Build([RacedResult(3,9,null,0),RacedResult(4,9,null,1,"Invented Cup")])!;
     Check(blank.Series.Select(s=>s.Name).SequenceEqual(["Place","Place · Invented Cup"]),"a result with no series is the place line alone");
 });
@@ -9523,16 +9524,31 @@ Test("Placings: colours come from the style, or cycle through the host's",()=>{
 Test("Placings: odd but real data still draws: no field, a field of 0, a place past its field, a single race",()=>{
     var spec=PlacingsChart.Build([RacedResult(30,0,null,0),RacedResult(25,20,null,1)])!;
     Check(spec.Series[0].Points[0].ValueNote is null&&spec.Series[0].Points[1].ValueNote=="/20","notes");
+    Check(PlacedNames(spec).Any(n=>n.Contains("25/20")),"odd data renders name with 25/20");
     var one=PlacingsChart.Build([RacedResult(2,10,5,0)])!;
     Check(one.XMin==-.5&&one.XMax==.5,"one race");
     foreach(var s in new[]{spec,one}){var svg=ChartSvg.Render(s);Check(svg.StartsWith("<svg"),"renders");}
     Check(!PlacedNames(one).Any(n=>n.Contains("previous")),"no previous race, no change words");
+    Check(PlacedNames(one).Any(n=>n.StartsWith("Place:")),"single race name starts with Place");
+});
+Test("Placings: blank label falls back to date then number",()=>{
+    var spec=PlacingsChart.Build([new Placing(5){Date=new(2027,3,1),Label=""},new Placing(3){Date=new(2027,3,8),Label="  ",Series="S"}])!;
+    Check(spec.Series[0].Points[0].Label=="1 Mar 2027"&&spec.Series[1].Points[0].Label=="8 Mar 2027","blank/whitespace labels become date");
+    var undate=PlacingsChart.Build([new Placing(5){Label=""},new Placing(3){Series="S"}])!;
+    Check(undate.Series[0].Points[0].Label=="#1"&&undate.Series[1].Points[0].Label=="#2","no date becomes number");
+});
+Test("Placings: seven series cycle through the style's palette",()=>{
+    var light=ChartStyle.Light;
+    var seven=PlacingsChart.Build(Enumerable.Range(0,7).Select(i=>RacedResult(i+1,9,null,i,$"S{i}")))!;
+    for(var k=1;k<seven.Series.Count;k++)Check(seven.Series[k].Color==light.Series[(k-1)%light.Series.Count],$"series {k} uses palette color");
 });
 Test("Placings: refusals say why",()=>{
     Reject(()=>PlacingsChart.Build(null!));
     Reject(()=>PlacingsChart.Build([new Placing(1),null!]));
     foreach(var bad in new PlacingsOptions[]{new(){PlaceName=" "},new(){PointsName=""},new(){DateFormat=""},new(){Unlabelled="R"},new(){PlaceColors=[]}})
         Reject(()=>PlacingsChart.Build([new Placing(1)],bad));
+    try{PlacingsChart.Build([new Placing(1)],new(){DateFormat="not-a-format"});}catch(ArgumentException e){Check(e.Message.Contains("DateFormat"),"DateFormat message");}
+    try{PlacingsChart.Build([new Placing(1)],new(){Unlabelled="{"});}catch(ArgumentException e){Check(e.Message.Contains("Unlabelled"),"Unlabelled message");}
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
@@ -9567,4 +9583,3 @@ sealed class NoJs:IJSRuntime
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier,object?[]? args)=>throw new InvalidOperationException("Prerender must not invoke JS.");
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier,CancellationToken token,object?[]? args)=>InvokeAsync<TValue>(identifier,args);
 }
-

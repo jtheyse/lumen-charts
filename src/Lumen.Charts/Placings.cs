@@ -46,9 +46,11 @@ public static class PlacingsChart
 {
     /// <summary>The chart for <paramref name="results"/>, or null when no result has a place (so a page can show its own empty state).
     /// The result is an ordinary <see cref="ChartSpec"/>: render it with <see cref="ChartSvg.Render(ChartSpec, bool, bool)"/> or
-    /// <c>&lt;LumenChart&gt;</c>, or change it with <c>with</c>.</summary>
-    /// <exception cref="ArgumentException">A null result, a blank name or date format, an <see cref="PlacingsOptions.Unlabelled"/>
-    /// without <c>{0}</c>, or an empty <see cref="PlacingsOptions.PlaceColors"/>.</exception>
+    /// <c>&lt;LumenChart&gt;</c>, or change it with <c>with</c>. Each series draws only at its own races; where one series has a race,
+    /// the others have no point.</summary>
+    /// <exception cref="ArgumentException">A null result, a blank name or date format, an <see cref="PlacingsOptions.Unlabelled"/> that
+    /// cannot be formatted, a <see cref="PlacingsOptions.DateFormat"/> that cannot parse, an empty <see cref="PlacingsOptions.PlaceColors"/>,
+    /// or a style with an empty <see cref="ChartStyle.Series"/> palette when one is needed.</exception>
     public static ChartSpec? Build(IEnumerable<Placing> results, PlacingsOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(results);
@@ -56,24 +58,27 @@ public static class PlacingsChart
         if (string.IsNullOrWhiteSpace(o.PlaceName)) throw new ArgumentException("A places chart needs a name for its places line (PlaceName).");
         if (string.IsNullOrWhiteSpace(o.PointsName)) throw new ArgumentException("A places chart needs a name for its points line and pane (PointsName).");
         if (string.IsNullOrWhiteSpace(o.DateFormat)) throw new ArgumentException("A places chart needs a date format (DateFormat) to label an event by its date.");
+        try { new DateOnly(2027, 1, 1).ToString(o.DateFormat, CultureInfo.InvariantCulture); } catch (FormatException) { throw new ArgumentException("DateFormat must be a valid format string for DateOnly.ToString."); }
         if (o.Unlabelled is null || !o.Unlabelled.Contains("{0}", StringComparison.Ordinal)) throw new ArgumentException("Unlabelled must contain {0}, where an event's number goes, such as \"R{0}\".");
+        try { string.Format(CultureInfo.InvariantCulture, o.Unlabelled, 1); } catch (FormatException) { throw new ArgumentException("Unlabelled must be a valid format string for string.Format, such as \"R{0}\"."); }
         if (o.PlaceColors is { Count: 0 }) throw new ArgumentException("PlaceColors must name at least one colour, or be null for the style's.");
         var style = o.Style ?? ChartStyle.Light;
+        if (style.Series.Count == 0) throw new ArgumentException("The style's Series palette must not be empty.");
         var placed = results.Select(r => r ?? throw new ArgumentException("A places chart's results may not contain null.")).Where(r => r.Place is > 0).ToList();
         if (placed.Count == 0) return null;
         // OrderBy is stable, so events on the same date keep the order they were given in.
         var races = placed.All(r => r.Date is not null) ? placed.OrderBy(r => r.Date!.Value).ToList() : placed;
-        var labels = races.Select((r, i) => r.Label ?? r.Date?.ToString(o.DateFormat, CultureInfo.InvariantCulture)
+        var labels = races.Select((r, i) => (string.IsNullOrWhiteSpace(r.Label) ? null : r.Label) ?? r.Date?.ToString(o.DateFormat, CultureInfo.InvariantCulture)
             ?? string.Format(CultureInfo.InvariantCulture, o.Unlabelled, i + 1)).ToArray();
         static string Key(Placing r) => r.Series?.Trim() ?? "";
         var keys = races.Select(Key).Distinct(StringComparer.Ordinal).ToList();
         string Color(int k) => o.PlaceColors is { } colors ? colors[k % colors.Count] : k == 0 ? style.Text : style.Series[(k - 1) % style.Series.Count];
-        // Each series is its own line, with a value only at its own events, so a place is judged only against the previous event
-        // of the same series.
+        // Each series is its own line, with points only at its own events, so a place is judged only against the previous event
+        // of the same series. Races from other series are skipped, not nulled.
         var lines = keys.Select((key, k) => new ChartSeries(
                 keys.Count == 1 || key.Length == 0 ? o.PlaceName : $"{o.PlaceName} · {key}",
-                races.Select((r, i) => new ChartPoint(i, Key(r) == key ? r.Place : null, labels[i])
-                    { ValueNote = Key(r) == key && r.Field is > 0 ? $"/{r.Field}" : null }).ToArray(),
+                races.Select((r, i) => (r, i)).Where(x => Key(x.r) == key).Select(x => new ChartPoint(x.i, x.r.Place, labels[x.i])
+                    { ValueNote = x.r.Field is > 0 ? $"/{x.r.Field}" : null }).ToArray(),
                 Color(k))
             { ChangeColors = ChangeColors.LowerIsBetter, ValueLabels = true, Markers = MarkerStyle.Filled }).ToList();
         var best = races.Min(r => r.Place!.Value);
