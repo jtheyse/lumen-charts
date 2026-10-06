@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Lumen.Charts;
 using Lumen.Charts.Blazor;
@@ -9199,6 +9200,14 @@ Test("Planner: each view's legend names only what that view draws",()=>{
     // The narrow year marks a weekend's clashes and close events, its holiday and other periods, and nothing else.
     var narrow=Words(PlanSvg(spec with{Width=340},PlannerView.WholePeriod,PlannerLayout.Narrow));
     Check(narrow.SequenceEqual(["clash","close","public holiday","other period","weekend"]),string.Join(",",narrow));
+});
+Test("Planner: every day of the wide year carries an unpainted cell a pointer can hit, and no other view does",()=>{
+    var year=PlannerSvg.Render(PlanYear(),PlannerView.WholePeriod);
+    Check(Regex.Matches(year,"<g class='lumen-day' role='group' data-day='[0-9-]+' aria-label='[^']*'><rect class='lumen-cell' [^>]*fill='none' stroke='none' pointer-events='all'/>").Count==365,"one cell first in every day");
+    Check(Regex.Matches(year,"class='lumen-cell'").Count==365,"no other cells");
+    foreach(var view in new[]{PlannerView.Month(2027,3),PlannerView.Day(new(2027,3,13))})
+        Check(!PlannerSvg.Render(PlanYear(),view).Contains("lumen-cell"),$"none in {view.Zoom}");
+    Check(!PlannerSvg.Render(PlanYear() with{Width=340},PlannerView.WholePeriod,PlannerLayout.Narrow).Contains("lumen-cell"),"none in the narrow year");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

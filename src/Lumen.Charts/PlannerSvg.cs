@@ -99,6 +99,9 @@ public static class PlannerSvg
                 if (d < spec.From || d > spec.To) continue;
                 var x = X(d);
                 w.Add($"<g class='lumen-day' role='group' data-day='{Iso(d)}' aria-label='{E(plan.DayName(d))}'>");
+                // An unpainted cell the size of the day, so a pointer can hit a weekday that has nothing drawn on it; the
+                // interactive planner opens the month from it and rings it when it has focus. It draws nothing.
+                w.Add($"<rect class='lumen-cell' x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(RowH - 2)}' fill='none' stroke='none' pointer-events='all'/>");
                 if (plan.IsWeekend(d)) w.Add($"<rect class='lumen-weekend' x='{N(x)}' y='{N(y)}' width='{N(col)}' height='{N(RowH - 2)}' fill='{style.Grid}'/>");
                 var periods = plan.On(d).Periods;
                 foreach (var p in periods)
