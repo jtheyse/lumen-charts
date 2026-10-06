@@ -9459,6 +9459,81 @@ Test("LumenPlanner: a call made in a zoom the planner has left is ignored, so a 
     Check(days.Count==0,"no DaySelected: "+string.Join(", ",days));
     Check(views.SequenceEqual(new[]{PlannerView.Month(2027,3),PlannerView.WholePeriod}),string.Join(", ",views));
 });
+// 0.45.0: places and points.
+Placing RacedResult(int? place,int? field,double? points,int week,string? series=null)=>new(place){Field=field,Points=points,Date=new DateOnly(2027,3,1).AddDays(7*week),Series=series};
+string[] PlacedNames(ChartSpec spec)=>Regex.Matches(ChartSvg.Render(spec),"aria-label='([^']*)'").Select(m=>m.Groups[1].Value).ToArray();
+Test("Placings: nothing placed is no chart, so the page shows its own empty state",()=>{
+    Check(PlacingsChart.Build([])is null,"no results");
+    Check(PlacingsChart.Build([new Placing(null){Points=10},new Placing(0){Field=20},new Placing(-3)])is null,"no place above 0");
+});
+Test("Placings: places read up as better, carry their field, and say their change in words",()=>{
+    var spec=PlacingsChart.Build([RacedResult(30,50,40,0),RacedResult(24,48,52,1),RacedResult(27,51,47,2),RacedResult(19,null,58,3)])!;
+    Check(spec.Kind==ChartKind.Line&&spec.YReversed&&spec.YLabel=="Place"&&spec.Title=="Places and points","shape");
+    Check(spec.Width==340&&spec.Height==380&&spec.XMin==-.5&&spec.XMax==3.5,"size and X");
+    Check(spec.Panes.Count==1&&spec.Panes[0].Label=="Points"&&spec.Panes[0].Weight==1,"points pane");
+    Check(spec.Description=="Finishing place out of the field, first at the top, and points. Best: 19.",spec.Description);
+    var names=PlacedNames(spec);
+    Check(names.Contains("Place: 8 Mar 2027, 24/48, better than the previous"),"better");
+    Check(names.Contains("Place: 15 Mar 2027, 27/51, worse than the previous"),"worse");
+    Check(names.Contains("Place: 22 Mar 2027, 19, better than the previous"),"no field: the place alone");
+    var place=spec.Series[0];
+    Check(place.ChangeColors==ChangeColors.LowerIsBetter&&place.ValueLabels&&place.Markers==MarkerStyle.Filled,"place line");
+});
+Test("Placings: a race without points is a gap, never a zero, and a real zero stays a zero",()=>{
+    var points=PlacingsChart.Build([RacedResult(5,20,40,0),RacedResult(6,20,0,1),RacedResult(4,20,null,2),RacedResult(3,20,52,3)])!.Series[^1];
+    Check(points.Name=="Points"&&points.Pane==1&&points.ValueLabels&&points.Markers==MarkerStyle.Filled,"points line");
+    Check(points.Points[1].Y==0&&points.Points[2].Y is null,"zero and gap");
+});
+Test("Placings: with no points anywhere there is no points line and no empty pane",()=>{
+    var spec=PlacingsChart.Build([RacedResult(5,20,null,0),RacedResult(4,22,null,1)])!;
+    Check(spec.Panes.Count==0&&spec.Series.Count==1&&spec.Height==260,"no pane");
+    Check(spec.Description=="Finishing place out of the field, first at the top. Best: 4.",spec.Description);
+});
+Test("Placings: a place is compared only with the previous race of its own series",()=>{
+    var spec=PlacingsChart.Build([RacedResult(30,50,40,0,"Invented League"),RacedResult(5,20,null,1,"Invented Open"),RacedResult(24,48,52,2," Invented League "),RacedResult(7,21,null,3,"Invented Open")])!;
+    Check(spec.Series.Select(s=>s.Name).SequenceEqual(["Place · Invented League","Place · Invented Open","Points"]),string.Join("|",spec.Series.Select(s=>s.Name)));
+    var names=PlacedNames(spec);
+    Check(names.Contains("Place · Invented League: 15 Mar 2027, 24/48, better than the previous"),"vs 30th, not vs the open race's 5th");
+    Check(names.Contains("Place · Invented Open: 22 Mar 2027, 7/21, worse than the previous"),"open vs open");
+    Check(spec.Series[0].Points[1].Y is null&&spec.Series[1].Points[0].Y is null,"gaps at the other series' races");
+    var blank=PlacingsChart.Build([RacedResult(3,9,null,0),RacedResult(4,9,null,1,"Invented Cup")])!;
+    Check(blank.Series.Select(s=>s.Name).SequenceEqual(["Place","Place · Invented Cup"]),"a result with no series is the place line alone");
+});
+Test("Placings: races are ordered by date when all have one, else kept as given, and labelled by label, date or number",()=>{
+    var sorted=PlacingsChart.Build([RacedResult(3,9,null,2),RacedResult(5,9,null,0),RacedResult(4,9,null,1)])!;
+    Check(sorted.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{5,4,3}),"by date");
+    var same=PlacingsChart.Build([new Placing(8){Date=new(2027,3,1)},new Placing(2){Date=new(2027,3,1)}])!;
+    Check(same.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{8,2}),"same date keeps the given order");
+    var mixed=PlacingsChart.Build([RacedResult(3,9,null,2),new Placing(5),new Placing(4){Label="Final"}])!;
+    Check(mixed.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{3,5,4}),"an undated race keeps the given order");
+    Check(mixed.Series[0].Points.Select(p=>p.Label).SequenceEqual(["15 Mar 2027","#2","Final"]),string.Join("|",mixed.Series[0].Points.Select(p=>p.Label)));
+    var custom=PlacingsChart.Build([RacedResult(3,9,null,0),new Placing(5)],new(){DateFormat="dd-MM-yyyy",Unlabelled="R{0}"})!;
+    Check(custom.Series[0].Points.Select(p=>p.Label).SequenceEqual(["01-03-2027","R2"]),"custom format and number");
+});
+Test("Placings: colours come from the style, or cycle through the host's",()=>{
+    var light=ChartStyle.Light;
+    var two=PlacingsChart.Build([RacedResult(3,9,1,0,"A"),RacedResult(4,9,2,1,"B")])!;
+    Check(two.Series[0].Color==light.Text&&two.Series[1].Color==light.Series[0]&&two.Series[2].Color==light.Series[1]&&two.Style==light,"defaults");
+    var five=PlacingsChart.Build(Enumerable.Range(0,5).Select(i=>RacedResult(i+1,9,null,i,$"S{i}")),new(){PlaceColors=["#F5F6F7","#F5B642"],PointsColor="#D7DDE5",Style=ChartStyle.Dark})!;
+    Check(five.Series.Select(s=>s.Color).SequenceEqual(["#F5F6F7","#F5B642","#F5F6F7","#F5B642","#F5F6F7"]),"cycled");
+    Check(five.Series.Select(s=>s.Name).Distinct().Count()==5&&five.Style==ChartStyle.Dark,"names and style");
+    var pts=PlacingsChart.Build([RacedResult(3,9,1,0)],new(){PointsColor="#D7DDE5"})!;
+    Check(pts.Series[^1].Color=="#D7DDE5","points colour");
+});
+Test("Placings: odd but real data still draws: no field, a field of 0, a place past its field, a single race",()=>{
+    var spec=PlacingsChart.Build([RacedResult(30,0,null,0),RacedResult(25,20,null,1)])!;
+    Check(spec.Series[0].Points[0].ValueNote is null&&spec.Series[0].Points[1].ValueNote=="/20","notes");
+    var one=PlacingsChart.Build([RacedResult(2,10,5,0)])!;
+    Check(one.XMin==-.5&&one.XMax==.5,"one race");
+    foreach(var s in new[]{spec,one}){var svg=ChartSvg.Render(s);Check(svg.StartsWith("<svg"),"renders");}
+    Check(!PlacedNames(one).Any(n=>n.Contains("previous")),"no previous race, no change words");
+});
+Test("Placings: refusals say why",()=>{
+    Reject(()=>PlacingsChart.Build(null!));
+    Reject(()=>PlacingsChart.Build([new Placing(1),null!]));
+    foreach(var bad in new PlacingsOptions[]{new(){PlaceName=" "},new(){PointsName=""},new(){DateFormat=""},new(){Unlabelled="R"},new(){PlaceColors=[]}})
+        Reject(()=>PlacingsChart.Build([new Placing(1)],bad));
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;
@@ -9492,3 +9567,4 @@ sealed class NoJs:IJSRuntime
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier,object?[]? args)=>throw new InvalidOperationException("Prerender must not invoke JS.");
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier,CancellationToken token,object?[]? args)=>InvokeAsync<TValue>(identifier,args);
 }
+
