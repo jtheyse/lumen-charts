@@ -95,7 +95,43 @@ The axis keeps its tick labels with the gridlines hidden. The place that is best
 
 ## Position and points by race, recommended: two panes
 
-Places on a reversed axis, first at the top, in a pane of their own, and the points beneath on theirs, both on the races' shared X:
+Places on a reversed axis, first at the top, and the points beneath in a pane of their own, both on the races' shared X. From 0.45.0 one call builds it from the races themselves, each a `Placing` with its place, the size of its field, its points and its date, with Race Face's own words and colours as options:
+
+```csharp
+// The invented races of "Mapping the app's records", each as a Placing; a race with no Position is left out, one with no Points has no points mark.
+var placeResults = races.Select(r => new Placing(r.Position) { Field = r.FieldSize, Points = r.Points, Date = r.Date }).ToArray();
+var placeWords = new PlacingsOptions
+{
+    PlaceName = "Pos/field", PointsName = "Pts", DateFormat = "dd-MM-yyyy", Unlabelled = "R{0}",
+    PlaceColors = [raceFace.Text, raceFace.Series[2], raceFace.Series[4], raceFace.Series[5]],   // hi, gold, silver, bronze: one for each series, in turn
+    PointsColor = raceFace.Series[1],                                                            // steel
+    Style = raceFace
+};
+// Build returns null when no race has a place: show the app's own empty state then. The title and axis label are the host's words.
+var placeChart = PlacingsChart.Build(placeResults, placeWords)! with { Title = "Position & points by race", YLabel = "Position" };
+string placeSvg = ChartSvg.Render(placeChart);
+```
+
+In a Blazor page, with an interactive render mode, the component takes the same results and options (a razor block, not compiled by the recipe check):
+
+```razor
+<LumenPlacings Results="placeResults" Options="placeWords" Adjust="Adjust">
+    <Empty><p>No races yet.</p></Empty>
+</LumenPlacings>
+
+@code {
+    // placeResults and placeWords are built above; Adjust is the host's last word on the chart the builder makes.
+    ChartSpec Adjust(ChartSpec spec) => spec with { Title = "Position & points by race", YLabel = "Position" };
+}
+```
+
+- **What the call does.** It drops a race without a place, draws the races in date order when every one has a date (else as given), labels each by its `Label`, else its date in `DateFormat`, else `R1`, `R2`; and it writes each place with its field, `24/48`, and names it by its change, `Pos/field: 16-05-2026, 24/48, better than the previous`. The points are one line in a pane labelled `Pts`, with a mark only at a race that has points: a race without points is no mark and never a zero, and the line joins across it. With no points at all there is no pane, and the chart is 260 tall instead of 380. It is 340 wide with `YReversed`, and its description reads `Finishing place out of the field, first at the top, and points. Best: 19.`
+- **One line for each series.** Give each result a `Series` ("League", "Open") and each gets its own line, named `Pos/field · League`, holding points only at its own races, so it draws joined across the others'; a place is better or worse only than the previous race of its own series, which is what the League and Open advice in "Mapping the app's records" asks for by hand. A race with no series is a line of its own. `PlaceColors` are used in turn, one for each series, and cycle; leave it null and the style's palette is used in order, with the points taking the next colour.
+- **Colours.** With change colours the lines are drawn in the style's `Rising` and `Falling` colours by change, as in the hand-built chart; in the interactive component the legend shows each series' own colour, hi for the first series and gold for the second. A host that does not pass `PlaceColors` takes `raceFace.Series` in order, red first, which this style keeps for thin lines and small text.
+- **Refusals.** A blank `PlaceName`, `PointsName` or `DateFormat`, an `Unlabelled` without `{0}`, an empty `PlaceColors` and a null result throw an `ArgumentException` naming the option.
+- **Re-rendering.** `<LumenPlacings>` rebuilds its chart whenever its parameters are set, and `<LumenChart>` returns to its whole view when its spec is set, so a host that renders again resets the zoom the reader made. `Static="true"` writes the plain SVG at the spec's own width, 340 unless `Adjust` changes it, and an `Adjust` that returns null shows `Empty`.
+
+The hand-built spec follows, as the explanation of what the builder writes for you: the two series, the pane, the reversed axis and the size are the same.
 
 ```csharp
 var recommended = new ChartSpec {

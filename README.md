@@ -481,6 +481,46 @@ string table = PlannerSvg.Table(planner, 2027, 3);   // March as an HTML table, 
 
 Limits. The planner is a view only: no editing, dragging or adding, and `Url` is for the host, not followed. It never computes relevance, since the host decides it for the viewer. A period is at most 400 days. The year draws at most three stripes a day and says `+N` for the rest; a month's lines cut long names and regions (the whole text stays in the tooltip, the name and the table). A multi-day event in the month view is listed on each of its days, not drawn as one bar across them. Public holidays, school terms and regions are the app's data: the planner holds no calendar of any country.
 
+### Places and points
+
+A rider's season of finishing places and points, race by race, is the two-pane chart that [Race results on a line](#race-results-on-a-line) draws by hand: places on a reversed axis, first at the top, each coloured and named by how it changed on the race before, and the points each race earned in a pane beneath. 0.45.0 builds it from the results themselves. `PlacingsChart.Build(results, options)` takes a list of `Placing` records and returns an ordinary `ChartSpec`, or `null` when no result has a place, so a page can show its own empty state. Nothing in it is specific to racing: any sequence of events with a rank, and perhaps a score, draws the same way.
+
+```csharp
+Placing[] season = [
+    new(31) { Field = 50, Points = 40, Date = new(2026, 4, 11) },
+    new(24) { Field = 48, Points = 52, Date = new(2026, 5, 16) },
+    new(27) { Field = 51, Points = 47, Date = new(2026, 7, 4) },
+    new(null) { Date = new(2026, 8, 8) },                          // no place: left out
+    new(19) { Field = 52, Points = 61, Date = new(2026, 9, 19) }];
+ChartSpec? chart = PlacingsChart.Build(season, new PlacingsOptions { PlaceName = "Pos/field", PointsName = "Pts", DateFormat = "dd-MM-yyyy" });
+string? svg = chart is null ? null : ChartSvg.Render(chart with { Title = "Position & points by race", YLabel = "Position" });
+```
+
+The same chart in a Blazor page, with the host's last word on the spec and its own words for an empty season:
+
+```razor
+<LumenPlacings Results="season" Options="words" Adjust="Adjust">
+    <Empty><p>No races yet.</p></Empty>
+</LumenPlacings>
+
+@code {
+    PlacingsOptions words = new() { PlaceName = "Pos/field", PointsName = "Pts", DateFormat = "dd-MM-yyyy" };
+    ChartSpec Adjust(ChartSpec spec) => spec with { Title = "Position & points by race", YLabel = "Position" };
+}
+```
+
+**What a result says.** A `Placing` is a `Place` and, optionally, a `Field` (the size of the field), `Points`, a `Date`, a `Label` and a `Series`. A result whose place is null, 0 or less is dropped with its points; if none is left `Build` returns `null`. When every remaining result has a date the races are drawn in date order, races on one date keeping the order given; otherwise they keep the order given. Each race's label on the X axis, in its tooltip and in its name is its `Label` (a blank or whitespace label counts as missing), else its date in `DateFormat`, else `Unlabelled` with its number from 1 in the drawn order.
+
+**One line for each series.** `Series` names the competition a result belongs to: a league and a cup are two lines, and a place is better or worse only than the previous race of its own series, so a 12th in a field of 80 is never called worse than a 4th in a league round of 30. Surrounding spaces in a series are ignored, and a result with no series is a line of its own. With one series the line is named `PlaceName`; with several each is `PlaceName · Series`. A line holds points only at its own races, so it is drawn joined across the races of the other series. Each place is written with its field after it, `24/48`, when the field is above 0, and alone otherwise, and each mark's name and tooltip end `, better than the previous`, `, worse than the previous` or `, level with the previous`, as every change-coloured line's do.
+
+**Points in a pane.** The points stand in a pane of their own, labelled `PointsName`, with one mark for each race that has points. A race without points has no mark and never a zero, and the line is drawn joined across it; a real zero is a zero. When no race has points there is no points line and no pane, and the chart is 260 units tall, not 380.
+
+**Defaults.** The place line is named `Place`, the points `Points`, a date is written `d MMM yyyy` in the invariant culture and a race with neither label nor date `#1`, `#2`. The chart is 340 wide by 380 (260 without points), titled `Places and points`, its Y axis `Place`, its description `Finishing place out of the field, first at the top, and points. Best: 19.`, the best place being the smallest. Title, description, axis label and size are not options: change them on the spec with `with { … }`, or with `Adjust` in the component. The colours come from the style's palette in order, `Style.Series[k % n]` for place line `k` and the palette colour after the place lines for the points, so a style that names its own series colours is followed. A host that wants a brighter first line passes `PlaceColors`, used in turn and cycled, and `PointsColor`: Race Face passes white, gold, silver and bronze for its places and a steel points colour. `Style` is the chart's style, `ChartStyle.Light` when null.
+
+**Refusals.** `Build` throws `ArgumentNullException` for a null `results`, and `ArgumentException` naming the option for a null result in the list, a blank `PlaceName`, `PointsName` or `DateFormat`, a `DateFormat` that cannot format a date, an `Unlabelled` that has no `{0}` or cannot format, an empty `PlaceColors`, and a style with an empty `Series` palette when the defaults need it. Values the chart cannot draw, such as points that are not finite, are refused by the chart's own validation when it renders.
+
+**The component.** `<LumenPlacings Results Options Adjust Static Empty>` builds the chart and draws it. By default it is a `<LumenChart>` that fits its box, without a toolbar, and needs an interactive render mode for tooltips; `Static="true"` writes the plain SVG with no script, at the spec's own width (340 unless `Adjust` changes it). `Empty` is shown when no result is placed, and again when `Adjust` returns `null`; without it nothing is drawn. A style cascaded by `<LumenBrand>` or a `CascadingValue<ChartStyle>` is used when `Options.Style` is null. The component rebuilds its chart every time its parameters are set, and a `<LumenChart>` returns to its whole view when its spec is set, so a host that renders again resets a zoom the reader has made. With change colours the lines are drawn in the style's `Rising` and `Falling` colours by change, while the interactive component's legend shows each series' own colour, as every `<LumenChart>`'s does. The gallery shows it on the Sports & performance page, in the Racing section, as the Places and points card, a league and an open series of invented races; the hand-built Race results card beside it stays as the explanation of what the builder does.
+
 ### Blocks
 
 Two charts that endurance apps draw are made of blocks whose width means something. Strava's lap chart sizes each lap by its distance and raises it to its pace, faster higher, with the average pace across them; TrainingPeaks and Zwift draw a structured workout as steps as long as they last and as high as their target, coloured by power level, with the ride laid over them to check how closely it was followed.
@@ -1158,9 +1198,16 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - HTML tooltips on hover and keyboard focus in the component, native SVG tooltips in exported and server-rendered charts, keyboard-focusable data marks, point selection, tables, and accessible labels. See [Accessibility](#accessibility) for what is measured and what is not. This is not a claim of WCAG certification.
 - SVG, PNG and CSV exports. PNG is rasterized in the browser from the same SVG, so it needs an interactive render mode; there is no server-side PNG or PDF rendering, 3D, or streaming transport yet.
 - A season planner (0.43.0) is a view of data the app passes in: no editing, no calendar of any country's holidays, and relevance is the app's to decide. It covers at most 400 days, takes at most 2000 events, 1000 periods and 500 regions (names of at most 200 characters), draws at most three stripes a day in the year and cuts a month's long names (the full text is in each mark's name, tooltip and the month's table). Its text is 10 to 12 units, so render it at the width it is shown at, with `PlannerLayout.Narrow` under 640 pixels. `<LumenPlanner>` (0.44.0) zooms and filters it interactively and fits its own box; it is still a view only, with no editing, dragging or adding, and a keyboard reaches an event in the year or a month by opening its day.
+- A places and points chart (0.45.0) is built from the results the app passes in: a place of 0 or less, or none, leaves a result out, and `null` is returned when none is left, with no chart and no empty state of its own (`<LumenPlacings>` shows its `Empty` fragment). Each series is its own line, drawn only at its own races and joined across the others', and a place is compared only with the previous race of its series; a race without points has no mark, never a zero. The title, description, axis label and size are set on the spec after it is built. `<LumenPlacings>` rebuilds its chart whenever its parameters are set, which resets a reader's zoom, and with change colours its legend shows each series' own colour while the lines are drawn in the style's rising and falling colours.
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.45.0 additions
+
+The places and points chart: `PlacingsChart.Build(results, options)` turns a list of `Placing` records (a place, and optionally a field, points, a date, a label and a series) into an ordinary `ChartSpec` of finishing places on a reversed axis, first at the top, one line per series with each place named and coloured by its change against the previous race of the same series, the field after each place (`24/48`) and the points each race earned in a pane beneath; it returns `null` when no result has a place. `PlacingsOptions` sets the words (`PlaceName`, `PointsName`, `DateFormat`, `Unlabelled`), the colours (`PlaceColors`, `PointsColor`) and the `Style`; the title, description, axis label and size are changed on the spec with `with { … }`. `<LumenPlacings Results Options Adjust Static Empty>` in `Lumen.Charts.Blazor` draws it, as a fitted `<LumenChart>` without a toolbar or as plain SVG with `Static`, or shows `Empty` when nothing is placed. Described under [Places and points](#places-and-points).
+
+Nothing drawn before moves: the 385 renderings of 0.44.0 are identical to it in both finishes, and three new rows hash the chart (`placings/points`, `placings/no-points` and `placings/two-series`). The gallery's Sports & performance page gains a Places and points card in its Racing section, 32 charts in all; the existing hand-built Race results card stays. The skill's `references/recipes-race-face.md` gives the one-call version of "Position and points by race, recommended: two panes", keeping the hand-built spec as the explanation. Limits: each series draws only at its own races and is joined across the others'; a race without points has no mark and never a zero; the component rebuilds its chart whenever its parameters are set, so a host that renders again resets a reader's zoom; there is no HTTP endpoint for the builder.
 
 ## 0.44.0 additions
 
