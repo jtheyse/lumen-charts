@@ -104,8 +104,9 @@
         _ => "Arrow keys move between events; Enter or Space selects one; Escape goes back to the month.",
     };
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
+        var reset = false;
         if (!ReferenceEquals(Spec, source))
         {
             // The reader's filter starts as the host's, follows the host when the host's filter changes by content, and is
@@ -116,16 +117,19 @@
             filter = first || hostChanged ? Spec.Filter ?? new() : Offered(filter);
             hostFilter = Spec.Filter;
             source = Spec;
-            if (!Inside(view)) { view = PlannerView.WholePeriod; focus = null; status = $"Showing {Where}"; }
+            if (!Inside(view)) { view = PlannerView.WholePeriod; focus = null; status = $"Showing {Where}"; reset = true; }
             else if (!first && !Same(before, filter)) status = "Filters updated";
         }
-        // The host's view is taken when the host changes it; the reader's own zooming is kept across the host's renders.
+        // The host's view is taken when the host changes it; the reader's own zooming is kept across the host's renders. A
+        // bound view that a new spec has just reset is still the old one in this parameter set, and is not a change.
         if (View != given)
         {
             given = View;
-            if (View != view) { view = View; focus = View.Zoom == PlannerZoom.Year ? null : View.Date; }
+            if (View != view) { view = View; focus = View.Zoom == PlannerZoom.Year ? null : View.Date; status = $"Showing {Where}"; }
         }
         Render();
+        // A host bound with @bind-View hears that the new spec returned the planner to its whole period (unless it set a view itself).
+        if (reset && view == PlannerView.WholePeriod) await ViewChanged.InvokeAsync(view);
     }
 
     private void Render()
@@ -176,10 +180,12 @@
     /// <summary>Called by the component's script when the reader opens a cell: a day of the year (or, on a phone, a weekend)
     /// opens its month, and a day of a month opens the day and raises <see cref="DaySelected"/>. <paramref name="date"/> is
     /// <c>yyyy-MM-dd</c>; <paramref name="later"/> is true for a weekend's second bar on a phone, which opens the next month.
-    /// A day outside the period stays shut and is said so in the status line.</summary>
-    [JSInvokable] public Task Open(string date, bool later) => InvokeAsync(async () =>
+    /// A day outside the period stays shut and is said so in the status line. <paramref name="zoom"/> is the zoom the reader
+    /// acted in (<c>year</c>, <c>month</c> or <c>day</c>); a call made in a zoom the planner has since left, as the second click of
+    /// a double-click or a held key is, does nothing.</summary>
+    [JSInvokable] public Task Open(string date, bool later, string zoom) => InvokeAsync(async () =>
     {
-        if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", Invariant, DateTimeStyles.None, out var day)) return;
+        if (zoom != ZoomWord || !DateOnly.TryParseExact(date, "yyyy-MM-dd", Invariant, DateTimeStyles.None, out var day)) return;
         if (view.Zoom == PlannerZoom.Year)
         {
             var month = later ? new DateOnly(day.Year, day.Month, 1).AddMonths(1) : day;
@@ -196,9 +202,14 @@
     });
 
     /// <summary>Called by the component's script when the reader presses Escape: a day goes back to its month, and a month to
-    /// the whole period with the tab stop on <paramref name="date"/> (<c>yyyy-MM-dd</c>, or null for the view's own date).</summary>
-    [JSInvokable] public Task Back(string? date) => InvokeAsync(async () =>
-        await Out(DateOnly.TryParseExact(date, "yyyy-MM-dd", Invariant, DateTimeStyles.None, out var at) ? at : view.Date));
+    /// the whole period with the tab stop on <paramref name="date"/> (<c>yyyy-MM-dd</c>, or null for the view's own date).
+    /// <paramref name="zoom"/> is the zoom the reader acted in (<c>year</c>, <c>month</c> or <c>day</c>); a call made in a zoom
+    /// the planner has since left does nothing.</summary>
+    [JSInvokable] public Task Back(string? date, string zoom) => InvokeAsync(async () =>
+    {
+        if (zoom != ZoomWord) return;
+        await Out(DateOnly.TryParseExact(date, "yyyy-MM-dd", Invariant, DateTimeStyles.None, out var at) ? at : view.Date);
+    });
 
     /// <summary>Called by the component's script when the reader selects an event by its <see cref="PlannerEvent.Id"/>. It names
     /// the event in the status line and raises <see cref="EventSelected"/>; an unknown id does nothing.</summary>
@@ -286,6 +297,8 @@
         };
         status = $"Filter {Word(group, value)} {(IsOn(group, value) ? "on" : "off")}";
         Render();
+        // The script is told even when the drawing is unchanged, so a chip the redraw disables hands the focus to the drawing.
+        told = null;
         StateHasChanged();
     }
 
@@ -294,6 +307,7 @@
         filter = new();
         status = "Filters cleared";
         Render();
+        told = null;
         StateHasChanged();
     }
 

@@ -9260,19 +9260,19 @@ Test("LumenPlanner: a day of the year opens its month, a day of the month opens 
     var views=new List<PlannerView>();var days=new List<DateOnly>();var receiver=new object();
     var more=new Dictionary<string,object?>{{"ViewChanged",EventCallback.Factory.Create<PlannerView>(receiver,v=>views.Add(v))},{"DaySelected",EventCallback.Factory.Create<DateOnly>(receiver,d=>days.Add(d))}};
     PlanComponent(PlanYear(),async(p,html)=>{
-        await p.Open("2027-03-10",false);
+        await p.Open("2027-03-10",false,"year");
         var month=await html();
         Check(month.Contains("data-zoom=\"month\"")&&month.Contains(Where("March 2027"))&&month.Contains("Showing March 2027"),"month");
         Check(PlanEnabled(month,"Back to 2027")&&PlanEnabled(month,"Previous month")&&PlanEnabled(month,"Next month"),"toolbar in a month");
         Check(month.Contains("Arrow keys move between days; Enter or Space opens the day; Escape goes back to the year."),"month keys");
-        await p.Open("2027-03-13",false);
+        await p.Open("2027-03-13",false,"month");
         var day=await html();
         Check(day.Contains("data-zoom=\"day\"")&&day.Contains(Where("Saturday 13 March 2027"))&&PlanEnabled(day,"Back to March 2027")&&PlanEnabled(day,"Next day"),"day");
-        await p.Open("2027-03-14",false);   // a day view opens nothing
+        await p.Open("2027-03-14",false,"day");   // a day view opens nothing
         Check((await html()).Contains(Where("Saturday 13 March 2027")),"a day stays");
-        await p.Back(null);
+        await p.Back(null,"day");
         Check((await html()).Contains(Where("March 2027")),"back to the month");
-        await p.Back("2027-03-13");
+        await p.Back("2027-03-13","month");
         Check((await html()).Contains("data-zoom=\"year\""),"back to the year");
     },more);
     Check(views.SequenceEqual(new[]{PlannerView.Month(2027,3),PlannerView.Day(new(2027,3,13)),PlannerView.Month(2027,3),PlannerView.WholePeriod}),string.Join(", ",views));
@@ -9280,7 +9280,7 @@ Test("LumenPlanner: a day of the year opens its month, a day of the month opens 
 });
 Test("LumenPlanner: Previous and Next step a month or a day and stop at the period's edges",()=>{
     PlanComponent(PlanYear(),async(p,html)=>{
-        await p.Open("2027-01-06",false);
+        await p.Open("2027-01-06",false,"year");
         var january=await html();
         Check(PlanDisabled(january,"Previous month")&&PlanEnabled(january,"Next month"),"January");
         await PlanStep(p,1);
@@ -9298,8 +9298,8 @@ Test("LumenPlanner: Previous and Next step a month or a day and stop at the peri
 });
 Test("LumenPlanner: a day outside the period stays shut, and a new period returns the planner to its whole period",()=>{
     PlanComponent(PlanYear(s=>s with{From=new(2027,3,5)}),async(p,html)=>{
-        await p.Open("2027-03-10",false);
-        await p.Open("2027-03-01",false);
+        await p.Open("2027-03-10",false,"year");
+        await p.Open("2027-03-01",false,"month");
         var shut=await html();
         Check(shut.Contains("data-zoom=\"month\"")&&shut.Contains("Monday 1 March 2027 is outside the planner"),"outside");
         await p.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",PlanYear(s=>s with{From=new(2028,1,1),To=new(2028,12,31),Periods=[],Events=[]})}}));
@@ -9314,7 +9314,7 @@ Test("LumenPlanner: a day outside the period stays shut, and a new period return
 });
 Test("LumenPlanner: the box's width sets the drawing's width and below 640 pixels the narrow layout, keeping the view",()=>{
     PlanComponent(PlanYear(),async(p,html)=>{
-        await p.Open("2027-03-10",false);
+        await p.Open("2027-03-10",false,"year");
         await p.Fit(500);
         var narrow=await html();
         Check(narrow.Contains("data-zoom=\"month\" data-layout=\"narrow\"")&&narrow.Contains("viewBox='0 0 500 ")&&narrow.Contains(Where("March 2027")),"the agenda");
@@ -9330,10 +9330,10 @@ Test("LumenPlanner: on a phone a weekend across a month's end opens the month of
     PlanComponent(PlanYear(),async(p,html)=>{
         await p.Fit(400);
         Check((await html()).Contains("Arrow keys move between weekends, up and down by month; Enter or Space opens the month."),"phone keys");
-        await p.Open("2027-07-31",true);
+        await p.Open("2027-07-31",true,"year");
         Check((await html()).Contains(Where("August 2027")),"the later bar opens August");
-        await p.Back("2027-08-01");
-        await p.Open("2027-07-31",false);
+        await p.Back("2027-08-01","month");
+        await p.Open("2027-07-31",false,"year");
         Check((await html()).Contains(Where("July 2027")),"the earlier bar opens July");
     });
 });
@@ -9416,10 +9416,48 @@ Test("LumenPlanner: a chosen status or relevance that no event of a new spec use
 Test("LumenPlanner: on a phone a weekend whose later month lies outside the period stays shut and says so",()=>{
     PlanComponent(PlanYear(s=>s with{To=new(2027,7,31)}),async(p,html)=>{
         await p.Fit(400);
-        await p.Open("2027-07-31",true);
+        await p.Open("2027-07-31",true,"year");
         var shut=await html();
         Check(shut.Contains("data-zoom=\"year\"")&&shut.Contains("August 2027 is outside the planner"),"outside");
     });
+});
+Test("LumenPlanner: a new spec that returns the planner to its whole period raises ViewChanged, and the host's stale view is ignored",()=>{
+    var views=new List<PlannerView>();
+    var bound=EventCallback.Factory.Create<PlannerView>(new object(),v=>views.Add(v));
+    var later=PlanYear(s=>s with{From=new(2028,1,1),To=new(2028,12,31),Periods=[],Events=[]});
+    PlanComponent(PlanYear(),async(p,html)=>{
+        await p.Open("2027-03-10",false,"year");
+        // As @bind-View does: the host passes March back, then a new spec arrives with that view still bound.
+        await p.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",PlanYear()},{"View",PlannerView.Month(2027,3)},{"ViewChanged",bound}}));
+        await p.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",later},{"View",PlannerView.Month(2027,3)},{"ViewChanged",bound}}));
+        var next=await html();
+        Check(next.Contains("data-zoom=\"year\"")&&next.Contains(Where("2028"))&&next.Contains("Showing 2028"),"the whole of 2028");
+    },new(){{"ViewChanged",bound}});
+    Check(views.SequenceEqual(new[]{PlannerView.Month(2027,3),PlannerView.WholePeriod}),string.Join(", ",views));
+});
+Test("LumenPlanner: a view the host sets is said in the status line",()=>{
+    PlanComponent(PlanYear(),async(p,html)=>{
+        await p.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"View",PlannerView.Day(new(2027,3,13))}}));
+        var day=await html();
+        Check(day.Contains(Where("Saturday 13 March 2027"))&&day.Contains("Showing Saturday 13 March 2027"),"Showing Saturday 13 March 2027");
+    },new(){{"View",PlannerView.Month(2027,3)}});
+});
+Test("LumenPlanner: a call made in a zoom the planner has left is ignored, so a double-click or a held key acts once",()=>{
+    var days=new List<DateOnly>();var views=new List<PlannerView>();
+    var more=new Dictionary<string,object?>{{"DaySelected",EventCallback.Factory.Create<DateOnly>(new object(),d=>days.Add(d))},{"ViewChanged",EventCallback.Factory.Create<PlannerView>(new object(),v=>views.Add(v))}};
+    PlanComponent(PlanYear(),async(p,html)=>{
+        await p.Open("2027-03-10",false,"year");
+        Check((await html()).Contains(Where("March 2027")),"the first call opens March");
+        await p.Open("2027-03-10",false,"year");
+        Check((await html()).Contains(Where("March 2027")),"the second, made from the year, is ignored");
+        await p.Back(null,"day");
+        Check((await html()).Contains(Where("March 2027")),"a Back made from a day is ignored in a month");
+        await p.Back(null,"month");
+        await p.Back(null,"month");
+        Check((await html()).Contains("data-zoom=\"year\""),"one Back from the month reaches the year");
+    },more);
+    Check(days.Count==0,"no DaySelected: "+string.Join(", ",days));
+    Check(views.SequenceEqual(new[]{PlannerView.Month(2027,3),PlannerView.WholePeriod}),string.Join(", ",views));
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

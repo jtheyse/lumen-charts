@@ -401,7 +401,9 @@ export function attachPlanner(root, dotnet) {
     const viewport = root.querySelector(':scope > .lumen-viewport');
     const words = root.querySelector(':scope > .lumen-keys');
     const keys = words ? words.id || (words.id = 'lumen-keys-' + ++described) : null;
-    const state = { lastDate: null, engaged: false, ring: null };
+    // engaged: the reader is in the planner, so a redraw keeps their focus in the drawing; acted: their own key or click inside
+    // the planner asked for the next redraw, so the page may scroll to the focus.
+    const state = { lastDate: null, engaged: false, acted: false, ring: null };
     const drawing = () => viewport.querySelector('svg');
     const zoom = () => root.dataset.zoom;
     const narrow = () => root.dataset.layout === 'narrow';
@@ -417,6 +419,9 @@ export function attachPlanner(root, dotnet) {
         const cell = target && target.closest ? target.closest(selector()) : null;
         return cell && viewport.contains(cell) ? cell : null;
     };
+    // A phone's month with nothing scheduled draws no cell, so the drawing itself is the stop and stands for the cell.
+    const bare = target => !!target && target === drawing() && cells().length === 0;
+    const stopOf = target => cellOf(target) || (bare(target) ? target : null);
     const dateOf = cell => cell?.dataset.day || cell?.dataset.weekend || null;
     const rove = cell => {
         // The cell that holds the tab stop is the one that a screen reader reads the keys with.
@@ -440,12 +445,13 @@ export function attachPlanner(root, dotnet) {
         svg.appendChild(rect);
         state.ring = rect;
     };
-    // A weekend across a month's end stands in both months' bars under one key; the second opens the later month.
+    // A weekend across a month's end stands in both months' bars under one key; the second opens the later month. Each call
+    // names the zoom it was made in, so one that arrives after the planner has zoomed (a second click, a held key) does nothing.
     const open = cell => {
         if (cell.dataset.weekend) {
             const same = cells().filter(other => other.dataset.weekend === cell.dataset.weekend);
-            dotnet.invokeMethodAsync('Open', cell.dataset.weekend, same.indexOf(cell) > 0);
-        } else if (cell.dataset.day) dotnet.invokeMethodAsync('Open', cell.dataset.day, false);
+            dotnet.invokeMethodAsync('Open', cell.dataset.weekend, same.indexOf(cell) > 0, zoom());
+        } else if (cell.dataset.day) dotnet.invokeMethodAsync('Open', cell.dataset.day, false, zoom());
     };
     const shift = (iso, days) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
     const shiftMonth = (iso, months) => {
@@ -485,20 +491,31 @@ export function attachPlanner(root, dotnet) {
         return null;
     };
     const moves = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'];
+    // A held key repeats its keydown: Enter, Space and Escape act on the first only, as a double-click's first click does.
     const keydown = event => {
-        const cell = cellOf(event.target);
-        if (!cell || event.target !== cell) return;
-        if (event.key === 'Enter' || event.key === ' ') {
+        const enter = event.key === 'Enter' || event.key === ' ';
+        // An event is a cell only in a day, but one a click focused in the year or a month answers Enter or Space all the same.
+        if (enter && event.target.matches?.('.lumen-datum[data-event]') && viewport.contains(event.target)) {
             event.preventDefault();
+            if (event.repeat) return;
             state.engaged = true;
-            if (cell.dataset.event) dotnet.invokeMethodAsync('SelectEvent', cell.dataset.event);
-            else if (zoom() !== 'day') open(cell);
+            dotnet.invokeMethodAsync('SelectEvent', event.target.dataset.event);
+            return;
+        }
+        const cell = stopOf(event.target);
+        if (!cell || event.target !== cell) return;
+        if (enter) {
+            event.preventDefault();
+            if (event.repeat || zoom() === 'day' || bare(cell)) return;
+            state.engaged = state.acted = true;
+            open(cell);
         } else if (event.key === 'Escape') {
             if (zoom() === 'year') return;
             event.preventDefault();
-            state.engaged = true;
-            dotnet.invokeMethodAsync('Back', dateOf(cell));
-        } else if (moves.includes(event.key)) {
+            if (event.repeat) return;
+            state.engaged = state.acted = true;
+            dotnet.invokeMethodAsync('Back', dateOf(cell), zoom());
+        } else if (moves.includes(event.key) && !bare(cell)) {
             event.preventDefault();
             const next = target(cell, event.key);
             if (next) { rove(next); next.focus(); }
@@ -506,10 +523,10 @@ export function attachPlanner(root, dotnet) {
     };
     // A click on an event selects it; a click anywhere else in a cell opens it, and a click on a mark drawn over a cell (a
     // "+N") opens the cell beneath. A click on any button of the planner (the toolbar, a chip) engages it too, so that a button the
-    // redraw disables does not leave the focus on the page.
+    // redraw disables does not leave the focus on the page. The second click of a double-click is not a click of its own.
     const click = event => {
-        if (event.target.closest?.('button') && root.contains(event.target)) state.engaged = true;
-        if (!viewport.contains(event.target)) return;
+        if (event.target.closest?.('button') && root.contains(event.target)) state.engaged = state.acted = true;
+        if (event.detail > 1 || !viewport.contains(event.target)) return;
         const mark = event.target.closest('.lumen-datum[data-event]');
         if (mark) {
             if (zoom() === 'day') rove(mark);
@@ -519,18 +536,23 @@ export function attachPlanner(root, dotnet) {
         if (zoom() === 'day') return;
         const cell = cellOf(event.target) || document.elementsFromPoint(event.clientX, event.clientY).map(cellOf).find(Boolean);
         if (!cell) return;
-        state.engaged = true;
+        state.engaged = state.acted = true;
         rove(cell);
         open(cell);
     };
+    // Focus anywhere in the planner engages it, a reader who only uses the arrow keys included.
     const focusin = event => {
-        const cell = cellOf(event.target);
-        if (cell && cells().includes(cell)) { rove(cell); ring(cell); }
+        state.engaged = true;
+        const cell = stopOf(event.target);
+        if (cell && (bare(cell) || cells().includes(cell))) { rove(cell); ring(cell); }
     };
     const focusout = event => {
-        if (!cellOf(event.relatedTarget)) unring();
-        if (event.relatedTarget && !root.contains(event.relatedTarget)) state.engaged = false;
+        if (!stopOf(event.relatedTarget)) unring();
+        if (event.relatedTarget && !root.contains(event.relatedTarget)) state.engaged = state.acted = false;
     };
+    // A press anywhere outside the planner ends its engagement too, on words that take no focus as well as on a control.
+    const outside = event => { if (!root.contains(event.target)) state.engaged = state.acted = false; };
+    document.addEventListener('pointerdown', outside, true);
     // The drawing fits its box, so the viewport is a tab stop and a region only while a box narrower than 320 pixels scrolls it.
     const region = () => {
         if (viewport.scrollWidth > viewport.clientWidth + 1) {
@@ -539,8 +561,17 @@ export function attachPlanner(root, dotnet) {
     };
     const sized = new ResizeObserver(region);
     sized.observe(viewport);
+    // If the reader is in the planner and the redraw took their focus, it follows to the new stop. The page scrolls to it only
+    // when the reader's own key or click in the planner asked for the redraw, not for a new width, theme or spec from the host.
+    const hold = stop => {
+        const acted = state.acted;
+        state.acted = false;
+        const active = document.activeElement;
+        // A button the redraw has just disabled still holds the focus for a moment before the browser drops it to the page.
+        if (state.engaged && (!active || active === document.body || active.disabled)) stop.focus(acted ? undefined : { preventScroll: true });
+    };
     // Each new drawing: every event leaves the tab order, the cell for the date asked for (or the last one focused) takes the
-    // stop, and if the reader's keypress or click replaced the drawing under their focus, the focus follows to that cell.
+    // stop, and if the drawing was replaced under the reader's focus, the focus follows to that cell.
     state.settle = focus => {
         unring();
         const svg = drawing();
@@ -549,7 +580,11 @@ export function attachPlanner(root, dotnet) {
         for (const mark of svg.querySelectorAll('.lumen-datum')) mark.setAttribute('tabindex', '-1');
         region();
         const all = cells();
-        if (all.length === 0) return;
+        if (all.length === 0) {
+            svg.setAttribute('tabindex', '0');
+            hold(svg);
+            return;
+        }
         const date = focus || state.lastDate;
         let current = all[0];
         if (date && zoom() === 'year' && narrow()) {
@@ -568,13 +603,11 @@ export function attachPlanner(root, dotnet) {
         } else if (date && zoom() !== 'day')
             current = all.find(cell => cell.dataset.day >= date) || all[all.length - 1];
         rove(current);
-        const active = document.activeElement;
-        // A button the redraw has just disabled still holds the focus for a moment before the browser drops it to the page.
-        if (state.engaged && (!active || active === document.body || active.disabled)) current.focus();
+        hold(current);
     };
     const bindings = [['keydown', keydown], ['click', click], ['focusin', focusin], ['focusout', focusout]];
     for (const [type, handler] of bindings) root.addEventListener(type, handler);
-    handlers.set(root, { bindings, sized, planner: state });
+    handlers.set(root, { bindings, sized, planner: state, outside });
     state.settle(null);
 }
 
@@ -621,6 +654,7 @@ export function detach(root) {
     state.state?.brush?.band?.remove();
     state.sized?.disconnect();
     if (state.escaped) document.removeEventListener('keydown', state.escaped, true);
+    if (state.outside) document.removeEventListener('pointerdown', state.outside, true);
     handlers.delete(root);
 }
 

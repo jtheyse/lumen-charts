@@ -684,6 +684,21 @@ async Task PlannerHome()
 async Task PlannerLeave() => await page.EvaluateAsync("() => (document.querySelector('a') ?? [...document.querySelectorAll('button')].find(b => !b.closest('#planner'))).focus()");
 async Task<string?> PlannerFocus() => await page.EvaluateAsync<string?>("() => document.activeElement?.dataset?.day ?? document.activeElement?.dataset?.event ?? null");
 async Task PlannerPicked(string words) => await page.WaitForFunctionAsync($"() => (document.querySelector('#planner-picked')?.textContent ?? '').includes({System.Text.Json.JsonSerializer.Serialize(words)})");
+const string PlannerOnStop = "() => document.activeElement === document.querySelector('#planner .lumen-viewport [tabindex=\"0\"]')";
+// Waits up to five seconds for what a check is about to assert, so that the check, not a timeout, says what was found.
+async Task PlannerUntil(IPage tab, string condition)
+{
+    try { await tab.WaitForFunctionAsync(condition, null, new() { Timeout = 5_000 }); }
+    catch (System.TimeoutException) { }
+}
+// Gives the page a new width and waits for the planner to be drawn again at its box's new width.
+async Task PlannerResized(int width)
+{
+    var before = await page.EvaluateAsync<double>("() => document.querySelector('#planner .lumen-viewport svg').viewBox.baseVal.width");
+    await page.SetViewportSizeAsync(width, 1000);
+    await page.WaitForFunctionAsync($"() => document.querySelector('#planner .lumen-viewport svg')?.viewBox.baseVal.width !== {before.ToString(CultureInfo.InvariantCulture)}");
+    await PlannerFitted(page);
+}
 if (await page.Locator("#planner .lumen-planner-box").CountAsync() > 0)
 {
     await Test("Planner: the drawing is one tab stop on a day, the year's events are not tab stops, and the keys are described", async () =>
@@ -791,7 +806,7 @@ if (await page.Locator("#planner .lumen-planner-box").CountAsync() > 0)
         await PlannerLeave();
         await page.GetByRole(AriaRole.Button, new() { Name = "Next month" }).ClickAsync();
         await page.WaitForFunctionAsync("() => document.querySelector('#planner .lumen-planner-where')?.textContent === 'December 2027'");
-        await page.WaitForTimeoutAsync(500);
+        await PlannerUntil(page, "() => document.activeElement?.dataset?.day === '2027-12-01'");
         await PlannerFitted(page);
         Check(await page.GetByRole(AriaRole.Button, new() { Name = "Next month" }).IsDisabledAsync(), "December has no next month");
         var held = await PlannerFocus();
@@ -810,10 +825,130 @@ if (await page.Locator("#planner .lumen-planner-box").CountAsync() > 0)
         await clear.FocusAsync();
         await page.Keyboard.PressAsync("Enter");
         await page.WaitForFunctionAsync("() => document.querySelectorAll('#planner .lumen-datum[data-event=\"cs\"]').length > 0");
-        await page.WaitForTimeoutAsync(500);
+        await PlannerUntil(page, PlannerOnStop);
         Check(await clear.IsDisabledAsync(), "Clear filters is disabled once nothing is filtered");
-        var stop = await page.EvaluateAsync<bool>("() => document.activeElement === document.querySelector('#planner .lumen-viewport [tabindex=\"0\"]')");
+        var stop = await page.EvaluateAsync<bool>(PlannerOnStop);
         Check(stop, "the focus is not on the drawing's tab stop: " + (await PlannerFocus() ?? "the page"));
+    });
+    // A chip that hides nothing in view leaves the drawing's markup as it was, so the planner must still be told of the redraw.
+    await Test("Planner: Clear filters in a day where the chip hid nothing still keeps the focus in the drawing", async () =>
+    {
+        await PlannerHome();
+        await page.EvaluateAsync("() => document.querySelector('#planner g.lumen-day[data-day=\"2027-03-10\"]').focus()");
+        await page.Keyboard.PressAsync("Enter");
+        await PlannerAt(page, "month");
+        await page.WaitForFunctionAsync("() => document.activeElement?.dataset?.day === '2027-03-10'");
+        await page.Keyboard.PressAsync("Enter");
+        await PlannerAt(page, "day");
+        await page.EvaluateAsync("() => document.querySelector('#planner .lumen-viewport svg').dataset.kept = 'yes'");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Enduro", Exact = true }).ClickAsync();
+        await page.WaitForFunctionAsync("() => [...document.querySelectorAll('#planner .lumen-planner-filters button[aria-pressed=\"true\"]')].some(b => b.textContent.includes('Enduro'))");
+        Check(await page.EvaluateAsync<bool>("() => document.querySelector('#planner .lumen-viewport svg').dataset.kept === 'yes'"), "the chip changed the day's drawing");
+        // Leaving the planner for a link ends its engagement, so the press on Clear filters alone must restore it.
+        await PlannerLeave();
+        var clear = page.GetByRole(AriaRole.Button, new() { Name = "Clear filters" });
+        await clear.FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+        await page.WaitForFunctionAsync("() => !document.querySelector('#planner .lumen-planner-filters button[aria-pressed=\"true\"]')");
+        await PlannerUntil(page, PlannerOnStop);
+        Check(await clear.IsDisabledAsync(), "Clear filters is disabled once nothing is filtered");
+        Check(await page.EvaluateAsync<bool>(PlannerOnStop), "the focus is not on the drawing's tab stop: " + await page.EvaluateAsync<string>("() => document.activeElement?.tagName ?? 'none'"));
+        await PlannerHome();
+    });
+    // A double-click is one click, and a held Enter one press: each opens the month, and neither opens a day or raises DaySelected.
+    await Test("Planner: a double-click or a held Enter on a weekday of the year opens its month once, not a day", async () =>
+    {
+        async Task Once(string how)
+        {
+            await page.WaitForFunctionAsync("() => document.querySelector('#planner .lumen-planner-box')?.dataset.zoom !== 'year'");
+            // A chip reaches the component after anything sent before it, so once it reads pressed every stray call has been answered.
+            await page.GetByRole(AriaRole.Button, new() { Name = "Gauteng, in South Africa" }).ClickAsync();
+            await page.WaitForFunctionAsync("() => document.querySelector('#planner button[aria-label=\"Gauteng, in South Africa\"]')?.getAttribute('aria-pressed') === 'true'");
+            var zoom = await page.Locator("#planner .lumen-planner-box").GetAttributeAsync("data-zoom");
+            var where = await page.Locator("#planner .lumen-planner-where").TextContentAsync();
+            var picked = await page.Locator("#planner-picked").TextContentAsync() ?? "";
+            await page.GetByRole(AriaRole.Button, new() { Name = "Clear filters" }).ClickAsync();
+            await page.WaitForFunctionAsync("() => !document.querySelector('#planner .lumen-planner-filters button[aria-pressed=\"true\"]')");
+            Check(zoom == "month" && where == "March 2027", $"the {how} left the planner at {zoom}, {where}");
+            Check(!picked.Contains("Opened"), $"the {how} opened a day: " + picked);
+            await PlannerHome();
+        }
+        await PlannerHome();
+        await page.Locator("#planner .lumen-datum[data-event='hx1']").First.ClickAsync();
+        await PlannerPicked("Selected event Hilltop XCO #1");
+        await page.Locator("#planner g.lumen-day[data-day='2027-03-10']").DblClickAsync();
+        await Once("double-click");
+        await page.EvaluateAsync("() => document.querySelector('#planner g.lumen-day[data-day=\"2027-03-10\"]').focus()");
+        // A key pressed again while it is down repeats, as a held key does.
+        await page.Keyboard.DownAsync("Enter");
+        await page.Keyboard.DownAsync("Enter");
+        await page.Keyboard.UpAsync("Enter");
+        await Once("held Enter");
+    });
+    // An event in the year or a month is not a tab stop, but one that was clicked holds the focus and answers Enter as a day's event does.
+    await Test("Planner: an event clicked in the year takes the focus, and Enter on such an event selects it", async () =>
+    {
+        await PlannerHome();
+        await page.Locator("#planner .lumen-datum[data-event='hx1']").First.ClickAsync();
+        await PlannerPicked("Selected event Hilltop XCO #1");
+        Check(await PlannerFocus() == "hx1", "the clicked event holds the focus: " + (await PlannerFocus() ?? "the page"));
+        // The host prints the same words for the same event, so Enter is pressed on a second event, focused as the click focused the first.
+        await page.EvaluateAsync("() => document.querySelector('#planner .lumen-datum[data-event=\"cs\"]').focus()");
+        await page.Keyboard.PressAsync("Enter");
+        await PlannerUntil(page, "() => (document.querySelector('#planner-picked')?.textContent ?? '').includes('Coast Stage Race')");
+        var picked = await page.Locator("#planner-picked").TextContentAsync() ?? "";
+        Check(picked.Contains("Selected event Coast Stage Race"), "after Enter on the focused event the host still says: " + picked);
+        Check(await page.Locator("#planner .lumen-planner-box[data-zoom='year']").CountAsync() == 1, "still the year");
+    });
+    // A redraw (here at a new width) must not pull the focus back to the planner, or scroll to it, once the reader has clicked elsewhere.
+    await Test("Planner: after a click elsewhere on the page, a redraw leaves the focus and the scroll where they are", async () =>
+    {
+        try
+        {
+            // The gallery scrolls smoothly; an instant scroll shows at once any scroll the redraw makes.
+            await page.EvaluateAsync("() => document.documentElement.style.scrollBehavior = 'auto'");
+            await PlannerHome();
+            await page.Locator("#planner g.lumen-day[data-day='2027-03-10']").ClickAsync();
+            await PlannerAt(page, "month");
+            await page.WaitForFunctionAsync("() => document.activeElement?.dataset?.day === '2027-03-10'");
+            await page.EvaluateAsync("() => window.scrollTo(0, 0)");
+            await page.Locator("h1").First.ClickAsync();
+            await page.WaitForFunctionAsync("() => document.activeElement === document.body");
+            var before = await page.EvaluateAsync<double>("() => window.scrollY");
+            await PlannerResized(960);
+            await PlannerResized(1400);
+            var after = await page.EvaluateAsync<double>("() => window.scrollY");
+            var held = await page.EvaluateAsync<string>("() => document.activeElement === document.body ? 'the page' : document.activeElement?.dataset?.day ?? document.activeElement?.tagName");
+            Check(held == "the page", "the redraw took the focus to " + held);
+            Check(after == before, $"the page scrolled from {before} to {after}");
+        }
+        finally { await page.SetViewportSizeAsync(1400, 1000); await page.EvaluateAsync("() => document.documentElement.style.scrollBehavior = ''"); }
+    });
+    // A reader who only moved with the arrow keys is in the drawing as much as one who clicked: a redraw keeps their day focused.
+    await Test("Planner: a reader who moved with the arrow keys keeps the focus on the same day through a redraw", async () =>
+    {
+        try
+        {
+            await page.EvaluateAsync("() => document.documentElement.style.scrollBehavior = 'auto'");
+            await PlannerHome();
+            // Leaving the drawing for a link ends any engagement an earlier click began, so only the keys below can begin it again.
+            await page.EvaluateAsync("() => document.querySelector('#planner g.lumen-day[data-day=\"2027-03-10\"]').focus()");
+            await PlannerLeave();
+            await page.EvaluateAsync("() => document.querySelector('#planner g.lumen-day[data-day=\"2027-03-10\"]').focus()");
+            await page.Keyboard.PressAsync("ArrowRight");
+            Check(await PlannerFocus() == "2027-03-11", "ArrowRight");
+            await PlannerResized(960);
+            await PlannerUntil(page, "() => document.activeElement?.dataset?.day === '2027-03-11'");
+            Check(await PlannerFocus() == "2027-03-11", "after a narrower redraw the focus is on " + (await PlannerFocus() ?? "the page"));
+            // The reader scrolls the page away, keeping the focus: a redraw that the reader did not ask for does not scroll back to it.
+            await page.EvaluateAsync("() => window.scrollTo(0, 0)");
+            await PlannerResized(1400);
+            await PlannerUntil(page, "() => document.activeElement?.dataset?.day === '2027-03-11'");
+            Check(await PlannerFocus() == "2027-03-11", "after a wider redraw the focus is on " + (await PlannerFocus() ?? "the page"));
+            var scrolled = await page.EvaluateAsync<double>("() => window.scrollY");
+            Check(scrolled == 0, $"the redraw scrolled the page to {scrolled}");
+        }
+        finally { await page.SetViewportSizeAsync(1400, 1000); await page.EvaluateAsync("() => document.documentElement.style.scrollBehavior = ''"); }
     });
     // On a phone the year is a column of months' bars, and a weekend across a month's end stands in two of them: Back and Escape
     // return to the weekend of the month they leave, in that month's bar.
@@ -843,6 +978,30 @@ if (await page.Locator("#planner .lumen-planner-box").CountAsync() > 0)
             await tab.WaitForSelectorAsync("#planner .lumen-planner-box[data-zoom='year']");
             await tab.WaitForFunctionAsync("() => document.activeElement?.dataset?.weekend === '2027-03-06'");
             Check(await tab.EvaluateAsync<string>(held) == "2027-03-06|1", "Back: " + await tab.EvaluateAsync<string>(held));
+        }
+        finally { await context.CloseAsync(); }
+    });
+    // A phone's month with nothing in it draws no day to stand on, so the drawing itself is the tab stop, and Escape on it goes back.
+    await Test("Planner: on a phone a month with nothing scheduled makes the drawing the tab stop, and Escape on it returns to the year", async () =>
+    {
+        var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+        var tab = await context.NewPageAsync();
+        try
+        {
+            await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+            await tab.WaitForSelectorAsync("#planner .lumen-planner-box[data-layout='narrow'][data-zoom='year']");
+            await PlannerFitted(tab);
+            var october = tab.Locator("#planner g.lumen-week[data-weekend^='2027-10']").First;
+            await october.ScrollIntoViewIfNeededAsync();
+            await october.ClickAsync();
+            await tab.WaitForFunctionAsync("() => document.querySelector('#planner .lumen-planner-where')?.textContent === 'October 2027'");
+            await PlannerAt(tab, "month");
+            Check((await tab.Locator("#planner .lumen-viewport svg").TextContentAsync() ?? "").Contains("Nothing scheduled"), "October's agenda says nothing is scheduled");
+            const string onDrawing = "() => { const svg = document.querySelector('#planner .lumen-viewport svg'); return document.activeElement === svg && svg.getAttribute('tabindex') === '0'; }";
+            await PlannerUntil(tab, onDrawing);
+            Check(await tab.EvaluateAsync<bool>(onDrawing), "the focus is on " + await tab.EvaluateAsync<string>("() => document.activeElement?.tagName ?? 'none'") + ", not on the drawing as the tab stop");
+            await tab.Keyboard.PressAsync("Escape");
+            await PlannerAt(tab, "year");
         }
         finally { await context.CloseAsync(); }
     });
