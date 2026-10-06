@@ -690,9 +690,10 @@ if (await page.Locator("#planner .lumen-planner-box").CountAsync() > 0)
         var facts = await page.EvaluateAsync<string>(@"() => {
             const svg = document.querySelector('#planner .lumen-viewport svg'), stop = svg.querySelector('[tabindex=""0""]');
             const keys = document.getElementById(svg.getAttribute('aria-describedby') ?? '')?.textContent ?? '';
-            return [stop.matches('g.lumen-day[data-day]'), svg.querySelectorAll('.lumen-datum[tabindex=""0""]').length, keys.startsWith('Arrow keys')].join('|');
+            return [stop.matches('g.lumen-day[data-day]'), svg.querySelectorAll('.lumen-datum[tabindex=""0""]').length, keys.startsWith('Arrow keys'),
+                stop.getAttribute('aria-describedby') === svg.getAttribute('aria-describedby'), svg.querySelectorAll('g.lumen-day[aria-describedby]').length].join('|');
         }");
-        Check(facts == "true|0|true", facts);
+        Check(facts == "true|0|true|true|1", facts);
     });
     await Test("Planner: arrow keys move by day and by month, Enter opens the month on that day, and Escape returns to the day in the year", async () =>
     {
@@ -791,9 +792,57 @@ if (await page.Locator("#planner .lumen-planner-box").CountAsync() > 0)
         await page.WaitForTimeoutAsync(500);
         await PlannerFitted(page);
         Check(await page.GetByRole(AriaRole.Button, new() { Name = "Next month" }).IsDisabledAsync(), "December has no next month");
-        var held = await page.EvaluateAsync<string>("() => { const a = document.activeElement; return a === document.body || !a ? 'body' : a.tagName + ':' + (a.dataset?.day ?? a.textContent); }");
-        Check(held != "body", "the focus fell to the page");
+        var held = await PlannerFocus();
+        Check(held == "2027-12-01", $"the focus is on {held ?? "the page"}, not on December's first day");
         await PlannerHome();
+    });
+    // A chip's own redraw disables Clear filters, which held the focus: it moves to the planner's current cell, not to the page.
+    await Test("Planner: pressing Enter on Clear filters, which then disables itself, keeps the focus in the drawing", async () =>
+    {
+        await PlannerHome();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Gauteng, in South Africa" }).ClickAsync();
+        await page.WaitForFunctionAsync("() => document.querySelectorAll('#planner .lumen-datum[data-event=\"cs\"]').length === 0");
+        // Leaving the planner for a link ends its engagement, so the press on Clear filters alone must restore it.
+        await page.Locator("a").First.FocusAsync();
+        var clear = page.GetByRole(AriaRole.Button, new() { Name = "Clear filters" });
+        await clear.FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+        await page.WaitForFunctionAsync("() => document.querySelectorAll('#planner .lumen-datum[data-event=\"cs\"]').length > 0");
+        await page.WaitForTimeoutAsync(500);
+        Check(await clear.IsDisabledAsync(), "Clear filters is disabled once nothing is filtered");
+        var stop = await page.EvaluateAsync<bool>("() => document.activeElement === document.querySelector('#planner .lumen-viewport [tabindex=\"0\"]')");
+        Check(stop, "the focus is not on the drawing's tab stop: " + (await PlannerFocus() ?? "the page"));
+    });
+    // On a phone the year is a column of months' bars, and a weekend across a month's end stands in two of them: Back and Escape
+    // return to the weekend of the month they leave, in that month's bar.
+    await Test("Planner: on a phone, Escape and Back return the focus to the weekend of the month in that month's bar", async () =>
+    {
+        var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+        var tab = await context.NewPageAsync();
+        try
+        {
+            await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+            await tab.WaitForSelectorAsync("#planner .lumen-planner-box[data-layout='narrow'][data-zoom='year']");
+            await PlannerFitted(tab);
+            const string March = "#planner g.lumen-week[data-weekend='2027-03-06']";
+            const string held = "() => { const a = document.activeElement; return a?.matches?.('g.lumen-week') ? a.dataset.weekend + '|' + document.querySelectorAll('#planner g.lumen-week[data-weekend=\"' + a.dataset.weekend + '\"]').length : (a?.tagName ?? 'none'); }";
+            Check(await tab.Locator(March).CountAsync() == 1, "March's first weekend stands once");
+            await tab.Locator(March).ScrollIntoViewIfNeededAsync();
+            await tab.Locator(March).ClickAsync();
+            await tab.WaitForSelectorAsync("#planner .lumen-planner-box[data-zoom='month']");
+            await tab.Keyboard.PressAsync("Escape");
+            await tab.WaitForSelectorAsync("#planner .lumen-planner-box[data-zoom='year']");
+            await tab.WaitForFunctionAsync("() => document.activeElement?.dataset?.weekend === '2027-03-06'");
+            Check(await tab.EvaluateAsync<string>(held) == "2027-03-06|1", "Escape: " + await tab.EvaluateAsync<string>(held));
+            // Back from the month leaves the date the 1st, which is before the month's first weekend: still March's bar, not February's.
+            await tab.Locator(March).ClickAsync();
+            await tab.WaitForSelectorAsync("#planner .lumen-planner-box[data-zoom='month']");
+            await tab.GetByRole(AriaRole.Button, new() { Name = "Back to 2027" }).ClickAsync();
+            await tab.WaitForSelectorAsync("#planner .lumen-planner-box[data-zoom='year']");
+            await tab.WaitForFunctionAsync("() => document.activeElement?.dataset?.weekend === '2027-03-06'");
+            Check(await tab.EvaluateAsync<string>(held) == "2027-03-06|1", "Back: " + await tab.EvaluateAsync<string>(held));
+        }
+        finally { await context.CloseAsync(); }
     });
     if (await page.Locator("#planner details summary").CountAsync() > 0)
         await Test("Planner: the month as a table holds every day", async () =>

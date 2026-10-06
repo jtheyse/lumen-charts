@@ -419,7 +419,11 @@ export function attachPlanner(root, dotnet) {
     };
     const dateOf = cell => cell?.dataset.day || cell?.dataset.weekend || null;
     const rove = cell => {
-        for (const other of cells()) other.setAttribute('tabindex', other === cell ? '0' : '-1');
+        // The cell that holds the tab stop is the one that a screen reader reads the keys with.
+        for (const other of cells()) {
+            other.setAttribute('tabindex', other === cell ? '0' : '-1');
+            if (keys && other === cell) other.setAttribute('aria-describedby', keys); else other.removeAttribute('aria-describedby');
+        }
         const date = dateOf(cell);
         if (date) state.lastDate = date;
     };
@@ -501,10 +505,10 @@ export function attachPlanner(root, dotnet) {
         }
     };
     // A click on an event selects it; a click anywhere else in a cell opens it, and a click on a mark drawn over a cell (a
-    // "+N") opens the cell beneath. A click on the toolbar engages the planner too, so that a button the redraw disables does not
-    // leave the focus on the page.
+    // "+N") opens the cell beneath. A click on any button of the planner (the toolbar, a chip) engages it too, so that a button the
+    // redraw disables does not leave the focus on the page.
     const click = event => {
-        if (event.target.closest?.('.lumen-planner-bar button')) state.engaged = true;
+        if (event.target.closest?.('button') && root.contains(event.target)) state.engaged = true;
         if (!viewport.contains(event.target)) return;
         const mark = event.target.closest('.lumen-datum[data-event]');
         if (mark) {
@@ -548,10 +552,21 @@ export function attachPlanner(root, dotnet) {
         if (all.length === 0) return;
         const date = focus || state.lastDate;
         let current = all[0];
-        if (date && zoom() !== 'day')
-            current = zoom() === 'year' && narrow()
-                ? all.filter(cell => cell.dataset.weekend <= date).pop() || all[0]
-                : all.find(cell => cell.dataset.day >= date) || all[all.length - 1];
+        if (date && zoom() === 'year' && narrow()) {
+            // A weekend across a month's end stands in both months' bars: its first copy is in its key's month, the second in the next.
+            const seen = new Set();
+            const barOf = cell => {
+                const key = cell.dataset.weekend, again = seen.has(key);
+                seen.add(key);
+                return again ? new Date(Date.UTC(+key.slice(0, 4), +key.slice(5, 7), 1)).toISOString().slice(0, 7) : key.slice(0, 7);
+            };
+            const bars = all.map(barOf);
+            const bar = all.filter((cell, i) => bars[i] === date.slice(0, 7));
+            current = bar.length
+                ? bar.filter(cell => cell.dataset.weekend <= date).pop() || bar[0]
+                : all.filter(cell => cell.dataset.weekend <= date).pop() || all[0];
+        } else if (date && zoom() !== 'day')
+            current = all.find(cell => cell.dataset.day >= date) || all[all.length - 1];
         rove(current);
         const active = document.activeElement;
         // A button the redraw has just disabled still holds the focus for a moment before the browser drops it to the page.
