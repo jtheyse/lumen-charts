@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Lumen.Charts;
@@ -3972,7 +3973,7 @@ Test("The packages carry their XML documentation beside each assembly, and it co
     var properties=new[]{typeof(ChartSpec),typeof(ChartSeries),typeof(ChartPoint),typeof(ChartPane),typeof(ChartAnnotation),typeof(ChartStyle),typeof(ZoneScale),typeof(Zone),
             typeof(LoadDay),typeof(CriticalPowerFit),typeof(BoxSummary),typeof(LinearFit),typeof(RollingWindow),typeof(HistogramBin),typeof(PointSelection)}
         .SelectMany(t=>t.GetProperties(declared).Select(p=>$"P:{t.FullName}.{p.Name}"))
-        .Concat(new[]{typeof(LumenChart),typeof(LumenGraph),typeof(LumenBrand)}.SelectMany(t=>t.GetProperties(declared)
+        .Concat(new[]{typeof(LumenChart),typeof(LumenGraph),typeof(LumenBrand),typeof(LumenPlanner)}.SelectMany(t=>t.GetProperties(declared)
             .Where(p=>p.IsDefined(typeof(ParameterAttribute),false)||p.IsDefined(typeof(CascadingParameterAttribute),false)).Select(p=>$"P:{t.FullName}.{p.Name}")));
     var methods=new[]{typeof(Training),typeof(Statistics),typeof(ZoneScale),typeof(ChartStyle),typeof(ChartSeries),typeof(ChartPoint)}
         .SelectMany(t=>t.GetMethods(declared).Where(m=>!m.IsSpecialName&&!Generated(m)).Select(m=>$"M:{t.FullName}.{m.Name}"));
@@ -9208,6 +9209,170 @@ Test("Planner: every day of the wide year carries an unpainted cell a pointer ca
     foreach(var view in new[]{PlannerView.Month(2027,3),PlannerView.Day(new(2027,3,13))})
         Check(!PlannerSvg.Render(PlanYear(),view).Contains("lumen-cell"),$"none in {view.Zoom}");
     Check(!PlannerSvg.Render(PlanYear() with{Width=340},PlannerView.WholePeriod,PlannerLayout.Narrow).Contains("lumen-cell"),"none in the narrow year");
+});
+// ---- 0.44.0: the interactive planner component ----
+// Renders a LumenPlanner under a cascaded style, lets a test act on it, and returns its markup once the renderer settles.
+// The act receives the component and a function that returns the markup as it stands.
+#pragma warning disable ASP0006 // the host's parameters are a dictionary, so their sequence numbers cannot be literals
+string PlanComponent(PlannerSpec spec,Func<LumenPlanner,Func<Task<string>>,Task>? act=null,Dictionary<string,object?>? more=null,ChartStyle? style=null)
+{
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try {
+        LumenPlanner? planner=null;
+        RenderFragment content=b=>{
+            b.OpenComponent<LumenPlanner>(0);b.AddAttribute(1,"Spec",spec);
+            var i=2;foreach(var (name,value) in more??new())b.AddAttribute(i++,name,value);
+            b.AddComponentReferenceCapture(100,c=>planner=(LumenPlanner)c);b.CloseComponent();
+        };
+        return renderer.Dispatcher.InvokeAsync(async()=>{
+            var root=await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",style??ChartStyle.Light},{"ChildContent",content}}));
+            if(act is not null)await act(planner!,async()=>{await root.QuiescenceTask;return root.ToHtmlString();});
+            await root.QuiescenceTask;
+            return root.ToHtmlString();
+        }).GetAwaiter().GetResult();
+    } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
+}
+#pragma warning restore ASP0006
+bool PlanDisabled(string html,string label)=>Regex.IsMatch(html,$"<button[^>]*\\bdisabled\\b[^>]*aria-label=\"{Regex.Escape(label)}\"");
+bool PlanEnabled(string html,string label)=>Regex.IsMatch(html,$"<button(?![^>]*\\bdisabled\\b)[^>]*aria-label=\"{Regex.Escape(label)}\"");
+Task PlanStep(LumenPlanner p,int by)=>(Task)typeof(LumenPlanner).GetMethod("Step",BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(p,[by])!;
+void PlanChoose(LumenPlanner p,string group,string value)=>typeof(LumenPlanner).GetMethod("Choose",BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(p,[group,value]);
+void PlanClear(LumenPlanner p)=>typeof(LumenPlanner).GetMethod("ClearFilters",BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(p,null);
+string Where(string text)=>$"<span class=\"lumen-planner-where\">{text}</span>";
+
+Test("LumenPlanner: prerender draws the year with its toolbar, filters, keys and status, and calls no script",()=>{
+    var html=PlanComponent(PlanYear());   // NoJs throws if the component calls the script while prerendering
+    Check(html.Contains("class=\"lumen-planner-box\" data-zoom=\"year\" data-layout=\"wide\""),"root");
+    Check(html.Contains("class='lumen-svg lumen-planner'")&&html.Contains("viewBox='0 0 1100 "),"the year at the spec's width");
+    Check(html.Contains(Where("2027")),"where");
+    Check(PlanDisabled(html,"Back")&&PlanDisabled(html,"Previous")&&PlanDisabled(html,"Next"),"nothing to go back or step to in the year");
+    Check(html.Contains("<span class=\"lumen-keys\" hidden>Arrow keys move between days, up and down by month; Enter or Space opens the month.</span>"),"keys");
+    Check(html.Contains("<span class=\"lumen-status\" role=\"status\"></span>"),"status");
+    foreach(var part in new[]{"<legend>Region</legend>","aria-label=\"Gauteng, in South Africa\"","aria-label=\"Western Cape, in South Africa\"",">South Africa</button>",
+        "<legend>Category</legend>",">XCO</button>",">Stage</button>","<legend>Audience</legend>",">Kids</button>",">Open</button>",
+        "<legend>Status</legend>",">Confirmed</button>",">Provisional</button>","<legend>Relevance</legend>",">Clash</button>",">Other</button>"})
+        Check(html.Contains(part),part);
+    Check(Regex.IsMatch(html,"<button type=\"button\" disabled>Clear filters</button>"),"nothing to clear");
+});
+Test("LumenPlanner: a day of the year opens its month, a day of the month opens the day and raises DaySelected, and Back steps out",()=>{
+    var views=new List<PlannerView>();var days=new List<DateOnly>();var receiver=new object();
+    var more=new Dictionary<string,object?>{{"ViewChanged",EventCallback.Factory.Create<PlannerView>(receiver,v=>views.Add(v))},{"DaySelected",EventCallback.Factory.Create<DateOnly>(receiver,d=>days.Add(d))}};
+    PlanComponent(PlanYear(),async(p,html)=>{
+        await p.Open("2027-03-10",false);
+        var month=await html();
+        Check(month.Contains("data-zoom=\"month\"")&&month.Contains(Where("March 2027"))&&month.Contains("Showing March 2027"),"month");
+        Check(PlanEnabled(month,"Back to 2027")&&PlanEnabled(month,"Previous month")&&PlanEnabled(month,"Next month"),"toolbar in a month");
+        Check(month.Contains("Arrow keys move between days; Enter or Space opens the day; Escape goes back to the year."),"month keys");
+        await p.Open("2027-03-13",false);
+        var day=await html();
+        Check(day.Contains("data-zoom=\"day\"")&&day.Contains(Where("Saturday 13 March 2027"))&&PlanEnabled(day,"Back to March 2027")&&PlanEnabled(day,"Next day"),"day");
+        await p.Open("2027-03-14",false);   // a day view opens nothing
+        Check((await html()).Contains(Where("Saturday 13 March 2027")),"a day stays");
+        await p.Back(null);
+        Check((await html()).Contains(Where("March 2027")),"back to the month");
+        await p.Back("2027-03-13");
+        Check((await html()).Contains("data-zoom=\"year\""),"back to the year");
+    },more);
+    Check(views.SequenceEqual(new[]{PlannerView.Month(2027,3),PlannerView.Day(new(2027,3,13)),PlannerView.Month(2027,3),PlannerView.WholePeriod}),string.Join(", ",views));
+    Check(days.SequenceEqual(new[]{new DateOnly(2027,3,13)}),"DaySelected once");
+});
+Test("LumenPlanner: Previous and Next step a month or a day and stop at the period's edges",()=>{
+    PlanComponent(PlanYear(),async(p,html)=>{
+        await p.Open("2027-01-06",false);
+        var january=await html();
+        Check(PlanDisabled(january,"Previous month")&&PlanEnabled(january,"Next month"),"January");
+        await PlanStep(p,1);
+        Check((await html()).Contains(Where("February 2027")),"February");
+        await PlanStep(p,-1);await PlanStep(p,-1);   // the second step is refused at the edge
+        Check((await html()).Contains(Where("January 2027")),"stays in January");
+    });
+    PlanComponent(PlanYear(),async(p,html)=>{
+        var last=await html();
+        Check(PlanDisabled(last,"Next day")&&PlanEnabled(last,"Previous day")&&last.Contains(Where("Friday 31 December 2027")),"the last day");
+        await PlanStep(p,-1);
+        Check((await html()).Contains(Where("Thursday 30 December 2027")),"the day before");
+    },new(){{"View",PlannerView.Day(new(2027,12,31))}});
+    Check(PlanDisabled(PlanComponent(PlanYear(),null,new(){{"View",PlannerView.Month(2027,12)}}),"Next month"),"December");
+});
+Test("LumenPlanner: a day outside the period stays shut, and a new period returns the planner to its whole period",()=>{
+    PlanComponent(PlanYear(s=>s with{From=new(2027,3,5)}),async(p,html)=>{
+        await p.Open("2027-03-10",false);
+        await p.Open("2027-03-01",false);
+        var shut=await html();
+        Check(shut.Contains("data-zoom=\"month\"")&&shut.Contains("Monday 1 March 2027 is outside the planner"),"outside");
+        await p.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",PlanYear(s=>s with{From=new(2028,1,1),To=new(2028,12,31),Periods=[],Events=[]})}}));
+        var next=await html();
+        Check(next.Contains("data-zoom=\"year\"")&&next.Contains(Where("2028")),"a new period starts at the whole period");
+    });
+    Exception? caught=null;
+    try{PlanComponent(PlanYear(),null,new(){{"View",PlannerView.Month(2028,1)}});}catch(Exception e){caught=e;}
+    while(caught is not null and not ArgumentException&&caught.InnerException is not null)caught=caught.InnerException;
+    Check(caught is ArgumentException,caught?.GetType().Name??"a host's view outside the period was drawn");
+});
+Test("LumenPlanner: the box's width sets the drawing's width and below 640 pixels the narrow layout, keeping the view",()=>{
+    PlanComponent(PlanYear(),async(p,html)=>{
+        await p.Open("2027-03-10",false);
+        await p.Fit(500);
+        var narrow=await html();
+        Check(narrow.Contains("data-zoom=\"month\" data-layout=\"narrow\"")&&narrow.Contains("viewBox='0 0 500 ")&&narrow.Contains(Where("March 2027")),"the agenda");
+        Check(narrow.Contains("class='lumen-agenda-day'"),"agenda drawn");
+        await p.Fit(100);
+        Check((await html()).Contains("viewBox='0 0 320 "),"never narrower than 320");
+        await p.Fit(900);
+        var wide=await html();
+        Check(wide.Contains("data-layout=\"wide\"")&&wide.Contains("viewBox='0 0 900 ")&&wide.Contains(Where("March 2027")),"the grid again");
+    });
+});
+Test("LumenPlanner: on a phone a weekend across a month's end opens the month of the bar it stands in",()=>{
+    PlanComponent(PlanYear(),async(p,html)=>{
+        await p.Fit(400);
+        Check((await html()).Contains("Arrow keys move between weekends, up and down by month; Enter or Space opens the month."),"phone keys");
+        await p.Open("2027-07-31",true);
+        Check((await html()).Contains(Where("August 2027")),"the later bar opens August");
+        await p.Back("2027-08-01");
+        await p.Open("2027-07-31",false);
+        Check((await html()).Contains(Where("July 2027")),"the earlier bar opens July");
+    });
+});
+Test("LumenPlanner: selecting an event raises EventSelected and names it in the status line",()=>{
+    var picked=new List<PlannerEvent>();
+    var html=PlanComponent(PlanYear(),async(p,_)=>{await p.SelectEvent("e1");await p.SelectEvent("nobody");},
+        new(){{"EventSelected",EventCallback.Factory.Create<PlannerEvent>(new object(),e=>picked.Add(e))}});
+    Check(picked.Count==1&&picked[0].Id=="e1","EventSelected once, for a known id only");
+    Check(html.Contains("Selected Hilltop XCO, Saturday 13 March 2027, Gauteng, XCO, Kids, clash"),"status");
+});
+Test("LumenPlanner: a host's view, a cascaded style and hidden filters are honoured",()=>{
+    var html=PlanComponent(PlanYear(),null,new(){{"View",PlannerView.Month(2027,3)},{"ShowFilters",false}},ChartStyle.Midnight);
+    Check(html.Contains("data-zoom=\"month\"")&&html.Contains(Where("March 2027")),"host view");
+    Check(!html.Contains("lumen-planner-filters"),"no filters");
+    Check(html.Contains(ChartStyle.Midnight.Background),"cascaded style");
+});
+Test("LumenPlanner: a chip filters the drawing, says it is pressed, and Clear filters restores everything",()=>{
+    var html=PlanComponent(PlanYear(),async(p,html)=>{
+        PlanChoose(p,"Region","ZA-GP");
+        var gauteng=await html();
+        Check(gauteng.Contains("data-event='e1'")&&!gauteng.Contains("data-event='e2'"),"Western Cape's event drops out");
+        Check(gauteng.Contains("aria-pressed=\"true\" aria-label=\"Gauteng, in South Africa\""),"pressed");
+        Check(gauteng.Contains("Filter Gauteng on")&&Regex.IsMatch(gauteng,"<button type=\"button\">Clear filters</button>"),"status and clear");
+        PlanChoose(p,"Status","Provisional");
+        Check(!(await html()).Contains("data-event="),"filtered to nothing still draws the year");
+        PlanClear(p);
+    });
+    Check(html.Contains("data-event='e2'")&&html.Contains("Filters cleared")&&!html.Contains("aria-pressed=\"true\""),"cleared");
+});
+Test("LumenPlanner: the spec's filter is where the reader starts, and a new spec drops chosen values it no longer offers",()=>{
+    var start=PlanYear(s=>s with{Filter=new(){Categories=["XCO","Track"]}});
+    var html=PlanComponent(start,async(p,html)=>{
+        var first=await html();
+        Check(Regex.IsMatch(first,"aria-pressed=\"true\"[^>]*>XCO</button>")&&!first.Contains("data-event='e2'"),"starts filtered to XCO");
+        PlanChoose(p,"Region","ZA-WC");
+        // The next spec drops the Western Cape and its event (an event in an unknown region would be refused).
+        await p.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",start with{Regions=[new("ZA","South Africa"),new("ZA-GP","Gauteng","ZA")],Events=[start.Events[0]]}}}));
+    });
+    // The status line still reads "Filter Western Cape on" from the click, so the chip and the drawing are checked, not the whole markup.
+    Check(html.Contains("data-event='e1'")&&!html.Contains(">Western Cape</button>")&&!html.Contains("aria-label=\"Western Cape"),"Western Cape dropped from the filter with the region");
+    Check(Regex.IsMatch(html,"<button type=\"button\">Clear filters</button>"),"XCO and the host's Track stay chosen");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

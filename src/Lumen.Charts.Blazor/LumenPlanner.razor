@@ -1,0 +1,332 @@
+@implements IAsyncDisposable
+@using System.Globalization
+@inject IJSRuntime JS
+<div class="lumen-planner-box" @ref="root" data-zoom="@ZoomWord" data-layout="@(Narrow ? "narrow" : "wide")">
+    <div class="lumen-planner-bar">
+        <button type="button" @onclick="BackButton" disabled="@(view.Zoom == PlannerZoom.Year)" aria-label="@BackLabel">Back</button>
+        <button type="button" @onclick="() => Step(-1)" disabled="@(Stepped(-1) is null)" aria-label="@StepLabel(-1)">Previous</button>
+        <span class="lumen-planner-where">@Where</span>
+        <button type="button" @onclick="() => Step(1)" disabled="@(Stepped(1) is null)" aria-label="@StepLabel(1)">Next</button>
+    </div>
+    @if (ShowFilters && Groups is { Count: > 0 } groups)
+    {
+        <div class="lumen-planner-filters" role="group" aria-label="Filters">
+            @foreach (var group in groups)
+            {
+                <fieldset>
+                    <legend>@group.Name</legend>
+                    @foreach (var chip in group.Chips)
+                    {
+                        <button type="button" class="@(chip.Depth > 0 ? "lumen-planner-sub" : null)" aria-pressed="@(chip.On ? "true" : "false")" aria-label="@chip.Label" @onclick="() => Choose(group.Name, chip.Value)">@chip.Text</button>
+                    }
+                </fieldset>
+            }
+            <button type="button" @onclick="ClearFilters" disabled="@(!Filtered)">Clear filters</button>
+        </div>
+    }
+    <div class="lumen-viewport">@((MarkupString)svg)</div>
+    <span class="lumen-keys" hidden>@Keys</span>
+    <span class="lumen-status" role="status">@status</span>
+</div>
+@code {
+    /// <summary>The planner to draw: its period, regions, holidays and events. Its <see cref="PlannerSpec.Filter"/> is the filter
+    /// the reader starts with; its <see cref="PlannerSpec.Width"/> is used only until the component has measured its box, and in
+    /// static rendering. A new spec keeps the reader's view while it lies in the new period, and the whole period otherwise.</summary>
+    [Parameter, EditorRequired] public PlannerSpec Spec { get; set; } = new();
+    /// <summary>The view to show: the whole period, a month or a day; the whole period by default. The component changes its
+    /// view as the reader zooms and steps, and raises <see cref="ViewChanged"/>; bind it with <c>@bind-View</c> to follow it.
+    /// A view outside the period is refused with an <see cref="ArgumentException"/>, as <see cref="PlannerSvg.Render"/> refuses it.</summary>
+    [Parameter] public PlannerView View { get; set; } = PlannerView.WholePeriod;
+    /// <summary>Raised with the new view whenever the reader opens a month or a day, goes back, or steps to another month or day.
+    /// Needs an interactive render mode.</summary>
+    [Parameter] public EventCallback<PlannerView> ViewChanged { get; set; }
+    /// <summary>Raised with the event when the reader clicks one, or chooses one in a day with Enter or Space. Needs an
+    /// interactive render mode.</summary>
+    [Parameter] public EventCallback<PlannerEvent> EventSelected { get; set; }
+    /// <summary>Raised with the day when the reader opens a day from a month, by a click or with Enter or Space. Needs an
+    /// interactive render mode.</summary>
+    [Parameter] public EventCallback<DateOnly> DaySelected { get; set; }
+    /// <summary>Shows the filter chips: the regions as a tree (a country, then its provinces), and every category, audience,
+    /// status and relevance the events use, each group shown when it offers two or more. True by default.</summary>
+    [Parameter] public bool ShowFilters { get; set; } = true;
+    /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style on the spec itself wins.</summary>
+    [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }
+
+    private sealed record Chip(string Value, string Text, string? Label, int Depth, bool On);
+    private sealed record Group(string Name, IReadOnlyList<Chip> Chips);
+    private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
+    // A planner is drawn from 320 to 4096 pixels wide, and in its narrow layout below 640.
+    private const int Narrowest = 320, Widest = 4096, NarrowBelow = 640;
+    private PlannerView view = PlannerView.WholePeriod, given = PlannerView.WholePeriod;
+    private PlannerSpec? source;
+    private PlannerFilter filter = new();
+    private string svg = "", status = "";
+    private string? told;
+    // The date whose cell should take the tab stop after the next drawing; sent once, then forgotten.
+    private DateOnly? focus;
+    private int? fitted;
+    private ElementReference root;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<LumenPlanner>? reference;
+
+    private bool Narrow => fitted is < NarrowBelow;
+    private string ZoomWord => view.Zoom switch { PlannerZoom.Month => "month", PlannerZoom.Day => "day", _ => "year" };
+    private string Period => Spec.From == new DateOnly(Spec.From.Year, 1, 1) && Spec.To == new DateOnly(Spec.From.Year, 12, 31)
+        ? Spec.From.Year.ToString(Invariant)
+        : $"{Spec.From.ToString("d MMMM yyyy", Invariant)} to {Spec.To.ToString("d MMMM yyyy", Invariant)}";
+    private string Where => view.Zoom switch
+    {
+        PlannerZoom.Month => view.Date.ToString("MMMM yyyy", Invariant),
+        PlannerZoom.Day => view.Date.ToString("dddd d MMMM yyyy", Invariant),
+        _ => Period,
+    };
+    private string BackLabel => view.Zoom switch
+    {
+        PlannerZoom.Day => $"Back to {view.Date.ToString("MMMM yyyy", Invariant)}",
+        PlannerZoom.Month => $"Back to {Period}",
+        _ => "Back",
+    };
+    private string StepLabel(int by) => (view.Zoom, by < 0) switch
+    {
+        (PlannerZoom.Month, true) => "Previous month",
+        (PlannerZoom.Month, false) => "Next month",
+        (PlannerZoom.Day, true) => "Previous day",
+        (PlannerZoom.Day, false) => "Next day",
+        (_, true) => "Previous",
+        _ => "Next",
+    };
+    private string Keys => (view.Zoom, Narrow) switch
+    {
+        (PlannerZoom.Year, false) => "Arrow keys move between days, up and down by month; Enter or Space opens the month.",
+        (PlannerZoom.Year, true) => "Arrow keys move between weekends, up and down by month; Enter or Space opens the month.",
+        (PlannerZoom.Month, _) => "Arrow keys move between days; Enter or Space opens the day; Escape goes back to the year.",
+        _ => "Arrow keys move between events; Enter or Space selects one; Escape goes back to the month.",
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(Spec, source))
+        {
+            filter = source is null ? Spec.Filter ?? new() : Offered(filter);
+            source = Spec;
+            if (!Inside(view)) { view = PlannerView.WholePeriod; focus = null; }
+        }
+        // The host's view is taken when the host changes it; the reader's own zooming is kept across the host's renders.
+        if (View != given)
+        {
+            given = View;
+            if (View != view) { view = View; focus = View.Zoom == PlannerZoom.Year ? null : View.Date; }
+        }
+        Render();
+    }
+
+    private void Render()
+    {
+        var spec = Spec with { Style = Spec.Style ?? CascadingStyle, Filter = filter, Width = fitted ?? Spec.Width };
+        svg = PlannerSvg.Render(spec, view, Narrow ? PlannerLayout.Narrow : PlannerLayout.Wide);
+    }
+
+    private bool Inside(PlannerView v) => v.Zoom switch
+    {
+        PlannerZoom.Month => v.Date <= Spec.To && v.Date.AddMonths(1).AddDays(-1) >= Spec.From,
+        PlannerZoom.Day => v.Date >= Spec.From && v.Date <= Spec.To,
+        _ => true,
+    };
+
+    private PlannerView? Stepped(int by)
+    {
+        PlannerView? next = view.Zoom switch
+        {
+            PlannerZoom.Month => PlannerView.Month(view.Date.AddMonths(by).Year, view.Date.AddMonths(by).Month),
+            PlannerZoom.Day => PlannerView.Day(view.Date.AddDays(by)),
+            _ => null,
+        };
+        return next is { } v && Inside(v) ? v : null;
+    }
+
+    private async Task Go(PlannerView next, DateOnly? at)
+    {
+        view = next; focus = at; status = $"Showing {Where}";
+        Render();
+        await ViewChanged.InvokeAsync(next);
+        StateHasChanged();
+    }
+
+    private async Task Step(int by)
+    {
+        if (Stepped(by) is { } next) await Go(next, next.Date);
+    }
+
+    private Task BackButton() => Out(view.Date);
+
+    private async Task Out(DateOnly at)
+    {
+        if (view.Zoom == PlannerZoom.Day) await Go(PlannerView.Month(view.Date.Year, view.Date.Month), view.Date);
+        else if (view.Zoom == PlannerZoom.Month) await Go(PlannerView.WholePeriod, at);
+    }
+
+    /// <summary>Called by the component's script when the reader opens a cell: a day of the year (or, on a phone, a weekend)
+    /// opens its month, and a day of a month opens the day and raises <see cref="DaySelected"/>. <paramref name="date"/> is
+    /// <c>yyyy-MM-dd</c>; <paramref name="later"/> is true for a weekend's second bar on a phone, which opens the next month.
+    /// A day outside the period stays shut and is said so in the status line.</summary>
+    [JSInvokable] public Task Open(string date, bool later) => InvokeAsync(async () =>
+    {
+        if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", Invariant, DateTimeStyles.None, out var day)) return;
+        if (view.Zoom == PlannerZoom.Year)
+        {
+            var month = later ? new DateOnly(day.Year, day.Month, 1).AddMonths(1) : day;
+            var next = PlannerView.Month(month.Year, month.Month);
+            if (Inside(next)) await Go(next, later ? month : day);
+        }
+        else if (view.Zoom == PlannerZoom.Month)
+        {
+            if (!Inside(PlannerView.Day(day))) { status = $"{day.ToString("dddd d MMMM yyyy", Invariant)} is outside the planner"; StateHasChanged(); return; }
+            await Go(PlannerView.Day(day), day);
+            await DaySelected.InvokeAsync(day);
+        }
+    });
+
+    /// <summary>Called by the component's script when the reader presses Escape: a day goes back to its month, and a month to
+    /// the whole period with the tab stop on <paramref name="date"/> (<c>yyyy-MM-dd</c>, or null for the view's own date).</summary>
+    [JSInvokable] public Task Back(string? date) => InvokeAsync(async () =>
+        await Out(DateOnly.TryParseExact(date, "yyyy-MM-dd", Invariant, DateTimeStyles.None, out var at) ? at : view.Date));
+
+    /// <summary>Called by the component's script when the reader selects an event by its <see cref="PlannerEvent.Id"/>. It names
+    /// the event in the status line and raises <see cref="EventSelected"/>; an unknown id does nothing.</summary>
+    [JSInvokable] public Task SelectEvent(string id) => InvokeAsync(async () =>
+    {
+        var e = Spec.Events.FirstOrDefault(x => x.Id == id);
+        if (e is null) return;
+        status = $"Selected {PlannerCalendar.Name(Spec, e)}";
+        await EventSelected.InvokeAsync(e);
+        StateHasChanged();
+    });
+
+    /// <summary>Called by the component's script with the width in whole pixels that the planner's box gives it. The planner is
+    /// redrawn at that width, from 320 to 4096 pixels, in its narrow layout below 640.</summary>
+    [JSInvokable] public Task Fit(int width) => InvokeAsync(() =>
+    {
+        var next = Math.Clamp(width, Narrowest, Widest);
+        if (next == fitted) return;
+        fitted = next;
+        Render();
+        StateHasChanged();
+    });
+
+    // The filter chips: regions as a tree, then each other dimension the events use, a group shown when it offers two or more.
+    private IReadOnlyList<Group> Groups
+    {
+        get
+        {
+            var groups = new List<Group>();
+            var regions = new List<Chip>();
+            var codes = Spec.Regions.Select(r => r.Code).ToHashSet(StringComparer.Ordinal);
+            void Add(PlannerRegion region, int depth, string? parent)
+            {
+                regions.Add(new(region.Code, region.Name, parent is null ? null : $"{region.Name}, in {parent}", depth, filter.Regions.Contains(region.Code)));
+                foreach (var child in Spec.Regions.Where(c => c.Parent == region.Code)) Add(child, depth + 1, region.Name);
+            }
+            foreach (var region in Spec.Regions.Where(r => r.Parent is null || !codes.Contains(r.Parent))) Add(region, 0, null);
+            if (regions.Count > 1) groups.Add(new("Region", regions));
+            void Words(string name, IEnumerable<string?> values, IReadOnlyList<string> on)
+            {
+                var distinct = values.OfType<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+                if (distinct.Length > 1) groups.Add(new(name, distinct.Select(v => new Chip(v, v, null, 0, on.Contains(v))).ToArray()));
+            }
+            Words("Category", Spec.Events.Select(e => e.Category), filter.Categories);
+            Words("Audience", Spec.Events.Select(e => e.Audience), filter.Audiences);
+            var statuses = Spec.Events.Select(e => e.Status).Distinct().Order().ToArray();
+            if (statuses.Length > 1) groups.Add(new("Status", statuses.Select(s => new Chip(s.ToString(), StatusWord(s), null, 0, filter.Statuses.Contains(s))).ToArray()));
+            var relevances = Spec.Events.Select(e => e.Relevance).Distinct().OrderDescending().ToArray();
+            if (relevances.Length > 1) groups.Add(new("Relevance", relevances.Select(r => new Chip(r.ToString(), RelevanceWord(r), null, 0, filter.Relevances.Contains(r))).ToArray()));
+            return groups;
+        }
+    }
+    private static string StatusWord(PlannerStatus s) => s switch { PlannerStatus.Provisional => "Provisional", PlannerStatus.Cancelled => "Cancelled", _ => "Confirmed" };
+    private static string RelevanceWord(PlannerRelevance r) => r switch { PlannerRelevance.Clash => "Clash", PlannerRelevance.Near => "Close", _ => "Other" };
+    private string Word(string group, string value) => group switch
+    {
+        "Region" => Spec.Regions.FirstOrDefault(r => r.Code == value)?.Name ?? value,
+        "Status" => StatusWord(Enum.Parse<PlannerStatus>(value)),
+        "Relevance" => RelevanceWord(Enum.Parse<PlannerRelevance>(value)),
+        _ => value,
+    };
+    private bool IsOn(string group, string value) => group switch
+    {
+        "Region" => filter.Regions.Contains(value),
+        "Category" => filter.Categories.Contains(value),
+        "Audience" => filter.Audiences.Contains(value),
+        "Status" => filter.Statuses.Contains(Enum.Parse<PlannerStatus>(value)),
+        "Relevance" => filter.Relevances.Contains(Enum.Parse<PlannerRelevance>(value)),
+        _ => false,
+    };
+    private bool Filtered => filter.Regions.Count + filter.Categories.Count + filter.Audiences.Count + filter.Statuses.Count + filter.Relevances.Count > 0;
+    private static IReadOnlyList<T> Flip<T>(IReadOnlyList<T> list, T value) =>
+        list.Contains(value) ? list.Where(v => !EqualityComparer<T>.Default.Equals(v, value)).ToArray() : [.. list, value];
+
+    private void Choose(string group, string value)
+    {
+        filter = group switch
+        {
+            "Region" => filter with { Regions = Flip(filter.Regions, value) },
+            "Category" => filter with { Categories = Flip(filter.Categories, value) },
+            "Audience" => filter with { Audiences = Flip(filter.Audiences, value) },
+            "Status" => filter with { Statuses = Flip(filter.Statuses, Enum.Parse<PlannerStatus>(value)) },
+            "Relevance" => filter with { Relevances = Flip(filter.Relevances, Enum.Parse<PlannerRelevance>(value)) },
+            _ => filter,
+        };
+        status = $"Filter {Word(group, value)} {(IsOn(group, value) ? "on" : "off")}";
+        Render();
+        StateHasChanged();
+    }
+
+    private void ClearFilters()
+    {
+        filter = new();
+        status = "Filters cleared";
+        Render();
+        StateHasChanged();
+    }
+
+    // A new spec keeps the reader's choices it still offers, and any its own filter names.
+    private PlannerFilter Offered(PlannerFilter chosen)
+    {
+        IReadOnlyList<string> Keep(IReadOnlyList<string> on, IEnumerable<string?> offered, IReadOnlyList<string>? host)
+        {
+            var allowed = offered.OfType<string>().Concat(host ?? []).ToHashSet(StringComparer.Ordinal);
+            return on.Where(allowed.Contains).ToArray();
+        }
+        return chosen with
+        {
+            Regions = Keep(chosen.Regions, Spec.Regions.Select(r => r.Code), Spec.Filter?.Regions),
+            Categories = Keep(chosen.Categories, Spec.Events.Select(e => e.Category), Spec.Filter?.Categories),
+            Audiences = Keep(chosen.Audiences, Spec.Events.Select(e => e.Audience), Spec.Filter?.Audiences),
+        };
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Lumen.Charts.Blazor/lumen.js");
+            reference = DotNetObjectReference.Create(this);
+            await module.InvokeVoidAsync("attachPlanner", root, reference);
+            await module.InvokeVoidAsync("fit", root, reference);
+        }
+        if (module is not null && !ReferenceEquals(told, svg))
+        {
+            told = svg;
+            var at = focus?.ToString("yyyy-MM-dd", Invariant);
+            focus = null;
+            await module.InvokeVoidAsync("plannerDrawn", root, at);
+        }
+    }
+
+    /// <summary>Removes the planner's event handlers from the page and stops measuring its box.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        try { if (module is not null) { await module.InvokeVoidAsync("detach", root); await module.DisposeAsync(); } }
+        catch (JSDisconnectedException) { }
+        finally { reference?.Dispose(); }
+    }
+}
