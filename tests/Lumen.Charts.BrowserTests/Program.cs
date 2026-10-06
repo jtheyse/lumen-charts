@@ -661,84 +661,146 @@ if (await fittedGraph.CountAsync() > 0)
 }
 else Console.WriteLine("SKIP fitted graph checks: this host's graph does not set FitWidth");
 
-// The season planner is static SVG drawn on the server three times, and the page shows one by the width of its own section: narrow
-// (340 wide, the phone layout) below 480 pixels, medium (520 wide, the grids) below 1000 and wide (1100) from there, so a tablet held
-// either way round gets the grids and the 10-pixel words are never shown smaller than 9 pixels.
-if (await page.Locator("#planner").CountAsync() > 0)
+// 0.44.0: the interactive planner. Its checks run on any host that shows one in a #planner section.
+async Task PlannerFitted(IPage tab) => await tab.WaitForFunctionAsync(
+    "() => { const v = document.querySelector('#planner .lumen-viewport'), s = v?.querySelector('svg');" +
+    " return !!s && Math.abs(s.viewBox.baseVal.width - Math.max(320, v.clientWidth)) <= 1" +
+    " && document.querySelectorAll('#planner .lumen-viewport [tabindex=\"0\"]').length === 1; }", null, new() { Timeout = 60_000 });
+async Task PlannerAt(IPage tab, string zoom) => await tab.WaitForSelectorAsync($"#planner .lumen-planner-box[data-zoom='{zoom}']");
+async Task PlannerHome()
 {
-    // The section's width, the drawings it shows, the smallest a 10-unit word is shown in them, the words that run outside their
-    // drawing, and the page's width.
-    const string plannerShown = @"() => { const section = document.querySelector('#planner'), width = section.getBoundingClientRect().width;
-        const shown = ['narrow', 'medium', 'wide'].filter(v => getComputedStyle(section.querySelector('.planner-' + v)).display !== 'none');
-        const svgs = [...section.querySelectorAll('svg')].filter(s => s.getBoundingClientRect().width > 0);
-        const smallest = Math.min(...svgs.map(s => s.getBoundingClientRect().width / Number(s.getAttribute('viewBox').split(' ')[2]) * 10));
-        const words = svgs.flatMap(s => [...s.querySelectorAll('text')]);
-        const outside = words.filter(t => { const s = t.ownerSVGElement.getBoundingClientRect(), b = t.getBoundingClientRect(); return b.left < s.left - 0.5 || b.right > s.right + 0.5; }).length;
-        return [width, svgs.length, smallest, words.length, outside, document.documentElement.scrollWidth, shown.join(',')].join('|'); }";
-    await Test("Planner: the year and March are drawn, every event a named focusable mark, the table holds every day", async () =>
+    // Each Back is answered by a redraw from the server: wait for it, or the next click meets a Back that the year has disabled.
+    for (var i = 0; i < 2; i++)
     {
-        var marks = page.Locator("#planner .planner-wide svg .lumen-datum");
-        Check(await marks.CountAsync() > 10, $"{await marks.CountAsync()} marks");
-        var label = await marks.First.GetAttributeAsync("aria-label");
-        // An event is named with its day in full, as in "Hilltop XCO #1, Saturday 13 February 2027, Gauteng, …".
-        Check(label is not null && Regex.IsMatch(label, @", \w+day \d{1,2} \w+ 2027"), label ?? "no label");
-        Check(await page.Locator("#planner .planner-wide svg .lumen-datum:not([tabindex='0'])").CountAsync() == 0, "a mark cannot be focused");
-        await page.Locator("#planner details summary").ClickAsync();
-        Check(await page.Locator("#planner table td").CountAsync() >= 31);
-    });
-    // The charts' focus stroke would thicken a focused line's words into a blot: the planner keeps its words unstroked and rings the line.
-    await Test("Planner: a focused month line keeps its words unstroked and shows a ring in the text colour", async () =>
+        var zoom = await page.Locator("#planner .lumen-planner-box").GetAttributeAsync("data-zoom");
+        if (zoom == "year") break;
+        await page.Locator("#planner .lumen-planner-bar button").First.ClickAsync();
+        await page.WaitForFunctionAsync($"() => document.querySelector('#planner .lumen-planner-box')?.dataset.zoom !== '{zoom}'");
+    }
+    await PlannerAt(page, "year");
+    await PlannerFitted(page);
+}
+async Task<string?> PlannerFocus() => await page.EvaluateAsync<string?>("() => document.activeElement?.dataset?.day ?? document.activeElement?.dataset?.event ?? null");
+async Task PlannerPicked(string words) => await page.WaitForFunctionAsync($"() => (document.querySelector('#planner-picked')?.textContent ?? '').includes({System.Text.Json.JsonSerializer.Serialize(words)})");
+if (await page.Locator("#planner .lumen-planner-box").CountAsync() > 0)
+{
+    await Test("Planner: the drawing is one tab stop on a day, the year's events are not tab stops, and the keys are described", async () =>
     {
-        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1440, Height = 900 } });
-        var tab = await context.NewPageAsync();
-        await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-        var m = (await tab.EvaluateAsync<string>(@"() => {
-            const g = [...document.querySelectorAll('#planner .planner-wide svg .lumen-datum')].find(g => g.querySelector('text') && g.querySelector('.lumen-focus'));
-            if (!g) return 'none found';
-            const ring = g.querySelector('.lumen-focus'), before = getComputedStyle(ring).stroke;
-            g.focus();
-            const text = g.querySelector('text'), after = getComputedStyle(ring);
-            return [document.activeElement === g, getComputedStyle(text).stroke, before, after.stroke, after.strokeWidth, after.stroke === getComputedStyle(g.ownerSVGElement).color].join('|'); }")).Split('|');
-        Check(m.Length == 6 && m[0] == "true", string.Join("|", m));
-        Check(m[1] == "none", $"the focused line's words are stroked {m[1]}");
-        Check(m[2] == "none" && m[3] != "none" && m[4] == "2px" && m[5] == "true", $"the ring is {m[2]} before focus and {m[3]} {m[4]} after");
+        await PlannerHome();
+        var facts = await page.EvaluateAsync<string>(@"() => {
+            const svg = document.querySelector('#planner .lumen-viewport svg'), stop = svg.querySelector('[tabindex=""0""]');
+            const keys = document.getElementById(svg.getAttribute('aria-describedby') ?? '')?.textContent ?? '';
+            return [stop.matches('g.lumen-day[data-day]'), svg.querySelectorAll('.lumen-datum[tabindex=""0""]').length, keys.startsWith('Arrow keys')].join('|');
+        }");
+        Check(facts == "true|0|true", facts);
     });
-    // A phone, a tablet either way round, and two desktops: the drawing for the section's width, its words at 9 pixels or more. The
-    // phone gets the narrow layout and a portrait tablet's 512-pixel section the grids, whatever else the gallery's layout does.
-    foreach (var (width, height, phone, must) in new[] { (375, 812, true, "narrow"), (768, 1024, false, "medium"), (1024, 768, false, null), (1280, 900, false, null), (1440, 900, false, null) })
-        await Test($"Planner: at {width} by {height} the drawing for the section's width shows its words at 9 pixels or more, the page does not scroll sideways and no word runs outside its drawing", async () =>
+    await Test("Planner: arrow keys move by day and by month, Enter opens the month on that day, and Escape returns to the day in the year", async () =>
+    {
+        await PlannerHome();
+        await page.EvaluateAsync("() => document.querySelector('#planner g.lumen-day[data-day=\"2027-03-10\"]').focus()");
+        Check(await page.Locator("#planner .lumen-ring").CountAsync() == 1, "the focused day is ringed");
+        await page.Keyboard.PressAsync("ArrowRight");
+        Check(await PlannerFocus() == "2027-03-11", "ArrowRight");
+        await page.Keyboard.PressAsync("ArrowDown");
+        Check(await PlannerFocus() == "2027-04-11", "ArrowDown is the next month");
+        await page.Keyboard.PressAsync("Enter");
+        await PlannerAt(page, "month");
+        await page.WaitForFunctionAsync("() => document.activeElement?.dataset?.day === '2027-04-11'");
+        Check(await page.Locator("#planner .lumen-planner-where").TextContentAsync() == "April 2027", "April");
+        await page.Keyboard.PressAsync("ArrowDown");
+        Check(await PlannerFocus() == "2027-04-18", "ArrowDown is the next week in a month");
+        await page.Keyboard.PressAsync("Escape");
+        await PlannerAt(page, "year");
+        await page.WaitForFunctionAsync("() => document.activeElement?.dataset?.day === '2027-04-18'");
+    });
+    await Test("Planner: a click on a weekday of the year opens its month, a click on a day opens it and raises DaySelected, and Back returns", async () =>
+    {
+        await PlannerHome();
+        await page.Locator("#planner g.lumen-day[data-day='2027-03-10']").ClickAsync();
+        await PlannerAt(page, "month");
+        await page.Locator("#planner g.lumen-day[data-day='2027-03-13']").ClickAsync(new() { Position = new() { X = 4, Y = 4 } });
+        await PlannerAt(page, "day");
+        await PlannerPicked("Opened Saturday 13 March 2027");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Back to March 2027" }).ClickAsync();
+        await PlannerAt(page, "month");
+    });
+    await Test("Planner: in a day the arrow keys move between its events, Enter selects one, and the status line names it", async () =>
+    {
+        await PlannerHome();
+        await page.EvaluateAsync("() => document.querySelector('#planner g.lumen-day[data-day=\"2027-03-13\"]').focus()");
+        await page.Keyboard.PressAsync("Enter");
+        await PlannerAt(page, "month");
+        await page.WaitForFunctionAsync("() => document.activeElement?.dataset?.day === '2027-03-13'");
+        await page.Keyboard.PressAsync("Enter");
+        await PlannerAt(page, "day");
+        await page.WaitForFunctionAsync("() => !!document.activeElement?.matches?.('#planner .lumen-datum[data-event]')");
+        var first = await PlannerFocus();
+        await page.Keyboard.PressAsync("ArrowDown");
+        var second = await PlannerFocus();
+        Check(first != second && second is not null, $"{first} then {second}");
+        var words = await page.EvaluateAsync<string>(@"() => { const e = document.activeElement, t = e.querySelector('text'), r = e.querySelector('.lumen-focus');
+            return getComputedStyle(t).stroke + '|' + (r ? getComputedStyle(r).stroke : 'no ring'); }");
+        Check(words.StartsWith("none|") && !words.EndsWith("|none") && !words.EndsWith("no ring"), "a focused event keeps its words unstroked and shows its ring: " + words);
+        await page.Keyboard.PressAsync("Enter");
+        await PlannerPicked("Selected event");
+        var status = await page.Locator("#planner .lumen-status").TextContentAsync();
+        Check(status?.StartsWith("Selected ") == true, status ?? "no status");
+        await page.Keyboard.PressAsync("Escape");
+        await PlannerAt(page, "month");
+        await page.Keyboard.PressAsync("Escape");
+        await PlannerAt(page, "year");
+    });
+    await Test("Planner: a click on an event's stripe in the year selects it without zooming", async () =>
+    {
+        await PlannerHome();
+        await page.Locator("#planner .lumen-datum[data-event='hx1']").First.ClickAsync();
+        await PlannerPicked("Hilltop XCO #1");
+        Check(await page.Locator("#planner .lumen-planner-box[data-zoom='year']").CountAsync() == 1, "still the year");
+    });
+    await Test("Planner: a region chip filters the drawing and says it is pressed, and Clear filters restores it", async () =>
+    {
+        await PlannerHome();
+        var chip = page.GetByRole(AriaRole.Button, new() { Name = "Gauteng, in South Africa" });
+        await chip.ClickAsync();
+        await page.WaitForFunctionAsync("() => document.querySelectorAll('#planner .lumen-datum[data-event=\"cs\"]').length === 0");
+        Check(await chip.GetAttributeAsync("aria-pressed") == "true", "pressed");
+        Check(await page.Locator("#planner .lumen-datum[data-event='hx1']").CountAsync() > 0, "Gauteng's events stay");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Clear filters" }).ClickAsync();
+        await page.WaitForFunctionAsync("() => document.querySelectorAll('#planner .lumen-datum[data-event=\"cs\"]').length > 0");
+    });
+    await Test("Planner: Previous and Next step months and stop at the period's edges", async () =>
+    {
+        await PlannerHome();
+        await page.Locator("#planner g.lumen-day[data-day='2027-01-06']").ClickAsync();
+        await PlannerAt(page, "month");
+        Check(await page.GetByRole(AriaRole.Button, new() { Name = "Previous month" }).IsDisabledAsync(), "January has no previous month");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Next month" }).ClickAsync();
+        await page.WaitForFunctionAsync("() => document.querySelector('#planner .lumen-planner-where')?.textContent === 'February 2027'");
+        await PlannerHome();
+    });
+    // A button that the redraw disables would drop the focus onto the page; the planner moves it to the month's current day.
+    await Test("Planner: stepping to the period's edge, where the button disables itself, does not drop the focus onto the page", async () =>
+    {
+        await PlannerHome();
+        await page.Locator("#planner g.lumen-day[data-day='2027-11-10']").ClickAsync();
+        await PlannerAt(page, "month");
+        // Leaving the planner for a link ends its engagement, so the click on the toolbar alone must restore it.
+        await page.Locator("a").First.FocusAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Next month" }).ClickAsync();
+        await page.WaitForFunctionAsync("() => document.querySelector('#planner .lumen-planner-where')?.textContent === 'December 2027'");
+        await page.WaitForTimeoutAsync(500);
+        await PlannerFitted(page);
+        Check(await page.GetByRole(AriaRole.Button, new() { Name = "Next month" }).IsDisabledAsync(), "December has no next month");
+        var held = await page.EvaluateAsync<string>("() => { const a = document.activeElement; return a === document.body || !a ? 'body' : a.tagName + ':' + (a.dataset?.day ?? a.textContent); }");
+        Check(held != "body", "the focus fell to the page");
+        await PlannerHome();
+    });
+    if (await page.Locator("#planner details summary").CountAsync() > 0)
+        await Test("Planner: the month as a table holds every day", async () =>
         {
-            await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = height }, IsMobile = phone, HasTouch = phone, DeviceScaleFactor = phone ? 2 : 1 });
-            var tab = await context.NewPageAsync();
-            await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            var m = (await tab.EvaluateAsync<string>(plannerShown)).Split('|');
-            var section = double.Parse(m[0], CultureInfo.InvariantCulture);
-            var expected = section < 480 ? "narrow" : section < 1000 ? "medium" : "wide";
-            Check(m[6] == expected && (must is null || m[6] == must) && m[1] == "2", $"a {section:0}-pixel section shows {m[6]} ({m[1]} drawings), not {expected}");
-            Check(double.Parse(m[2], CultureInfo.InvariantCulture) >= 9, $"a 10-unit word is shown {double.Parse(m[2], CultureInfo.InvariantCulture):0.0} pixels tall");
-            Check(int.Parse(m[5]) <= width, $"the page is {m[5]} pixels wide");
-            Check(int.Parse(m[3]) > 0 && m[4] == "0", $"{m[4]} of {m[3]} words outside");
+            await page.Locator("#planner details summary").ClickAsync();
+            Check(await page.Locator("#planner table td").CountAsync() >= 31, "31 days");
         });
-    // The narrowest section that still gets the grids: 480 pixels is the cutoff and the medium drawing is 520 wide, so its words are
-    // 9.2 pixels there. The gallery drops its sidebar at 760 pixels, so a window of about 520 gives a section of about 485 (a 768
-    // window with a classic scrollbar gives 497, in the same band).
-    await Test("Planner: a section of about 485 pixels shows the grids, its words at 9 pixels or more, the page does not scroll sideways and no word runs outside its drawing", async () =>
-    {
-        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 540, Height = 900 } });
-        var tab = await context.NewPageAsync();
-        await tab.GotoAsync(address + "#planner", new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-        var first = double.Parse((await tab.EvaluateAsync<string>(plannerShown)).Split('|')[0], CultureInfo.InvariantCulture);
-        var viewport = 540 - (int)Math.Round(first - 485);
-        await tab.SetViewportSizeAsync(viewport, 900);
-        await tab.WaitForTimeoutAsync(300);
-        var m = (await tab.EvaluateAsync<string>(plannerShown)).Split('|');
-        var section = double.Parse(m[0], CultureInfo.InvariantCulture);
-        Check(section is >= 480 and < 504, $"a {viewport}-pixel window gave a {section:0}-pixel section, not about 485");
-        Check(m[6] == "medium" && m[1] == "2", $"a {section:0}-pixel section shows {m[6]} ({m[1]} drawings), not medium");
-        Check(double.Parse(m[2], CultureInfo.InvariantCulture) >= 9, $"a 10-unit word is shown {double.Parse(m[2], CultureInfo.InvariantCulture):0.0} pixels tall");
-        Check(int.Parse(m[5]) <= viewport, $"the page is {m[5]} pixels wide in a {viewport}-pixel window");
-        Check(int.Parse(m[3]) > 0 && m[4] == "0", $"{m[4]} of {m[3]} words outside");
-    });
 }
 else Console.WriteLine("SKIP planner checks: this host shows no planner");
 

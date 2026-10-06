@@ -392,6 +392,182 @@ export function attachGraph(root, dotnet) {
     handlers.set(root, { bindings });
 }
 
+/// Makes a planner drawn by <LumenPlanner> one tab stop. Its cells (the days of the year or of a month, the weekends of a
+/// phone's year, the events of a day) share a roving tab stop: the arrow keys, Home and End move it, Enter or Space opens a
+/// cell (a month from the year, a day from a month) or selects an event, and Escape goes back out. A click opens or selects
+/// the same way. Events in the year and in a month are not tab stops; a keyboard reaches them by opening their day. The
+/// focused cell is ringed in the text colour. Nothing here changes what PlannerSvg.Render drew, only the live page.
+export function attachPlanner(root, dotnet) {
+    const viewport = root.querySelector(':scope > .lumen-viewport');
+    const words = root.querySelector(':scope > .lumen-keys');
+    const keys = words ? words.id || (words.id = 'lumen-keys-' + ++described) : null;
+    const state = { lastDate: null, engaged: false, ring: null };
+    const drawing = () => viewport.querySelector('svg');
+    const zoom = () => root.dataset.zoom;
+    const narrow = () => root.dataset.layout === 'narrow';
+    const selector = () => zoom() === 'day' ? '.lumen-datum[data-event], g.lumen-day[data-day]'
+        : zoom() === 'year' && narrow() ? 'g.lumen-week[data-weekend]' : 'g.lumen-day[data-day]';
+    // A day's cells are its events; a day with none is its own single cell, so Escape still reaches it.
+    const cells = () => {
+        if (zoom() !== 'day') return [...viewport.querySelectorAll(selector())];
+        const events = [...viewport.querySelectorAll('.lumen-datum[data-event]')];
+        return events.length ? events : [...viewport.querySelectorAll('g.lumen-day[data-day]')];
+    };
+    const cellOf = target => {
+        const cell = target && target.closest ? target.closest(selector()) : null;
+        return cell && viewport.contains(cell) ? cell : null;
+    };
+    const dateOf = cell => cell?.dataset.day || cell?.dataset.weekend || null;
+    const rove = cell => {
+        for (const other of cells()) other.setAttribute('tabindex', other === cell ? '0' : '-1');
+        const date = dateOf(cell);
+        if (date) state.lastDate = date;
+    };
+    const unring = () => { state.ring?.remove(); state.ring = null; };
+    const ring = cell => {
+        unring();
+        const svg = drawing();
+        if (!svg || !cell || cell.matches('.lumen-datum')) return;   // an event draws its own ring
+        const box = cell.getBBox();
+        const rect = document.createElementNS(NS, 'rect');
+        const attributes = { class: 'lumen-ring', x: box.x - 2, y: box.y - 2, width: box.width + 4, height: box.height + 4, rx: 3,
+            fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'pointer-events': 'none', 'aria-hidden': 'true' };
+        for (const [name, value] of Object.entries(attributes)) rect.setAttribute(name, String(value));
+        svg.appendChild(rect);
+        state.ring = rect;
+    };
+    // A weekend across a month's end stands in both months' bars under one key; the second opens the later month.
+    const open = cell => {
+        if (cell.dataset.weekend) {
+            const same = cells().filter(other => other.dataset.weekend === cell.dataset.weekend);
+            dotnet.invokeMethodAsync('Open', cell.dataset.weekend, same.indexOf(cell) > 0);
+        } else if (cell.dataset.day) dotnet.invokeMethodAsync('Open', cell.dataset.day, false);
+    };
+    const shift = (iso, days) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
+    const shiftMonth = (iso, months) => {
+        const d = new Date(iso + 'T00:00:00Z');
+        const first = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, 1));
+        const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+        first.setUTCDate(Math.min(d.getUTCDate(), last));
+        return first.toISOString().slice(0, 10);
+    };
+    const byDate = iso => viewport.querySelector(`g.lumen-day[data-day="${iso}"]`);
+    const slot = (cell, axis) => Number(cell.querySelector('rect')?.getAttribute(axis) ?? 0);
+    const target = (cell, key) => {
+        const all = cells(), i = all.indexOf(cell);
+        const back = key === 'ArrowLeft' || key === 'ArrowUp';
+        if (zoom() === 'day' || (zoom() === 'month' && narrow()))
+            return key === 'Home' ? all[0] : key === 'End' ? all[all.length - 1] : all[i + (back ? -1 : 1)];
+        if (zoom() === 'year' && narrow()) {
+            if (key === 'ArrowLeft' || key === 'ArrowRight') return all[i + (back ? -1 : 1)];
+            const row = all.filter(other => slot(other, 'y') === slot(cell, 'y'));
+            if (key === 'Home') return row[0];
+            if (key === 'End') return row[row.length - 1];
+            const rows = [...new Set(all.map(other => slot(other, 'y')))].sort((a, b) => a - b);
+            const next = rows[rows.indexOf(slot(cell, 'y')) + (back ? -1 : 1)];
+            if (next === undefined) return null;
+            return all.filter(other => slot(other, 'y') === next)
+                .reduce((best, other) => !best || Math.abs(slot(other, 'x') - slot(cell, 'x')) < Math.abs(slot(best, 'x') - slot(cell, 'x')) ? other : best, null);
+        }
+        const day = cell.dataset.day, month = all.filter(other => other.dataset.day.slice(0, 7) === day.slice(0, 7));
+        switch (key) {
+            case 'ArrowLeft': return byDate(shift(day, -1));
+            case 'ArrowRight': return byDate(shift(day, 1));
+            case 'ArrowUp': return byDate(zoom() === 'year' ? shiftMonth(day, -1) : shift(day, -7));
+            case 'ArrowDown': return byDate(zoom() === 'year' ? shiftMonth(day, 1) : shift(day, 7));
+            case 'Home': return month[0];
+            case 'End': return month[month.length - 1];
+        }
+        return null;
+    };
+    const moves = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'];
+    const keydown = event => {
+        const cell = cellOf(event.target);
+        if (!cell || event.target !== cell) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            state.engaged = true;
+            if (cell.dataset.event) dotnet.invokeMethodAsync('SelectEvent', cell.dataset.event);
+            else if (zoom() !== 'day') open(cell);
+        } else if (event.key === 'Escape') {
+            if (zoom() === 'year') return;
+            event.preventDefault();
+            state.engaged = true;
+            dotnet.invokeMethodAsync('Back', dateOf(cell));
+        } else if (moves.includes(event.key)) {
+            event.preventDefault();
+            const next = target(cell, event.key);
+            if (next) { rove(next); next.focus(); }
+        }
+    };
+    // A click on an event selects it; a click anywhere else in a cell opens it, and a click on a mark drawn over a cell (a
+    // "+N") opens the cell beneath. A click on the toolbar engages the planner too, so that a button the redraw disables does not
+    // leave the focus on the page.
+    const click = event => {
+        if (event.target.closest?.('.lumen-planner-bar button')) state.engaged = true;
+        if (!viewport.contains(event.target)) return;
+        const mark = event.target.closest('.lumen-datum[data-event]');
+        if (mark) {
+            if (zoom() === 'day') rove(mark);
+            dotnet.invokeMethodAsync('SelectEvent', mark.dataset.event);
+            return;
+        }
+        if (zoom() === 'day') return;
+        const cell = cellOf(event.target) || document.elementsFromPoint(event.clientX, event.clientY).map(cellOf).find(Boolean);
+        if (!cell) return;
+        state.engaged = true;
+        rove(cell);
+        open(cell);
+    };
+    const focusin = event => {
+        const cell = cellOf(event.target);
+        if (cell && cells().includes(cell)) { rove(cell); ring(cell); }
+    };
+    const focusout = event => {
+        if (!cellOf(event.relatedTarget)) unring();
+        if (event.relatedTarget && !root.contains(event.relatedTarget)) state.engaged = false;
+    };
+    // The drawing fits its box, so the viewport is a tab stop and a region only while a box narrower than 320 pixels scrolls it.
+    const region = () => {
+        if (viewport.scrollWidth > viewport.clientWidth + 1) {
+            viewport.setAttribute('tabindex', '0'); viewport.setAttribute('role', 'region'); viewport.setAttribute('aria-label', 'Scrollable planner');
+        } else { viewport.removeAttribute('tabindex'); viewport.removeAttribute('role'); viewport.removeAttribute('aria-label'); }
+    };
+    const sized = new ResizeObserver(region);
+    sized.observe(viewport);
+    // Each new drawing: every event leaves the tab order, the cell for the date asked for (or the last one focused) takes the
+    // stop, and if the reader's keypress or click replaced the drawing under their focus, the focus follows to that cell.
+    state.settle = focus => {
+        unring();
+        const svg = drawing();
+        if (!svg) return;
+        if (keys) svg.setAttribute('aria-describedby', keys);
+        for (const mark of svg.querySelectorAll('.lumen-datum')) mark.setAttribute('tabindex', '-1');
+        region();
+        const all = cells();
+        if (all.length === 0) return;
+        const date = focus || state.lastDate;
+        let current = all[0];
+        if (date && zoom() !== 'day')
+            current = zoom() === 'year' && narrow()
+                ? all.filter(cell => cell.dataset.weekend <= date).pop() || all[0]
+                : all.find(cell => cell.dataset.day >= date) || all[all.length - 1];
+        rove(current);
+        const active = document.activeElement;
+        // A button the redraw has just disabled still holds the focus for a moment before the browser drops it to the page.
+        if (state.engaged && (!active || active === document.body || active.disabled)) current.focus();
+    };
+    const bindings = [['keydown', keydown], ['click', click], ['focusin', focusin], ['focusout', focusout]];
+    for (const [type, handler] of bindings) root.addEventListener(type, handler);
+    handlers.set(root, { bindings, sized, planner: state });
+    state.settle(null);
+}
+
+/// Tells a planner's script that its drawing changed, and which date (yyyy-MM-dd), if any, should hold its tab stop.
+export function plannerDrawn(root, focus) {
+    handlers.get(root)?.planner?.settle(focus);
+}
+
 /// Reports the width of a chart's or a graph's box in whole pixels to the component's Fit method, at once and again whenever
 /// the box settles at a new width, so that it can be drawn at the width it is shown and its text keeps its own size. A hidden
 /// box measures nothing.

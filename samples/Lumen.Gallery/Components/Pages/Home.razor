@@ -61,16 +61,9 @@
         </section>
         <section id="planner" class="card">
             <h2>Planning a season</h2>
-            <p>A <code>PlannerSpec</code> drawn by <code>PlannerSvg.Render</code>: months aligned by weekday so weekends line up down the year, public holidays ◆, a school holiday band, and invented events by relevance — clash bold, close dashed, other thin, provisional hatched, cancelled struck through, yours outlined — each named in full.</p>
-            @foreach (var (shown, width, drawn) in PlannerDrawings)
-            {
-                <div class="planner-@shown">
-                    <h3>The year 2027</h3>
-                    @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme, width, "Season planner: the year 2027"), PlannerView.WholePeriod, drawn))
-                    <h3>March 2027</h3>
-                    @((MarkupString)PlannerSvg.Render(PlannerData.Season(Theme, width), PlannerView.Month(2027, 3), drawn))
-                </div>
-            }
+            <p>A <code>&lt;LumenPlanner&gt;</code> over a <code>PlannerSpec</code> of invented events, with South Africa's provinces and 2027 public holidays. Click a day, or move to it with the arrow keys and press Enter, to open its month; open a day in the month to list its events; Escape or Back goes out. The chips filter by region, category, audience, status and relevance. It is drawn at its box's width, and below 640 pixels in its phone layout.</p>
+            @Branded(@<LumenPlanner Spec="PlannerData.Season(Theme)" EventSelected="OnPlannerEvent" DaySelected="OnPlannerDay"/>)
+            <p class="quiet" id="planner-picked">@(plannerPicked ?? "Select an event, or open a day")</p>
             <details><summary>March as a table</summary>@((MarkupString)PlannerSvg.Table(PlannerData.Season(Theme), 2027, 3))</details>
         </section>
         <section class="lower-grid">
@@ -97,9 +90,9 @@
         BrandDemo.Harbour => @<CascadingValue Value="DemoData.Harbour">@content</CascadingValue>,
         _ => content
     };
-    // The planner is drawn three times on the server and the section's width picks one in app.css, so its words are never shown
-    // under 9 pixels: wide from 1000 pixels, medium (the same grids) from 480, so a portrait tablet gets the grids, and the phone layout below.
-    private static readonly (string Shown, int Width, PlannerLayout Layout)[] PlannerDrawings = [("wide", 1100, PlannerLayout.Wide), ("medium", 520, PlannerLayout.Wide), ("narrow", 340, PlannerLayout.Narrow)];
+    private string? plannerPicked;
+    private void OnPlannerEvent(PlannerEvent e)=>plannerPicked=$"Selected event {e.Name}";
+    private void OnPlannerDay(DateOnly day)=>plannerPicked=$"Opened {day.ToString("dddd d MMMM yyyy",System.Globalization.CultureInfo.InvariantCulture)}";
     private GraphLayout layout=GraphLayout.Layered;
     private int revision;private string? selection;private string? node;private GraphSpec? graphCache;
     private GraphSpec Graph=>graphCache ??= DemoData.Graph(layout,Theme);
