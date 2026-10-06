@@ -37,8 +37,8 @@
     /// view as the reader zooms and steps, and raises <see cref="ViewChanged"/>; bind it with <c>@bind-View</c> to follow it.
     /// A view outside the period is refused with an <see cref="ArgumentException"/>, as <see cref="PlannerSvg.Render"/> refuses it.</summary>
     [Parameter] public PlannerView View { get; set; } = PlannerView.WholePeriod;
-    /// <summary>Raised with the new view whenever the reader opens a month or a day, goes back, or steps to another month or day.
-    /// Needs an interactive render mode.</summary>
+    /// <summary>Raised with the new view whenever the reader opens a month or a day, goes back, or steps to another month or day,
+    /// and with the whole period when a new <see cref="Spec"/> leaves the view outside its period. Needs an interactive render mode.</summary>
     [Parameter] public EventCallback<PlannerView> ViewChanged { get; set; }
     /// <summary>Raised with the event when the reader clicks one, or chooses one in a day with Enter or Space. Needs an
     /// interactive render mode.</summary>
