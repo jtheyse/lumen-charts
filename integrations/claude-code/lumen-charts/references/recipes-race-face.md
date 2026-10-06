@@ -665,7 +665,7 @@ string teamRiderSvg = ChartSvg.Render(teamRider);
 
 ## Season planner
 
-Organizers choosing a date see the year at a glance: months aligned by weekday so the weekends line up down the page, public holidays, school holidays and long weekends marked, and other organizers' events drawn by how much they compete with yours — the app decides that, Lumen only draws it. Zoom by drawing a month or a day. Every event is invented here. The planner is for PCs and tablets, so the wide layout is the main one (0.43.0).
+Organizers choosing a date see the year at a glance: months aligned by weekday so the weekends line up down the page, public holidays, school holidays and long weekends marked, and other organizers' events drawn by how much they compete with yours — the app decides that, Lumen only draws it. Zoom by drawing a month or a day. Every event is invented here. The planner is for PCs and tablets, so the wide layout is the main one (0.43.0). In a Blazor app `<LumenPlanner>` (0.44.0) is the interactive version: the reader zooms from the year to a month to a day, steps and filters, and it chooses its own layout and width; the static calls below are for pages without it, for email and for the server.
 
 ```csharp
 // The app's regions, holidays and events. The relevance is the app's own rule, worked out for the organizer viewing:
@@ -695,14 +695,26 @@ string seasonPhone = PlannerSvg.Render(seasonPlanner with { Width = 340 }, Plann
 string seasonTable = PlannerSvg.Table(seasonPlanner, 2027, 3);   // the month for screen readers and static pages
 ```
 
+The same planner in a Blazor page with an interactive render mode, beside those static calls (a razor block, not compiled by the recipe check):
+
+```razor
+<LumenPlanner Spec="seasonPlanner" EventSelected="OnEvent" DaySelected="OnDay" />
+
+@code {
+    // seasonPlanner is the PlannerSpec built above; the component draws it at its box's width and zooms it itself.
+    void OnEvent(PlannerEvent e) { /* open the event's page, e.Url or e.Id */ }
+    void OnDay(DateOnly day) { /* offer the day for a new event */ }
+}
+```
+
 - **Relevance is yours to decide.** `Clash`, `Near` and `Other` are drawn by weight and dash, not colour: a clash bold and solid, a close event dashed, any other thin and muted. Each is said in words in the event's name and tooltip, `Hilltop XCO, Saturday 13 March 2027, Gauteng, XCO, Kids, clash`, and a `Near` one says `close`. The planner never computes relevance, so the rule can change without a Lumen release. A cancelled event counts as neither clash nor close in any busy count (the year's weekly counts, a phone's month slots and summaries), though it is still drawn and named as cancelled.
 - **The year.** Twelve rows, one per month, aligned by weekday on 37 columns so every Saturday and Sunday stands in one column down the page; the month and its year are written on two lines. Weekends are bands, public holidays diamonds, school holidays a band along the top of their days, other periods (`PeriodKind.Other`: exams, a large outside event) a dotted band under it, and a long weekend a bracket under the stripes (derived: weekend days and public holidays joined, three days or more, at least one a holiday). Each event is a stripe across its days, in the lowest of three lanes free on all of them; a day with more writes `+N`, which names the ones it hid, and each week writes one number, its clashes and close events counted together, each named apart in words for a screen reader.
 - **The month and the day.** A month is a grid of weeks with each day's events under it as lines of words, `Name · word · day N of M · Region code`: a multi-day event is listed under every day it covers, its line ending `day 2 of 3`; a line too long for its cell is cut at its end with `…`, so the region code goes first, the whole text staying in its tooltip and name, and a full day writes `+N more` naming the rest. A day is a list of its holidays and events with their region, category, audience, status and relevance in words.
 - **Regions.** A filter on a province still shows the country's holidays and the events set for the whole country or for no region; events in other provinces drop out. Filter by `Categories`, `Audiences`, `Statuses` and `Relevances` the same way, and leave `Filter` null to see everything.
-- **Phones.** For a box under 640 pixels draw `PlannerLayout.Narrow` at the box's width (`Width = 340` here): the year becomes a bar of weekend slots per month, a weekend across a month's end shown in both bars and named by its full span, with the month's clash and close events counted once each in words; a month becomes an agenda of only the days that hold something.
-- **Sizes.** The drawing's text is 10 to 12 units, so for readable text on screen render `Width` equal to the box's CSS width. The interactive `<LumenPlanner>` of 0.44.0 does this itself; until then draw the width the page has.
+- **Phones.** `<LumenPlanner>` draws the narrow layout by itself in a box under 640 pixels and the wide one from there; on a 375 px phone its toolbar and filter chips stand above the drawing, so `ShowFilters="false"` with the host's own filters set through `Spec.Filter` gives the drawing more room. Without the component, for a box under 640 pixels draw `PlannerLayout.Narrow` at the box's width (`Width = 340` here): the year becomes a bar of weekend slots per month, a weekend across a month's end shown in both bars and named by its full span, with the month's clash and close events counted once each in words; a month becomes an agenda of only the days that hold something.
+- **Sizes.** The drawing's text is 10 to 12 units, so for readable text on screen the drawing's width must equal the box's CSS width. `<LumenPlanner>` measures its box and draws at that width, from 320 to 4096 pixels (it has no `FitWidth`; it always fits), and is drawn at `Spec.Width` and scaled only until it is interactive. For the static calls, render `Width` equal to the box's CSS width.
 - **Not colour.** Provisional is an outline with hatching, cancelled an outline with a strike line, yours an outline in the text colour, and every one is also said in words. On the card, words clear 4.5:1 (`hi` 16.70:1, `low` 4.87:1) and every mark 3:1, including on a weekend band, where `hi` stands 12.70:1 and `low` 3.71:1; check a style of your own with `ContrastIssues()`.
-- **Limits.** View only, no editing; at most 400 days, 2000 events, 1000 periods and 500 regions, and 200 characters in a title, description or name; at most three stripes a day in the year; a month's lines cut long names; `PlannerSvg.Table` is the month's words for a static page. Interactive zoom comes with `<LumenPlanner>` in 0.44.0; until then draw the view the page asks for.
+- **Limits.** View only, no editing, dragging or adding; at most 400 days, 2000 events, 1000 periods and 500 regions, and 200 characters in a title, description or name; at most three stripes a day in the year; a month's lines cut long names; `PlannerSvg.Table` is the month's words for a static page. Interactive zoom has arrived with `<LumenPlanner>` (0.44.0), which needs an interactive render mode, and a keyboard reaches an event in the year or a month by opening its day; a page without the component draws the view it asks for.
 
 ## Rendering notes
 
