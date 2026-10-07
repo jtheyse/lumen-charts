@@ -1864,7 +1864,6 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
         if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Blocks)
             ChartSvg.Render(spec with{XFormat=ValueFormat.Duration});
         else Check(Refusal(spec with{XFormat=ValueFormat.Duration}).Contains(kind==ChartKind.Calendar?"writes its own calendar":"X format"),$"{kind}: X format");
-        // A heatmap's Y format, from 0.46.0, writes its cells' values, so it is accepted like a calendar's.
         if(kind is ChartKind.Donut or ChartKind.Radar or ChartKind.Histogram)
         {
             Check(Refusal(spec with{YFormat=ValueFormat.Compact}).Contains("Y format"),$"{kind}: Y format");
@@ -1878,6 +1877,12 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
         {
             ChartSvg.Render(spec with{YFormat=ValueFormat.Duration});
             Check(Refusal(spec with{Y2Format=ValueFormat.Duration}).Contains("no secondary axis"),$"{kind}: Y2 format");
+        }
+        // A heatmap's Y format, from 0.46.0, writes its cells' values, and it has no secondary axis.
+        else if(kind==ChartKind.Heatmap)
+        {
+            ChartSvg.Render(spec with{YFormat=ValueFormat.Duration});
+            Check(Refusal(spec with{Y2Format=ValueFormat.Duration}).StartsWith("A heatmap has no secondary axis, so it takes no Y2 format"),$"{kind}: Y2 format");
         }
         else ChartSvg.Render(spec with{YFormat=ValueFormat.Duration,Y2Format=ValueFormat.Compact});
         if(kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Area or ChartKind.Histogram)
@@ -9681,19 +9686,41 @@ Test("Heatmap table: the new options are refused where they mean nothing, and ou
 Test("Heatmap table: each refusal says why, and a cell width that is no number is refused too",()=>{
     var line=new ChartSpec{Title="Line",Kind=ChartKind.Line,Series=[new("A",[new(0,1),new(1,2)])]};
     string Why(ChartSpec spec){try{ChartValidation.Validate(spec);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
-    Check(Why(line with{CellText=true}).StartsWith("Cell text and cell width apply to heatmaps, which draw a grid of cells;")&&Why(line with{CellWidth=30}).StartsWith("Cell text and cell width apply to heatmaps"),"cell text and width off a heatmap");
-    foreach(var width in new[]{23,double.NaN,double.PositiveInfinity,double.NegativeInfinity})
-        Check(Why(HeatGrid(s=>s with{CellWidth=width})).StartsWith("A heatmap's cell is at least 24 pixels wide, so its text and focus ring fit."),$"width {width}");
+    // A calendar draws cells too, but its days are its own marks: it takes neither.
+    var calendar=Sample(ChartKind.Calendar);
+    foreach(var other in new[]{line,calendar})
+        Check(Why(other with{CellText=true}).StartsWith("Cell text writes in a heatmap's cells and cell width sets the width of its columns, so they apply to heatmap charts only;")&&Why(other with{CellWidth=30}).StartsWith("Cell text writes in a heatmap's cells"),$"{other.Kind}: cell text and width off a heatmap");
+    Check(Why(HeatGrid(s=>s with{CellWidth=23})).StartsWith("A heatmap's cell is at least 24 pixels wide, so its text and focus ring fit."),"width 23");
+    foreach(var width in new[]{double.NaN,double.PositiveInfinity,double.NegativeInfinity})
+        Check(Why(HeatGrid(s=>s with{CellWidth=width})).StartsWith("A heatmap's cell width is a finite number of pixels, at least 24, so its text and focus ring fit."),$"width {width}");
+    // Y2 format and unit: a heatmap writes its cells' values in a Y format and unit, but has no secondary axis; the refusals say so.
+    Check(Why(HeatGrid(s=>s with{Y2Format=ValueFormat.Compact})).StartsWith("A heatmap has no secondary axis, so it takes no Y2 format; its cells' values take YFormat."),"Y2 format");
+    Check(Why(Sample(ChartKind.Donut) with{YUnit="s"}).Contains("to the values a heatmap's cells write, which it measures on no axis;"),"the unit's list of kinds");
     var wide=Why(HeatGrid(s=>s with{Series=[new("A",Enumerable.Range(0,100).Select(i=>new ChartPoint(i,i)).ToArray())],CellWidth=40}));
     Check(wide.StartsWith("At 40 pixels a column, 100 columns make a drawing 4165 pixels wide, past the 4096 a chart may be;"),wide);
     Check(Why(line with{Series=[new("A",[new ChartPoint(0,1){NotRated="x"},new(1,2)])]}).StartsWith("NotRated marks a heatmap cell as not rated and says why"),"not rated off a heatmap");
     Check(Why(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1){NotRated=" "}])]})).StartsWith("A not-rated reason is written in the cell's name, so it needs words"),"blank");
     foreach(var bad in new[]{new string('x',25),"a\nb","a\rb","a\tb"})
         Check(Why(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1){NotRated=bad}])]})).StartsWith("A not-rated reason is written in the cell's name, at most 24 characters and no line breaks"),$"{bad.Length} characters");
+    // A control character is refused wherever a label is, a heatmap or not.
+    foreach(var control in new[]{"\u0007","too few\u0000starts"})
+    {
+        Check(Why(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1){NotRated=control}])]})).StartsWith("Labels cannot contain control characters"),$"control character in a not-rated reason: {control.Length} characters");
+        Check(Why(line with{Series=[new("A",[new ChartPoint(0,1){NotRated=control},new(1,2)])]}).StartsWith("Labels cannot contain control characters"),"and off a heatmap");
+    }
     // The grid may be 4096 wide, no more: 165 plus one column of 3931 is exactly that.
     var one=HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1)])]});
     ChartValidation.Validate(one with{CellWidth=3931});
-    Check(Why(one with{CellWidth=3932}).Contains("make a drawing 4097 pixels wide, past the 4096"),"one pixel past");
+    Check(Why(one with{CellWidth=3932}).StartsWith("At 3932 pixels a column, 1 column makes a drawing 4097 pixels wide, past the 4096 a chart may be;"),"one pixel past, one column");
+});
+Test("Heatmap table: the gradient-ID hash tells a chart with cell text, a cell width or a not-rated cell from one without, and leaves the others as they were",()=>{
+    // A chart's IDs are the hash of its spec as JSON, which leaves out what is at its default (CellText false, the others null) so that every
+    // chart drawn before 0.46.0 keeps its IDs. What is set must still count, or two different charts on a page would share gradient IDs.
+    var plain=HeatGrid(s=>s with{CellText=false});
+    Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{CellText=true}),"cell text is left out of the hash when set");
+    Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{CellWidth=30}),"cell width is left out of the hash when set");
+    Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{Series=[plain.Series[0],new("Long distance",[new ChartPoint(0,1.2,"2025"){NotRated="no starts"},plain.Series[1].Points[1]])]}),"a not-rated reason is left out of the hash when set");
+    Check(ChartSvg.IdPrefix(plain)==ChartSvg.IdPrefix(plain with{}),"the same spec hashes the same");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

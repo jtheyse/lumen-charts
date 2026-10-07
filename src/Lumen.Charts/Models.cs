@@ -325,8 +325,10 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// as wide as <c>152 bpm</c> each, and more leave every other category's words out; a number alone, <c>152</c>, fits about eight. It is
     /// said after the name in the mark's tooltip and accessible name, <c>Heart rate: L3 · 152 bpm, 152</c>, and in the component's
     /// status line and data table. A category takes the first sub-label any series gives it, so every mark in it says the same words;
-    /// series may repeat it or leave it null, but two different sub-labels for one category are refused. Continuous X axes write tick labels
-    /// rather than categories, so every kind but column, bar and stacked column charts refuses it, as does a sparkline.</summary>
+    /// series may repeat it or leave it null, but two different sub-labels for one category are refused. On a heatmap, from 0.46.0, a
+    /// cell takes its own, as a second line in the cell when <see cref="ChartSpec.CellText"/> is set and in its name always, so the cells
+    /// of one column may differ, as <c>/12 starts</c> and <c>/4 starts</c> do. Continuous X axes write tick labels rather than categories,
+    /// so every kind but column, bar, stacked column and heatmap charts refuses it, as does a sparkline.</summary>
     public string? SubLabel { get; init; }
     /// <summary>
     /// The word a missing value is written as, such as <c>absent</c> for a round the rider was entered in and did not ride: 1 to 12
@@ -578,7 +580,9 @@ public sealed record ChartSpec
     /// automatic tick labels, the names and tooltips of the marks measured on it, their value labels, its bounds, zones and annotations, the
     /// shared readout, and the component's status line and data table. <c>"s"</c> writes <c>+12.3s</c> and <c>" bpm"</c> writes
     /// <c>152 bpm</c>, so give it the space it needs. A tick set by <see cref="YTickValues"/> with a label of its own is written as given,
-    /// and the right-hand axis takes none. CSV keeps raw numbers. Null writes none. The kinds that take <see cref="YTickValues"/> take it.
+    /// and the right-hand axis takes none. CSV keeps raw numbers. Null writes none. The kinds that take <see cref="YTickValues"/> take it,
+    /// and from 0.46.0 so does a heatmap, though it takes no <see cref="YTickValues"/>, having no Y axis: its unit follows its cells'
+    /// values, as its <see cref="YFormat"/> does.
     /// </summary>
     public string? YUnit { get; init; }
     /// <summary>The data: at most 32 series and 100,000 points in all.</summary>
