@@ -9853,7 +9853,7 @@ Test("Heatmap table: CellWidth widens the drawing and thins its column labels wi
     var two=HeatSvg(HeatGrid(s=>s with{CellWidth=48}));
     Check(two.Contains("viewBox='0 0 320 ")&&Regex.Matches(two,"<rect x='(131|179)' y='[0-9.]+' width='46' ").Count==4,"two columns at 48");
 });
-Test("Heatmap table: the refined scale says low and high and fits a phone; the classic keeps 0.23.0's words",()=>{
+Test("Heatmap table: the refined scale keeps both ends whole on a phone; the classic keeps 0.23.0's words",()=>{
     var phone=HeatGrid(s=>s with{Width=340,Series=[new("A",[new ChartPoint(0,123456.5,"a"),new ChartPoint(1,987654.25,"b")])]});
     var line=System.Net.WebUtility.HtmlDecode(Regex.Matches(HeatSvg(phone),"<text x='130' y='[0-9.]+' class='lumen-muted'>([^<]*)</text>").Last().Groups[1].Value);
     // The line is drawn at 12 px, so it is measured at 12 px: the estimate for 11 px scaled by 12 / 11. Both ends of the scale are written

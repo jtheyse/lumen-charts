@@ -3202,7 +3202,7 @@ public static partial class ChartSvg
             // The 12 px line ends 12 units short of the drawing's edge: the first step that does not reach it is drawn, and where none
             // does the last, cut, so that both ends of the scale are kept before either is.
             var room = s.Width - 12 - HeatmapLeft;
-            line = lines.FirstOrDefault(step => Broad(step) <= room) ?? lines[^1];
+            line = lines.FirstOrDefault(option => Broad(option) <= room) ?? lines[^1];
             var keep = line.Length;
             while (keep > 1 && Broad(Short(line, keep)) > room) keep--;
             line = Short(line, keep);
