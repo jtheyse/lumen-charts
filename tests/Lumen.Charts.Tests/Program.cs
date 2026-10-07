@@ -9903,6 +9903,9 @@ Test("Heatmap table: HtmlTable writes a value as the cells do, leaves a missing 
     Check(html.Contains("<tr><th scope='row'>Long distance</th><td>—, not rated: too &lt;few&gt;</td><td></td><td>3.1k pts (5 riders)</td></tr>"),"the second row: "+html);
     // A value is written as the drawing writes it, and its note as the cell's name does, which the cell itself leaves out.
     Check(HeatSvg(spec).Contains(">3.1k pts<")&&HeatNames(spec).Contains("Long distance: 2, 3.1k pts (5 riders)"),"the drawing's value: "+string.Join(" | ",HeatNames(spec)));
+    // A · inside a note or a sub-label is encoded with the rest of its words, as &#183;; the · the table puts between a value and its sub-label is its own, and plain.
+    var dotted=ChartExport.HtmlTable(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,2.8,"a"){SubLabel="/12 · or so",ValueNote=" · 34 pts, 5 riders"}])]}));
+    Check(dotted.Contains("<td>2.8 &#183; 34 pts, 5 riders · /12 &#183; or so</td>"),dotted);
 });
 Test("Heatmap table: HtmlTable validates, and refuses the kinds that have no grid with a reason",()=>{
     var why="";
