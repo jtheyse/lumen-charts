@@ -30,10 +30,10 @@ Donut/Light/True 5668A60FF9FAE3CD
 Donut/Light/False B5DBF1BEB568DAE1
 Donut/Dark/True 896867A5D820A268
 Donut/Dark/False 4E1D912DBF16FB30
-Heatmap/Light/True 43D1B062374DE7AE
-Heatmap/Light/False 5F9CA40CB3FAD6DA
-Heatmap/Dark/True A8614127A0FB88C3
-Heatmap/Dark/False E954B8FCA6B72F17
+Heatmap/Light/True 9DA2CC8227F4428C
+Heatmap/Light/False FE40F5799E9DB302
+Heatmap/Dark/True 374FC240CA3AA167
+Heatmap/Dark/False EE021DF3F33219A8
 Radar/Light/True DA6867ECC2A5836C
 Radar/Light/False B83AE79F688F0891
 Radar/Dark/True 000563A18C651E0E
@@ -386,3 +386,7 @@ planner/gauteng 145DA5471521D53B
 placings/points 3A5A872CA78F9D0F
 placings/no-points F644532B9FDBED34
 placings/two-series 5462E4F4895ACDEA
+heatmap-table/light BCB592EB603CE971
+heatmap-table/dark 78DF03CBB524F976
+heatmap-table/midnight 118F352E90E118ED
+heatmap-table/cell-width 580AACF77E9265A8

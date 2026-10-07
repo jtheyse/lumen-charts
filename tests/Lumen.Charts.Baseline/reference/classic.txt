@@ -386,3 +386,7 @@ planner/gauteng 3058778A2D174A1F
 placings/points 80075119EF897F90
 placings/no-points D855215AB8DC04E0
 placings/two-series BC8559398F48DF93
+heatmap-table/light 9C43395B89568B04
+heatmap-table/dark 28ABFCC8D38F6751
+heatmap-table/midnight 0F11992BFDBA366F
+heatmap-table/cell-width F1F34BA65B02A903
