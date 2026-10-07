@@ -65,7 +65,9 @@ public sealed record ChartStyle
     /// <summary>Candles and OHLC bars that close below their open.</summary>
     public string Falling { get; init; } = "#D36B84";
     /// <summary>Heatmap cells are interpolated from this colour at the lowest value… A calendar starts from its empty day's
-    /// track instead, a third of the way from <see cref="Grid"/> towards <see cref="HeatmapHigh"/>, so it does not use this.</summary>
+    /// track instead, a third of the way from <see cref="Grid"/> towards <see cref="HeatmapHigh"/>, so it does not use this. From
+    /// 0.46.0, in the refined finish, a heatmap on a dark background, such as the Dark preset's, that keeps this default pair is drawn
+    /// in a dark ramp instead, #22304A to #6E9BFF, so its brightest cell is its highest value.</summary>
     public string HeatmapLow { get; init; } = "#E4EDFC";
     /// <summary>…to this one at the highest.</summary>
     public string HeatmapHigh { get; init; } = "#4069D0";
@@ -162,7 +164,7 @@ public static class Contrast
         return (Math.Max(a, b) + .05) / (Math.Min(a, b) + .05);
     }
 
-    private static double Luminance(string hex) =>
+    internal static double Luminance(string hex) =>
         .2126 * Channel(hex, 1) + .7152 * Channel(hex, 3) + .0722 * Channel(hex, 5);
 
     private static double Channel(string hex, int offset)

@@ -5231,13 +5231,17 @@ Test("Calendar ramp: on every preset, a brand and the classic finish, the quiete
     // Tiers are untouched: a zoned calendar never takes the ramp.
     Check(!Svg(spec with{YZones=Effort()}).ToString().Contains("#B0C1E8"),"a zoned calendar took the ramp");
 });
-Test("Heatmaps keep their ramp from HeatmapLow to HeatmapHigh on every preset, cells and legend key alike",()=>{
+Test("Heatmaps keep their ramp from HeatmapLow to HeatmapHigh on every preset, cells and legend key alike, but Dark's refined default turns dark",()=>{
     foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight,Brand()})
     {
+        // From 0.46.0 the refined finish draws the default pale-to-deep ramp on a dark background, as the Dark preset has it, in a dark ramp,
+        // so its brightest cell is its highest value; every other preset's ramp is its own.
+        var (low,high)=ChartSvg.HeatmapPair(style);
+        Check(style==ChartStyle.Dark?low!=style.HeatmapLow&&high!=style.HeatmapHigh:(low,high)==(style.HeatmapLow,style.HeatmapHigh),$"{style.Background}: the pair {low} {high}");
         var doc=Svg(Spec(ChartKind.Heatmap) with{Style=style,Series=[new("Row",[new(0,0,"A"),new(1,5,"B"),new(2,10,"C")])]});
         var fills=doc.Descendants(ns+"g").Where(g=>g.Attribute("data-point") is not null).Select(g=>(string?)g.Element(ns+"rect")!.Attribute("fill")).ToArray();
-        Check(fills.SequenceEqual([style.HeatmapLow,Blend(style.HeatmapLow,style.HeatmapHigh,.5),style.HeatmapHigh]),$"{style.Background}: {string.Join(",",fills)}");
-        Check(XDocument.Parse(ChartSvg.LegendKey(Spec(ChartKind.Heatmap) with{Style=style},0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual([style.HeatmapLow,style.HeatmapHigh]),$"{style.Background}: the heatmap's key moved");
+        Check(fills.SequenceEqual([low,Blend(low,high,.5),high]),$"{style.Background}: {string.Join(",",fills)}");
+        Check(XDocument.Parse(ChartSvg.LegendKey(Spec(ChartKind.Heatmap) with{Style=style},0)).Root!.Elements().Select(e=>(string?)e.Attribute("fill")).SequenceEqual([low,high]),$"{style.Background}: the heatmap's key moved");
     }
 });
 // A node's label is drawn 12 pixels high, as wide as the library's generous estimate: .62 of an em for most letters, .9 for m and
@@ -6796,7 +6800,8 @@ Test("0.34.0's renderings do not move: rows of its baseline rebuilt here match i
         ("Timeline/Light/True","AB656FD0AD6DA5B1","3A4014195F6691E4",Titled(ChartKind.Timeline,new("A",[ChartPoint.Span(0,2),ChartPoint.Span(5,7)]),new("B",[ChartPoint.Span(2,5),ChartPoint.Span(7,9,"Last")]),new("C",[ChartPoint.Span(9,12)]))),
         ("Blocks/Light/True","ED303664D2DE44C5","33DE20590ACB95F0",Titled(ChartKind.Blocks,new ChartSeries("B",[ChartPoint.Block(0,2,5,"W"),ChartPoint.Block(2,6,9),ChartPoint.Block(6,7,7),ChartPoint.Block(8,12,3,"C")]))),
         ("Donut/Light/True","5668A60FF9FAE3CD","41B05E947E74CD0F",Baseline(ChartKind.Donut,ChartTheme.Light)),
-        ("Heatmap/Light/True","43D1B062374DE7AE","E701C0163185BA1C",Baseline(ChartKind.Heatmap,ChartTheme.Light)),
+        // 0.46.0 moved the refined heatmap by design: its colour scale says "low" and "high" (it was 43D1B062374DE7AE). The classic one holds.
+        ("Heatmap/Light/True","9DA2CC8227F4428C","E701C0163185BA1C",Baseline(ChartKind.Heatmap,ChartTheme.Light)),
         ("Radar/Light/True","DA6867ECC2A5836C","16406553279DC2CE",Baseline(ChartKind.Radar,ChartTheme.Light)),
         ("Histogram/Light/True","BDD2A861ACC503CD","7A551A8B643A8CBB",Baseline(ChartKind.Histogram,ChartTheme.Light)),
         ("annotated","90C7B27AF8A858FD","B8D59813CF5546F6",line with{Annotations=[new(AnnotationAxis.Y,25){Label="Target"},new(AnnotationAxis.X,3){To=6,Label="Window"}]}),
@@ -9721,6 +9726,79 @@ Test("Heatmap table: the gradient-ID hash tells a chart with cell text, a cell w
     Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{CellWidth=30}),"cell width is left out of the hash when set");
     Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{Series=[plain.Series[0],new("Long distance",[new ChartPoint(0,1.2,"2025"){NotRated="no starts"},plain.Series[1].Points[1]])]}),"a not-rated reason is left out of the hash when set");
     Check(ChartSvg.IdPrefix(plain)==ChartSvg.IdPrefix(plain with{}),"the same spec hashes the same");
+});
+string HeatSvg(ChartSpec spec)=>ChartSvg.Render(spec);
+string[] HeatNames(ChartSpec spec)=>Regex.Matches(HeatSvg(spec),"aria-label='([^']*)'").Select(m=>System.Net.WebUtility.HtmlDecode(m.Groups[1].Value)).ToArray();
+Test("Heatmap table: cells write their value and second line, names carry both, and a not-rated cell is dashed, unshaded and outside the scale",()=>{
+    var svg=HeatSvg(HeatGrid());
+    // 3.1 is the ramp's high end, #4069D0, white at 5.1:1; 2.8 is #5277D4, white at only 4.2:1 and the text colour 3.0:1, so its cell
+    // writes nothing and its name says it all.
+    Check(svg.Contains(">3.1<")&&svg.Contains(">/14 starts<")&&!svg.Contains(">2.8<"),"cell text");
+    Check(Regex.IsMatch(svg,$"fill='{ChartStyle.Light.Background}'[^>]*stroke-dasharray='3 2'")||Regex.IsMatch(svg,$"stroke-dasharray='3 2'[^>]*fill='{ChartStyle.Light.Background}'"),"not-rated cell");
+    var names=HeatNames(HeatGrid());
+    Check(names.Contains("Sprint: 2025 · /12 starts, 2.8"),string.Join(" | ",names));
+    Check(names.Contains("Long distance: 2025 · /4 starts, 1.2, not rated: too few starts to rate"),"not rated named");
+    Check(svg.Contains("Color scale: 0.4 low to 3.1 high"),"scale leaves the not-rated 1.2 out");
+});
+Test("Heatmap table: text takes whichever colour stands out more, and no text where neither reaches 4.5:1",()=>{
+    var svg=HeatSvg(HeatGrid());
+    foreach(Match m in Regex.Matches(svg,"<rect[^>]*fill='(#[0-9A-F]{6})'[^>]*/>\\s*(?:</?g[^>]*>\\s*)*<text[^>]*fill='(#[0-9A-Fa-f]{6})'"))
+        Check(Lumen.Charts.Contrast.Ratio(m.Groups[1].Value,m.Groups[2].Value)>=4.5,$"{m.Groups[2].Value} on {m.Groups[1].Value}");
+    var grey=HeatGrid(s=>s with{Style=ChartStyle.Light with{HeatmapLow="#777777",HeatmapHigh="#787878"}});
+    Check(ChartSvg.CellInk("#777777",grey.Style!) is null,"mid grey takes no text");
+    Check(HeatNames(grey).Contains("Sprint: 2025 · /12 starts, 2.8"),"the name keeps it");
+});
+Test("Heatmap table: a sub-label that does not fit is dropped first, then the value",()=>{
+    const string sub="/12 starts riddn";   // 16 characters, the most a sub-label takes
+    var narrow=HeatGrid(s=>s with{Width=340,Series=[new("Sprint",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,i+1.5,$"S{i}"){SubLabel=sub}).ToArray())]});
+    var svg=HeatSvg(narrow);
+    Check(!svg.Contains($">{sub}<"),"sub-label dropped at about 22 px a cell");
+    Check(HeatNames(narrow).Any(n=>n.Contains(sub)),"the name keeps it");
+});
+Test("Heatmap table: a format and a unit reach the cells, the names and the scale",()=>{
+    var svg=HeatSvg(HeatGrid(s=>s with{YUnit=" pts"}));
+    Check(svg.Contains(">3.1 pts<")&&svg.Contains("0.4 pts low to 3.1 pts high"),"unit");
+    Check(HeatNames(HeatGrid(s=>s with{YUnit=" pts"})).Contains("Sprint: 2025 · /12 starts, 2.8 pts"),"the unit in the names");
+});
+Test("Heatmap table: a not-rated cell without a value is drawn, written '—' and named without a value",()=>{
+    var spec=HeatGrid(s=>s with{Series=[s.Series[0],s.Series[1] with{Points=[new ChartPoint(0,null,"2025"){SubLabel="/0 starts",NotRated="no starts"},s.Series[1].Points[1]]}]});
+    Check(HeatSvg(spec).Contains(">—<"),"dash");
+    Check(HeatNames(spec).Contains("Long distance: 2025 · /0 starts, not rated: no starts"),string.Join(" | ",HeatNames(spec)));
+});
+Test("Heatmap table: every cell not rated draws, and says there are no rated cells",()=>{
+    var spec=HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1){NotRated="x"},new ChartPoint(1,2){NotRated="y"}])]});
+    Check(HeatSvg(spec).Contains("Color scale: no rated cells"),"no scale");
+});
+Test("Heatmap table: CellWidth widens the drawing and thins its column labels without overlap",()=>{
+    var wide=HeatGrid(s=>s with{CellWidth=48,Series=[new("A",Enumerable.Range(0,30).Select(i=>new ChartPoint(i,i,$"Season {2000+i}")).ToArray())]});
+    Check(HeatSvg(wide).Contains($"viewBox='0 0 {165+30*48} "),"width");
+    var hundred=HeatGrid(s=>s with{CellWidth=24,Series=[new("A",Enumerable.Range(0,100).Select(i=>new ChartPoint(i,i,$"C{i}")).ToArray())]});
+    Check(HeatSvg(hundred).Contains($"viewBox='0 0 {165+100*24} "),"100 columns at 24");
+});
+Test("Heatmap table: the refined scale says low and high and fits a phone; the classic keeps 0.23.0's words",()=>{
+    var phone=HeatGrid(s=>s with{Width=340,Series=[new("A",[new ChartPoint(0,123456.5,"a"),new ChartPoint(1,987654.25,"b")])]});
+    var line=Regex.Match(HeatSvg(phone),">((?:Color scale: )?[^<]* low to [^<]*)<").Groups[1].Value;
+    Check(line.Length>0&&130+ChartSvg.Wide(line)<=340-12,line);
+    var classic=HeatGrid(s=>s with{CellText=false,Style=ChartStyle.Light with{Finish=ChartFinish.Classic}});
+    Check(HeatSvg(classic).Contains("(light) to")&&HeatSvg(classic).Contains("(dark)"),"classic words");
+});
+Test("Heatmap table: on a dark background the default ramp turns dark, its high end clearing 3:1; the classic finish and other pairs are untouched",()=>{
+    var (low,high)=ChartSvg.HeatmapPair(ChartStyle.Dark);
+    Check(low!="#E4EDFC"&&Lumen.Charts.Contrast.Ratio(high,ChartStyle.Dark.Background)>=3,$"{low} {high}");
+    Check(ChartSvg.HeatmapPair(ChartStyle.Dark with{Finish=ChartFinish.Classic})==("#E4EDFC","#4069D0"),"classic as given");
+    Check(ChartSvg.HeatmapPair(ChartStyle.Light)==("#E4EDFC","#4069D0"),"light as given");
+    Check(ChartSvg.HeatmapPair(ChartStyle.Midnight)==(ChartStyle.Midnight.HeatmapLow,ChartStyle.Midnight.HeatmapHigh),"midnight as given");
+});
+Test("Heatmap table: the dark pair keys the legend too, column labels a cell width thins keep 6 px apart, and cells that are all not rated and empty still draw",()=>{
+    var (low,high)=ChartSvg.HeatmapPair(ChartStyle.Dark);
+    var key=ChartSvg.LegendKey(HeatGrid(s=>s with{Theme=ChartTheme.Dark}),0);
+    Check(key.Contains($"fill='{low}'")&&key.Contains($"fill='{high}'")&&!key.Contains("#E4EDFC"),key);
+    // Each column label is centred on its column; two shown side by side keep their estimated widths and 6 px between them.
+    var wide=HeatGrid(s=>s with{CellWidth=48,Series=[new("A",Enumerable.Range(0,30).Select(i=>new ChartPoint(i,i,$"Season {2000+i}")).ToArray())]});
+    var labels=Regex.Matches(HeatSvg(wide),"<text x='([0-9.]+)' y='[0-9.]+' text-anchor='middle' class='lumen-muted'>([^<]*)</text>").Select(m=>(X:double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),Width:ChartSvg.Wide(m.Groups[2].Value))).ToArray();
+    Check(labels.Length is > 1 and < 30&&labels.Zip(labels.Skip(1)).All(p=>p.Second.X-p.First.X>=(p.First.Width+p.Second.Width)/2+6),$"{labels.Length} labels");
+    var empty=HeatSvg(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,null,"a"){NotRated="no starts"},new ChartPoint(1,null,"b"){NotRated="no starts"}])]}));
+    Check(!empty.Contains("No data to display")&&empty.Contains("stroke-dasharray='3 2'")&&empty.Contains(">—<")&&empty.Contains("Color scale: no rated cells"),"empty and not rated");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
