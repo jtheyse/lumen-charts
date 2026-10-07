@@ -33,7 +33,7 @@ Today's heatmap (`ChartKind.Heatmap`) draws coloured cells only: no text in cell
 Heatmap only; refused on every other kind with a reason.
 
 - Each drawn cell writes its value on one line and, when the point has a `SubLabel`, the sub-label on a second line beneath it, both centred in the cell.
-- `ChartPoint.SubLabel` is now allowed on heatmaps (same limits as today: at most 16 characters, not blank, no line breaks). The existing rule that sub-labels within a category are consistent applies as for other category kinds only where it already does; on a heatmap each cell's sub-label is its own.
+- `ChartPoint.SubLabel` is now allowed on heatmaps (same limits as today: at most 16 characters, not blank, no line breaks). The category rule that all series' sub-labels in one category agree (column, bar and stacked column charts write one sub-label under the category's name) does **not** apply to heatmaps: each cell's sub-label is its own, such as "/12 starts" and "/4 starts" in one season's column.
 - `YFormat` and `YUnit` are now allowed on heatmaps; they format the cell text, the cell's name, the colour-scale line and the HTML table. Default (Number, no unit) leaves every existing name unchanged.
 - **Text colour, per cell:** whichever of `Style.Text` and `Style.Background` has the higher contrast with that cell's fill; if it is below 4.5:1, the cell writes no text.
 - **Fit:** using the library's text-width estimate, if the sub-label does not fit the cell's width or the two lines do not fit its height, the sub-label is dropped; if the value then does not fit, the value is dropped too. Value text is 11 px, sub-label 10 px.
@@ -58,10 +58,11 @@ Heatmap only; refused elsewhere with a reason; blank or control characters refus
 - If the line would run past the drawing's right edge (text-width estimate), the `Color scale: ` prefix is dropped; if still too wide, it is cut with "…".
 - The classic finish keeps `Color scale: {min} (light) to {max} (dark)` exactly.
 
-### Dark's own heatmap pair (refined finish only)
+### A dark heatmap pair on dark backgrounds (refined finish only)
 
-- The Dark preset gets its own `HeatmapLow` and `HeatmapHigh`, low end close to Dark's background and high end clearing 3:1 against Dark's background `#171E2E`; the values are chosen and verified in the build (a unit test measures them).
-- The classic finish draws Dark heatmaps with 0.23.0's pair (`#E4EDFC` → `#4069D0`), so its four classic rows stay identical. How the renderer keeps the classic colours is the plan's to decide (for example, the classic finish using the old pair when the style's heatmap colours are the Dark preset's).
+- The Dark preset itself is **not** changed: its `HeatmapLow`/`HeatmapHigh` feed the calendar ramp (`CalendarLow`, the calendar legend) and the spec hash that names gradients, so changing them would move every Dark calendar and the IDs of other Dark charts.
+- Instead the refined heatmap renderer resolves its pair: when the style's pair is the default `#E4EDFC` → `#4069D0` **and** the style's background is dark (relative luminance below 0.2), it uses a dark pair — low close to the background, high clearing 3:1 against it — chosen and verified in the build (a unit test measures it on Dark's `#171E2E`). Any other pair, and every pair on a light background, is used as given. The heatmap's legend keys (`ChartSvg` legend swatches for heatmap rows) use the same resolved pair.
+- The classic finish never resolves: it draws the style's pair as given, so Dark's four classic rows stay identical.
 
 ### `ChartSpec.CellWidth` (`double?`, at least 24)
 
@@ -86,7 +87,7 @@ Heatmaps only (an `ArgumentException` saying so for other kinds); validates the 
 ## 3. Tests, gallery, docs
 
 - **Unit:** text colour per cell (light and dark fills, a fill where neither colour clears 4.5:1 → no text), fit-and-drop (sub-label first, then value), `YFormat`/`YUnit` on heatmaps, not-rated drawing (dashed outline, background fill, out of the scale, "—"), names with sub-label and not-rated words, `CellWidth` width and refusals, column thinning with `CellWidth`, the refined legend wording and its fitting at 340 wide, the classic legend unchanged, Dark's pair contrast, `HtmlTable` structure (scopes, caption, encoding, refusal for non-heatmaps), CSV `NotRated` column, the component's grid table, every refusal (`CellText`/`CellWidth`/`NotRated` on other kinds, `CellWidth` < 24, `NotRated` length).
-- **Baseline:** added rows — cell text in Light, Dark and Midnight; not-rated cells; `CellWidth`. Changed by design — the four refined `Heatmap/*` rows. Unchanged — the four classic `Heatmap/*` rows and every other row.
+- **Baseline:** added rows — cell text in Light, Dark and Midnight; not-rated cells; `CellWidth`. Changed by design — the four refined `Heatmap/*` rows (the legend wording in all four; the dark pair in the two Dark rows). Unchanged — the four classic `Heatmap/*` rows and every other row.
 - **Gallery:** a "Category heatmap" card on the Sports & performance page (Racing section) with invented categories and seasons, `CellText`, sub-labels, not-rated cells and `CellWidth`; browser checks (cells' names, the grid table in "View data", sideways scroll at a 375 px phone with readable cells) and the existing axe sweeps in light, dark and Midnight; one HTTP check of the card's prerender.
 - **Docs:** README (a "Heatmap tables" section; the legend fix; 0.46.0 additions; limits), `references/api.md`, `SKILL.md`, the Race Face recipe "Category heatmap" (#16) with invented data (rows = categories, columns = seasons, value = points per rider-start, `SubLabel` "/12 starts", `ValueNote` such as "34 pts, 5 riders", `NotRated` below 10 starts, `CellText`, `CellWidth`, `ChartExport.HtmlTable`), compiled by `tests/Lumen.Charts.Recipes`; `docs/VERIFICATION.md`; version 0.46.0.
 
