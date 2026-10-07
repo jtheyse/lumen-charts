@@ -9758,6 +9758,16 @@ Test("Heatmap table: text takes whichever colour stands out more, and black or w
     Check(greys.Any(c=>c.Text=="2.8")&&greys.Where(c=>c.Fill!=ChartStyle.Light.Background).All(c=>c.Ink is "#000000" or "#FFFFFF"&&Lumen.Charts.Contrast.Ratio(c.Ink,c.Fill)>=4.5),string.Join(" ",greys));
     Check(HeatNames(grey).Contains("Sprint: 2025 · /12 starts, 2.8"),"the name keeps it");
 });
+Test("Heatmap table: a style's own text or background colour writes a cell wherever it reaches 4.5:1, before black or white",()=>{
+    // Light's text, #26324B, clears 10.9:1 on the ramp's pale end; Dark's text, #E8ECF6, clears 11.2:1 on its dark ramp's low end, and
+    // Dark's background, #171E2E, 6.2:1 on its high end. None of them is pure black or white.
+    Check(ChartSvg.CellInk("#E4EDFC",ChartStyle.Light)==ChartStyle.Light.Text,$"Light's pale end takes {ChartSvg.CellInk("#E4EDFC",ChartStyle.Light)}");
+    var (low,high)=ChartSvg.HeatmapPair(ChartStyle.Dark);
+    Check(ChartSvg.CellInk(low,ChartStyle.Dark)==ChartStyle.Dark.Text,$"Dark's low end takes {ChartSvg.CellInk(low,ChartStyle.Dark)}");
+    Check(ChartSvg.CellInk(high,ChartStyle.Dark)==ChartStyle.Dark.Background,$"Dark's high end takes {ChartSvg.CellInk(high,ChartStyle.Dark)}");
+    // As drawn: HeatGrid's 0.4, the pale end, is written in Light's text colour.
+    Check(HeatInks(HeatSvg(HeatGrid())).Single(c=>c.Text=="0.4").Ink==ChartStyle.Light.Text,"0.4 in the text colour");
+});
 Test("Heatmap table: every rated cell of a ramp writes its value at 4.5:1 or more, on Light, Dark and Midnight",()=>{
     foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight})
     {
@@ -9836,8 +9846,9 @@ Test("Heatmap table: the dark pair keys the legend too, column labels a cell wid
     var key=ChartSvg.LegendKey(HeatGrid(s=>s with{Theme=ChartTheme.Dark}),0);
     Check(key.Contains($"fill='{low}'")&&key.Contains($"fill='{high}'")&&!key.Contains("#E4EDFC"),key);
     // Each column label is centred on its column; two shown side by side keep their estimated widths at 12 px, the size they are drawn
-    // at, and 6 px between them.
-    var wide=HeatGrid(s=>s with{CellWidth=48,Series=[new("A",Enumerable.Range(0,30).Select(i=>new ChartPoint(i,i,$"Season {2000+i}")).ToArray())]});
+    // at, and 6 px between them. At 38 a column, "Season 20…" measured at 11 px would take every second column, 76 apart where 12 px text
+    // needs about 76.6; measured at 12 px it takes every third.
+    var wide=HeatGrid(s=>s with{CellWidth=38,Series=[new("A",Enumerable.Range(0,30).Select(i=>new ChartPoint(i,i,$"Season {2000+i}")).ToArray())]});
     var labels=Regex.Matches(HeatSvg(wide),"<text x='([0-9.]+)' y='[0-9.]+' text-anchor='middle' class='lumen-muted'>([^<]*)</text>").Select(m=>(X:double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),Width:ChartSvg.Wide(m.Groups[2].Value)*12/11)).ToArray();
     Check(labels.Length is > 1 and < 30&&labels.Zip(labels.Skip(1)).All(p=>p.Second.X-p.First.X>=(p.First.Width+p.Second.Width)/2+6),$"{labels.Length} labels");
     var empty=HeatSvg(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,null,"a"){NotRated="no starts"},new ChartPoint(1,null,"b"){NotRated="no starts"}])]}));
