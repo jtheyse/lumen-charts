@@ -3082,23 +3082,28 @@ public static partial class ChartSvg
         w.Text(cx, cy + 22, "TOTAL", "text-anchor='middle' class='lumen-muted' font-size='10'");
     }
 
-    /// <summary>The room a heatmap keeps beside its columns: 130 units for its rows' names on the left, 35 on the right.</summary>
-    internal const double HeatmapMargin = 165;
+    /// <summary>Where a heatmap's grid starts: 130 units in from the left, past its rows' names.</summary>
+    internal const double HeatmapLeft = 130;
+    /// <summary>The room a heatmap keeps beside its columns: <see cref="HeatmapLeft"/> on the left and 35 units on the right.</summary>
+    internal const double HeatmapMargin = HeatmapLeft + 35;
+    /// <summary>The narrowest drawing a chart may be, in SVG units, a sparkline aside.</summary>
+    internal const int MinWidth = 320;
     /// <summary>The widest drawing a chart may be, in SVG units.</summary>
     internal const int MaxWidth = 4096;
     /// <summary>How wide a heatmap is whose <paramref name="columns"/> take <paramref name="cellWidth"/> units each: its margin and its
     /// columns. Validation holds it within <see cref="MaxWidth"/>.</summary>
     internal static double HeatmapWidth(int columns, double cellWidth) => HeatmapMargin + columns * cellWidth;
     /// <summary>The width a chart is drawn at: a heatmap with a <see cref="ChartSpec.CellWidth"/> as wide as its columns make it, rounded up
-    /// to a whole unit, whatever its Width; any other chart its Width.</summary>
+    /// to a whole unit, and never narrower than <see cref="MinWidth"/>, the room left over standing at its right, whatever its Width; any
+    /// other chart its Width.</summary>
     internal static int DrawnWidth(ChartSpec spec) => spec.Kind == ChartKind.Heatmap && spec.CellWidth is { } cell
-        ? (int)Math.Ceiling(HeatmapWidth(spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count(), cell)) : spec.Width;
+        ? Math.Max(MinWidth, (int)Math.Ceiling(HeatmapWidth(spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count(), cell))) : spec.Width;
     /// <summary>How a heatmap writes its values, in its cells, their names and its colour scale: in <see cref="ChartSpec.YFormat"/>, with
     /// <see cref="ChartSpec.YUnit"/> after each.</summary>
     internal static Axis HeatmapValues(ChartSpec s) => new(AxisKind.Linear, 0, 1) { ValueFormat = s.YFormat, Unit = s.YUnit };
 
-    /// <summary>The style's default heatmap ramp, pale blue to deep blue, which reads on a light background.</summary>
-    private const string PaleLow = "#E4EDFC", DeepHigh = "#4069D0";
+    /// <summary>A style left at its defaults, whose heatmap ramp, pale blue to deep blue, reads on a light background.</summary>
+    private static readonly ChartStyle Defaults = new();
     /// <summary>The ramp a dark background takes in its place: its low end a few steps up from the Dark preset's background, its high end
     /// 6.2:1 against it.</summary>
     private const string DarkLow = "#22304A", DarkHigh = "#6E9BFF";
@@ -3107,16 +3112,18 @@ public static partial class ChartSvg
     /// brightest cell is its highest value; any other pair, every pair on a light background and every pair in the classic finish is used
     /// as given.</summary>
     internal static (string Low, string High) HeatmapPair(ChartStyle style) =>
-        style.Finish == ChartFinish.Refined && string.Equals(style.HeatmapLow, PaleLow, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(style.HeatmapHigh, DeepHigh, StringComparison.OrdinalIgnoreCase) && Contrast.Luminance(style.Background) < .2
+        style.Finish == ChartFinish.Refined && string.Equals(style.HeatmapLow, Defaults.HeatmapLow, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(style.HeatmapHigh, Defaults.HeatmapHigh, StringComparison.OrdinalIgnoreCase) && Contrast.Luminance(style.Background) < .2
             ? (DarkLow, DarkHigh) : (style.HeatmapLow, style.HeatmapHigh);
     /// <summary>The colour a heatmap cell's words are written in on <paramref name="fill"/>: whichever of the style's text and background
-    /// colours contrasts more with it, the text colour on a tie, or null, no words, where neither reaches 4.5:1.</summary>
-    internal static string? CellInk(string fill, ChartStyle style)
+    /// colours contrasts more with it, the text colour on a tie, where that reaches 4.5:1; otherwise pure black or pure white, whichever
+    /// contrasts more, black on a tie, one of which always reaches 4.58:1. Every cell's words can be read.</summary>
+    internal static string CellInk(string fill, ChartStyle style)
     {
         double text = Contrast.Ratio(style.Text, fill), ground = Contrast.Ratio(style.Background, fill);
         var (ink, ratio) = text >= ground ? (style.Text, text) : (style.Background, ground);
-        return ratio >= 4.5 ? ink : null;
+        if (ratio >= 4.5) return ink;
+        return Contrast.Ratio("#000000", fill) >= Contrast.Ratio("#FFFFFF", fill) ? "#000000" : "#FFFFFF";
     }
 
     private static void Heatmap(SvgWriter w, ChartSpec s)
@@ -3138,14 +3145,14 @@ public static partial class ChartSvg
             for (var pi = 0; pi < series.Points.Count; pi++)
             {
                 var p = series.Points[pi]; if (!p.Y.HasValue && p.NotRated is null) continue;
-                var x = 130 + Array.IndexOf(cats,p.X)*cw;
+                var x = HeatmapLeft + Array.IndexOf(cats,p.X)*cw;
                 var y = 80+w.Head+si*ch;
                 // A cell is named by its row, its column and its sub-label, then its value; a not-rated one adds why, and leaves out a value
-                // it does not have.
-                var name = (p.Y.HasValue ? PointLabel(series, p, columns, words, sub: p.SubLabel) + Of(series, p) : $"{series.Name}: {p.Label ?? columns.Format(p.X)}{Under(p.SubLabel)}")
+                // it does not have. A heatmap draws no band, so a point's Low and High, which it does not refuse, are not said.
+                var name = (p.Y.HasValue ? PointLabel(series, p with { Low = null, High = null }, columns, words, sub: p.SubLabel) + Of(series, p) : $"{series.Name}: {p.Label ?? columns.Format(p.X)}{Under(p.SubLabel)}")
                     + (p.NotRated is { } why ? $", not rated: {why}" : "");
                 var box = $"x='{N(x+1)}' y='{N(y+1)}' width='{N(Math.Max(0,cw-2))}' height='{N(Math.Max(0,ch-2))}' rx='3'";
-                string? ink;
+                string ink;
                 if (p.NotRated is null)
                 {
                     var color = Mix(low, high, scale!.Value.Map(p.Y!.Value, 0, 1));
@@ -3159,27 +3166,28 @@ public static partial class ChartSvg
                     Datum(w,si,pi,name,$"<rect {box} fill='{w.Style.Background}' stroke='{w.Style.Muted}' stroke-dasharray='3 2'{w.Fixed}/>");
                     ink = w.Style.Text;
                 }
-                if (s.CellText && ink is not null) CellWords(w, x + cw / 2, y + ch / 2, cw, ch, p.Y is { } value ? words.Format(value) : "—", p.SubLabel, ink);
+                if (s.CellText) CellWords(w, x + cw / 2, y + ch / 2, cw, ch, p.Y is { } value ? words.Format(value) : "—", p.SubLabel, ink);
             }
         }
         string Column(double at) => s.Series.SelectMany(x=>x.Points).First(p=>p.X==at).Label ?? LinearScale.Label(at);
-        // Columns of a set width keep their labels 6 units apart; otherwise every column is labelled up to 12, and fewer past them.
-        var step = s.CellWidth is null ? Math.Max(1,(int)Math.Ceiling(cats.Length/12d)) : Math.Max(1,(int)Math.Ceiling((cats.Max(at => Wide(Short(Column(at),10))) + 6) / cw));
+        // Columns of a set width keep their 12 px labels 6 units apart; otherwise every column is labelled up to 12, and fewer past them.
+        var step = s.CellWidth is null ? Math.Max(1,(int)Math.Ceiling(cats.Length/12d)) : Math.Max(1,(int)Math.Ceiling((cats.Max(at => Broad(Short(Column(at),10))) + 6) / cw));
         for (var i = 0; i < cats.Length; i += step)
-            w.Text(130+(i+.5)*cw, s.Height-w.Foot-62, Short(Column(cats[i]),10), "text-anchor='middle' class='lumen-muted'");
+            w.Text(HeatmapLeft+(i+.5)*cw, s.Height-w.Foot-62, Short(Column(cats[i]),10), "text-anchor='middle' class='lumen-muted'");
         var line = scale is not { } ramp ? "Color scale: no rated cells"
             : w.Refined ? $"Color scale: {words.Format(ramp.Min)} low to {words.Format(ramp.Max)} high"
             : $"Color scale: {words.Format(ramp.Min)} (light) to {words.Format(ramp.Max)} (dark)";
         if (w.Refined)
         {
-            // The line ends 12 units short of the drawing's edge: without its prefix where that does not, and cut where even that does not.
-            var room = s.Width - 12 - 130d;
-            if (Wide(line) > room) line = line["Color scale: ".Length..];
+            // The 12 px line ends 12 units short of the drawing's edge: without its prefix where that does not, and cut where even that
+            // does not.
+            var room = s.Width - 12 - HeatmapLeft;
+            if (Broad(line) > room) line = line["Color scale: ".Length..];
             var max = line.Length;
-            while (max > 1 && Wide(Short(line, max)) > room) max--;
+            while (max > 1 && Broad(Short(line, max)) > room) max--;
             line = Short(line, max);
         }
-        w.Text(130, s.Height-w.Foot-36, line, "class='lumen-muted'");
+        w.Text(HeatmapLeft, s.Height-w.Foot-36, line, "class='lumen-muted'");
     }
 
     /// <summary>Writes a heatmap cell's value, 11 px and weight 600, and under it its sub-label, 10 px, in <paramref name="ink"/>, centred

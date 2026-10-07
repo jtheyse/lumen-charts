@@ -898,10 +898,10 @@ public static partial class ChartValidation
     /// same for both. A strip is drawn as tall as its content, so it does not use its height, which may lie anywhere from 16 to 2160.</summary>
     internal static void Dimensions(int width, int height, bool sparkline = false, bool strip = false)
     {
-        if (strip && !sparkline && (width is < 320 or > 4096 || height is < 16 or > 2160)) throw new ArgumentException("A strip's width must be 320–4096; it is drawn as tall as its content, and its Height, which it does not use, must lie within 16–2160.");
+        if (strip && !sparkline && (width is < ChartSvg.MinWidth or > ChartSvg.MaxWidth || height is < 16 or > 2160)) throw new ArgumentException($"A strip's width must be {ChartSvg.MinWidth}–{ChartSvg.MaxWidth}; it is drawn as tall as its content, and its Height, which it does not use, must lie within 16–2160.");
         if (strip && !sparkline) return;
-        if (sparkline && (width is < 60 or > 4096 || height is < 16 or > 2160)) throw new ArgumentException("A sparkline's dimensions must be 60–4096 by 16–2160.");
-        if (!sparkline && (width is < 320 or > 4096 || height is < 240 or > 2160)) throw new ArgumentException("Dimensions must be 320–4096 by 240–2160.");
+        if (sparkline && (width is < 60 or > ChartSvg.MaxWidth || height is < 16 or > 2160)) throw new ArgumentException($"A sparkline's dimensions must be 60–{ChartSvg.MaxWidth} by 16–2160.");
+        if (!sparkline && (width is < ChartSvg.MinWidth or > ChartSvg.MaxWidth || height is < 240 or > 2160)) throw new ArgumentException($"Dimensions must be {ChartSvg.MinWidth}–{ChartSvg.MaxWidth} by 240–2160.");
     }
     internal static void Text(string? text)
     {

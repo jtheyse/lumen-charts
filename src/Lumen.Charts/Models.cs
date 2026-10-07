@@ -715,13 +715,14 @@ public sealed record ChartSpec
     /// <summary>Calendar charts only: the day each week starts on, Monday by default, as ISO 8601 has it. Every other kind refuses
     /// it set.</summary>
     public DayOfWeek WeekStart { get; init; } = DayOfWeek.Monday;
-    /// <summary>On a heatmap, writes each cell's value and, on a second line, its <see cref="ChartPoint.SubLabel"/>, in whichever of
-    /// the style's text and background colours stands out more against the cell, and only where that reaches 4.5:1 and the text fits;
-    /// the cell's name always carries both. Heatmaps only; false by default.</summary>
+    /// <summary>On a heatmap, writes each cell's value and, on a second line, its <see cref="ChartPoint.SubLabel"/>, where they fit, in
+    /// whichever of the style's text and background colours stands out more against the cell where that reaches 4.5:1, and otherwise in
+    /// black or white, whichever stands out more, so every word clears 4.5:1; the cell's name always carries both. Heatmaps only; false
+    /// by default.</summary>
     public bool CellText { get; init; }
     /// <summary>On a heatmap, the width of every column in pixels, at least 24: the drawing grows to 165 plus the columns times this
-    /// width instead of squeezing into <see cref="Width"/>, and in <c>&lt;LumenChart FitWidth&gt;</c> it scrolls sideways when wider
-    /// than its box. Heatmaps only; null by default.</summary>
+    /// width, and never narrower than 320, the room left over at its right, instead of squeezing into <see cref="Width"/>, and in
+    /// <c>&lt;LumenChart FitWidth&gt;</c> it scrolls sideways when wider than its box. Heatmaps only; null by default.</summary>
     public double? CellWidth { get; init; }
     /// <summary>
     /// In the Blazor component, reads every series at once at one X: a vertical guide through every pane at the X nearest the
