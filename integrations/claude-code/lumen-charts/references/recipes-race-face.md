@@ -1,6 +1,6 @@
 # Race results recipes
 
-Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields, a race's gaps to the leader, a ride's effort zones as a strip of shares, a race's scores on meter bars, a ride's best efforts, a race's heart rate lap by lap, a team rider's season with a missed round written in and an organizers' season planner, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.43.0, together with the recipes in `sports.md`.
+Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields, a race's gaps to the leader, a ride's effort zones as a strip of shares, a race's scores on meter bars, a ride's best efforts, a race's heart rate lap by lap, a team rider's season with a missed round written in, a category-by-season heatmap table with a cell for too few starts to rate, and an organizers' season planner, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.46.0, together with the recipes in `sports.md`.
 
 ```csharp
 using System.Globalization;
@@ -699,6 +699,48 @@ string teamRiderSvg = ChartSvg.Render(teamRider);
 - **Never colour alone.** `absent` is a word, not only a gold mark, and the series is named in its legend and in every mark's name.
 - **Keys.** From 0.42.0 a card whose drawing fits it is one tab stop, the roving point; its viewport takes a stop of its own, as a `role=region`, only while the drawing is wider than the card and scrolls.
 
+## Category heatmap
+
+An invented history of four categories over four seasons as a table of colour: a row for each category, a column for each season, each cell its points per rider-start with its starts under it, and a cell with too few starts marked "not rated" instead of coloured as if it were a result (0.46.0).
+
+```csharp
+// The app's results by category and season: the points its riders earned, the starts they came from and the riders who made them.
+// An invented history in which the relay did not run in 2023:
+(string Category, (int Points, int Starts, int Riders)[] Seasons)[] categoryHistory = [
+    ("Sprint", [(34, 12, 5), (41, 14, 6), (45, 13, 6), (52, 15, 7)]),
+    ("Middle distance", [(27, 11, 5), (30, 12, 5), (38, 14, 6), (36, 13, 6)]),
+    ("Long distance", [(8, 4, 3), (24, 10, 4), (19, 11, 4), (31, 12, 5)]),
+    ("Relay", [(0, 0, 0), (20, 10, 5), (14, 9, 6), (25, 10, 5)])];
+const int categoryFirstSeason = 2023, categoryRatedStarts = 10;      // a cell with fewer starts than this is not rated
+var categoryHeatmap = new ChartSpec {
+    Title = "Points per start, by category", Description = "Points per rider-start in each category and season; a dashed cell has too few starts to rate",
+    Kind = ChartKind.Heatmap, Height = 320, Style = raceFace, CellText = true, CellWidth = 72,
+    Series = categoryHistory.Select(category => new ChartSeries(category.Category, category.Seasons.Select((season, i) =>
+        new ChartPoint(i, season.Starts > 0 ? Math.Round((double)season.Points / season.Starts, 1) : null, $"{categoryFirstSeason + i}")
+        {
+            SubLabel = $"/{season.Starts} starts",
+            ValueNote = season.Starts > 0 ? $" · {season.Points} pts, {season.Riders} riders" : null,   // brings its own separator
+            NotRated = season.Starts < categoryRatedStarts ? "too few starts to rate" : null
+        }).ToArray())).ToArray()
+};
+string categorySvg = ChartSvg.Render(categoryHeatmap);           // 453 wide: 165 + four seasons of 72
+string categoryTable = ChartExport.HtmlTable(categoryHeatmap);   // the same cells as a table, rows by columns, for a static page and screen readers
+// Interactive: <LumenChart Spec="categoryHeatmap" FitWidth="true" />   ("View data" shows the table)
+```
+
+- **Each cell.** `CellText = true` writes the value, 11 px at weight 600, and under it the point's `SubLabel`, 10 px, centred. Every word is in the style's text colour here, `hi` `#F5F6F7`, which clears 4.5:1 on every cell, 4.51:1 at the least on the brightest red `#E30613`; where neither the text nor the background colour reaches 4.5:1 on a cell, Lumen writes it in black or white instead, so no cell is left without its number. A sub-label that does not fit the cell is dropped first, then the value, and the cell's name always says both. `ValueNote` is never drawn in a cell: it is in the cell's name and in the table.
+- **Names.** Each cell is a focusable mark named as a column chart's is: its row, its column, then ` · ` and its sub-label, then its value and its `ValueNote` as written, `Sprint: 2023 · /12 starts, 2.8 · 34 pts, 5 riders`. The note brings its own separator, so write it (`" · 34 pts, 5 riders"`); a note without one would run on from the value. A not-rated cell adds `, not rated: ` and its reason.
+- **Not rated.** Whether a cell is rated is the app's rule, here fewer than ten starts: `NotRated = "too few starts to rate"` (1 to 24 characters, no line breaks). Three cells are not rated. Long distance in 2023 has four starts and a value, `Long distance: 2023 · /4 starts, 2 · 8 pts, 3 riders, not rated: too few starts to rate`; Relay in 2025 has nine starts; and Relay in 2023 had none, so its `Y` is `null`: the cell is still drawn, writes `—`, and is named without a value, `Relay: 2023 · /0 starts, not rated: too few starts to rate`. A `null` `Y` without `NotRated` draws no cell at all. A not-rated cell is unshaded (the card's colour), outlined with a dash in `Muted` at full opacity (4.87:1 on the card), and left out of the colour scale: `Color scale: 1.7 low to 3.5 high` reads the thirteen rated cells, and the 1.6 of Relay in 2025 does not pull it lower.
+- **Never colour alone.** The numbers say what the colours say, and the dashes and the words say what the colour of a not-rated cell cannot. The style's ramp starts at the panel colour `#1E1F22`, which stands only 1.10:1 off the card `#161618`, so the lowest cells, Long distance in 2025 here, are told apart by their hairline outline and their number, and a not-rated cell from them by its dashes. The scale line is words too: the refined finish writes `{min} low to {max} high`, which is right on any ramp, where 0.45.0 wrote `(light) to (dark)`.
+- **Width.** `CellWidth = 72` gives each season 72 pixels, enough for `/15 starts` under its value, so the drawing is 165 + 4 × 72 = 453 wide whatever `Width` says (it is not used, so only `Height` is set; the rows share what is left, about 34 units each here, and a row needs about 29 for both lines). A narrower `CellWidth` drops the sub-label first and then the value; 24 is the least, and more than 4096 in all is refused with the number of columns and pixels. `<LumenChart>` shows the drawing at exactly its own size, with or without `FitWidth`: in a card narrower than 453 pixels it scrolls sideways (its viewport is then a `role=region` stop, as any scrolling chart's is) and it is never squeezed or stretched. A page that draws the static SVG must keep it from squeezing itself, since the root is `width:100%`: put it in a box that scrolls and give the inner one the drawn width, `<div style="overflow-x:auto"><div style="min-width:453px">…svg…</div></div>`; at 375 pixels the bare SVG shrank to 359 and the wrapped one kept 453 and scrolled. On a phone the row names scroll away with the cells, which is what the table is for.
+- **The table.** `ChartExport.HtmlTable(spec)` returns a `<table class='lumen-grid-table'>` of the same cells, the seasons across the head and a row for each category, each `<th scope='row'>`, and each cell the value, the `ValueNote`, ` · ` and the sub-label, then `, not rated: …` where it applies: `2.8 · 34 pts, 5 riders · /12 starts`, `— · /0 starts, not rated: too few starts to rate`. Every word is HTML-encoded, so the `·` in a note is written `&#183;`. It is a bare table: on a static page wrap it in the region `<LumenChart>`'s "View data" uses, so a table taller than its box can be scrolled from the keyboard, and link `lumen.css`, which styles the wrapper and the grid and gives the wrapper its focus ring:
+
+```html
+<div class="lumen-table" tabindex="0" role="region" aria-label="Chart data">…ChartExport.HtmlTable(categoryHeatmap)…</div>
+```
+
+- **Data.** `ChartExport.Csv(spec)` writes a `Note` column, since cells carry notes, and after it a `NotRated` column, since some cell is not rated, empty for the rated ones; it has no column for sub-labels. The invented history above stands for the app's own: Lumen does not work out starts, riders or points per start, and does not decide which cells are rated.
+
 ## Season planner
 
 Organizers choosing a date see the year at a glance: months aligned by weekday so the weekends line up down the page, public holidays, school holidays and long weekends marked, and other organizers' events drawn by how much they compete with yours — the app decides that, Lumen only draws it. Zoom by drawing a month or a day. Every event is invented here. The planner is for PCs and tablets, so the wide layout is the main one (0.43.0). In a Blazor app `<LumenPlanner>` (0.44.0) is the interactive version: the reader zooms from the year to a month to a day, steps and filters, and it chooses its own layout and width; the static calls below are for pages without it, for email and for the server.
@@ -757,5 +799,5 @@ The same planner in a Blazor page with an interactive render mode, beside those 
 - **Static:** `ChartSvg.Render(spec)` at `Width = 340` (or the card's own width) is the whole chart: labels, colours, tooltips and names, with no script. Write it into the page, or rasterise it on the server with an SVG library of your choice; Lumen ships no PNG or PDF renderer. Each line's value label stands on a copy of itself stroked in the background colour, not on SVG 2's `paint-order`, so rasterisers without it draw it the same.
 - **Interactive:** `<LumenChart Spec="recommended" FitWidth="true" />` measures its card and redraws at that width, never below 320 px; before it is interactive it is drawn at `Width` and scaled to fit. `Height` is kept, so choose one that reads at a phone's width.
 - **Gaps:** a race with no place or no points is `null`, never zero: the line breaks, no mark or label is drawn, and the next race's change still compares with the last race that had a place. A `GapLabel` (0.42.0) writes a word there instead, `absent`, and names the point; a race that was not held has no point at all. A race with no field size draws its place without a note.
-- **CSV:** `ChartExport.Csv(spec)` adds a `Note` column whenever a point carries a note, so the export keeps each field size beside its place.
+- **CSV:** `ChartExport.Csv(spec)` adds a `Note` column whenever a point carries a note, so the export keeps each field size beside its place, and a heatmap with a not-rated cell adds a `NotRated` column after it (0.46.0).
 - **Sparklines:** `ChartSvg.Render` draws a sparkline at its own size, `width:120px;max-width:100%`, rather than the width of its box. In the component, `<LumenChart Spec="pb" />` draws the drawing alone with its tooltips — no legend, toolbar, zoom or data table — and a tooltip stands just above the drawing, as wide as its words. A sparkline may be as small as 60 by 16; other kinds than line, area, scatter and column, panes and value labels are refused.
