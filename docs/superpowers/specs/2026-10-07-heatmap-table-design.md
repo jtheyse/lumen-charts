@@ -69,14 +69,14 @@ Heatmap only; refused elsewhere with a reason; blank or control characters refus
 Heatmap only; refused elsewhere and below 24.
 
 - Each column takes that width; the drawing's width becomes `165 + columns × CellWidth` (the spec's `Width` is ignored for a heatmap with `CellWidth`; the result must stay within the size limits, else refused with a reason).
-- In `<LumenChart FitWidth="true">`, a heatmap with `CellWidth` is drawn at that width and, when wider than its box, scrolls sideways (the component sets `--lumen-drawn`, as `<LumenGraph>` does); it is never squeezed.
+- In `<LumenChart>`, a heatmap with `CellWidth` is shown at exactly its drawn size, with or without `FitWidth` and before the box is measured: it scrolls sideways when wider than its box and is never squeezed or stretched (the component sets `--lumen-drawn` and a `lumen-fixed` class whose rule fixes the drawing's min- and max-width to it). (Amended during the build: a min-width alone let a wide box stretch it.)
 - Column labels are thinned so that no two overlap (text-width estimate against the cell width), in place of the fixed "every n past 12 columns" rule — only when `CellWidth` is set, so existing heatmaps do not move.
 
 ### `ChartExport.HtmlTable(ChartSpec spec)` → `string`
 
 Heatmaps only (an `ArgumentException` saying so for other kinds); validates the spec first.
 
-- `<table class='lumen-grid-table'><caption>{title}</caption>`, a header row with an empty corner cell and one `<th scope='col'>` per column label, then one row per series with `<th scope='row'>{series name}</th>` and one `<td>` per column: the value (formatted), then `" · {sub-label}"` when present, then `", not rated: {words}"` when not rated; `—` for a not-rated cell without a value; empty for no point / null value.
+- `<table class='lumen-grid-table'><caption>{title}</caption>`, a header row with an empty corner cell and one `<th scope='col'>` per column label, then one row per series with `<th scope='row'>{series name}</th>` and one `<td>` per column: the value (formatted) followed by its `ValueNote` when it has one (as the cell's name reads), then `" · {sub-label}"` when present, then `", not rated: {words}"` when not rated; `—` for a not-rated cell without a value; empty for no point / null value.
 - Single-quoted attributes and HTML-encoded text, like `PlannerSvg.Table`.
 
 ### Component and CSV
