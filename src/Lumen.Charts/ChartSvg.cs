@@ -3177,7 +3177,7 @@ public static partial class ChartSvg
                 {
                     // Unshaded and dashed, so it is never read as a low score; its name says it is not rated.
                     Datum(w,si,pi,name,$"<rect {box} fill='{w.Style.Background}' stroke='{w.Style.Muted}' stroke-dasharray='3 2'{w.Fixed}/>");
-                    ink = w.Style.Text;
+                    ink = CellInk(w.Style.Background, w.Style);
                 }
                 if (s.CellText) CellWords(w, x + cw / 2, y + ch / 2, cw, ch, p.Y is { } value ? words.Format(value) : "—", p.SubLabel, ink);
             }

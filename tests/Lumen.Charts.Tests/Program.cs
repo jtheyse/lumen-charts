@@ -10021,6 +10021,26 @@ Test("Heatmap table: the component's status line reads a selected cell as its na
     var said=Enumerable.Range(0,2).SelectMany(si=>Enumerable.Range(0,2).Select(pi=>Status(grid,si,pi))).ToArray();
     Check(said.SequenceEqual(HeatNames(grid).Skip(1)),string.Join(" | ",said));
 });
+Test("Heatmap table: a not-rated cell writes in the ink every other cell does, so a text colour weak on the background still reads, and no preset's ink moves",()=>{
+    // A not-rated cell is drawn dashed on the chart's background, and writes its value, or a dash, in the first line of its cell.
+    (string Ink,string Text)[] NotRated(ChartSpec spec)=>Regex.Matches(HeatSvg(spec),"<rect[^>]*stroke-dasharray='3 2'[^>]*/>\\s*(?:</?g[^>]*>\\s*)*<text[^>]*fill='(#[0-9A-Fa-f]{6})'[^>]*>([^<]*)<")
+        .Select(m=>(m.Groups[1].Value,m.Groups[2].Value)).ToArray();
+    // #999999 is 2.8:1 on white, where Light's own text is 10.9:1.
+    var weak=ChartStyle.Light with{Text="#999999"};
+    var empty=(s:HeatGrid(c=>c with{Style=weak,Series=[c.Series[0],c.Series[1] with{Points=[new ChartPoint(0,null,"2025"){SubLabel="/0 starts",NotRated="no starts"},c.Series[1].Points[1]]}]}),text:"—");
+    foreach(var (spec,text) in new[]{(HeatGrid(c=>c with{Style=weak}),"1.2"),(empty.s,empty.text)})
+    {
+        var cell=NotRated(spec).Single();
+        Check(cell.Text==text&&Lumen.Charts.Contrast.Ratio(cell.Ink,weak.Background)>=4.5,$"{text} in {cell.Ink} on {weak.Background}: {Lumen.Charts.Contrast.Ratio(cell.Ink,weak.Background):0.0}:1");
+    }
+    // A preset's text colour reaches 4.5:1 on its background, so it is written in it as before.
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight})
+    {
+        Check(ChartSvg.CellInk(style.Background,style)==style.Text,$"{style.Background} takes {ChartSvg.CellInk(style.Background,style)}");
+        var cell=NotRated(HeatGrid(c=>c with{Style=style})).Single();
+        Check(cell.Text=="1.2"&&cell.Ink==style.Text,$"{style.Background}: {cell.Ink}");
+    }
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;
