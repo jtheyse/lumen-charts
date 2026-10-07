@@ -261,6 +261,8 @@ else
         status=Spec.Kind is ChartKind.Gauge or ChartKind.Ring ? ChartSvg.LegendLabel(Spec,index)
             : Spec.Kind==ChartKind.Strip ? ChartSvg.PartLabel(Spec,point)
             : Spec.Kind==ChartKind.Calendar ? Day(index,p)
+            // A heatmap cell reads as the drawing names it: its sub-label, its value, and why it is not rated where it is not.
+            : Spec.Kind==ChartKind.Heatmap ? ChartSvg.HeatmapCellName(Spec,Spec.Series[index],p)
             : p.XEnd is {} end&&(Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Blocks&&p.Y is {} height ? $"{Spec.Series[index].Name}: {(p.Label is null ? "" : p.Label+", ")}{xAxis.Format(p.X)} to {xAxis.Format(end)} = {Measure(Spec.Series[index]).Format(height)}{p.ValueNote}{Averages(index,p)}"
             : p.XEnd is {} finish ? $"{Spec.Series[index].Name}: {xAxis.Format(p.X)} to {xAxis.Format(finish)}"
             : (Spec.Series[index].Kind ?? Spec.Kind)==ChartKind.Range&&p.Low is {} low&&p.High is {} high ? $"{Spec.Series[index].Name}: {Category(p)} = {Measure(Spec.Series[index]).Format(low)} to {Measure(Spec.Series[index]).Format(high)}{(p.Y is {} typical ? $", average {Measure(Spec.Series[index]).Format(typical)}" : "")}"

@@ -10001,6 +10001,26 @@ Test("Heatmap table: the drawn width is the drawing the reader sees, a hidden se
     const string fit=".lumen-fit>.lumen-viewport>svg{min-width:var(--lumen-drawn,0)}",hold=".lumen-fixed>.lumen-viewport>svg{min-width:var(--lumen-drawn);max-width:var(--lumen-drawn)}";
     Check(css.Split(".lumen-fit").Length==2&&css.Contains(fit)&&css.Split(".lumen-fixed").Length==2&&css.Contains(hold)&&css.IndexOf(fit)<css.IndexOf(hold),"the fixed drawing's rule");
 });
+// 0.46.0's final fixes.
+Test("Heatmap table: the component's status line reads a selected cell as its name reads it, sub-label, value and why it is not rated included",()=>{
+    var flags=BindingFlags.NonPublic|BindingFlags.Instance;
+    string Status(ChartSpec spec,int series,int point){var said="";Operate(spec,async c=>{await c.SelectPoint(series,point);said=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(c)!;});return said;}
+    // Not rated, with a value: the status read "Long distance: 2025 = 1.2", leaving out both the sub-label and that it is not rated.
+    var grid=HeatGrid();
+    var rated=Status(grid,1,0);
+    Check(rated=="Long distance: 2025 · /4 starts, 1.2, not rated: too few starts to rate"&&HeatNames(grid).Contains(rated),rated);
+    // Not rated, without a value: it read "Long distance: 2025 = missing".
+    var empty=HeatGrid(s=>s with{Series=[s.Series[0],s.Series[1] with{Points=[new ChartPoint(0,null,"2025"){SubLabel="/0 starts",NotRated="no starts"},s.Series[1].Points[1]]}]});
+    var none=Status(empty,1,0);
+    Check(none=="Long distance: 2025 · /0 starts, not rated: no starts"&&HeatNames(empty).Contains(none),none);
+    // Rated, with a sub-label, a unit and a note: the sub-label comes before the value, and the value is written as the cell writes it.
+    var noted=HeatGrid(s=>s with{YUnit=" pts",Series=[s.Series[0] with{Points=[s.Series[0].Points[0] with{ValueNote=" · 34 pts, 5 riders"},s.Series[0].Points[1]]},s.Series[1]]});
+    var sprint=Status(noted,0,0);
+    Check(sprint=="Sprint: 2025 · /12 starts, 2.8 pts · 34 pts, 5 riders"&&HeatNames(noted).Contains(sprint),sprint);
+    // Every drawn cell reads as it is named, in the order it is drawn.
+    var said=Enumerable.Range(0,2).SelectMany(si=>Enumerable.Range(0,2).Select(pi=>Status(grid,si,pi))).ToArray();
+    Check(said.SequenceEqual(HeatNames(grid).Skip(1)),string.Join(" | ",said));
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

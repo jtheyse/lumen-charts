@@ -3130,6 +3130,20 @@ public static partial class ChartSvg
         return Contrast.Ratio("#000000", fill) >= Contrast.Ratio("#FFFFFF", fill) ? "#000000" : "#FFFFFF";
     }
 
+    /// <summary>A heatmap cell's name, as the drawing gives it to the cell and as the component's status line reads the cell when it is
+    /// selected: its row, its column and its sub-label, then its value and the value's note, written in <see cref="ChartSpec.YFormat"/>
+    /// and <see cref="ChartSpec.YUnit"/>, and, for a cell that is not rated, why. A cell without a value leaves it out. A heatmap draws
+    /// no band, so a point's Low and High, which it does not refuse, are not said.</summary>
+    internal static string HeatmapCellName(ChartSpec spec, ChartSeries series, ChartPoint point)
+    {
+        // A column without a label is named by its X.
+        var columns = new Axis(AxisKind.Linear, 0, 1);
+        var name = point.Y.HasValue
+            ? PointLabel(series, point with { Low = null, High = null }, columns, HeatmapValues(spec), sub: point.SubLabel) + Of(series, point)
+            : $"{series.Name}: {point.Label ?? columns.Format(point.X)}{Under(point.SubLabel)}";
+        return name + (point.NotRated is { } why ? $", not rated: {why}" : "");
+    }
+
     private static void Heatmap(SvgWriter w, ChartSpec s)
     {
         var cats = HeatmapColumns(s);
@@ -3138,8 +3152,6 @@ public static partial class ChartSvg
         LinearScale? scale = values.Length > 0 ? LinearScale.Create(values) : null;
         var (low, high) = HeatmapPair(w.Style);
         var words = HeatmapValues(s);
-        // A column without a label is named by its X.
-        var columns = new Axis(AxisKind.Linear, 0, 1);
         // A description or a source on two lines takes its 14 pixels from the rows' height.
         var cw = s.CellWidth ?? (s.Width - HeatmapMargin) / cats.Length; var ch = (s.Height - w.Head - w.Foot - 160d) / s.Series.Count;
         for (var si = 0; si < s.Series.Count; si++)
@@ -3151,10 +3163,7 @@ public static partial class ChartSvg
                 var p = series.Points[pi]; if (!p.Y.HasValue && p.NotRated is null) continue;
                 var x = HeatmapLeft + Array.IndexOf(cats,p.X)*cw;
                 var y = 80+w.Head+si*ch;
-                // A cell is named by its row, its column and its sub-label, then its value; a not-rated one adds why, and leaves out a value
-                // it does not have. A heatmap draws no band, so a point's Low and High, which it does not refuse, are not said.
-                var name = (p.Y.HasValue ? PointLabel(series, p with { Low = null, High = null }, columns, words, sub: p.SubLabel) + Of(series, p) : $"{series.Name}: {p.Label ?? columns.Format(p.X)}{Under(p.SubLabel)}")
-                    + (p.NotRated is { } why ? $", not rated: {why}" : "");
+                var name = HeatmapCellName(s, series, p);
                 var box = $"x='{N(x+1)}' y='{N(y+1)}' width='{N(Math.Max(0,cw-2))}' height='{N(Math.Max(0,ch-2))}' rx='3'";
                 string ink;
                 if (p.NotRated is null)
