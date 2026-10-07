@@ -1864,7 +1864,8 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
         if(kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Blocks)
             ChartSvg.Render(spec with{XFormat=ValueFormat.Duration});
         else Check(Refusal(spec with{XFormat=ValueFormat.Duration}).Contains(kind==ChartKind.Calendar?"writes its own calendar":"X format"),$"{kind}: X format");
-        if(kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Histogram)
+        // A heatmap's Y format, from 0.46.0, writes its cells' values, so it is accepted like a calendar's.
+        if(kind is ChartKind.Donut or ChartKind.Radar or ChartKind.Histogram)
         {
             Check(Refusal(spec with{YFormat=ValueFormat.Compact}).Contains("Y format"),$"{kind}: Y format");
             Check(Refusal(spec with{Y2Format=ValueFormat.Duration}).Contains("Y format"),$"{kind}: Y2 format");
@@ -4230,11 +4231,12 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // written after its height, and since 0.35.0 the chart's X tick labels, written after its X ticks, and since 0.36.0 the chart's shared
     // readout, written last, which is never hashed, and since 0.37.0 the chart's sampling, written after its rendered points, and its pane
     // titles, written after its panes, and since 0.39.0 its bar tracks and drawn titles, and since 0.41.0 its painted background and
-    // fitted height, written last.
+    // fitted height, written last, and since 0.46.0 its cell text, written after the week start (its cell width is null until set, so
+    // never written).
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false}";
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
@@ -6869,7 +6871,9 @@ Test("ValueFormat.Signed writes a plus for a positive value, a true minus for a 
     Check(status=="Change: Mon = −3"&&System.Net.WebUtility.HtmlDecode(html).Contains("<td>+4</td>"),status);
     // A time axis writes its calendar, and the kinds without a Y axis or with a count on it refuse it, as they refuse every other format.
     Check(Refused(Spec() with{XAxis=AxisKind.Time,XFormat=ValueFormat.Signed}).StartsWith("A time axis writes its own calendar"),"a signed time axis");
-    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Histogram}) Check(Refused(Sample(kind) with{YFormat=ValueFormat.Signed}).StartsWith("A Y format applies"),$"{kind}");
+    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Radar,ChartKind.Histogram}) Check(Refused(Sample(kind) with{YFormat=ValueFormat.Signed}).StartsWith("A Y format applies"),$"{kind}");
+    // 0.46.0: a heatmap writes its cells' values in a Y format, so it takes one.
+    ChartValidation.Validate(Sample(ChartKind.Heatmap) with{YFormat=ValueFormat.Signed});
     // Gauges, rings and calendars write their values in it.
     Check(ChartSvg.Render(Sample(ChartKind.Gauge) with{YFormat=ValueFormat.Signed}).Contains("+72"),"a gauge");
 });
@@ -7413,8 +7417,11 @@ Test("YUnit follows every value the axis writes: its ticks, names and tooltips, 
 });
 Test("YUnit is refused past 8 characters and where there is no such axis, each with its reason",()=>{
     Check(Refused(Spec() with{YUnit="seconds!!"}).StartsWith("YUnit is written after every value"),"long");
-    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Gauge,ChartKind.Ring,ChartKind.Timeline,ChartKind.Calendar})
+    foreach(var kind in new[]{ChartKind.Donut,ChartKind.Radar,ChartKind.Histogram,ChartKind.Box,ChartKind.Violin,ChartKind.Gauge,ChartKind.Ring,ChartKind.Timeline,ChartKind.Calendar})
         Check(Refused(Sample(kind) with{YUnit="s"}).Length>0,$"{kind}");
+    // 0.46.0: a heatmap writes its cells' values after a unit, as a column chart writes its axis's, so it takes one, and not past 8 characters.
+    ChartValidation.Validate(Sample(ChartKind.Heatmap) with{YUnit="s"});
+    Check(Refused(Sample(ChartKind.Heatmap) with{YUnit="seconds!!"}).StartsWith("YUnit is written after every value"),"a heatmap's long");
     Check(Refused(Spec() with{Panes=[new(){YUnit="123456789"}],Series=[..Spec().Series,new("P",[new(0,1)]){Pane=1}]}).StartsWith("YUnit is written"),"a pane's");
     Check(ChartSvg.Render(Spark() with{YUnit=" kg"}).Contains("aria-label='S: A, 3 kg'"),"a sparkline's names");
 });
@@ -7960,10 +7967,13 @@ Test("A sub-label is said after its category's name in every mark's name and too
     var plain=Operate(Spec(ChartKind.Column),async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,1);});
     Check(plain.Contains("<tr><td>Series</td><td>B</td><td>5</td></tr>")&&plain.Contains("Series: B = 5</span>"),"a chart without sub-labels");
 });
-Test("A sub-label is refused off column, bar and stacked column charts, on a sparkline, blank, past 16 characters, across lines, and where two series give one category different ones, each with its reason",()=>{
+Test("A sub-label is refused off column, bar, stacked column and heatmap charts, on a sparkline, blank, past 16 characters, across lines, and where two series give one category different ones (heatmap cells may differ), each with its reason",()=>{
     ChartSpec With(ChartKind kind,string sub)=>new(){Title="S",Kind=kind,Series=[new("S",[new(0,1,"A"){SubLabel=sub},new(1,2,"B")])]};
-    foreach(var kind in new[]{ChartKind.Line,ChartKind.Scatter,ChartKind.Area,ChartKind.Donut,ChartKind.Heatmap,ChartKind.Radar})
-        Check(Refused(With(kind,"x")).StartsWith("A sub-label is a second line under a category's name, so it applies to column, bar and stacked column charts"),$"{kind}: {Refused(With(kind,"x"))}");
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Scatter,ChartKind.Area,ChartKind.Donut,ChartKind.Radar})
+        Check(Refused(With(kind,"x")).StartsWith("A sub-label is a second line under a category's name, so it applies to column, bar, stacked column and heatmap cells"),$"{kind}: {Refused(With(kind,"x"))}");
+    // 0.46.0: a heatmap cell takes one, under the same limits, and each cell in a column may differ from the others.
+    Check(Svg(With(ChartKind.Heatmap,"x")) is not null&&Refused(With(ChartKind.Heatmap," ")).StartsWith("A sub-label is written under its category's name, so it needs words")&&Refused(With(ChartKind.Heatmap,new string('x',17))).StartsWith("A sub-label is one short line"),"a heatmap's");
+    Check(Svg(new ChartSpec{Title="T",Kind=ChartKind.Heatmap,Series=[new("A",[new(0,1,"L1"){SubLabel="/12 starts"}]),new("B",[new(0,2,"L1"){SubLabel="/4 starts"}])]}) is not null,"a heatmap's cells differ in a column");
     Check(Refused(Spark(ChartKind.Column) with{Series=[new("S",[new(0,1){SubLabel="x"},new(1,2)])]}).StartsWith("A sparkline draws its data alone, with no words, so its points take no sub-labels"),"a sparkline");
     Check(Refused(With(ChartKind.Column," ")).StartsWith("A sub-label is written under its category's name, so it needs words"),"blank");
     Check(Refused(With(ChartKind.Column,new string('x',17))).StartsWith("A sub-label is one short line")&&Refused(With(ChartKind.Bar,"one\ntwo")).StartsWith("A sub-label is one short line")&&Svg(With(ChartKind.Column,new string('x',16))) is not null,"long or two lines");
@@ -9667,6 +9677,23 @@ Test("Heatmap table: the new options are refused where they mean nothing, and ou
     Reject(()=>ChartValidation.Validate(HeatGrid(s=>s with{Series=[new("A",Enumerable.Range(0,100).Select(i=>new ChartPoint(i,i)).ToArray())],CellWidth=40})));   // 165+4000 > 4096
     foreach(var bad in new[]{""," ",new string('x',25),"a\nb"})
         Reject(()=>ChartValidation.Validate(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1){NotRated=bad}])]})));
+});
+Test("Heatmap table: each refusal says why, and a cell width that is no number is refused too",()=>{
+    var line=new ChartSpec{Title="Line",Kind=ChartKind.Line,Series=[new("A",[new(0,1),new(1,2)])]};
+    string Why(ChartSpec spec){try{ChartValidation.Validate(spec);}catch(ArgumentException error){return error.Message;}throw new Exception("a chart was accepted that should not be");}
+    Check(Why(line with{CellText=true}).StartsWith("Cell text and cell width apply to heatmaps, which draw a grid of cells;")&&Why(line with{CellWidth=30}).StartsWith("Cell text and cell width apply to heatmaps"),"cell text and width off a heatmap");
+    foreach(var width in new[]{23,double.NaN,double.PositiveInfinity,double.NegativeInfinity})
+        Check(Why(HeatGrid(s=>s with{CellWidth=width})).StartsWith("A heatmap's cell is at least 24 pixels wide, so its text and focus ring fit."),$"width {width}");
+    var wide=Why(HeatGrid(s=>s with{Series=[new("A",Enumerable.Range(0,100).Select(i=>new ChartPoint(i,i)).ToArray())],CellWidth=40}));
+    Check(wide.StartsWith("At 40 pixels a column, 100 columns make a drawing 4165 pixels wide, past the 4096 a chart may be;"),wide);
+    Check(Why(line with{Series=[new("A",[new ChartPoint(0,1){NotRated="x"},new(1,2)])]}).StartsWith("NotRated marks a heatmap cell as not rated and says why"),"not rated off a heatmap");
+    Check(Why(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1){NotRated=" "}])]})).StartsWith("A not-rated reason is written in the cell's name, so it needs words"),"blank");
+    foreach(var bad in new[]{new string('x',25),"a\nb","a\rb","a\tb"})
+        Check(Why(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1){NotRated=bad}])]})).StartsWith("A not-rated reason is written in the cell's name, at most 24 characters and no line breaks"),$"{bad.Length} characters");
+    // The grid may be 4096 wide, no more: 165 plus one column of 3931 is exactly that.
+    var one=HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1)])]});
+    ChartValidation.Validate(one with{CellWidth=3931});
+    Check(Why(one with{CellWidth=3932}).Contains("make a drawing 4097 pixels wide, past the 4096"),"one pixel past");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

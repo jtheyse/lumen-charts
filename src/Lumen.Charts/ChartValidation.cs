@@ -25,7 +25,6 @@ public static partial class ChartValidation
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");
         if (spec.Kind == ChartKind.Timeline) Timeline(spec);
         if (spec.Kind == ChartKind.Calendar) Calendar(spec);
-        if (spec.Kind == ChartKind.Heatmap) Heatmap(spec);
         if (spec.XAxis != AxisKind.Linear && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Calendar or ChartKind.Blocks))
             throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC, band and range charts, and a time axis to timelines, blocks and calendars; the other kinds index or derive their X values.");
         Blocks(spec);
@@ -108,16 +107,9 @@ public static partial class ChartValidation
         if (spec.Kind != ChartKind.Calendar && (spec.CalendarLayout != CalendarLayout.Weeks || spec.CalendarCell != CalendarCell.Square || spec.WeekStart != DayOfWeek.Monday))
             throw new ArgumentException("CalendarLayout, CalendarCell and WeekStart lay out a calendar's days, so they apply to calendar charts only.");
         if (spec.Kind != ChartKind.Heatmap && (spec.CellText || spec.CellWidth is not null))
-            throw new ArgumentException("Cell text and cell width apply to heatmaps, which draw a grid of cells; the other kinds draw their marks in other layouts, so they ignore these.");
-        if (spec.CellWidth is not null && spec.CellWidth < 24)
+            throw new ArgumentException("Cell text and cell width apply to heatmaps, which draw a grid of cells; the other kinds draw no such grid, so there are no cells to write in or to widen.");
+        if (spec.CellWidth is { } cellWidth && !(Finite(cellWidth) && cellWidth >= 24))
             throw new ArgumentException("A heatmap's cell is at least 24 pixels wide, so its text and focus ring fit.");
-        if (spec.CellWidth is not null)
-        {
-            var columns = spec.Series!.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count();
-            var width = 165 + columns * spec.CellWidth;
-            if (width > 4096)
-                throw new ArgumentException($"At {spec.CellWidth} pixels a column, {columns} columns make a drawing {width} pixels wide, past the 4096 a chart may be; narrow the cells or show fewer columns.");
-        }
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
         foreach (var annotation in spec.Annotations)
         {
@@ -340,8 +332,11 @@ public static partial class ChartValidation
         {
             foreach (var s in spec.Series)
                 if (s.Points.Select(p => p.X).Distinct().Count() != s.Points.Count) throw new ArgumentException("Category X values must be unique within each series.");
-            if (spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count() > 100)
+            var categories = spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count();
+            if (categories > 100)
                 throw new ArgumentException("Category charts support at most 100 categories; aggregate first.");
+            if (spec.CellWidth is { } columnWidth && 165 + categories * columnWidth > 4096)
+                throw new ArgumentException(FormattableString.Invariant($"At {columnWidth} pixels a column, {categories} columns make a drawing {165 + categories * columnWidth} pixels wide, past the 4096 a chart may be; narrow the cells or show fewer columns."));
             if (spec.Kind is not ChartKind.Heatmap && spec.Series.SelectMany(s => s.Points).Where(p => p.SubLabel is not null).GroupBy(p => p.X).Any(category => category.Select(p => p.SubLabel).Distinct().Count() > 1))
                 throw new ArgumentException("A category's sub-label is written once under its name, so the points of several series in one category may repeat it or leave it null, but not give different ones.");
         }
@@ -684,11 +679,12 @@ public static partial class ChartValidation
     /// <summary>A not-rated reason marks a heatmap cell as not rated and says why, so it needs a heatmap, words on one short line, and the words to make sense.</summary>
     private static void NotRated(ChartSpec spec, string reason)
     {
+        Text(reason);
         if (spec.Kind != ChartKind.Heatmap)
             throw new ArgumentException("NotRated marks a heatmap cell as not rated and says why, such as \"too few starts to rate\", so it applies to heatmap cells only; the other kinds draw other marks.");
         if (string.IsNullOrWhiteSpace(reason))
             throw new ArgumentException("A not-rated reason is written in the cell's name, so it needs words; leave NotRated null to write none.");
-        if (reason.Length > MaxNotRated || reason.Any(c => c is '\n' or '\r'))
+        if (reason.Length > MaxNotRated || reason.Any(c => c is '\n' or '\r' or '\t'))
             throw new ArgumentException($"A not-rated reason is written in the cell's name, at most {MaxNotRated} characters and no line breaks, such as too few starts to rate.");
     }
 
@@ -878,12 +874,6 @@ public static partial class ChartValidation
             throw new ArgumentException("A calendar colours each day by its value, from YZones or the style's heatmap ramp, so its points take no colours of their own.");
         if (points.Any(p => p.Y < 0))
             throw new ArgumentException("A calendar's values are amounts, such as distance, time or training stress, so none can be negative; zero or a missing value is a day without activity.");
-    }
-
-    /// <summary>Heatmap-specific validation is done in the main Validate method.</summary>
-    private static void Heatmap(ChartSpec spec)
-    {
-        // Validation for CellText, CellWidth and NotRated is done in Validate.
     }
 
     /// <summary>A zone without its own colour takes the style's ramp at its position, so a scale longer than the ramp
