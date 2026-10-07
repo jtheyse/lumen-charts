@@ -46,7 +46,7 @@ Heatmap only; refused elsewhere with a reason; blank or control characters refus
 - The cell is drawn even when `Y` is null: fill = `Style.Background`, a dashed outline (`stroke-dasharray='3 2'`) in `Style.Muted`, which must clear 3:1 against the background (the existing style checks guarantee Muted's contrast; the dashed outline uses full opacity).
 - A not-rated cell's value (if any) is **left out of the colour scale's minimum and maximum**.
 - With `CellText`, it writes its value (if any) and sub-label in `Style.Text`, or "—" when it has no value.
-- Its name: `"{row}: {column}, {value}{sub}, not rated: {NotRated}"`, with the value part omitted when there is none, e.g. `Long distance: 2025, 2.8 · /4 starts, not rated: too few starts to rate`. (The sub-label is named the way column charts already name it, `" · /4 starts"`.)
+- Its name keeps the order of every other cell's, which is the column chart's: `"{row}: {column} · {sub}, {value}{ValueNote}"`, then `", not rated: {NotRated}"`, with the value part omitted when there is none, e.g. `Long distance: 2025 · /4 starts, 1.2, not rated: too few starts to rate`. (The sub-label is named the way column charts already name it, `" · /4 starts"`, straight after the column.)
 - It is focusable like any other cell.
 - A null `Y` without `NotRated` still draws no cell, as today.
 
