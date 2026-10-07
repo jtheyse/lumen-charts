@@ -120,7 +120,7 @@ public static class SportsData
     /// <summary>The first of the four seasons in <see cref="CategoryHistory"/>.</summary>
     public const int FirstCategorySeason = 2023;
 
-    /// <summary>The fewest starts a category and season need to be rated; a cell with fewer is marked, not coloured as a result.</summary>
+    /// <summary>The fewest starts a category and season need to be rated. A cell with fewer starts is marked not rated instead of being coloured as a result.</summary>
     public const int RatedStarts = 10;
 
     /// <summary>An invented history for the category heatmap card: each category's four seasons from <see cref="FirstCategorySeason"/>,

@@ -41,11 +41,11 @@ else
     @if(showData&&Spec.Kind==ChartKind.Heatmap)
     {
         @* A heatmap's data is a grid, its rows by its columns, as the drawing is, of the rows the reader has not hidden. *@
-        <div class="lumen-table">@((MarkupString)ChartExport.HtmlTable(VisibleSpec()))</div>
+        <div class="lumen-table" tabindex="0" role="region" aria-label="Chart data">@((MarkupString)ChartExport.HtmlTable(VisibleSpec()))</div>
     }
     else if(showData)
     {
-        <div class="lumen-table"><table><caption>@Spec.Title — original data (@Spec.Series.Sum(s=>s.Points.Count) observations)</caption>
+        <div class="lumen-table" tabindex="0" role="region" aria-label="Chart data"><table><caption>@Spec.Title — original data (@Spec.Series.Sum(s=>s.Points.Count) observations)</caption>
         <thead><tr><th scope="col">Series</th><th scope="col">X / Category</th><th scope="col">Value</th></tr></thead><tbody>
         @foreach(var series in Spec.Series)
         {

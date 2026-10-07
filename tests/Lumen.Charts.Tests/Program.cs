@@ -9923,11 +9923,24 @@ Test("Heatmap table: CSV carries a not-rated column only when a cell is not rate
     var quoted=ChartExport.Csv(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1,"a"){NotRated="said \"no\""},new ChartPoint(1,2,"b"){NotRated="=cmd"}])]}));
     Check(quoted.Contains(",\"said \"\"no\"\"\"\r\n")&&quoted.Contains(",\"'=cmd\"\r\n"),quoted);
 });
+Test("The component's open data table, a heatmap's grid or any other chart's list, is one focusable named region, so a keyboard can scroll it",()=>{
+    // The table scrolls inside a box 320 pixels tall, so a keyboard reader needs a tab stop on it, named as the drawing's own scrolling region is.
+    // It opens on a click, which static rendering cannot send, so the test opens it directly and reads a point, which draws it.
+    const string region="class=\"lumen-table\" tabindex=\"0\" role=\"region\" aria-label=\"Chart data\">";
+    string Opened(ChartSpec spec)=>Operate(spec,async c=>{typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.SelectPoint(0,0);});
+    var grid=Opened(HeatGrid());var list=Opened(Spec(ChartKind.Column));
+    Check(grid.Contains(region+"<table class='lumen-grid-table'>")&&Regex.Matches(grid,"class=\"lumen-table\"").Count==1,"the grid's region");
+    Check(list.Contains(region+"<table><caption>")&&list.Contains("original data")&&Regex.Matches(list,"class=\"lumen-table\"").Count==1,"the list's region");
+    Check(!Prerender(ChartElement(Spec(ChartKind.Column))).Contains("lumen-table"),"a closed table draws no region");
+    var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
+    const string ring="{outline:2px solid var(--lumen-accent,#5675e7);outline-offset:-2px}";
+    Check(css.Contains(".lumen-viewport:focus-visible"+ring)&&css.Contains(".lumen-table:focus-visible"+ring),"the focus ring");
+});
 Test("Heatmap table: the component's data table is the grid for a heatmap, and a heatmap with CellWidth keeps its width when fitted",()=>{
     // The table opens on a click, which static rendering cannot send, so the test opens it directly and reads a point, which draws it.
     var html=Operate(HeatGrid(),async c=>{typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.SelectPoint(0,0);});
     Check(html.Contains("lumen-grid-table")&&html.Contains("<th scope='row'>Sprint</th>"),"grid in View data");
-    Check(html.Contains("<div class=\"lumen-table\"><table class='lumen-grid-table'>")&&!html.Contains("original data")&&!html.Contains("<th scope=\"col\">Series</th>"),"the flat table is not written beside it");
+    Check(html.Contains("<table class='lumen-grid-table'>")&&!html.Contains("original data")&&!html.Contains("<th scope=\"col\">Series</th>"),"the flat table is not written beside it");
     // Eight columns of 48 are 165 + 384 = 549 wide, which a 340 box cannot hold: the drawing keeps its width and the viewport scrolls.
     var eight=HeatGrid(s=>s with{CellWidth=48,Series=[new("Sprint",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,i+1,$"S{i}")).ToArray()),new("Long distance",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,8-i,$"S{i}")).ToArray())]});
     var fitted=Operate(eight,async c=>{await c.Fit(340);},fit:true);

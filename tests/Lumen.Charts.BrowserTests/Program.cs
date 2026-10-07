@@ -309,15 +309,23 @@ await Test("Hiding a series removes its marks", async () =>
     await page.WaitForFunctionAsync($"() => document.querySelector('.lumen-chart').querySelectorAll('.lumen-datum[data-point]').length === {before}");
 });
 
-await Test("The data table lists observations with scoped headers", async () =>
+await Test("The data table lists observations with scoped headers, is a named region a keyboard can reach, and passes axe-core while open", async () =>
 {
     await Tool("View data").ClickAsync();
-    var table = chart.Locator(".lumen-table table");
-    await table.WaitForAsync();
-    Check(await table.Locator("caption").CountAsync() == 1);
-    Check(await table.Locator("th[scope=col]").CountAsync() == 3, "table headers are not scoped");
-    Check(await table.Locator("tbody tr").CountAsync() > 0);
-    await Tool("Hide data").ClickAsync();
+    try
+    {
+        var table = chart.Locator(".lumen-table table");
+        await table.WaitForAsync();
+        Check(await table.Locator("caption").CountAsync() == 1);
+        Check(await table.Locator("th[scope=col]").CountAsync() == 3, "table headers are not scoped");
+        Check(await table.Locator("tbody tr").CountAsync() > 0);
+        // The table scrolls in a box of its own, so it takes a tab stop and a name, as the drawing's scrolling region does.
+        var region = chart.Locator(".lumen-table");
+        Check(await region.GetAttributeAsync("tabindex") == "0" && await region.GetAttributeAsync("role") == "region" && await region.GetAttributeAsync("aria-label") == "Chart data", "the table is not a named, focusable region");
+        await Sweep();
+    }
+    // The data is hidden again whatever the checks found, so the tests after it start from a closed table.
+    finally { await Tool("Hide data").ClickAsync(); }
 });
 
 await Test("Zooming narrows the axis and reset restores it", async () =>
@@ -1732,9 +1740,11 @@ if (await sportsLink.CountAsync() > 0)
         await Test("The Category heatmap's View data is a grid table with a row for each category, each cell reading its value, its note and its starts", async () =>
         {
             var card = sports.Locator("#category-heatmap .lumen-chart");
-            await card.GetByRole(AriaRole.Button, new() { Name = "View data", Exact = true }).ClickAsync();
+            var opened = false;
             try
             {
+                await card.GetByRole(AriaRole.Button, new() { Name = "View data", Exact = true }).ClickAsync();
+                opened = true;
                 var table = card.Locator(".lumen-table table.lumen-grid-table");
                 await table.WaitForAsync();
                 Check(await table.Locator("th[scope=col]").CountAsync() == 4 && await table.Locator("tbody th[scope=row]").CountAsync() == 4, "four seasons across, four categories down");
@@ -1743,9 +1753,13 @@ if (await sportsLink.CountAsync() > 0)
                 var cells = await table.Locator("tbody td").AllTextContentsAsync();
                 Check(cells.Count == 16 && cells[0] == "2.8 pts · 34 pts, 5 riders · /12 starts" && cells.Count(c => c.Contains(", not rated: too few starts to rate")) == 3, string.Join(" | ", cells));
                 Check(cells.Contains("— · /0 starts, not rated: too few starts to rate"), string.Join(" | ", cells));
+                // The grid is taller than the 320-pixel box it scrolls in, so its region is a named tab stop, and axe-core finds the page clean with it open.
+                var region = card.Locator(".lumen-table");
+                Check(await region.GetAttributeAsync("tabindex") == "0" && await region.GetAttributeAsync("role") == "region" && await region.GetAttributeAsync("aria-label") == "Chart data", "the grid is not a named, focusable region");
+                await SweepOf(sports);
             }
-            // The data is hidden again whatever the checks found, so the axe sweeps below see the page as a visitor first meets it.
-            finally { await card.GetByRole(AriaRole.Button, new() { Name = "Hide data", Exact = true }).ClickAsync(); }
+            // The data is hidden again, if it was opened, whatever the checks found, so the axe sweeps below see the page as a visitor first meets it.
+            finally { if (opened) await card.GetByRole(AriaRole.Button, new() { Name = "Hide data", Exact = true }).ClickAsync(); }
         });
 
         await Test("On a 375-pixel phone the Category heatmap scrolls sideways at the width of its cells instead of squeezing, and the page does not", async () =>
@@ -1757,12 +1771,16 @@ if (await sportsLink.CountAsync() > 0)
             await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 33", null, new() { Timeout = 120_000 });
             var card = tab.Locator("#category-heatmap .lumen-chart");
             await card.ScrollIntoViewIfNeededAsync();
-            var measured = await card.EvaluateAsync<double[]>(@"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'), cells = [...s.querySelectorAll('g.lumen-datum > rect')];
-                const before = [v.scrollWidth, v.clientWidth, cells[0].getBoundingClientRect().width, s.getBoundingClientRect().width, Number(s.getAttribute('viewBox').split(' ')[2]), document.documentElement.scrollWidth];
+            // The numbers first and then the scrolling region's own tabindex, role and name, which a keyboard reader needs to reach the part that scrolls.
+            var read = await card.EvaluateAsync<System.Text.Json.JsonElement>(@"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'), cells = [...s.querySelectorAll('g.lumen-datum > rect')];
+                const before = [v.scrollWidth, v.clientWidth, Math.min(...cells.map(r => r.getBoundingClientRect().width)), s.getBoundingClientRect().width, Number(s.getAttribute('viewBox').split(' ')[2]), document.documentElement.scrollWidth];
                 v.scrollLeft = v.scrollWidth;
-                return [...before, cells.at(-1).getBoundingClientRect().right - v.getBoundingClientRect().right, v.scrollLeft]; }");
+                return [...before, cells.at(-1).getBoundingClientRect().right - v.getBoundingClientRect().right, v.scrollLeft, v.getAttribute('tabindex'), v.getAttribute('role'), v.getAttribute('aria-label')]; }");
+            var measured = read.EnumerateArray().Take(8).Select(e => e.GetDouble()).ToArray();
+            var scroller = read.EnumerateArray().Skip(8).Select(e => e.GetString()).ToArray();
+            Check(scroller.SequenceEqual(["0", "region", "Scrollable chart"]), $"the scrolling region reads {string.Join(" | ", scroller)}");
             Check(measured[0] > measured[1], $"the card's box is {measured[1]} wide and holds {measured[0]}, so it does not scroll sideways");
-            Check(measured[2] >= 69.5, $"a cell is drawn {measured[2]:0.#} wide, under its width of 70");
+            Check(measured[2] >= 69.5, $"the narrowest cell is drawn {measured[2]:0.#} wide, under its width of 70");
             Check(Math.Abs(measured[3] - measured[4]) < 1, $"drawn {measured[4]} wide and shown {measured[3]:0.#}");
             Check(measured[5] <= 375, $"the page is {measured[5]} wide");
             Check(measured[7] > 0 && measured[6] <= 1, $"scrolled to {measured[7]}, the last cell ends {measured[6]:0.#} past the box's edge");
@@ -1998,6 +2016,8 @@ if (await sportsLink.CountAsync() > 0)
         await sports.SetViewportSizeAsync(375, 800);
         await sports.WaitForFunctionAsync(drawnToFit);
         // A heatmap with CellWidth is shown at exactly its drawn size and scrolls in its own box instead of squeezing; its card's check follows.
+        // The one chart skipped is the Category heatmap, so that skip cannot hide another chart that scrolls.
+        Check(await sports.Locator(".lumen-fixed > .lumen-viewport").CountAsync() == 1 && await sports.Locator("#category-heatmap .lumen-fixed > .lumen-viewport").CountAsync() == 1, "the charts held at their drawn width are not just the Category heatmap");
         var overflow = await sports.EvaluateAsync<int[]>("() => [document.documentElement.scrollWidth, ...[...document.querySelectorAll('.lumen-chart:not(.lumen-fixed) .lumen-viewport')].map(v => v.scrollWidth - v.clientWidth)]");
         Check(overflow[0] <= 375, $"the page is {overflow[0]} pixels wide");
         Check(overflow.Skip(1).All(extra => extra <= 0), $"a chart scrolls sideways: {string.Join(", ", overflow.Skip(1))}");
