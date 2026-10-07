@@ -10060,6 +10060,15 @@ Test("Heatmap table: the refined scale keeps both ends of its scale before it cu
     var classic=HeatGrid(s=>s with{Width=320,YUnit=" pts/h",Style=ChartStyle.Light with{Finish=ChartFinish.Classic},Series=[new("A",[new ChartPoint(0,-123456.789,"a"),new ChartPoint(1,987654.321,"b")])]});
     Check(HeatSvg(classic).Contains(">Color scale: -123456.79 pts/h (light) to 987654.32 pts/h (dark)<"),"classic");
 });
+Test("Heatmap table: the component refuses a heatmap with a series that has no points with the validation message, whatever its CellWidth",()=>{
+    foreach(var width in new double?[]{null,48})
+    {
+        var spec=HeatGrid(s=>s with{CellWidth=width,Series=[new ChartSeries("A",null!)]});
+        string? said=null;
+        try{Operate(spec,_=>Task.CompletedTask);}catch(Exception error){said=$"{error.GetType().Name}: {error.Message}";}
+        Check(said=="ArgumentException: Series and points cannot be null.",$"CellWidth {width}: {said}");
+    }
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;
