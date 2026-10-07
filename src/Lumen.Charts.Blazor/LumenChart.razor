@@ -7,8 +7,8 @@
 }
 else
 {
-<div class="@(FitWidth ? "lumen-chart lumen-fit" : "lumen-chart")" @ref="root">
-    <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart" style="@Scrolls">@((MarkupString)svg)</div>
+<div class="@((FitWidth ? "lumen-chart lumen-fit" : "lumen-chart") + (drawnWidth is null ? "" : " lumen-fixed"))" @ref="root">
+    <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart" style="@DrawnStyle">@((MarkupString)svg)</div>
     @* The keys a reader moves with, hidden from view and from reading in place: the script, which makes them work, names them as the
        viewport's description while it scrolls, and otherwise the drawing's, as a sparkline's. The viewport is written as a scrolling
        region and a tab stop; the script leaves it neither while the drawing fits it (0.42.0). *@
@@ -115,9 +115,10 @@ else
     private const int Widest=4096;
     private int Narrowest => Spec.Sparkline ? 60 : 320;
     // The width the drawing shown has when its heatmap's columns have a width of their own, which no box changes, and null for every other
-    // chart. While the chart fits its box, the viewport holds the drawing at it, so that a narrower box scrolls it instead of squeezing it.
+    // chart. The chart is then marked lumen-fixed and its viewport carries that width, which the stylesheet holds the drawing to, fitted
+    // or not and measured or not: a narrower box scrolls it, and a wider one leaves room beside it.
     private int? drawnWidth;
-    private string? Scrolls => FitWidth && fitted is not null && drawnWidth is { } drawn ? $"--lumen-drawn:{drawn}px" : null;
+    private string? DrawnStyle => drawnWidth is { } drawn ? $"--lumen-drawn:{drawn}px" : null;
     private int Width => FitWidth && fitted is { } width ? width : Spec.Width;
     private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Blocks;
     private string Value(ChartSeries series,ChartPoint point)
@@ -193,7 +194,8 @@ else
     {
         xAxis=FullRange;visible=Enumerable.Range(0,Spec.Series.Count).Where(i=>!hidden.Contains(i)||Candles(i)).ToArray();
         var shown=VisibleSpec();
-        drawnWidth=shown.Kind==ChartKind.Heatmap&&shown.CellWidth is not null?ChartSvg.DrawnWidth(shown):null;
+        // CellWidth is refused on every other kind, so a spec that has it is a heatmap, or is refused as the drawing renders.
+        drawnWidth=shown.CellWidth is not null?ChartSvg.DrawnWidth(shown):null;
         svg=ChartSvg.Render(shown, includeLegend:false, includeTitles:false);
         readout=Spec.SharedReadout ? ChartSvg.Readout(shown) : null;
         plot=CanZoom&&!Spec.Sparkline ? ChartSvg.Plot(shown) : null;

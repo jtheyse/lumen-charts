@@ -9911,32 +9911,55 @@ Test("Heatmap table: the component's data table is the grid for a heatmap, and a
     var wide=Operate(eight,async c=>{await c.Fit(1200);},fit:true);
     Check(wide.Contains("--lumen-drawn:549px")&&wide.Contains("viewBox='0 0 549 "),"a wider box does not widen the drawing");
 });
-Test("Heatmap table: only a fitted heatmap with CellWidth carries the drawn width, a hidden series leaves the grid, and every other chart's component is as it was",()=>{
+Test("Heatmap table: a heatmap with CellWidth is marked fixed and carries its drawn width prerendered, fitted before and after measuring and in any box, and every other chart is written as before",()=>{
+    string Root(string html)=>Regex.Match(html,"<div class=\"lumen-chart[^\"]*\"").Value;
     string Viewport(string html)=>Regex.Match(html,"<div class=\"lumen-viewport\"[^>]*>").Value;
     const string plain="<div class=\"lumen-viewport\" tabindex=\"0\" role=\"region\" aria-label=\"Scrollable chart\">";
+    var eight=HeatGrid(s=>s with{CellWidth=48,Series=[new("Sprint",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,i+1,$"S{i}")).ToArray())]});
+    const string held="<div class=\"lumen-viewport\" tabindex=\"0\" role=\"region\" aria-label=\"Scrollable chart\" style=\"--lumen-drawn:549px\">";
+    // Without FitWidth, fitted before the browser has measured the box, and fitted at a narrow, a wide and a very wide box: the drawing is
+    // held to the width it is drawn at, which the viewBox says too.
+    (string Case,string Html,string Root)[] fixedOnes=[
+        ("not fitted",Operate(eight,_=>Task.CompletedTask),"<div class=\"lumen-chart lumen-fixed\""),
+        ("measured without FitWidth",Operate(eight,async c=>{await c.Fit(340);}),"<div class=\"lumen-chart lumen-fixed\""),
+        ("fitted, not yet measured",Operate(eight,_=>Task.CompletedTask,fit:true),"<div class=\"lumen-chart lumen-fit lumen-fixed\""),
+        ("fitted at 340",Operate(eight,async c=>{await c.Fit(340);},fit:true),"<div class=\"lumen-chart lumen-fit lumen-fixed\""),
+        ("fitted at 1200",Operate(eight,async c=>{await c.Fit(1200);},fit:true),"<div class=\"lumen-chart lumen-fit lumen-fixed\"")];
+    foreach(var (name,html,root) in fixedOnes)
+        Check(Root(html)==root&&Viewport(html)==held&&html.Contains("viewBox='0 0 549 "),$"{name}: {Root(html)} {Viewport(html)}");
+    // A heatmap without CellWidth, and every other kind, are written as they were, in every state.
+    foreach(var (name,spec) in new (string,ChartSpec)[]{("a heatmap",HeatGrid()),("a line chart",Spec()),("a column chart",Spec(ChartKind.Column))})
+    {
+        var states=new[]{Operate(spec,_=>Task.CompletedTask),Operate(spec,async c=>{await c.Fit(340);},fit:true),Operate(spec,_=>Task.CompletedTask,fit:true)};
+        Check(states.All(h=>Viewport(h)==plain&&!h.Contains("lumen-fixed")&&!h.Contains("--lumen-drawn")),$"{name} was changed");
+        Check(Root(states[0])=="<div class=\"lumen-chart\""&&Root(states[1])=="<div class=\"lumen-chart lumen-fit\""&&Root(states[2])=="<div class=\"lumen-chart lumen-fit\"",$"{name}'s root: {Root(states[0])} {Root(states[1])}");
+    }
+});
+Test("Heatmap table: the drawn width is the drawing the reader sees, a hidden series leaves the grid, and the stylesheet holds a fixed drawing to its width and gives the grid the data table's look",()=>{
+    string Viewport(string html)=>Regex.Match(html,"<div class=\"lumen-viewport\"[^>]*>").Value;
     var toggle=typeof(LumenChart).GetMethod("Toggle",BindingFlags.NonPublic|BindingFlags.Instance)!;
     var eight=HeatGrid(s=>s with{CellWidth=48,Series=[new("Sprint",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,i+1,$"S{i}")).ToArray())]});
-    // Before the browser has measured the box, without FitWidth, without CellWidth and on every other kind, the viewport is written as before.
-    Check(Viewport(Operate(eight,_=>Task.CompletedTask,fit:true))==plain,"fitted, not yet measured");
-    Check(Viewport(Operate(eight,async c=>{await c.Fit(340);}))==plain,"measured without FitWidth");
-    Check(Viewport(Operate(HeatGrid(),async c=>{await c.Fit(340);},fit:true))==plain,"a heatmap without CellWidth");
-    Check(Viewport(Operate(Spec(),async c=>{await c.Fit(340);},fit:true))==plain,"a line chart");
-    Check(Viewport(Operate(Spec(ChartKind.Column),async c=>{await c.Fit(340);},fit:true))==plain,"a column chart");
     // The width is the drawing the reader sees: a series hidden from the legend takes its own columns away.
     var two=eight with{Series=[eight.Series[0],new("Long distance",Enumerable.Range(0,10).Select(i=>new ChartPoint(i,i,$"S{i}")).ToArray())]};
     var shown=Operate(two,async c=>{await c.Fit(340);},fit:true);
     var hidden=Operate(two,async c=>{toggle.Invoke(c,[1]);await c.Fit(340);},fit:true);
     Check(shown.Contains("style=\"--lumen-drawn:645px\"")&&hidden.Contains("style=\"--lumen-drawn:549px\"")&&hidden.Contains("viewBox='0 0 549 "),"hidden series: "+Viewport(shown)+" then "+Viewport(hidden));
+    // Hiding it with nothing fitted moves the width too, and the chart stays marked.
+    var unfitted=Operate(two,async c=>{toggle.Invoke(c,[1]);await c.SelectPoint(0,0);});
+    Check(unfitted.Contains("style=\"--lumen-drawn:549px\"")&&unfitted.Contains("lumen-chart lumen-fixed\""),"hidden series, not fitted");
     // A hidden series is a row the grid leaves out, as the drawing does.
     var rows=Operate(HeatGrid(),async c=>{toggle.Invoke(c,[1]);typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.SelectPoint(0,0);});
     Check(rows.Contains("<th scope='row'>Sprint</th>")&&!rows.Contains("<th scope='row'>Long distance</th>"),"a hidden row");
     // With every row hidden the table is empty, and the component still draws.
     var empty=Operate(HeatGrid(),async c=>{toggle.Invoke(c,[0]);toggle.Invoke(c,[1]);typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.Fit(400);},fit:true);
     Check(empty.Contains("<tbody></tbody></table>"),"every row hidden");
-    // The stylesheet gives the grid the data table's look, and the fitted chart's rule is the one it was.
+    // The stylesheet gives the grid the data table's look.
     var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
     Check(css.Contains(".lumen-table table,.lumen-grid-table{border-collapse:collapse;width:100%}")&&css.Contains(".lumen-table td,.lumen-table th,.lumen-grid-table td,.lumen-grid-table th{text-align:left;")
         &&css.Contains(".lumen-table caption,.lumen-grid-table caption{text-align:left;padding:10px 0}"),"the grid's look");
+    // A fixed drawing's min- and max-width, which beat the drawing's own width of 100%, come after the fitted chart's rule, which is the one it was.
+    const string fit=".lumen-fit>.lumen-viewport>svg{min-width:var(--lumen-drawn,0)}",hold=".lumen-fixed>.lumen-viewport>svg{min-width:var(--lumen-drawn);max-width:var(--lumen-drawn)}";
+    Check(css.Split(".lumen-fit").Length==2&&css.Contains(fit)&&css.Split(".lumen-fixed").Length==2&&css.Contains(hold)&&css.IndexOf(fit)<css.IndexOf(hold),"the fixed drawing's rule");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

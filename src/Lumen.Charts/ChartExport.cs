@@ -40,9 +40,9 @@ public static class ChartExport
     /// but whole, not cut, and a row for each series, named by a row header. A cell holds its value as the cells' names write it, in
     /// <see cref="ChartSpec.YFormat"/> with <see cref="ChartSpec.YUnit"/> and followed by its <see cref="ChartPoint.ValueNote"/>, then
     /// <c> · </c> and its <see cref="ChartPoint.SubLabel"/>, then <c>, not rated: </c> and the reason of a not-rated cell, which has
-    /// <c>—</c> in place of a value it does not have. A cell with no point, or with no value and not rated, is empty. Every word is
-    /// HTML-encoded, and the table is styled by <c>lumen.css</c>, which the Blazor package serves. The spec is validated first, and a chart
-    /// that is not a heatmap has no grid and is refused.
+    /// <c>—</c> in place of a value it does not have. A cell is empty when it has no point, or has neither a value nor a not-rated reason.
+    /// Every word is HTML-encoded, and the table is styled by <c>lumen.css</c>, which the Blazor package serves. The spec is validated
+    /// first, and a chart that is not a heatmap has no grid and is refused.
     /// </summary>
     /// <exception cref="ArgumentException">The spec is not valid, or is not a heatmap.</exception>
     public static string HtmlTable(ChartSpec spec)
@@ -64,7 +64,7 @@ public static class ChartExport
         return table.Append("</tbody></table>").ToString();
     }
     // A grid cell's words, which are encoded one by one so that the separators between them stay as they are written. A cell with no point,
-    // or with neither a value nor a reason it has none, is empty.
+    // or with neither a value nor a not-rated reason, is empty.
     private static string GridCell(ChartPoint? p,Axis values)
     {
         if(p is null||!p.Y.HasValue&&p.NotRated is null)return "";
