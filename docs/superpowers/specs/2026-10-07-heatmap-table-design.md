@@ -35,7 +35,7 @@ Heatmap only; refused on every other kind with a reason.
 - Each drawn cell writes its value on one line and, when the point has a `SubLabel`, the sub-label on a second line beneath it, both centred in the cell.
 - `ChartPoint.SubLabel` is now allowed on heatmaps (same limits as today: at most 16 characters, not blank, no line breaks). The category rule that all series' sub-labels in one category agree (column, bar and stacked column charts write one sub-label under the category's name) does **not** apply to heatmaps: each cell's sub-label is its own, such as "/12 starts" and "/4 starts" in one season's column.
 - `YFormat` and `YUnit` are now allowed on heatmaps; they format the cell text, the cell's name, the colour-scale line and the HTML table. Default (Number, no unit) leaves every existing name unchanged.
-- **Text colour, per cell:** whichever of `Style.Text` and `Style.Background` has the higher contrast with that cell's fill; if it is below 4.5:1, the cell writes no text.
+- **Text colour, per cell:** whichever of `Style.Text` and `Style.Background` has the higher contrast with that cell's fill; if neither reaches 4.5:1, pure black `#000000` or pure white `#FFFFFF`, whichever contrasts more (one of them always reaches at least 4.58:1), so every cell writes its value. (Amended during the build by the owner: about a quarter of mid-ramp cells on the default colours would otherwise have written nothing.)
 - **Fit:** using the library's text-width estimate, if the sub-label does not fit the cell's width or the two lines do not fit its height, the sub-label is dropped; if the value then does not fit, the value is dropped too. Value text is 11 px, sub-label 10 px.
 - `ValueNote` stays name-only (never drawn in the cell).
 
