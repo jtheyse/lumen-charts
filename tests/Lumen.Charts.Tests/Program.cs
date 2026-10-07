@@ -9855,9 +9855,10 @@ Test("Heatmap table: CellWidth widens the drawing and thins its column labels wi
 });
 Test("Heatmap table: the refined scale says low and high and fits a phone; the classic keeps 0.23.0's words",()=>{
     var phone=HeatGrid(s=>s with{Width=340,Series=[new("A",[new ChartPoint(0,123456.5,"a"),new ChartPoint(1,987654.25,"b")])]});
-    var line=Regex.Match(HeatSvg(phone),">((?:Color scale: )?[^<]* low to [^<]*)<").Groups[1].Value;
-    // The line is drawn at 12 px, so it is measured at 12 px: the estimate for 11 px scaled by 12 / 11.
-    Check(line.Length>0&&130+ChartSvg.Wide(line)*12/11<=340-12,line);
+    var line=System.Net.WebUtility.HtmlDecode(Regex.Matches(HeatSvg(phone),"<text x='130' y='[0-9.]+' class='lumen-muted'>([^<]*)</text>").Last().Groups[1].Value);
+    // The line is drawn at 12 px, so it is measured at 12 px: the estimate for 11 px scaled by 12 / 11. Both ends of the scale are written
+    // in it, whole.
+    Check(line.Contains("123456.5")&&line.Contains("987654.25")&&130+ChartSvg.Wide(line)*12/11<=340-12,line);
     var classic=HeatGrid(s=>s with{CellText=false,Style=ChartStyle.Light with{Finish=ChartFinish.Classic}});
     Check(HeatSvg(classic).Contains("(light) to")&&HeatSvg(classic).Contains("(dark)"),"classic words");
 });
@@ -10040,6 +10041,24 @@ Test("Heatmap table: a not-rated cell writes in the ink every other cell does, s
         var cell=NotRated(HeatGrid(c=>c with{Style=style})).Single();
         Check(cell.Text=="1.2"&&cell.Ink==style.Text,$"{style.Background}: {cell.Ink}");
     }
+});
+Test("Heatmap table: the refined scale keeps both ends of its scale before it cuts anything",()=>{
+    // The line is the last text 130 units in from the left, drawn at 12 px: it has the drawing's width less 142 units to stand in.
+    string Line(int width,string unit)=>System.Net.WebUtility.HtmlDecode(Regex.Matches(HeatSvg(HeatGrid(s=>s with{Width=width,YUnit=unit,Series=[new("A",[new ChartPoint(0,-123456.789,"a"),new ChartPoint(1,987654.321,"b")])]})),
+        "<text x='130' y='[0-9.]+' class='lumen-muted'>([^<]*)</text>").Last().Groups[1].Value);
+    // In turn: the whole line, without its prefix, then the scale's two ends with an en dash between them.
+    Check(Line(600," pts/h")=="Color scale: -123456.79 pts/h low to 987654.32 pts/h high","the whole line");
+    Check(Line(450," pts/h")=="-123456.79 pts/h low to 987654.32 pts/h high","without its prefix");
+    Check(Line(370," pts/h")=="-123456.79 pts/h – 987654.32 pts/h","the two ends, in full");
+    Check(Line(320,"")=="-123456.79 – 987654.32","the two ends at a phone's width");
+    // Only where even the two ends do not fit is anything cut: 226.8 units of 178 at 320 with this unit, so the line ends in "…", the low end whole.
+    Check(Line(320," pts/h")=="-123456.79 pts/h – 987654…","cut last");
+    foreach(var width in new[]{320,340,370,450,600})
+        foreach(var unit in new[]{""," pts/h"})
+            Check(130+ChartSvg.Wide(Line(width,unit))*12/11<=width-12||Line(width,unit).EndsWith('…'),$"{width} {unit}: {Line(width,unit)}");
+    // The classic finish keeps 0.23.0's line however long it is.
+    var classic=HeatGrid(s=>s with{Width=320,YUnit=" pts/h",Style=ChartStyle.Light with{Finish=ChartFinish.Classic},Series=[new("A",[new ChartPoint(0,-123456.789,"a"),new ChartPoint(1,987654.321,"b")])]});
+    Check(HeatSvg(classic).Contains(">Color scale: -123456.79 pts/h (light) to 987654.32 pts/h (dark)<"),"classic");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

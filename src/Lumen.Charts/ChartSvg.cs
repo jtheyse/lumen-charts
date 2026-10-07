@@ -3187,18 +3187,25 @@ public static partial class ChartSvg
         var step = s.CellWidth is null ? Math.Max(1,(int)Math.Ceiling(cats.Length/12d)) : Math.Max(1,(int)Math.Ceiling((cats.Max(at => Broad(Short(Column(at),10))) + 6) / cw));
         for (var i = 0; i < cats.Length; i += step)
             w.Text(HeatmapLeft+(i+.5)*cw, s.Height-w.Foot-62, Short(Column(cats[i]),10), "text-anchor='middle' class='lumen-muted'");
-        var line = scale is not { } ramp ? "Color scale: no rated cells"
-            : w.Refined ? $"Color scale: {words.Format(ramp.Min)} low to {words.Format(ramp.Max)} high"
-            : $"Color scale: {words.Format(ramp.Min)} (light) to {words.Format(ramp.Max)} (dark)";
+        // The scale's line, in the words the refined finish gives up one step at a time: the whole line, then without its prefix, then
+        // the scale's two ends alone.
+        string[] lines;
+        if (scale is not { } ramp) lines = ["Color scale: no rated cells", "no rated cells"];
+        else
+        {
+            string lo = words.Format(ramp.Min), hi = words.Format(ramp.Max);
+            lines = w.Refined ? [$"Color scale: {lo} low to {hi} high", $"{lo} low to {hi} high", $"{lo} – {hi}"] : [$"Color scale: {lo} (light) to {hi} (dark)"];
+        }
+        var line = lines[0];
         if (w.Refined)
         {
-            // The 12 px line ends 12 units short of the drawing's edge: without its prefix where that does not, and cut where even that
-            // does not.
+            // The 12 px line ends 12 units short of the drawing's edge: the first step that does not reach it is drawn, and where none
+            // does the last, cut, so that both ends of the scale are kept before either is.
             var room = s.Width - 12 - HeatmapLeft;
-            if (Broad(line) > room) line = line["Color scale: ".Length..];
-            var max = line.Length;
-            while (max > 1 && Broad(Short(line, max)) > room) max--;
-            line = Short(line, max);
+            line = lines.FirstOrDefault(step => Broad(step) <= room) ?? lines[^1];
+            var keep = line.Length;
+            while (keep > 1 && Broad(Short(line, keep)) > room) keep--;
+            line = Short(line, keep);
         }
         w.Text(HeatmapLeft, s.Height-w.Foot-36, line, "class='lumen-muted'");
     }
