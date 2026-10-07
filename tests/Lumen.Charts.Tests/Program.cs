@@ -9645,6 +9645,29 @@ Test("LumenPlacings: a cascaded style is used unless the options set one",()=>{
     var own=PlacingsMarkup(new(){{"Results",PlacedSeason},{"Options",new PlacingsOptions{Style=ChartStyle.Dark}}},ChartStyle.Midnight);
     Check(own.Contains(ChartStyle.Dark.Background)&&!own.Contains(ChartStyle.Midnight.Background),"options win");
 });
+// 0.46.0: heatmap tables.
+ChartSpec HeatGrid(Func<ChartSpec,ChartSpec>? change=null)
+{
+    var spec=new ChartSpec{Title="Points per start",Description="Invented categories by season",Kind=ChartKind.Heatmap,Width=600,Height=320,CellText=true,
+        Series=[new("Sprint",[new ChartPoint(0,2.8,"2025"){SubLabel="/12 starts"},new ChartPoint(1,3.1,"2026"){SubLabel="/14 starts"}]),
+                new("Long distance",[new ChartPoint(0,1.2,"2025"){SubLabel="/4 starts",NotRated="too few starts to rate"},new ChartPoint(1,0.4,"2026"){SubLabel="/11 starts"}])]};
+    return change is null?spec:change(spec);
+}
+Test("Heatmap table: cell text, sub-labels per cell, a format, a unit and not-rated cells are accepted on heatmaps",()=>{
+    ChartValidation.Validate(HeatGrid());
+    ChartValidation.Validate(HeatGrid(s=>s with{YFormat=ValueFormat.Compact,YUnit=" pts",CellWidth=24}));
+    ChartValidation.Validate(HeatGrid(s=>s with{Series=[s.Series[0],s.Series[1] with{Points=[new ChartPoint(0,null,"2025"){NotRated="no starts"},s.Series[1].Points[1]]}]}));
+});
+Test("Heatmap table: the new options are refused where they mean nothing, and outside their limits",()=>{
+    var line=new ChartSpec{Title="Line",Kind=ChartKind.Line,Series=[new("A",[new(0,1),new(1,2)])]};
+    Reject(()=>ChartValidation.Validate(line with{CellText=true}));
+    Reject(()=>ChartValidation.Validate(line with{CellWidth=30}));
+    Reject(()=>ChartValidation.Validate(line with{Series=[new("A",[new ChartPoint(0,1){NotRated="x"},new(1,2)])]}));
+    Reject(()=>ChartValidation.Validate(HeatGrid(s=>s with{CellWidth=23})));
+    Reject(()=>ChartValidation.Validate(HeatGrid(s=>s with{Series=[new("A",Enumerable.Range(0,100).Select(i=>new ChartPoint(i,i)).ToArray())],CellWidth=40})));   // 165+4000 > 4096
+    foreach(var bad in new[]{""," ",new string('x',25),"a\nb"})
+        Reject(()=>ChartValidation.Validate(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1){NotRated=bad}])]})));
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

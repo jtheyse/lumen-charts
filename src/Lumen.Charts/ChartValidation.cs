@@ -25,6 +25,7 @@ public static partial class ChartValidation
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");
         if (spec.Kind == ChartKind.Timeline) Timeline(spec);
         if (spec.Kind == ChartKind.Calendar) Calendar(spec);
+        if (spec.Kind == ChartKind.Heatmap) Heatmap(spec);
         if (spec.XAxis != AxisKind.Linear && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Calendar or ChartKind.Blocks))
             throw new ArgumentException("Time and log X axes apply to line, area, scatter, bubble, candlestick, OHLC, band and range charts, and a time axis to timelines, blocks and calendars; the other kinds index or derive their X values.");
         Blocks(spec);
@@ -41,8 +42,8 @@ public static partial class ChartValidation
             throw new ArgumentException("A time axis writes its own calendar; duration and compact formats apply to linear and log axes.");
         if (spec.XFormat != ValueFormat.Number && spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Blocks))
             throw new ArgumentException("An X format applies to line, area, scatter, bubble, candlestick, OHLC, band, range, timeline and blocks charts; the other kinds index or derive their X values.");
-        if ((spec.YFormat != ValueFormat.Number || spec.Y2Format != ValueFormat.Number) && spec.Kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Radar or ChartKind.Histogram)
-            throw new ArgumentException("A Y format applies to the values a Y axis measures; donut, heatmap and radar charts have no Y axis, and a histogram's counts observations.");
+        if ((spec.YFormat != ValueFormat.Number || spec.Y2Format != ValueFormat.Number) && spec.Kind is ChartKind.Donut or ChartKind.Radar or ChartKind.Histogram)
+            throw new ArgumentException("A Y format applies to the values a Y axis measures; donut and radar charts have no Y axis, and a histogram's counts observations.");
         if ((spec.YReversed || spec.Y2Reversed) && spec.Kind is not (ChartKind.Line or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Box or ChartKind.Violin or ChartKind.Blocks))
             throw new ArgumentException(spec.Kind is ChartKind.Gauge or ChartKind.Ring
                 ? "A gauge or ring has no Y axis to reverse: its scale runs clockwise round its arc."
@@ -106,6 +107,17 @@ public static partial class ChartValidation
             throw new ArgumentException("Unknown calendar layout, cell or week start.");
         if (spec.Kind != ChartKind.Calendar && (spec.CalendarLayout != CalendarLayout.Weeks || spec.CalendarCell != CalendarCell.Square || spec.WeekStart != DayOfWeek.Monday))
             throw new ArgumentException("CalendarLayout, CalendarCell and WeekStart lay out a calendar's days, so they apply to calendar charts only.");
+        if (spec.Kind != ChartKind.Heatmap && (spec.CellText || spec.CellWidth is not null))
+            throw new ArgumentException("Cell text and cell width apply to heatmaps, which draw a grid of cells; the other kinds draw their marks in other layouts, so they ignore these.");
+        if (spec.CellWidth is not null && spec.CellWidth < 24)
+            throw new ArgumentException("A heatmap's cell is at least 24 pixels wide, so its text and focus ring fit.");
+        if (spec.CellWidth is not null)
+        {
+            var columns = spec.Series!.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count();
+            var width = 165 + columns * spec.CellWidth;
+            if (width > 4096)
+                throw new ArgumentException($"At {spec.CellWidth} pixels a column, {columns} columns make a drawing {width} pixels wide, past the 4096 a chart may be; narrow the cells or show fewer columns.");
+        }
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
         foreach (var annotation in spec.Annotations)
         {
@@ -248,6 +260,7 @@ public static partial class ChartValidation
                 Text(p.Label); Color(p.Color); Text(p.ValueNote); Color(p.Highlight);
                 if (p.SubLabel is not null) SubLabel(spec, p.SubLabel);
                 if (p.GapLabel is not null) GapLabel(spec, mark, p);
+                if (p.NotRated is not null) NotRated(spec, p.NotRated);
                 if (p.Highlight is not null)
                 {
                     if (mark is not (ChartKind.Line or ChartKind.Scatter))
@@ -329,7 +342,7 @@ public static partial class ChartValidation
                 if (s.Points.Select(p => p.X).Distinct().Count() != s.Points.Count) throw new ArgumentException("Category X values must be unique within each series.");
             if (spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count() > 100)
                 throw new ArgumentException("Category charts support at most 100 categories; aggregate first.");
-            if (spec.Series.SelectMany(s => s.Points).Where(p => p.SubLabel is not null).GroupBy(p => p.X).Any(category => category.Select(p => p.SubLabel).Distinct().Count() > 1))
+            if (spec.Kind is not ChartKind.Heatmap && spec.Series.SelectMany(s => s.Points).Where(p => p.SubLabel is not null).GroupBy(p => p.X).Any(category => category.Select(p => p.SubLabel).Distinct().Count() > 1))
                 throw new ArgumentException("A category's sub-label is written once under its name, so the points of several series in one category may repeat it or leave it null, but not give different ones.");
         }
         if (spec.Kind == ChartKind.Donut && count > 100) throw new ArgumentException("Donut charts support at most 100 slices.");
@@ -552,8 +565,8 @@ public static partial class ChartValidation
         if (unit is null) return;
         Text(unit);
         if (unit.Length > 8) throw new ArgumentException("YUnit is written after every value on its axis, so it is at most 8 characters, such as s, % or \" bpm\".");
-        if (!Measured(kind) && kind != ChartKind.Strip)
-            throw new ArgumentException("YUnit follows the values a Y axis measures, so it applies to line, area, scatter, bubble, column, bar, stacked column, candlestick, OHLC, band, range and blocks charts, and to the amounts a strip's parts name; donut, heatmap, radar, gauge, ring, timeline and calendar charts have no such axis, a gauge writes its unit from YLabel, and histogram, box and violin charts do not take one yet.");
+        if (!Measured(kind) && kind != ChartKind.Strip && kind != ChartKind.Heatmap)
+            throw new ArgumentException("YUnit follows the values a Y axis measures, so it applies to line, area, scatter, bubble, column, bar, stacked column, candlestick, OHLC, band, range, heatmap and blocks charts, and to the amounts a strip's parts name; donut, radar, gauge, ring, timeline and calendar charts have no such axis, a gauge writes its unit from YLabel, and histogram, box and violin charts do not take one yet.");
     }
 
     /// <summary>A trend's fit, window and degree choose the trend <see cref="ChartSeries.Trend"/> draws, so each needs a trend, and
@@ -634,8 +647,8 @@ public static partial class ChartValidation
     private static void SubLabel(ChartSpec spec, string sub)
     {
         Text(sub);
-        if (spec.Kind is not (ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn))
-            throw new ArgumentException("A sub-label is a second line under a category's name, so it applies to column, bar and stacked column charts; the other kinds write tick labels along a continuous X axis, or no category names at all, so name the point in its Label or ValueNote.");
+        if (spec.Kind is not (ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn or ChartKind.Heatmap))
+            throw new ArgumentException("A sub-label is a second line under a category's name, so it applies to column, bar, stacked column and heatmap cells; the other kinds write tick labels along a continuous X axis, or no category names at all, so name the point in its Label or ValueNote.");
         if (spec.Sparkline)
             throw new ArgumentException("A sparkline draws its data alone, with no words, so its points take no sub-labels; write them in the words beside it.");
         if (string.IsNullOrWhiteSpace(sub))
@@ -663,6 +676,20 @@ public static partial class ChartValidation
             throw new ArgumentException("A density scatter shades cells rather than points, so it writes no gap label at a missing point.");
         if (p.Y.HasValue)
             throw new ArgumentException("A gap label is written where a value is missing, so it applies to a point whose Y is null; a point with a value is read by its value, and a note on it belongs in its ValueNote.");
+    }
+
+    /// <summary>The most characters a point's not-rated reason takes.</summary>
+    private const int MaxNotRated = 24;
+
+    /// <summary>A not-rated reason marks a heatmap cell as not rated and says why, so it needs a heatmap, words on one short line, and the words to make sense.</summary>
+    private static void NotRated(ChartSpec spec, string reason)
+    {
+        if (spec.Kind != ChartKind.Heatmap)
+            throw new ArgumentException("NotRated marks a heatmap cell as not rated and says why, such as \"too few starts to rate\", so it applies to heatmap cells only; the other kinds draw other marks.");
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new ArgumentException("A not-rated reason is written in the cell's name, so it needs words; leave NotRated null to write none.");
+        if (reason.Length > MaxNotRated || reason.Any(c => c is '\n' or '\r'))
+            throw new ArgumentException($"A not-rated reason is written in the cell's name, at most {MaxNotRated} characters and no line breaks, such as too few starts to rate.");
     }
 
     /// <summary>Each finishing touch applies to the marks that can show it.</summary>
@@ -851,6 +878,12 @@ public static partial class ChartValidation
             throw new ArgumentException("A calendar colours each day by its value, from YZones or the style's heatmap ramp, so its points take no colours of their own.");
         if (points.Any(p => p.Y < 0))
             throw new ArgumentException("A calendar's values are amounts, such as distance, time or training stress, so none can be negative; zero or a missing value is a day without activity.");
+    }
+
+    /// <summary>Heatmap-specific validation is done in the main Validate method.</summary>
+    private static void Heatmap(ChartSpec spec)
+    {
+        // Validation for CellText, CellWidth and NotRated is done in Validate.
     }
 
     /// <summary>A zone without its own colour takes the style's ramp at its position, so a scale longer than the ramp

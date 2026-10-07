@@ -346,6 +346,10 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// over it. CSV does not carry it.
     /// </summary>
     public string? GapLabel { get; init; }
+    /// <summary>On a heatmap, marks the cell as not rated and says why, 1 to 24 characters, such as "too few starts to rate": the cell
+    /// is drawn unshaded with a dashed outline, left out of the colour scale, written with its value or "—", and named
+    /// "…, not rated: {reason}". A not-rated cell is drawn even when its value is null. Heatmaps only.</summary>
+    public string? NotRated { get; init; }
 
     /// <summary>A candle or OHLC bar, its Y the close. High must be the highest of the four prices and low the lowest.</summary>
     public static ChartPoint Candle(double x, double open, double high, double low, double close, string? label = null) =>
@@ -707,6 +711,14 @@ public sealed record ChartSpec
     /// <summary>Calendar charts only: the day each week starts on, Monday by default, as ISO 8601 has it. Every other kind refuses
     /// it set.</summary>
     public DayOfWeek WeekStart { get; init; } = DayOfWeek.Monday;
+    /// <summary>On a heatmap, writes each cell's value and, on a second line, its <see cref="ChartPoint.SubLabel"/>, in whichever of
+    /// the style's text and background colours stands out more against the cell, and only where that reaches 4.5:1 and the text fits;
+    /// the cell's name always carries both. Heatmaps only; false by default.</summary>
+    public bool CellText { get; init; }
+    /// <summary>On a heatmap, the width of every column in pixels, at least 24: the drawing grows to 165 plus the columns times this
+    /// width instead of squeezing into <see cref="Width"/>, and in <c>&lt;LumenChart FitWidth&gt;</c> it scrolls sideways when wider
+    /// than its box. Heatmaps only; null by default.</summary>
+    public double? CellWidth { get; init; }
     /// <summary>
     /// In the Blazor component, reads every series at once at one X: a vertical guide through every pane at the X nearest the
     /// pointer or the focused point, a ring round each shown series' point there, and one tooltip that reads the X first and then

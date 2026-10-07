@@ -99,7 +99,7 @@ public static partial class ChartSvg
     /// such setting, serialized it, so every chart drawn before it keeps its IDs. Whether the background is painted changes only the root's
     /// style, never a gradient, so it is never part of the hash, painted or not, and an unpainted chart names its gradients as the painted one
     /// does. A series' average changes only the words its marks say, so it is never part of the hash either. A point's gap label, from 0.42.0,
-    /// is null unless set, and nulls are left out already.</summary>
+    /// is null unless set, and nulls are left out already. Cell text, from 0.46.0, is false by default, so it is left out unless set.</summary>
     private static void Unfitted(JsonTypeInfo info)
     {
         if (info.Type == typeof(ChartSeries))
@@ -107,8 +107,14 @@ public static partial class ChartSvg
                 if (property.Name == nameof(ChartSeries.AverageOf)) property.ShouldSerialize = (_, _) => false;
         if (info.Type != typeof(ChartSpec)) return;
         foreach (var property in info.Properties)
-            if (property.Name == nameof(ChartSpec.PaintBackground)) property.ShouldSerialize = (_, _) => false;
-            else if (property.Name == nameof(ChartSpec.FitHeight)) property.ShouldSerialize = (_, fitted) => fitted is true;
+        {
+            if (property.Name == nameof(ChartSpec.PaintBackground))
+                property.ShouldSerialize = (_, _) => false;
+            else if (property.Name == nameof(ChartSpec.FitHeight))
+                property.ShouldSerialize = (_, fitted) => fitted is true;
+            else if (property.Name == nameof(ChartSpec.CellText))
+                property.ShouldSerialize = (_, cellText) => cellText is true;
+        }
     }
     /// <summary>A chart without bar tracks that draws its title and description, as every chart did before 0.39.0, is serialized for hashing
     /// as 0.38.0, which had neither setting, serialized it, so every chart drawn before them keeps its IDs.</summary>
