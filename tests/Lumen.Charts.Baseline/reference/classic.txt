@@ -383,3 +383,6 @@ planner/day-midnight 0C182EC0631BF493
 planner/year-narrow-340 2AB574BB93046B89
 planner/month-narrow-340 903057F91E43CD33
 planner/gauteng 3058778A2D174A1F
+placings/points 80075119EF897F90
+placings/no-points D855215AB8DC04E0
+placings/two-series BC8559398F48DF93
