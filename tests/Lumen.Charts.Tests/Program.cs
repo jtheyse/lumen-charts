@@ -9854,6 +9854,90 @@ Test("Heatmap table: the dark pair keys the legend too, column labels a cell wid
     var empty=HeatSvg(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,null,"a"){NotRated="no starts"},new ChartPoint(1,null,"b"){NotRated="no starts"}])]}));
     Check(!empty.Contains("No data to display")&&empty.Contains("stroke-dasharray='3 2'")&&empty.Contains(">—<")&&empty.Contains("Color scale: no rated cells"),"empty and not rated");
 });
+Test("Heatmap table: HtmlTable is a real grid, rows by columns, with headers, sub-labels and not-rated words",()=>{
+    var html=ChartExport.HtmlTable(HeatGrid());
+    Check(html.StartsWith("<table class='lumen-grid-table'><caption>Points per start</caption>"),html[..Math.Min(90,html.Length)]);
+    Check(html.Contains("<thead><tr><td></td><th scope='col'>2025</th><th scope='col'>2026</th></tr></thead>"),"column headers");
+    Check(html.Contains("<tr><th scope='row'>Sprint</th><td>2.8 · /12 starts</td><td>3.1 · /14 starts</td></tr>"),"a row");
+    Check(html.Contains("<td>1.2 · /4 starts, not rated: too few starts to rate</td>"),"not rated");
+    Check(html.EndsWith("</tbody></table>"),"the end");
+    Check(ChartExport.HtmlTable(HeatGrid(s=>s with{Title="A <b>"})).Contains("<caption>A &lt;b&gt;</caption>"),"encoded");
+    Reject(()=>ChartExport.HtmlTable(new ChartSpec{Title="L",Kind=ChartKind.Line,Series=[new("A",[new(0,1),new(1,2)])]}));
+});
+Test("Heatmap table: HtmlTable writes a value as the cells do, leaves a missing cell empty, dashes a not-rated cell that has no value, and encodes every word",()=>{
+    var spec=HeatGrid(s=>s with{YFormat=ValueFormat.Compact,YUnit=" pts",Series=[
+        new("Sprint & Co",[new ChartPoint(0,2800,"A season label of some length"){SubLabel="/12 <starts>"},new ChartPoint(1,null,"2026")]),
+        new("Long distance",[new ChartPoint(0,null,"ignored"){NotRated="too <few>"},new ChartPoint(2,3100){ValueNote=" (5 riders)"}])]});
+    var html=ChartExport.HtmlTable(spec);
+    // Columns by X: a label is written whole, not cut at 10 characters, and a column whose first point has none is named by its X.
+    Check(html.Contains("<thead><tr><td></td><th scope='col'>A season label of some length</th><th scope='col'>2026</th><th scope='col'>2</th></tr></thead>"),html);
+    Check(html.Contains("<tr><th scope='row'>Sprint &amp; Co</th><td>2.8k pts · /12 &lt;starts&gt;</td><td></td><td></td></tr>"),"the first row: "+html);
+    Check(html.Contains("<tr><th scope='row'>Long distance</th><td>—, not rated: too &lt;few&gt;</td><td></td><td>3.1k pts (5 riders)</td></tr>"),"the second row: "+html);
+    // A value is written as the drawing writes it, and its note as the cell's name does, which the cell itself leaves out.
+    Check(HeatSvg(spec).Contains(">3.1k pts<")&&HeatNames(spec).Contains("Long distance: 2, 3.1k pts (5 riders)"),"the drawing's value: "+string.Join(" | ",HeatNames(spec)));
+});
+Test("Heatmap table: HtmlTable validates, and refuses the kinds that have no grid with a reason",()=>{
+    var why="";
+    try{ChartExport.HtmlTable(new ChartSpec{Title="L",Kind=ChartKind.Column,Series=[new("A",[new(0,1,"a"),new(1,2,"b")])]});}catch(ArgumentException e){why=e.Message;}
+    Check(why.StartsWith("An HTML grid table reads a heatmap's rows by its columns; other kinds have no grid")&&why.Contains("Csv"),why);
+    Reject(()=>ChartExport.HtmlTable(HeatGrid(s=>s with{CellWidth=23})));
+    Reject(()=>ChartExport.HtmlTable(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1){NotRated=" "}])]})));
+    // A heatmap that has nothing yet is a table without rows, not a refusal: the component shows one when every row is hidden.
+    var none=ChartExport.HtmlTable(HeatGrid(s=>s with{Series=[]}));
+    Check(none=="<table class='lumen-grid-table'><caption>Points per start</caption><thead><tr><td></td></tr></thead><tbody></tbody></table>",none);
+});
+Test("Heatmap table: CSV carries a not-rated column only when a cell is not rated",()=>{
+    var csv=ChartExport.Csv(HeatGrid());
+    Check(csv.Split("\r\n")[0].EndsWith(",NotRated")&&csv.Contains(",\"too few starts to rate\"\r\n"),csv.Split("\r\n")[0]);
+    // Every other record has the column too, empty where its cell is rated, and the reason is quoted as every text cell is.
+    var rows=csv.Split("\r\n",StringSplitOptions.RemoveEmptyEntries);
+    Check(rows.Length==5&&rows.Skip(1).Count(r=>r.EndsWith(",\"\""))==3&&rows.Count(r=>r.EndsWith(",\"too few starts to rate\""))==1,csv);
+    Check(!ChartExport.Csv(HeatGrid(s=>s with{Series=[s.Series[0]]})).Contains("NotRated"),"none");
+    var quoted=ChartExport.Csv(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,1,"a"){NotRated="said \"no\""},new ChartPoint(1,2,"b"){NotRated="=cmd"}])]}));
+    Check(quoted.Contains(",\"said \"\"no\"\"\"\r\n")&&quoted.Contains(",\"'=cmd\"\r\n"),quoted);
+});
+Test("Heatmap table: the component's data table is the grid for a heatmap, and a heatmap with CellWidth keeps its width when fitted",()=>{
+    // The table opens on a click, which static rendering cannot send, so the test opens it directly and reads a point, which draws it.
+    var html=Operate(HeatGrid(),async c=>{typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.SelectPoint(0,0);});
+    Check(html.Contains("lumen-grid-table")&&html.Contains("<th scope='row'>Sprint</th>"),"grid in View data");
+    Check(html.Contains("<div class=\"lumen-table\"><table class='lumen-grid-table'>")&&!html.Contains("original data")&&!html.Contains("<th scope=\"col\">Series</th>"),"the flat table is not written beside it");
+    // Eight columns of 48 are 165 + 384 = 549 wide, which a 340 box cannot hold: the drawing keeps its width and the viewport scrolls.
+    var eight=HeatGrid(s=>s with{CellWidth=48,Series=[new("Sprint",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,i+1,$"S{i}")).ToArray()),new("Long distance",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,8-i,$"S{i}")).ToArray())]});
+    var fitted=Operate(eight,async c=>{await c.Fit(340);},fit:true);
+    Check(fitted.Contains("style=\"--lumen-drawn:549px\"")&&fitted.Contains("viewBox='0 0 549 "),"drawn width kept: "+Regex.Match(fitted,"<div class=\"lumen-viewport\"[^>]*>").Value+Regex.Match(fitted,"viewBox='[^']*'").Value);
+    // Two columns are drawn at the 320 floor, however wide the box.
+    var small=Operate(HeatGrid(s=>s with{CellWidth=48}),async c=>{await c.Fit(340);},fit:true);
+    Check(small.Contains("--lumen-drawn:320px")&&small.Contains("viewBox='0 0 320 "),"the floor");
+    var wide=Operate(eight,async c=>{await c.Fit(1200);},fit:true);
+    Check(wide.Contains("--lumen-drawn:549px")&&wide.Contains("viewBox='0 0 549 "),"a wider box does not widen the drawing");
+});
+Test("Heatmap table: only a fitted heatmap with CellWidth carries the drawn width, a hidden series leaves the grid, and every other chart's component is as it was",()=>{
+    string Viewport(string html)=>Regex.Match(html,"<div class=\"lumen-viewport\"[^>]*>").Value;
+    const string plain="<div class=\"lumen-viewport\" tabindex=\"0\" role=\"region\" aria-label=\"Scrollable chart\">";
+    var toggle=typeof(LumenChart).GetMethod("Toggle",BindingFlags.NonPublic|BindingFlags.Instance)!;
+    var eight=HeatGrid(s=>s with{CellWidth=48,Series=[new("Sprint",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,i+1,$"S{i}")).ToArray())]});
+    // Before the browser has measured the box, without FitWidth, without CellWidth and on every other kind, the viewport is written as before.
+    Check(Viewport(Operate(eight,_=>Task.CompletedTask,fit:true))==plain,"fitted, not yet measured");
+    Check(Viewport(Operate(eight,async c=>{await c.Fit(340);}))==plain,"measured without FitWidth");
+    Check(Viewport(Operate(HeatGrid(),async c=>{await c.Fit(340);},fit:true))==plain,"a heatmap without CellWidth");
+    Check(Viewport(Operate(Spec(),async c=>{await c.Fit(340);},fit:true))==plain,"a line chart");
+    Check(Viewport(Operate(Spec(ChartKind.Column),async c=>{await c.Fit(340);},fit:true))==plain,"a column chart");
+    // The width is the drawing the reader sees: a series hidden from the legend takes its own columns away.
+    var two=eight with{Series=[eight.Series[0],new("Long distance",Enumerable.Range(0,10).Select(i=>new ChartPoint(i,i,$"S{i}")).ToArray())]};
+    var shown=Operate(two,async c=>{await c.Fit(340);},fit:true);
+    var hidden=Operate(two,async c=>{toggle.Invoke(c,[1]);await c.Fit(340);},fit:true);
+    Check(shown.Contains("style=\"--lumen-drawn:645px\"")&&hidden.Contains("style=\"--lumen-drawn:549px\"")&&hidden.Contains("viewBox='0 0 549 "),"hidden series: "+Viewport(shown)+" then "+Viewport(hidden));
+    // A hidden series is a row the grid leaves out, as the drawing does.
+    var rows=Operate(HeatGrid(),async c=>{toggle.Invoke(c,[1]);typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.SelectPoint(0,0);});
+    Check(rows.Contains("<th scope='row'>Sprint</th>")&&!rows.Contains("<th scope='row'>Long distance</th>"),"a hidden row");
+    // With every row hidden the table is empty, and the component still draws.
+    var empty=Operate(HeatGrid(),async c=>{toggle.Invoke(c,[0]);toggle.Invoke(c,[1]);typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.Fit(400);},fit:true);
+    Check(empty.Contains("<tbody></tbody></table>"),"every row hidden");
+    // The stylesheet gives the grid the data table's look, and the fitted chart's rule is the one it was.
+    var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
+    Check(css.Contains(".lumen-table table,.lumen-grid-table{border-collapse:collapse;width:100%}")&&css.Contains(".lumen-table td,.lumen-table th,.lumen-grid-table td,.lumen-grid-table th{text-align:left;")
+        &&css.Contains(".lumen-table caption,.lumen-grid-table caption{text-align:left;padding:10px 0}"),"the grid's look");
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

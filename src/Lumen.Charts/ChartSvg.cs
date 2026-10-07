@@ -3101,6 +3101,10 @@ public static partial class ChartSvg
     /// <summary>How a heatmap writes its values, in its cells, their names and its colour scale: in <see cref="ChartSpec.YFormat"/>, with
     /// <see cref="ChartSpec.YUnit"/> after each.</summary>
     internal static Axis HeatmapValues(ChartSpec s) => new(AxisKind.Linear, 0, 1) { ValueFormat = s.YFormat, Unit = s.YUnit };
+    /// <summary>The X of each of a heatmap's columns, left to right: every X any of its points has, a cell that is not drawn included.</summary>
+    internal static double[] HeatmapColumns(ChartSpec s) => s.Series.SelectMany(x => x.Points).Select(p => p.X).Distinct().Order().ToArray();
+    /// <summary>What a heatmap writes at the head of its column at <paramref name="at"/>: the label the first point there gives it, or its X.</summary>
+    internal static string HeatmapColumn(ChartSpec s, double at) => s.Series.SelectMany(x => x.Points).First(p => p.X == at).Label ?? LinearScale.Label(at);
 
     /// <summary>A style left at its defaults, whose heatmap ramp, pale blue to deep blue, reads on a light background.</summary>
     private static readonly ChartStyle Defaults = new();
@@ -3128,7 +3132,7 @@ public static partial class ChartSvg
 
     private static void Heatmap(SvgWriter w, ChartSpec s)
     {
-        var cats = s.Series.SelectMany(x => x.Points).Select(p => p.X).Distinct().Order().ToArray();
+        var cats = HeatmapColumns(s);
         // A not-rated cell is drawn but is no result, so the colour scale is built from the rated cells alone, and from none where none is.
         var values = s.Series.SelectMany(x => x.Points).Where(p => p.Y.HasValue && p.NotRated is null).Select(p => p.Y!.Value).ToArray();
         LinearScale? scale = values.Length > 0 ? LinearScale.Create(values) : null;
@@ -3169,7 +3173,7 @@ public static partial class ChartSvg
                 if (s.CellText) CellWords(w, x + cw / 2, y + ch / 2, cw, ch, p.Y is { } value ? words.Format(value) : "—", p.SubLabel, ink);
             }
         }
-        string Column(double at) => s.Series.SelectMany(x=>x.Points).First(p=>p.X==at).Label ?? LinearScale.Label(at);
+        string Column(double at) => HeatmapColumn(s, at);
         // Columns of a set width keep their 12 px labels 6 units apart; otherwise every column is labelled up to 12, and fewer past them.
         var step = s.CellWidth is null ? Math.Max(1,(int)Math.Ceiling(cats.Length/12d)) : Math.Max(1,(int)Math.Ceiling((cats.Max(at => Broad(Short(Column(at),10))) + 6) / cw));
         for (var i = 0; i < cats.Length; i += step)
