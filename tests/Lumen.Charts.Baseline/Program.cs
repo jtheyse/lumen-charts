@@ -849,6 +849,26 @@ var league = placed.Where(p => p.Series == "Invented League").Select(p => p with
 lines.Add($"placings/points {Hash(ChartSvg.Render(PlacingsChart.Build(league, new() { Style = Finished(null, ChartTheme.Light) })!))}");
 lines.Add($"placings/no-points {Hash(ChartSvg.Render(PlacingsChart.Build(league.Select(p => p with { Points = null }), new() { Style = Finished(null, ChartTheme.Light) })!))}");
 lines.Add($"placings/two-series {Hash(ChartSvg.Render(PlacingsChart.Build(placed, new() { Style = Finished(null, ChartTheme.Light) })!))}");
+// 0.46.0: heatmap tables. Four invented categories by four seasons, points per start with the number of starts beneath, two cells too
+// thin to rate (one with a value, one without), and the same at a fixed cell width over twelve seasons.
+ChartSpec CategoryGrid(ChartTheme theme, ChartStyle? style, int seasons, double? cellWidth) => new()
+{
+    Kind = ChartKind.Heatmap, Theme = theme, Style = style, Title = "Points per start", Description = "Invented categories by season",
+    Width = 600, Height = 320, YUnit = " pts", CellText = true, CellWidth = cellWidth,
+    Series = new[] { "Sprint", "Middle distance", "Long distance", "Relay" }.Select((category, r) => new ChartSeries(category, Enumerable.Range(0, seasons).Select(c =>
+    {
+        ChartPoint cell = new(c, Math.Round(1 + (r * 5 + c * 3) % 9 * .4, 1), $"{2026 - seasons + 1 + c}") { SubLabel = $"/{10 + (r * 7 + c * 5) % 5} starts" };
+        return (r, c) switch
+        {
+            (2, 0) => cell with { SubLabel = "/4 starts", NotRated = "too few starts to rate" },
+            (3, 2) => cell with { Y = null, SubLabel = "/2 starts", NotRated = "too few starts to rate" },
+            _ => cell
+        };
+    }).ToArray())).ToArray()
+};
+foreach (var (name, theme, style) in new[] { ("light", ChartTheme.Light, (ChartStyle?)null), ("dark", ChartTheme.Dark, null), ("midnight", ChartTheme.Light, ChartStyle.Midnight) })
+    lines.Add($"heatmap-table/{name} {Hash(Render(CategoryGrid(theme, style, 4, null)))}");
+lines.Add($"heatmap-table/cell-width {Hash(Render(CategoryGrid(ChartTheme.Light, null, 12, 56)))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

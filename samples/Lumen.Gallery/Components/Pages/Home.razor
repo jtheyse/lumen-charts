@@ -8,7 +8,7 @@
         <a class="nav-item active" href="#playground"><span>▦</span> Chart explorer <b>23</b></a>
         <a class="nav-item" href="#network"><span>⌘</span> Network graphs <b>2</b></a>
         <a class="nav-item" href="#integration"><span>⌁</span> Developer API</a>
-        <a class="nav-item" href="sports"><span>∿</span> Sports &amp; performance <b>32</b></a>
+        <a class="nav-item" href="sports"><span>∿</span> Sports &amp; performance <b>33</b></a>
         <div class="nav-label">EXPLORE BY PURPOSE</div>
         @foreach(var item in new[]{("Change over time",ChartKind.Line),("Compare categories",ChartKind.Bar),("Find relationships",ChartKind.Scatter),("Parts of a whole",ChartKind.Donut),("Patterns & density",ChartKind.Heatmap)})
         { <button class="purpose" @onclick="()=>Select(item.Item2)">@item.Item1<span>↗</span></button> }

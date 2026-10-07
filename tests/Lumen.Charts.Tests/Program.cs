@@ -3715,13 +3715,14 @@ var sports=SportsData.Cards(ChartTheme.Light,ChartStyle.Light.Zones);
 ChartSpec Sports(string id)=>sports.Single(card=>card.Id==id).Spec;
 var athlete=SportsData.Season;var latest=athlete.Sessions[^1];
 DateOnly DayOf(double x)=>DateOnly.FromDateTime(TimeAxis.Moment(x).UtcDateTime);
-Test("Sports page: thirty-two charts in twenty-nine cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
+Test("Sports page: thirty-three charts in thirty cards, each rendering in light, dark and Midnight at a desktop's and a phone's widths",()=>{
     // 0.34.0's Getting faster? card draws three sparklines in place of one chart; they are checked on their own below. 0.35.0 adds
     // How the field finished to the Racing section, 0.37.0 Ride channels in a Long ride section of its own, and 0.38.0 Season arc and Gap to
     // the leader to the Racing section, 0.39.0 Time in zone, as shares, and Session scores to the Latest session section, and 0.40.0
-    // Heart rate by lap to the Latest session section and Best efforts to the Fitness section, and 0.45.0 Places and points to the Racing section.
-    Check(sports.Count==29&&sports.Select(card=>card.Id).Distinct().Count()==29&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
-        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==32,"the page should have thirty-two charts in twenty-nine cards");
+    // Heart rate by lap to the Latest session section and Best efforts to the Fitness section, 0.45.0 Places and points to the Racing section,
+    // and 0.46.0 Category heatmap after it.
+    Check(sports.Count==30&&sports.Select(card=>card.Id).Distinct().Count()==30&&sports.Count(card=>card.Beside is not null)==1&&sports.Count(card=>card.Lines is not null)==1
+        &&sports.Sum(card=>card.Lines?.Count??(card.Beside is null?1:2))==33,"the page should have thirty-three charts in thirty cards");
     // 0.27.0 added the Sleep and recovery section last, so the twelve before it keep their order; 0.33.0's Racing section stands
     // before it.
     Check(sports.TakeLast(3).Select(card=>(card.Section,card.Id,card.Spec.Kind)).SequenceEqual([("sleep","hypnogram",ChartKind.Timeline),("sleep","sleep-timing",ChartKind.Range),("sleep","heart-range",ChartKind.Range)]),"the sleep section is not last");
@@ -6544,7 +6545,7 @@ Test("Sports page: Getting faster? rings each time faster than all before it, fr
             Check(!Svg(line.Spec with{Style=style}).Descendants(ns+"text").Any(),$"{line.Name} wrote a word");
         }
     // The page draws each at its own size beside its words, and its sparklines and charts number twenty-four.
-    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==32,"the page's count");
+    Check(sports.Sum(c=>c.Lines?.Count??(c.Beside is null?1:2))==33,"the page's count");
 });
 // 0.35.0: how the field finished, and text that fits. Blocks keep a visible height; an annotation can draw its label without its value
 // and stand over the data; an X axis chooses which of its labels it writes, and either axis can label just its two ends; and a chart's
@@ -7583,7 +7584,7 @@ Test("Ticks, units and end labels round-trip through the HTTP API's JSON, a requ
 });
 Test("Sports page: Season arc and Gap to the leader close the Racing section, the arc's disciplines joined over each other's races and the gap's riders named at their ends with the legend off",()=>{
     var ids=sports.Where(card=>card.Section=="racing").Select(card=>card.Id).ToArray();
-    Check(ids.SequenceEqual(["race-results","field","season-arc","gap","places-points"])&&sports.Single(card=>card.Id=="gap").ShowLegend==false&&sports.Where(card=>card.Id is not ("gap" or "scores")).All(card=>card.ShowLegend),string.Join(",",ids));
+    Check(ids.SequenceEqual(["race-results","field","season-arc","gap","places-points","category-heatmap"])&&sports.Single(card=>card.Id=="gap").ShowLegend==false&&sports.Where(card=>card.Id is not ("gap" or "scores")).All(card=>card.ShowLegend),string.Join(",",ids));
     var arc=Sports("season-arc");
     Check(arc is {YReversed:true,YMin:0,YMax:100,YUnit:"%"}&&arc.YTickValues!.Select(t=>t.Label).SequenceEqual(["Front","Mid","Back"])&&arc.Series.Select(s=>s.Name).SequenceEqual(["XCC","XCO","XCM","Other"]),"the arc");
     // Every race stands once, in one discipline, at its index in the season; the race not finished is a gap in its own line.
@@ -7593,6 +7594,32 @@ Test("Sports page: Season arc and Gap to the leader close the Racing section, th
     Check(gap.Title==$"You finished +{SportsData.LapGaps()[^1][^1].ToString(CultureInfo.InvariantCulture)}s back"&&Sports("season-arc").Title=="Top quarter in 3 of 10",gap.Title);
     // No end label is cut on a phone's card, and every one stands inside the drawing.
     Check(Ends38(doc).All(e=>!Text38(e).EndsWith("…")&&Attr(Words38(e),"x")+Broad38(Text38(e))<=340),"a label was cut on a phone");
+});
+// 0.46.0: the Category heatmap card, a heatmap table of invented categories by season.
+Test("Sports page: the Category heatmap closes the Racing section, its cells the points per start of the points and starts behind them, and exactly the cells under ten starts not rated",()=>{
+    var card=sports.Single(c=>c.Id=="category-heatmap");var heat=card.Spec;
+    Check(card.Section=="racing"&&!card.Wide&&sports.Last(c=>c.Section=="racing")==card&&heat is{Kind:ChartKind.Heatmap,CellText:true,CellWidth:72,YUnit:" pts"},"the card");
+    ChartValidation.Validate(heat);
+    Check(heat.Series.Select(s=>s.Name).SequenceEqual(SportsData.CategoryHistory.Select(c=>c.Category))&&heat.Series.All(s=>s.Points.Select(p=>p.Label).SequenceEqual(["2023","2024","2025","2026"])),"rows and seasons");
+    foreach(var (row,history) in heat.Series.Zip(SportsData.CategoryHistory))
+        foreach(var (cell,(points,starts,riders)) in row.Points.Zip(history.Seasons))
+        {
+            Check(cell.SubLabel==$"/{starts} starts"&&(cell.NotRated is not null)==(starts<SportsData.RatedStarts),$"{row.Name} {cell.Label}: {starts} starts, not rated {cell.NotRated}");
+            Check(cell.Y==(starts>0?Math.Round((double)points/starts,1):null)&&(starts==0?cell.ValueNote is null:cell.ValueNote==$" · {points} pts, {riders} riders"),$"{row.Name} {cell.Label}: {cell.Y} {cell.ValueNote}");
+        }
+    // Each name says the sub-label, the value and the note, and "not rated" with its reason on the three thin cells; the cell with no starts has no value to say.
+    var names=PlacedNames(heat);
+    Check(names.Count(n=>n.EndsWith(", not rated: too few starts to rate"))==3&&names.Contains("Sprint: 2023 · /12 starts, 2.8 pts · 34 pts, 5 riders")
+        &&names.Contains("Long distance: 2023 · /4 starts, 2 pts · 8 pts, 3 riders, not rated: too few starts to rate")&&names.Contains("Relay: 2023 · /0 starts, not rated: too few starts to rate"),string.Join(" | ",names));
+    // The drawing is 165 pixels and four 72-pixel seasons wide whatever the spec's width, each of its sixteen cells writes its value and its starts
+    // beneath, and the colour scale leaves out the not-rated 1.6 for the rated 1.7.
+    var drawing=Svg(heat with{Width=337});
+    Check(drawing.Root!.Attribute("viewBox")!.Value.StartsWith("0 0 453 "),drawing.Root.Attribute("viewBox")!.Value);
+    var written=drawing.Root.Elements(ns+"text").Where(t=>(string?)t.Attribute("aria-hidden")=="true").ToArray();
+    Check(written.Count(t=>(string?)t.Attribute("font-size")=="11")==16&&written.Count(t=>(string?)t.Attribute("font-size")=="10"&&t.Value.EndsWith(" starts"))==16,$"{written.Length} words written in the cells");
+    Check(drawing.Descendants(ns+"text").Any(t=>t.Value=="Color scale: 1.7 pts low to 3.5 pts high"),"the colour scale");
+    var table=ChartExport.HtmlTable(heat);
+    Check(Regex.Matches(table,"<th scope='row'>").Count==4&&table.Contains("<th scope='row'>Middle distance</th>")&&table.Contains("class='lumen-grid-table'"),table);
 });
 // 0.39.0: proportions and meters. A strip of parts as shares of one bar with its own key, tracks behind bars, and charts that keep their
 // title and description as their name without drawing them. Every example is invented.

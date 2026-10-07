@@ -1682,15 +1682,15 @@ if (await sportsLink.CountAsync() > 0)
     var charts = sports.Locator(".lumen-chart");
     // Every chart sets FitWidth, which draws it at the width it is shown once the page is interactive, so the checks wait until it has.
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
-        return svgs.length === 32 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
+        return svgs.length === 33 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
-    await Test("The Sports & performance page renders its thirty-two charts, each live and drawn at the width it is shown", async () =>
+    await Test("The Sports & performance page renders its thirty-three charts, each live and drawn at the width it is shown", async () =>
     {
-        Check(await charts.CountAsync() == 32, $"the page shows {await charts.CountAsync()} charts");
-        for (var i = 0; i < 32; i++)
+        Check(await charts.CountAsync() == 33, $"the page shows {await charts.CountAsync()} charts");
+        for (var i = 0; i < 33; i++)
             Check(await charts.Nth(i).Locator(".lumen-datum[data-point]").CountAsync() > 0, $"chart {i + 1} drew no marks");
-        // Each chart's script adds its tooltip, so thirty-two of them prove every chart, sparklines included, is interactive.
-        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32");
+        // Each chart's script adds its tooltip, so thirty-three of them prove every chart, sparklines included, is interactive.
+        await sports.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 33");
         await sports.WaitForFunctionAsync(drawnToFit);
     });
 
@@ -1703,6 +1703,72 @@ if (await sportsLink.CountAsync() > 0)
         Check(names.Any(n => n.StartsWith("Place · Invented Open: ") && n.EndsWith("worse than the previous")), "the open series compared with itself");
         Check(names.Any(n => n.StartsWith("Points: ")), "the points pane");
     });
+
+    // The Category heatmap is a heatmap table: each cell is named with its starts, a cell with too few starts to rate says so in words, every
+    // cell writes its value, a heatmap with CellWidth is shown at exactly the size it is drawn (it does not stretch in a wide box, and scrolls in
+    // a narrow one), and its "View data" reads as a grid with a row for each category.
+    if (await sports.Locator("#category-heatmap .lumen-chart").CountAsync() > 0)
+    {
+        await Test("The Category heatmap names each cell with its starts and says which are not rated, writes every cell's value, and is shown at exactly its drawn width", async () =>
+        {
+            var card = sports.Locator("#category-heatmap .lumen-chart");
+            await card.ScrollIntoViewIfNeededAsync();
+            var names = await card.Locator(".lumen-datum[data-point]").EvaluateAllAsync<string[]>("marks => marks.map(m => m.getAttribute('aria-label') ?? '')");
+            Check(names.Length == 16 && names.All(n => Regex.IsMatch(n, @"^[^:]+: 20\d\d · /\d+ starts")), string.Join(" | ", names));
+            Check(names.Count(n => n.EndsWith(", not rated: too few starts to rate")) == 3, string.Join(" | ", names));
+            Check(names.Contains("Sprint: 2023 · /12 starts, 2.8 pts · 34 pts, 5 riders") && names.Contains("Relay: 2023 · /0 starts, not rated: too few starts to rate"), string.Join(" | ", names));
+            // The browser draws every cell's value and its starts, the three thin cells dashed, each cell at its own width, and the drawing at
+            // exactly its viewBox in a box wider than it, rather than stretched to fill it.
+            var drawn = await card.EvaluateAsync<double[]>(@"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg');
+                const words = [...s.querySelectorAll(':scope > text[aria-hidden=""true""]')];
+                return [words.filter(t => t.getAttribute('font-size') === '11').length, words.filter(t => t.getAttribute('font-size') === '10').length,
+                    s.querySelectorAll('g.lumen-datum > rect[stroke-dasharray=""3 2""]').length, s.querySelector('g.lumen-datum > rect').getBoundingClientRect().width,
+                    Number(s.getAttribute('viewBox').split(' ')[2]), s.getBoundingClientRect().width, v.clientWidth, v.scrollWidth - v.clientWidth]; }");
+            Check(drawn[0] == 16 && drawn[1] == 16 && drawn[2] == 3, $"{drawn[0]} values and {drawn[1]} starts written, {drawn[2]} dashed cells");
+            Check(drawn[3] >= 69.5, $"a cell is drawn {drawn[3]:0.#} wide");
+            Check(Math.Abs(drawn[5] - drawn[4]) < 1 && drawn[6] > drawn[4] && drawn[7] <= 0, $"drawn {drawn[4]} wide and shown {drawn[5]:0.#} in a box {drawn[6]} wide that scrolls by {drawn[7]}");
+        });
+
+        await Test("The Category heatmap's View data is a grid table with a row for each category, each cell reading its value, its note and its starts", async () =>
+        {
+            var card = sports.Locator("#category-heatmap .lumen-chart");
+            await card.GetByRole(AriaRole.Button, new() { Name = "View data", Exact = true }).ClickAsync();
+            try
+            {
+                var table = card.Locator(".lumen-table table.lumen-grid-table");
+                await table.WaitForAsync();
+                Check(await table.Locator("th[scope=col]").CountAsync() == 4 && await table.Locator("tbody th[scope=row]").CountAsync() == 4, "four seasons across, four categories down");
+                var rows = await table.Locator("tbody th[scope=row]").AllTextContentsAsync();
+                Check(rows.SequenceEqual(["Sprint", "Middle distance", "Long distance", "Relay"]), string.Join(" | ", rows));
+                var cells = await table.Locator("tbody td").AllTextContentsAsync();
+                Check(cells.Count == 16 && cells[0] == "2.8 pts · 34 pts, 5 riders · /12 starts" && cells.Count(c => c.Contains(", not rated: too few starts to rate")) == 3, string.Join(" | ", cells));
+                Check(cells.Contains("— · /0 starts, not rated: too few starts to rate"), string.Join(" | ", cells));
+            }
+            // The data is hidden again whatever the checks found, so the axe sweeps below see the page as a visitor first meets it.
+            finally { await card.GetByRole(AriaRole.Button, new() { Name = "Hide data", Exact = true }).ClickAsync(); }
+        });
+
+        await Test("On a 375-pixel phone the Category heatmap scrolls sideways at the width of its cells instead of squeezing, and the page does not", async () =>
+        {
+            await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+            var tab = await phone.NewPageAsync();
+            tab.SetDefaultTimeout(15_000);
+            await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 33", null, new() { Timeout = 120_000 });
+            var card = tab.Locator("#category-heatmap .lumen-chart");
+            await card.ScrollIntoViewIfNeededAsync();
+            var measured = await card.EvaluateAsync<double[]>(@"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'), cells = [...s.querySelectorAll('g.lumen-datum > rect')];
+                const before = [v.scrollWidth, v.clientWidth, cells[0].getBoundingClientRect().width, s.getBoundingClientRect().width, Number(s.getAttribute('viewBox').split(' ')[2]), document.documentElement.scrollWidth];
+                v.scrollLeft = v.scrollWidth;
+                return [...before, cells.at(-1).getBoundingClientRect().right - v.getBoundingClientRect().right, v.scrollLeft]; }");
+            Check(measured[0] > measured[1], $"the card's box is {measured[1]} wide and holds {measured[0]}, so it does not scroll sideways");
+            Check(measured[2] >= 69.5, $"a cell is drawn {measured[2]:0.#} wide, under its width of 70");
+            Check(Math.Abs(measured[3] - measured[4]) < 1, $"drawn {measured[4]} wide and shown {measured[3]:0.#}");
+            Check(measured[5] <= 375, $"the page is {measured[5]} wide");
+            Check(measured[7] > 0 && measured[6] <= 1, $"scrolled to {measured[7]}, the last cell ends {measured[6]:0.#} past the box's edge");
+        });
+    }
+    else Console.WriteLine("SKIP Category heatmap checks: this host's Sports & performance page has no Category heatmap");
 
     await Test("Hovering a mark on the Sports & performance page shows its tooltip", async () =>
     {
@@ -1748,7 +1814,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 33", null, new() { Timeout = 120_000 });
             await Sparklines(tab, "phone");
         });
     }
@@ -1771,7 +1837,7 @@ if (await sportsLink.CountAsync() > 0)
                 var tab = await context.NewPageAsync();
                 tab.SetDefaultTimeout(15_000);
                 await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32", null, new() { Timeout = 120_000 });
+                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 33", null, new() { Timeout = 120_000 });
                 await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
                 const string inside = @"(s, texts) => { const box = s.getBoundingClientRect();
                     return texts.filter(t => { const b = t.getBoundingClientRect(); return b.width === 0 || b.left < box.left - .5 || b.right > box.right + .5 || b.top < box.top - .5 || b.bottom > box.bottom + .5; }).length; }";
@@ -1803,7 +1869,7 @@ if (await sportsLink.CountAsync() > 0)
                 var tab = await context.NewPageAsync();
                 tab.SetDefaultTimeout(15_000);
                 await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32", null, new() { Timeout = 120_000 });
+                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 33", null, new() { Timeout = 120_000 });
                 await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
                 foreach (var (id, count) in new[] { ("#lap-heart", 4), ("#best-efforts", 5) })
                 {
@@ -1875,7 +1941,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 33", null, new() { Timeout = 120_000 });
             await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
             var card = tab.Locator("#ride-channels .lumen-chart");
             await card.ScrollIntoViewIfNeededAsync();
@@ -1931,7 +1997,8 @@ if (await sportsLink.CountAsync() > 0)
     {
         await sports.SetViewportSizeAsync(375, 800);
         await sports.WaitForFunctionAsync(drawnToFit);
-        var overflow = await sports.EvaluateAsync<int[]>("() => [document.documentElement.scrollWidth, ...[...document.querySelectorAll('.lumen-viewport')].map(v => v.scrollWidth - v.clientWidth)]");
+        // A heatmap with CellWidth is shown at exactly its drawn size and scrolls in its own box instead of squeezing; its card's check follows.
+        var overflow = await sports.EvaluateAsync<int[]>("() => [document.documentElement.scrollWidth, ...[...document.querySelectorAll('.lumen-chart:not(.lumen-fixed) .lumen-viewport')].map(v => v.scrollWidth - v.clientWidth)]");
         Check(overflow[0] <= 375, $"the page is {overflow[0]} pixels wide");
         Check(overflow.Skip(1).All(extra => extra <= 0), $"a chart scrolls sideways: {string.Join(", ", overflow.Skip(1))}");
     });
@@ -1977,7 +2044,7 @@ if (await sportsLink.CountAsync() > 0)
             var tab = await phone.NewPageAsync();
             tab.SetDefaultTimeout(15_000);
             await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
-            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 32", null, new() { Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 33", null, new() { Timeout = 120_000 });
             await tab.WaitForFunctionAsync(drawnToFit, null, new() { Timeout = 60_000 });
             var card = tab.Locator("#field .lumen-chart");
             await card.ScrollIntoViewIfNeededAsync();
@@ -1993,7 +2060,7 @@ if (await sportsLink.CountAsync() > 0)
             Check(measured[0] > 10 && measured[1] == 0, $"{measured[1]} of the card's {measured[0]} texts run outside its drawing");
             // Its title, its description and its source on two lines, the card drawn at the width it is shown and the page not scrolling sideways.
             Check(measured[2] == 4 && measured[6] <= 375 && Math.Abs(measured[7] - measured[6]) < 1.5 && measured[8] <= 375, $"{measured[2]} lines written from the left, drawn {measured[6]} wide and shown {measured[7]:0.#}, the page {measured[8]} wide");
-            Check(measured[3] == 29 && measured[4] >= 82 && measured[5] == 0, $"{measured[5]} of the {measured[4]} titles, descriptions and sources of {measured[3]} charts run outside their drawings");
+            Check(measured[3] == 30 && measured[4] >= 82 && measured[5] == 0, $"{measured[5]} of the {measured[4]} titles, descriptions and sources of {measured[3]} charts run outside their drawings");
         });
     else Console.WriteLine("SKIP field phone check: this host's Sports & performance page has no How the field finished");
     await sports.CloseAsync();
