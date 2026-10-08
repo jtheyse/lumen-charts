@@ -10267,6 +10267,25 @@ Test("Heatmap follow-ups: a gap-label cell is drawn like a not-rated cell, write
     var missed=HeatGrid(s=>s with{Series=[new("Sprint",[new ChartPoint(0,null,"2023"){GapLabel="did not race"},new ChartPoint(1,3.1,"2024")]),new("Relay",[new ChartPoint(0,null,"2023"){GapLabel="did not race"},new ChartPoint(1,2.0,"2024")])]});
     Check(Regex.IsMatch(ChartSvg.Render(missed),">2023<"),"its column is labelled");
 });
+Test("Heatmap follow-ups: a heatmap whose every cell is a gap-label cell is drawn, dashed and named, and a cell-width one has its frozen band",()=>{
+    ChartSeries Missed(string name)=>new(name,[new ChartPoint(0,null,"2023"){SubLabel="/0 starts",GapLabel="did not race"},new ChartPoint(1,null,"2024"){SubLabel="/0 starts",GapLabel="did not race"}]);
+    foreach(var width in new double?[]{null,90})
+    {
+        var spec=HeatGrid(s=>s with{CellWidth=width,Series=[Missed("Sprint"),Missed("Relay")]});
+        var svg=ChartSvg.Render(spec);
+        Check(!svg.Contains("No data to display"),$"width {width}: drawn as empty");
+        Check(Regex.Matches(svg,"stroke-dasharray='3 2'").Count==4,$"width {width}: four dashed cells");
+        Check(HeatNames(spec).Contains("Sprint: 2023 · /0 starts, did not race")&&HeatNames(spec).Contains("Relay: 2024 · /0 starts, did not race"),$"width {width}: "+string.Join(" | ",HeatNames(spec)));
+        Check(svg.Contains(">Sprint<")&&svg.Contains(">Relay<")&&svg.Contains(">2023<")&&svg.Contains(">2024<")&&Regex.Matches(svg,">did not race<").Count==4,$"width {width}: names, columns and words");
+    }
+    // The frozen band stands for a cell-width heatmap, as it does for one of not-rated cells; the others have none.
+    var banded=ChartSvg.HeatmapNameBand(HeatGrid(s=>s with{CellWidth=90,Series=[Missed("Sprint"),Missed("Relay")]}));
+    Check(banded is not null&&banded.Value.Svg.Contains(">Sprint<")&&banded.Value.Svg.Contains(">Relay<"),"the band");
+    Check(ChartSvg.HeatmapNameBand(HeatGrid(s=>s with{Series=[Missed("Sprint"),Missed("Relay")]})) is null,"no cell width, no band");
+    // Only a heatmap counts a gap label as data: a line of gap-label points alone still reads "No data to display", as it did.
+    var line=Spec(ChartKind.Line) with{Series=[new("S",[new ChartPoint(0,null,"a"){GapLabel="no ride"},new ChartPoint(1,null,"b"){GapLabel="no ride"}])]};
+    Check(ChartSvg.Render(line).Contains("No data to display"),"a line is unchanged");
+});
 Test("Heatmap follow-ups: YMin, YMax and IncludeZero set a refined heatmap's scale ends; the classic finish ignores them",()=>{
     Check(ChartSvg.Render(HeatGrid(s=>s with{IncludeZero=true})).Contains("Color scale: 0 low to 3.1 high"),"zero");
     Check(ChartSvg.Render(HeatGrid(s=>s with{YMin=0,YMax=5})).Contains("Color scale: 0 low to 5 high"),"set ends");

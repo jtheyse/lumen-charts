@@ -539,10 +539,11 @@ public static partial class ChartSvg
         return changes;
     }
     // A timeline's spans and a range's bars have no Y of their own to be missing, a calendar draws every day it spans, and a heatmap draws
-    // a not-rated cell with or without a value.
+    // a not-rated cell with or without a value and a gap-label cell with none.
     private static bool HasData(ChartSpec spec) => spec.Kind is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Timeline or ChartKind.Calendar
         ? spec.Series.Any(s => s.Points.Count > 0)
-        : spec.Series.Any(s => s.Summary is not null || s.Points.Any(p => p.Y.HasValue || p.NotRated is not null || p.Low.HasValue && Mark(spec, s) == ChartKind.Range));
+        : spec.Series.Any(s => s.Summary is not null || s.Points.Any(p => p.Y.HasValue || p.NotRated is not null || p.Low.HasValue && Mark(spec, s) == ChartKind.Range
+            || p.GapLabel is not null && Mark(spec, s) == ChartKind.Heatmap));
     private static string N(double n) => SvgWriter.N(n);
     /// <summary>Counts are grouped invariantly, so a host's culture cannot change what the chart reads.</summary>
     private static string Count(int value) => value.ToString("N0", CultureInfo.InvariantCulture);
