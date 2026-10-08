@@ -4238,11 +4238,11 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // readout, written last, which is never hashed, and since 0.37.0 the chart's sampling, written after its rendered points, and its pane
     // titles, written after its panes, and since 0.39.0 its bar tracks and drawn titles, and since 0.41.0 its painted background and
     // fitted height, written last, and since 0.46.0 its cell text, written after the week start (its cell width is null until set, so
-    // never written).
+    // never written), and since 0.46.1 its labels on top, written after the cell text.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false}";
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
@@ -8245,9 +8245,9 @@ Test("FitHeight draws a bar chart as tall as its rows: 36 a row on tracks, 32 wi
     // The gallery's fitted meters: titled, three rows.
     Check(Tall41(ChartSvg.Render(DemoData.FittedMeters(ChartTheme.Light),includeLegend:false))==78+108+24,"the gallery's meters");
 });
-Test("FitHeight is refused on every kind but horizontal bars, with its reason",()=>{
-    foreach(var kind in Enum.GetValues<ChartKind>().Where(k=>k!=ChartKind.Bar))
-        Check(Refused(Sample(kind) with{FitHeight=true}).StartsWith("FitHeight works out a horizontal bar chart's height"),$"{kind}: {Refused(Sample(kind) with{FitHeight=true})}");
+Test("FitHeight is refused on every kind but horizontal bars and heatmaps, with its reason",()=>{
+    foreach(var kind in Enum.GetValues<ChartKind>().Where(k=>k is not (ChartKind.Bar or ChartKind.Heatmap)))
+        Check(Refused(Sample(kind) with{FitHeight=true}).StartsWith("FitHeight works out a chart's height"),$"{kind}: {Refused(Sample(kind) with{FitHeight=true})}");
     Check(Svg(Sample(ChartKind.Bar) with{FitHeight=true}) is not null,"bars");
 });
 Test("The three settings round-trip through the HTTP API's JSON, stay out of the gradient hash at their defaults, and every kind draws byte for byte as before with them written out",()=>{
@@ -8364,7 +8364,7 @@ Test("Gap labels that would collide are thinned as value labels are: the later w
 Test("A gap label is refused on a point with a value, on other kinds and a density scatter, on a sparkline, blank, past 12 characters and across lines, each with its reason",()=>{
     ChartSpec With(ChartSpec s,string gap,double? y=null)=>s with{Series=[s.Series[0] with{Points=[s.Series[0].Points[0] with{Y=y,GapLabel=gap},..s.Series[0].Points.Skip(1)]},..s.Series.Skip(1)]};
     Check(Refused(With(Spec(),"absent",2)).StartsWith("A gap label is written where a value is missing"),"a valued point");
-    foreach(var kind in new[]{ChartKind.Column,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Bubble,ChartKind.Band,ChartKind.Heatmap,ChartKind.Radar,ChartKind.Donut})
+    foreach(var kind in new[]{ChartKind.Column,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Bubble,ChartKind.Band,ChartKind.Radar,ChartKind.Donut})
         Check(Refused(With(Sample(kind),"absent")).StartsWith("A gap label is written where a line, an area or scatter points miss a value"),$"{kind}: {Refused(With(Sample(kind),"absent"))}");
     Check(Refused(Spec(ChartKind.Column) with{Series=[Spec().Series[0],new("Share",[new(0,null,"A"){GapLabel="absent"}]){Kind=ChartKind.Column}]}).StartsWith("A gap label is written where a line"),"a column series");
     Check(Refused(With(Spec(ChartKind.Scatter),"absent") with{DensityCells=20}).StartsWith("A density scatter shades cells rather than points, so it writes no gap label"),"a density scatter");
@@ -9721,7 +9721,7 @@ Test("Heatmap table: each refusal says why, and a cell width that is no number i
     // A calendar draws cells too, but its days are its own marks: it takes neither.
     var calendar=Sample(ChartKind.Calendar);
     foreach(var other in new[]{line,calendar})
-        Check(Why(other with{CellText=true}).StartsWith("Cell text writes in a heatmap's cells and cell width sets the width of its columns, so they apply to heatmap charts only;")&&Why(other with{CellWidth=30}).StartsWith("Cell text writes in a heatmap's cells"),$"{other.Kind}: cell text and width off a heatmap");
+        Check(Why(other with{CellText=true}).StartsWith("Cell text writes in a heatmap's cells, cell width sets the width of its columns and ColumnLabelsOnTop moves its column labels above its grid, so they apply to heatmap charts only;")&&Why(other with{CellWidth=30}).StartsWith("Cell text writes in a heatmap's cells"),$"{other.Kind}: cell text and width off a heatmap");
     Check(Why(HeatGrid(s=>s with{CellWidth=23})).StartsWith("A heatmap's cell is at least 24 pixels wide, so its text and focus ring fit."),"width 23");
     foreach(var width in new[]{double.NaN,double.PositiveInfinity,double.NegativeInfinity})
         Check(Why(HeatGrid(s=>s with{CellWidth=width})).StartsWith("A heatmap's cell width is a finite number of pixels, at least 24, so its text and focus ring fit."),$"width {width}");
@@ -10071,6 +10071,33 @@ Test("Heatmap table: the component refuses a heatmap with a series that has no p
         try{Operate(spec,_=>Task.CompletedTask);}catch(Exception error){said=$"{error.GetType().Name}: {error.Message}";}
         Check(said=="ArgumentException: Series and points cannot be null.",$"CellWidth {width}: {said}");
     }
+});
+// 0.46.1: heatmap follow-ups.
+ChartSpec Noted(ChartSpec s,string note)=>s with{Series=[s.Series[0] with{Points=[s.Series[0].Points[0] with{ValueNote=note},s.Series[0].Points[1]]},s.Series[1]]};
+ChartSpec FirstCell(ChartSpec s,ChartPoint first)=>s with{Series=[s.Series[0] with{Points=[first,s.Series[0].Points[1]]},s.Series[1]]};
+Test("Heatmap follow-ups: heatmap cells take a 40-character note, a gap label where they have no value, labels on top and FitHeight",()=>{
+    var forty=" · "+new string('9',37);
+    Check(forty.Length==40,"forty");
+    ChartValidation.Validate(Noted(HeatGrid(),forty));
+    ChartValidation.Validate(FirstCell(HeatGrid(),new ChartPoint(0,null,"2025"){SubLabel="/0 starts",GapLabel="did not race"}));
+    ChartValidation.Validate(HeatGrid(s=>s with{ColumnLabelsOnTop=true,FitHeight=true}));
+});
+Test("Heatmap follow-ups: a longer note, a gap label with a value or beside a reason, and labels on top or FitHeight elsewhere are refused",()=>{
+    var fortyOne=" · "+new string('9',38);
+    Reject(()=>ChartValidation.Validate(Noted(HeatGrid(),fortyOne)));
+    try{ChartValidation.Validate(Noted(HeatGrid(),fortyOne));}
+    catch(ArgumentException e){Check(e.Message.StartsWith("A value note is at most 20 characters (40 on a heatmap cell, where it is never drawn)"),e.Message);}
+    // Every other kind keeps 20.
+    Reject(()=>ChartValidation.Validate(Spec(ChartKind.Column) with{Series=[new("S",[new ChartPoint(0,1,"A"){ValueNote=new string('x',21)}])]}));
+    Reject(()=>ChartValidation.Validate(FirstCell(HeatGrid(),new ChartPoint(0,2.8,"2025"){GapLabel="did not race"})));
+    Reject(()=>ChartValidation.Validate(FirstCell(HeatGrid(),new ChartPoint(0,null,"2025"){GapLabel="did not race",NotRated="no starts"})));
+    try{ChartValidation.Validate(FirstCell(HeatGrid(),new ChartPoint(0,null,"2025"){GapLabel="did not race",NotRated="no starts"}));}
+    catch(ArgumentException e){Check(e.Message.StartsWith("A heatmap cell is either not rated or has a gap label, not both"),e.Message);}
+    Reject(()=>ChartValidation.Validate(Spec(ChartKind.Column) with{ColumnLabelsOnTop=true}));
+    Reject(()=>ChartValidation.Validate(Spec(ChartKind.Line) with{FitHeight=true}));
+});
+Test("Heatmap follow-ups: labels on top left false change nothing a heatmap draws",()=>{
+    Check(ChartSvg.Render(HeatGrid())==ChartSvg.Render(HeatGrid(s=>s with{ColumnLabelsOnTop=false})),"false is the default");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

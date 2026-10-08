@@ -303,7 +303,8 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// Kinds whose colours mean something else — direction, value, a state or a distribution — refuse it, as do stacked
     /// columns, whose colours tell the stacked series apart.</summary>
     public string? Color { get; init; }
-    /// <summary>A short note written straight after this point's value, at most 20 characters, such as <c>/48</c> after a finishing
+    /// <summary>A short note written straight after this point's value, at most 20 characters, or 40 on a heatmap cell, which never draws
+    /// it, from 0.46.1, such as <c>/48</c> after a finishing
     /// position for the size of its field: in the muted colour at normal weight after a value label, and after the value in the
     /// mark's tooltip and accessible name and in the component's data table. A <c>Note</c> column carries it into CSV. Give it any
     /// space it needs: <c>" inside baseline"</c>. A missing value has nothing for a note to follow, so its note reaches the CSV
@@ -332,7 +333,8 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     public string? SubLabel { get; init; }
     /// <summary>
     /// The word a missing value is written as, such as <c>absent</c> for a round the rider was entered in and did not ride: 1 to 12
-    /// characters on one line, on a point whose <see cref="Y"/> is null in a series drawn as a line, an area or scatter points. The point
+    /// characters on one line, on a point whose <see cref="Y"/> is null in a series drawn as a line, an area or scatter points, or, from
+    /// 0.46.1, on a heatmap cell with no value, which is drawn unshaded and dashed and named with the word. The point
     /// is still a missing value, so a line or an area still breaks there, but it is no longer silent: the word is written at the point's
     /// X, centred on it and moved in from the plot's sides so it is never cut, just inside the plot beside the start of the series' value
     /// axis, above the plot's bottom edge, or below its top edge where a reversed axis puts the start at the top, at 11 px and weight 600,
@@ -343,7 +345,8 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// focusable mark like any other, an invisible box round its word, or a narrow one at its X where the word is left out, named and tooltipped <c>Share: Round 3, absent</c>, the word in
     /// place of <c>missing</c> and any <see cref="ValueNote"/> after it, so the arrow keys reach it, the component's shared readout reads
     /// it, <c>Share absent</c>, and its status line and data table say it. A point the X range shown leaves out is left out with its word.
-    /// A point that has a value, a series of any other kind, a density scatter and a sparkline refuse it. Leave a point out altogether,
+    /// A point that has a value, a series of any other kind, a density scatter and a sparkline refuse it, as does a heatmap cell that is
+    /// also <see cref="NotRated"/>: a cell is either not rated or has a gap label. Leave a point out altogether,
     /// rather than give it a null Y, where nothing was missed, such as a round the rider's category did not hold: the line then simply joins
     /// over it. CSV does not carry it.
     /// </summary>
@@ -724,6 +727,10 @@ public sealed record ChartSpec
     /// width, and never narrower than 320, the room left over at its right, instead of squeezing into <see cref="Width"/>, and in
     /// <c>&lt;LumenChart FitWidth&gt;</c> it scrolls sideways when wider than its box. Heatmaps only; null by default.</summary>
     public double? CellWidth { get; init; }
+    /// <summary>Writes a heatmap's column labels above its grid, under its title and description, as a table's header row reads, instead of
+    /// under it; the grid takes the room they leave below (0.46.1). Heatmaps only, refused elsewhere; false by default, and left out of the
+    /// gradient-ID hash while false.</summary>
+    public bool ColumnLabelsOnTop { get; init; }
     /// <summary>
     /// In the Blazor component, reads every series at once at one X: a vertical guide through every pane at the X nearest the
     /// pointer or the focused point, a ring round each shown series' point there, and one tooltip that reads the X first and then
@@ -773,7 +780,7 @@ public sealed record ChartSpec
     /// </summary>
     public bool PaintBackground { get; init; } = true;
     /// <summary>
-    /// Horizontal bar charts only: draws the chart as tall as its rows need instead of <see cref="Height"/>, as a strip is drawn as tall as
+    /// Horizontal bar charts and, from 0.46.1, heatmaps: draws the chart as tall as its rows need instead of <see cref="Height"/>, as a strip is drawn as tall as
     /// its content, so a card of three or four meters keeps no spare room. Each category takes a row of 36 units on tracks
     /// (<see cref="BarTrack"/>), 32 without, or 38 where any category writes a <see cref="ChartPoint.SubLabel"/>, so names never collide;
     /// and round the rows the chart keeps the room it draws in: 78 units above them for the title and description, 14 more for a
@@ -783,8 +790,9 @@ public sealed record ChartSpec
     /// <see cref="ChartSvg.Render"/> draws when it includes one. So three meters on tracks without titles, ticks or source are
     /// 28 + 3 × 36 + 24 = 160 units tall, and one is 88: no 240-unit floor applies. <see cref="Height"/> is still checked, 240 to 2160, and
     /// otherwise not used. The height follows the categories the chart draws, so the component, which draws a hidden series without its
-    /// points, draws a chart shorter when the series it hides held a category alone; its <c>FitWidth</c> scaling is unchanged. Off by
-    /// default; other kinds refuse it.
+    /// points, draws a chart shorter when the series it hides held a category alone; its <c>FitWidth</c> scaling is unchanged. A heatmap
+    /// takes 36 units a row, and with it an empty <see cref="Source"/> reserves no room under the grid. Off by default; other kinds
+    /// refuse it.
     /// </summary>
     public bool FitHeight { get; init; }
 }

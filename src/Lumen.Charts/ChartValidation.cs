@@ -18,8 +18,8 @@ public static partial class ChartValidation
         if (spec.Sparkline) Sparkline(spec);
         if (spec.Kind == ChartKind.Strip) Strip(spec);
         Track(spec);
-        if (spec.FitHeight && spec.Kind != ChartKind.Bar)
-            throw new ArgumentException("FitHeight works out a horizontal bar chart's height from its rows, one a category, so it applies to bar charts only; a strip is drawn as tall as its content already, and the other kinds lay their marks out in the Height they are given.");
+        if (spec.FitHeight && spec.Kind is not (ChartKind.Bar or ChartKind.Heatmap))
+            throw new ArgumentException("FitHeight works out a chart's height from its rows, a horizontal bar chart's one a category and a heatmap's 36 units each, so it applies to bar charts and heatmaps only; a strip is drawn as tall as its content already, and the other kinds lay their marks out in the Height they are given.");
         if (!Enum.IsDefined(spec.XAxis) || !Enum.IsDefined(spec.YAxis)) throw new ArgumentException("Unknown axis kind.");
         Style(spec.Style);
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");
@@ -108,8 +108,8 @@ public static partial class ChartValidation
             throw new ArgumentException("Unknown calendar layout, cell or week start.");
         if (spec.Kind != ChartKind.Calendar && (spec.CalendarLayout != CalendarLayout.Weeks || spec.CalendarCell != CalendarCell.Square || spec.WeekStart != DayOfWeek.Monday))
             throw new ArgumentException("CalendarLayout, CalendarCell and WeekStart lay out a calendar's days, so they apply to calendar charts only.");
-        if (spec.Kind != ChartKind.Heatmap && (spec.CellText || spec.CellWidth is not null))
-            throw new ArgumentException("Cell text writes in a heatmap's cells and cell width sets the width of its columns, so they apply to heatmap charts only; the other kinds draw other marks.");
+        if (spec.Kind != ChartKind.Heatmap && (spec.CellText || spec.CellWidth is not null || spec.ColumnLabelsOnTop))
+            throw new ArgumentException("Cell text writes in a heatmap's cells, cell width sets the width of its columns and ColumnLabelsOnTop moves its column labels above its grid, so they apply to heatmap charts only; the other kinds draw other marks.");
         if (spec.CellWidth is { } cellWidth && !double.IsFinite(cellWidth))
             throw new ArgumentException("A heatmap's cell width is a finite number of pixels, at least 24, so its text and focus ring fit.");
         if (spec.CellWidth < 24)
@@ -266,8 +266,8 @@ public static partial class ChartValidation
                 }
                 if (p.ValueNote is not null)
                 {
-                    if (p.ValueNote.Length > 20)
-                        throw new ArgumentException("A value note follows a value on the chart, so it is at most 20 characters, such as /48 after a finishing position for the size of its field; longer words belong in the point's label.");
+                    if (p.ValueNote.Length > (mark == ChartKind.Heatmap ? 40 : 20))
+                        throw new ArgumentException("A value note is at most 20 characters (40 on a heatmap cell, where it is never drawn), such as /48 after a finishing position for the size of its field; longer words belong in the point's label.");
                     if (mark is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Range or ChartKind.Histogram or ChartKind.Box or ChartKind.Violin or ChartKind.Timeline or ChartKind.Calendar or ChartKind.Gauge or ChartKind.Ring)
                         throw new ArgumentException("A value note is written after a mark's one value, so it applies to lines, areas, bands, scatter points, bubbles, columns, bars, blocks, donut slices, heatmap cells and radar points; a candle reads four prices, a range bar two ends, a timeline's span has no value, histograms, boxes, violins and calendars add their points up, and a gauge or ring writes its value in its legend.");
                 }
@@ -669,10 +669,12 @@ public static partial class ChartValidation
             throw new ArgumentException("A gap label is the word a missing value is written as, such as absent, so it needs words; leave GapLabel null to write none.");
         if (gap.Length > MaxGapLabel || gap.Any(c => c is '\n' or '\r' or '\t'))
             throw new ArgumentException($"A gap label is one short word or two written in the plot, at most {MaxGapLabel} characters and no line breaks, such as absent or no result.");
-        if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter))
-            throw new ArgumentException("A gap label is written where a line, an area or scatter points miss a value, so it applies to series drawn as lines, areas or scatter points; the other kinds draw nothing at a missing value, or draw a value of their own, so name the point in its Label or ValueNote.");
+        if (mark is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Heatmap))
+            throw new ArgumentException("A gap label is written where a line, an area or scatter points miss a value, so it applies to series drawn as lines, areas or scatter points, and to heatmap cells, which it draws unshaded and dashed; the other kinds draw nothing at a missing value, or draw a value of their own, so name the point in its Label or ValueNote.");
         if (spec.DensityCells is not null && mark == ChartKind.Scatter)
             throw new ArgumentException("A density scatter shades cells rather than points, so it writes no gap label at a missing point.");
+        if (p.NotRated is not null)
+            throw new ArgumentException("A heatmap cell is either not rated or has a gap label, not both: NotRated says why a result is not read as a score, and GapLabel names a cell with no result, such as did not race.");
         if (p.Y.HasValue)
             throw new ArgumentException("A gap label is written where a value is missing, so it applies to a point whose Y is null; a point with a value is read by its value, and a note on it belongs in its ValueNote.");
     }
