@@ -117,7 +117,7 @@ This changes 0.46.0's drawing of not-rated cells (value and sub-label), so the e
 
 For a heatmap with `CellWidth`, `<LumenChart>` adds a second copy of the drawing inside `.lumen-viewport`.
 
-- **What the copy shows:** the copy's `viewBox` is cropped to the row-name band, the name column from the top of the grid to its bottom. It sits in a layer with `position:sticky; left:0`, painted in the style's background, with a 1 px `Style.Grid` hairline on its right edge, so cells read as passing under it.
+- **What the copy shows:** the copy's `viewBox` is cropped to the row-name band, the name column over the grid's rows and its column-label row, so a scrolled-away column's label never shows beside the frozen names. It sits in a layer with `position:sticky; left:0`, painted in the style's background, with a 1 px `Style.Grid` hairline on its right edge, so cells read as passing under it.
 - **Accessibility:** the copy is `aria-hidden="true"`, holds nothing focusable, and takes the pointer itself, so a covered cell can't be hovered or clicked. It is never read or focused. It is not `inert`, since `inert` makes hit-testing skip it and lets the pointer through to the cell beneath. Marks, focus order, tooltips, keys and "View data" all stay on the one real drawing.
 - **What scrolls:** the title, description, scale line and column labels lie outside the band, so they scroll with the drawing.
 - **When nothing scrolls:** the copy sits exactly over the real names and nothing visible changes.
