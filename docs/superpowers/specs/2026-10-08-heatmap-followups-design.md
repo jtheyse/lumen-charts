@@ -90,10 +90,12 @@ This changes 0.46.0's drawing of not-rated cells (value and sub-label), so the e
 
 ### 1.6 Full row names (gap 6, the drawing part)
 
+- **Refined finish only:** the measured name column is refined only. The classic finish keeps today's 130 column and cuts names at 17 characters (`Short(name, 17)`, ending at x = 118), however long they are, to stay 0.23.0 byte for byte. The rest of this section is the refined finish.
 - Row names are measured at 12 px.
 - **Name column:**
   - The column stays at today's 130 units, with names ending at x = 118, while every name fits 118.
   - Otherwise it widens to fit the longest name plus 18, up to **240**.
+  - A name of 17 characters or fewer can widen it, if it measures wider than 118 units.
 - **Cutting:** names wider than their room (the column less 12, or less 18 once widened) are cut by measured width with "…", no longer at 17 characters.
 - **Width:**
   - The drawing's width follows the column: `left + 35 + columns × CellWidth` with `CellWidth`.
@@ -119,9 +121,10 @@ For a heatmap with `CellWidth`, `<LumenChart>` adds a second copy of the drawing
 
 - **What the copy shows:** the copy's `viewBox` is cropped to the row-name band, the name column over the grid's rows and its column-label row, so a scrolled-away column's label never shows beside the frozen names. It sits in a layer with `position:sticky; left:0`, painted in the style's background, with a 1 px `Style.Grid` hairline on its right edge, so cells read as passing under it.
 - **Accessibility:** the copy is `aria-hidden="true"`, holds nothing focusable, and takes the pointer itself, so a covered cell can't be hovered or clicked. It is never read or focused. It is not `inert`, since `inert` makes hit-testing skip it and lets the pointer through to the cell beneath. Marks, focus order, tooltips, keys and "View data" all stay on the one real drawing.
-- **What scrolls:** the title, description, scale line and column labels lie outside the band, so they scroll with the drawing.
+- **What scrolls:** the title, description, scale line and source lie outside the band, so they scroll with the drawing. The column labels lie inside it, since the band also covers the column-label row: the crop reaches 24 units above the grid with labels on top, or 24 below it with labels at the foot.
+- **Narrow columns:** with narrow columns (`CellWidth` about 24 to 60) whose first label is wider than its cell, the band clips the overhang of that label at rest. This is accepted.
 - **When nothing scrolls:** the copy sits exactly over the real names and nothing visible changes.
-- **Renderer:** the renderer exposes the band (name-column width, grid top, grid bottom) as an internal helper, beside `DrawnWidth`.
+- **Renderer:** the renderer exposes the band (name-column width, and the crop's top and height, which take in the column-label row as well as the grid's rows) as an internal helper, beside `DrawnWidth`.
 - **Static SVG:** it has no freezing. The docs say so and point to "View data".
 
 ### 2.2 "View data" without the toolbar (item 7)
