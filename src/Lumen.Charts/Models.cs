@@ -627,16 +627,19 @@ public sealed record ChartSpec
     /// table.
     /// </summary>
     public bool Sparkline { get; init; }
-    /// <summary>Stretches the value axis to include zero. Kinds drawn from a zero baseline always include it.</summary>
+    /// <summary>Stretches the value axis to include zero. Kinds drawn from a zero baseline always include it. On a heatmap in the refined
+    /// finish, from 0.46.1, it widens the colour scale to run through 0; the classic finish ignores it.</summary>
     public bool IncludeZero { get; init; }
     /// <summary>The lowest value the X axis shows. Null fits the data.</summary>
     public double? XMin { get; init; }
     /// <summary>The highest value the X axis shows. Null fits the data.</summary>
     public double? XMax { get; init; }
     /// <summary>The bottom of the main plot's left-hand axis. Null fits the data; a kind drawn from zero refuses a bound that
-    /// leaves zero out.</summary>
+    /// leaves zero out. On a heatmap in the refined finish, from 0.46.1, it is the low end of the colour scale, used as given; the
+    /// classic finish ignores it.</summary>
     public double? YMin { get; init; }
-    /// <summary>The top of the main plot's left-hand axis. Null fits the data.</summary>
+    /// <summary>The top of the main plot's left-hand axis. Null fits the data. On a heatmap in the refined finish, from 0.46.1, it is the
+    /// high end of the colour scale, used as given; the classic finish ignores it.</summary>
     public double? YMax { get; init; }
     /// <summary>The least the main plot's left-hand axis spans, centred on its data: where the data's range is smaller, the axis runs
     /// from the middle of the data less half the span to the middle plus half, so a wobble of 0.3 in a span of 8 reads as small instead
