@@ -1712,47 +1712,67 @@ if (await sportsLink.CountAsync() > 0)
         Check(names.Any(n => n.StartsWith("Points: ")), "the points pane");
     });
 
-    // The Category heatmap is a heatmap table: each cell is named with its starts, a cell with too few starts to rate says so in words, every
-    // cell writes its value, a heatmap with CellWidth is shown at exactly the size it is drawn (it does not stretch in a wide box, and scrolls in
-    // a narrow one), and its "View data" reads as a grid with a row for each category.
+    // The Category heatmap is a heatmap table: each cell is named with its starts, a cell with too few starts to rate and a season nobody raced
+    // say so in words, every cell writes its value or its reason, a heatmap with CellWidth is shown at exactly the size it is drawn (it does
+    // not stretch in a wide box, and scrolls in a narrow one) with its row names held at the left while the cells scroll, the keyboard never
+    // leaves a cell under them, and its "View data", the one button its tools row keeps, reads as a grid with a row for each category.
+    // Its name column holds "Junior mixed team relay" whole, so the drawing is 185 + 35 + 4 x 90 = 580 wide.
     if (await sports.Locator("#category-heatmap .lumen-chart").CountAsync() > 0)
     {
-        await Test("The Category heatmap names each cell with its starts and says which are not rated, writes every cell's value, and is shown at exactly its drawn width", async () =>
+        await Test("The Category heatmap names each cell with its starts and says which are not rated and which season nobody raced, writes every cell's words, and is shown at exactly its drawn width", async () =>
         {
             var card = sports.Locator("#category-heatmap .lumen-chart");
             await card.ScrollIntoViewIfNeededAsync();
             var names = await card.Locator(".lumen-datum[data-point]").EvaluateAllAsync<string[]>("marks => marks.map(m => m.getAttribute('aria-label') ?? '')");
             Check(names.Length == 16 && names.All(n => Regex.IsMatch(n, @"^[^:]+: 20\d\d · /\d+ starts")), string.Join(" | ", names));
-            Check(names.Count(n => n.EndsWith(", not rated: too few starts to rate")) == 3, string.Join(" | ", names));
-            Check(names.Contains("Sprint: 2023 · /12 starts, 2.8 pts · 34 pts, 5 riders") && names.Contains("Relay: 2023 · /0 starts, not rated: too few starts to rate"), string.Join(" | ", names));
-            // The browser draws every cell's value and its starts, the three thin cells dashed, each cell at its own width, and the drawing at
-            // exactly its viewBox in a box wider than it, rather than stretched to fill it.
-            var drawn = await card.EvaluateAsync<double[]>(@"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg');
+            Check(names.Count(n => n.EndsWith(", not rated: too few starts to rate")) == 2 && names.Count(n => n.EndsWith(", did not race")) == 1, string.Join(" | ", names));
+            Check(names.Contains("Sprint: 2023 · /12 starts, 2.8 pts · 34 pts, 5 riders") && names.Contains("Junior mixed team relay: 2023 · /0 starts, did not race"), string.Join(" | ", names));
+            // The browser draws the thirteen rated cells' values with their starts, the two reasons on two lines each and the season nobody
+            // raced in one line with its starts, the three thin cells dashed, the long name whole, each cell at its own width, and the drawing at
+            // exactly its viewBox.
+            const string measure = @"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg');
                 const words = [...s.querySelectorAll(':scope > text[aria-hidden=""true""]')];
-                return [words.filter(t => t.getAttribute('font-size') === '11').length, words.filter(t => t.getAttribute('font-size') === '10').length,
+                return [words.filter(t => t.getAttribute('font-size') === '11').length, words.filter(t => t.getAttribute('font-size') === '10' && t.textContent.startsWith('/')).length,
+                    words.filter(t => t.getAttribute('font-size') === '10' && !t.textContent.startsWith('/')).length,
                     s.querySelectorAll('g.lumen-datum > rect[stroke-dasharray=""3 2""]').length, s.querySelector('g.lumen-datum > rect').getBoundingClientRect().width,
-                    Number(s.getAttribute('viewBox').split(' ')[2]), s.getBoundingClientRect().width, v.clientWidth, v.scrollWidth - v.clientWidth]; }");
-            Check(drawn[0] == 16 && drawn[1] == 16 && drawn[2] == 3, $"{drawn[0]} values and {drawn[1]} starts written, {drawn[2]} dashed cells");
-            Check(drawn[3] >= 69.5, $"a cell is drawn {drawn[3]:0.#} wide");
-            Check(Math.Abs(drawn[5] - drawn[4]) < 1 && drawn[6] > drawn[4] && drawn[7] <= 0, $"drawn {drawn[4]} wide and shown {drawn[5]:0.#} in a box {drawn[6]} wide that scrolls by {drawn[7]}");
+                    Number(s.getAttribute('viewBox').split(' ')[2]), s.getBoundingClientRect().width, v.clientWidth, v.scrollWidth - v.clientWidth,
+                    [...s.querySelectorAll(':scope > text.lumen-muted')].filter(t => t.textContent === 'Junior mixed team relay').length]; }";
+            var drawn = await card.EvaluateAsync<double[]>(measure);
+            Check(drawn[0] == 13 && drawn[1] == 14 && drawn[2] == 5 && drawn[3] == 3, $"{drawn[0]} values, {drawn[1]} starts and {drawn[2]} reason lines written, {drawn[3]} dashed cells");
+            Check(drawn[9] == 1, "the long row name is not written whole");
+            Check(drawn[4] >= 87.5, $"a cell is drawn {drawn[4]:0.#} wide");
+            Check(drawn[5] == 580 && Math.Abs(drawn[6] - drawn[5]) < 1, $"drawn {drawn[5]} wide and shown {drawn[6]:0.#}");
+            // In a box wider than the drawing it stands at its own width rather than stretching to fill the box, which at 1400 pixels is narrower.
+            await sports.SetViewportSizeAsync(1800, 1000);
+            try
+            {
+                await sports.WaitForFunctionAsync(drawnToFit);
+                var wide = await card.EvaluateAsync<double[]>(measure);
+                Check(Math.Abs(wide[6] - wide[5]) < 1 && wide[7] > wide[5] && wide[8] <= 0, $"drawn {wide[5]} wide and shown {wide[6]:0.#} in a box {wide[7]} wide that scrolls by {wide[8]}");
+            }
+            finally { await sports.SetViewportSizeAsync(1400, 1000); await sports.WaitForFunctionAsync(drawnToFit); }
         });
 
-        await Test("The Category heatmap's View data is a grid table with a row for each category, each cell reading its value, its note and its starts", async () =>
+        await Test("The Category heatmap's View data is its tools row's one button and opens a grid table with a row for each category, each cell reading its value, its starts and its note", async () =>
         {
             var card = sports.Locator("#category-heatmap .lumen-chart");
+            await card.ScrollIntoViewIfNeededAsync();
+            // The toolbar is off and only "View data" is kept: no zoom and no exports in the tools row, which is the hushed one.
+            var tools = card.Locator(".lumen-tools button");
+            Check(await tools.CountAsync() == 1 && (await tools.AllTextContentsAsync()).SequenceEqual(["View data"]) && await card.Locator(".lumen-tools.lumen-hush").CountAsync() == 1, string.Join(" | ", await tools.AllTextContentsAsync()));
             var opened = false;
             try
             {
-                await card.GetByRole(AriaRole.Button, new() { Name = "View data", Exact = true }).ClickAsync();
+                await tools.First.ClickAsync();
                 opened = true;
                 var table = card.Locator(".lumen-table table.lumen-grid-table");
                 await table.WaitForAsync();
                 Check(await table.Locator("th[scope=col]").CountAsync() == 4 && await table.Locator("tbody th[scope=row]").CountAsync() == 4, "four seasons across, four categories down");
                 var rows = await table.Locator("tbody th[scope=row]").AllTextContentsAsync();
-                Check(rows.SequenceEqual(["Sprint", "Middle distance", "Long distance", "Relay"]), string.Join(" | ", rows));
+                Check(rows.SequenceEqual(["Sprint", "Middle distance", "Long distance", "Junior mixed team relay"]), string.Join(" | ", rows));
                 var cells = await table.Locator("tbody td").AllTextContentsAsync();
-                Check(cells.Count == 16 && cells[0] == "2.8 pts · 34 pts, 5 riders · /12 starts" && cells.Count(c => c.Contains(", not rated: too few starts to rate")) == 3, string.Join(" | ", cells));
-                Check(cells.Contains("— · /0 starts, not rated: too few starts to rate"), string.Join(" | ", cells));
+                Check(cells.Count == 16 && cells[0] == "2.8 pts · /12 starts · 34 pts, 5 riders" && cells.Count(c => c.EndsWith(", not rated: too few starts to rate")) == 2, string.Join(" | ", cells));
+                Check(cells.Contains("2 pts · /4 starts · 8 pts, 3 riders, not rated: too few starts to rate") && cells.Contains("did not race · /0 starts"), string.Join(" | ", cells));
                 // The grid is taller than the 320-pixel box it scrolls in, so its region is a named tab stop, and axe-core finds the page clean with it open.
                 var region = card.Locator(".lumen-table");
                 Check(await region.GetAttributeAsync("tabindex") == "0" && await region.GetAttributeAsync("role") == "region" && await region.GetAttributeAsync("aria-label") == "Chart data", "the grid is not a named, focusable region");
@@ -1762,7 +1782,7 @@ if (await sportsLink.CountAsync() > 0)
             finally { if (opened) await card.GetByRole(AriaRole.Button, new() { Name = "Hide data", Exact = true }).ClickAsync(); }
         });
 
-        await Test("On a 375-pixel phone the Category heatmap scrolls sideways at the width of its cells instead of squeezing, and the page does not", async () =>
+        await Test("On a 375-pixel phone the Category heatmap scrolls sideways at the width of its cells instead of squeezing, the page does not, and its row names stay put while the cells scroll under them", async () =>
         {
             await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
             var tab = await phone.NewPageAsync();
@@ -1780,10 +1800,106 @@ if (await sportsLink.CountAsync() > 0)
             var scroller = read.EnumerateArray().Skip(8).Select(e => e.GetString()).ToArray();
             Check(scroller.SequenceEqual(["0", "region", "Scrollable chart"]), $"the scrolling region reads {string.Join(" | ", scroller)}");
             Check(measured[0] > measured[1], $"the card's box is {measured[1]} wide and holds {measured[0]}, so it does not scroll sideways");
-            Check(measured[2] >= 69.5, $"the narrowest cell is drawn {measured[2]:0.#} wide, under its width of 70");
-            Check(Math.Abs(measured[3] - measured[4]) < 1, $"drawn {measured[4]} wide and shown {measured[3]:0.#}");
+            Check(measured[2] >= 87.5, $"the narrowest cell is drawn {measured[2]:0.#} wide, under its width of 88");
+            Check(Math.Abs(measured[3] - measured[4]) < 1 && measured[4] == 580, $"drawn {measured[4]} wide and shown {measured[3]:0.#}");
             Check(measured[5] <= 375, $"the page is {measured[5]} wide");
             Check(measured[7] > 0 && measured[6] <= 1, $"scrolled to {measured[7]}, the last cell ends {measured[6]:0.#} past the box's edge");
+
+            // The row names stay where they are while the cells scroll under them.
+            const string places = @"() => { const c = document.querySelector('#category-heatmap'), b = c.querySelector('.lumen-freeze'), s = c.querySelector('.lumen-viewport > svg'); return [b.getBoundingClientRect().left, s.getBoundingClientRect().left]; }";
+            await tab.EvaluateAsync("() => { document.querySelector('#category-heatmap .lumen-viewport').scrollLeft = 0; }");
+            var before = await tab.EvaluateAsync<double[]>(places);
+            await tab.EvaluateAsync("() => document.querySelector('#category-heatmap .lumen-viewport').scrollBy(200, 0)");
+            await tab.WaitForTimeoutAsync(300);
+            var after = await tab.EvaluateAsync<double[]>(places);
+            Check(Math.Abs(after[0] - before[0]) < 1, "names held: " + string.Join(",", before) + " -> " + string.Join(",", after));
+            Check(before[1] - after[1] > 150, "cells scrolled: " + string.Join(",", before) + " -> " + string.Join(",", after));
+            // The layer is never read or focused, and takes the pointer itself, so what it covers can be neither hovered nor clicked.
+            var layer = await tab.EvaluateAsync<string[]>(@"() => { const b = document.querySelector('#category-heatmap .lumen-freeze'); return [b.getAttribute('aria-hidden'), String(b.hasAttribute('inert')), String(b.querySelectorAll('[tabindex],a,button').length), getComputedStyle(b).pointerEvents]; }");
+            Check(layer.SequenceEqual(new[] { "true", "false", "0", "auto" }), string.Join(",", layer));
+            // A frozen name now stands over cells that scrolled beneath it: the pointer reaches the layer, shows no tooltip and selects nothing.
+            var name = await tab.EvaluateAsync<double[]>(@"() => { const c = document.querySelector('#category-heatmap'), b = c.querySelector('.lumen-freeze'), t = [...b.querySelectorAll('text')].find(e => e.textContent === 'Junior mixed team relay'),
+                r = t.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, hit = document.elementFromPoint(x, y);
+                const under = [...c.querySelectorAll('.lumen-viewport > svg g.lumen-datum')].filter(g => { const q = g.getBoundingClientRect(); return q.left <= x && x <= q.right && q.top <= y && y <= q.bottom; }).length;
+                return [x, y, hit && b.contains(hit) ? 1 : 0, hit && hit.closest('.lumen-datum') ? 1 : 0, under]; }");
+            Check(name[2] == 1 && name[3] == 0, $"the pointer at a frozen name reaches {(name[2] == 1 ? "the layer" : "something else")}{(name[3] == 1 ? " and a cell" : "")}");
+            Check(name[4] >= 1, "no cell stands under the frozen name, so the check proves nothing");
+            var tip = card.Locator(".lumen-tooltip");
+            var line = card.Locator(".lumen-status");
+            var said = await line.TextContentAsync() ?? "";
+            await tab.Mouse.MoveAsync((float)name[0], (float)name[1]);
+            await tab.WaitForTimeoutAsync(300);
+            Check(!await tip.IsVisibleAsync(), $"hovering a frozen name shows a tooltip: {await tip.TextContentAsync()}");
+            await tab.Mouse.ClickAsync((float)name[0], (float)name[1]);
+            await tab.WaitForTimeoutAsync(500);
+            Check((await line.TextContentAsync() ?? "") == said && !await tip.IsVisibleAsync(), $"clicking a frozen name selected \"{await line.TextContentAsync()}\"");
+            // A cell the layer leaves visible, to its right, still shows its tooltip and is selected by a click.
+            var cell = await tab.EvaluateAsync<double[]>(@"() => { const c = document.querySelector('#category-heatmap'), v = c.querySelector('.lumen-viewport'), edge = c.querySelector('.lumen-freeze').getBoundingClientRect().right, end = v.getBoundingClientRect().right;
+                let best = [0, 0, 0];
+                for (const g of c.querySelectorAll('.lumen-viewport > svg g.lumen-datum')) {
+                    const q = g.getBoundingClientRect(), left = Math.max(q.left, edge + 1), right = Math.min(q.right, end - 1);
+                    if (right - left > best[2]) best = [(left + right) / 2, q.top + q.height / 2, right - left];
+                }
+                return best; }");
+            Check(cell[2] >= 20, $"no cell stands visible beside the frozen names: {string.Join(",", cell)}");
+            await tab.Mouse.MoveAsync((float)cell[0], (float)cell[1]);
+            await tip.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            var hovered = await tab.EvaluateAsync<string>("([x, y]) => document.elementFromPoint(x, y)?.closest('.lumen-datum')?.getAttribute('aria-label') ?? ''", new[] { cell[0], cell[1] });
+            Check(hovered.Length > 0 && await tip.TextContentAsync() == hovered, $"the tooltip reads \"{await tip.TextContentAsync()}\", the cell \"{hovered}\"");
+            await tab.Mouse.ClickAsync((float)cell[0], (float)cell[1]);
+            await tab.WaitForFunctionAsync("([c, was]) => { const t = c.querySelector('.lumen-status')?.textContent || ''; return t !== was && t.includes(':'); }", new object[] { await card.ElementHandleAsync(), said });
+        });
+
+        // The viewport keeps scroll-padding-left equal to the width of the layer over its names, so a cell reached with a key stops beside
+        // that layer and not under it; and the viewport's focus ring, drawn along its edge, is whole where the layer stands.
+        await Test("On a 375-pixel phone the keys leave no Category heatmap cell under the frozen names, and the focus ring of its scrolling region stays whole along them", async () =>
+        {
+            await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+            var tab = await phone.NewPageAsync();
+            tab.SetDefaultTimeout(15_000);
+            await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+            await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 33", null, new() { Timeout = 120_000 });
+            var card = tab.Locator("#category-heatmap .lumen-chart");
+            await card.ScrollIntoViewIfNeededAsync();
+            const string edges = @"() => { const c = document.querySelector('#category-heatmap'), v = c.querySelector('.lumen-viewport'), a = document.activeElement.getBoundingClientRect(), v0 = v.getBoundingClientRect();
+                return [a.left, c.querySelector('.lumen-freeze').getBoundingClientRect().right, v.scrollLeft, a.right, v0.right, parseFloat(getComputedStyle(v).scrollPaddingLeft)]; }";
+            await card.Locator(".lumen-datum[data-point]").First.FocusAsync();
+            // End goes to the last cell of the row, which scrolls the cells left; Home comes back to the first, which must stop beside the names.
+            await tab.Keyboard.PressAsync("End");
+            await tab.WaitForTimeoutAsync(300);
+            var last = await tab.EvaluateAsync<double[]>(edges);
+            Check(await tab.EvaluateAsync<string>("() => document.activeElement.getAttribute('aria-label')") is { } end && end.StartsWith("Sprint: 2026"), "End reached the row's last cell");
+            Check(last[2] > 0 && last[0] >= last[1] - 1 && last[3] <= last[4] + 1, $"the last cell stands {last[0]:0.#} to {last[3]:0.#} with the names to {last[1]:0.#} and the box to {last[4]:0.#}, scrolled {last[2]}");
+            await tab.Keyboard.PressAsync("Home");
+            await tab.WaitForTimeoutAsync(300);
+            var first = await tab.EvaluateAsync<double[]>(edges);
+            Check(await tab.EvaluateAsync<string>("() => document.activeElement.getAttribute('aria-label')") is { } home && home.StartsWith("Sprint: 2023"), "Home reached the row's first cell");
+            Check(first[0] >= first[1] - 1, $"the first cell stands at {first[0]:0.#}, under the names that end at {first[1]:0.#}");
+            Check(first[5] > 0 && Math.Abs(first[5] - (first[1] - (await tab.EvaluateAsync<double>("() => document.querySelector('#category-heatmap .lumen-viewport').getBoundingClientRect().left")))) < 1, $"the viewport pads its scrolling by {first[5]}");
+
+            // Shift+Tab leaves the cell for its scrolling region, which shows a focus ring along its edge: 2 pixels wide, the width of the strip
+            // the layer leaves clear of it. Its pixels beside the names are all the ring's colour, and the same strip is covered without that.
+            await tab.Keyboard.PressAsync("Shift+Tab");
+            await tab.WaitForTimeoutAsync(200);
+            var ring = await tab.EvaluateAsync<string[]>(@"() => { const v = document.querySelector('#category-heatmap .lumen-viewport'), b = v.querySelector('.lumen-freeze'), r = v.getBoundingClientRect(), q = b.getBoundingClientRect();
+                return [String(document.activeElement === v), String(v.matches(':focus-visible')), getComputedStyle(v).outlineColor, getComputedStyle(b).clipPath, String(r.left), String(q.top), String(q.height)]; }");
+            Check(ring[0] == "true" && ring[1] == "true" && ring[3] == "inset(0px -1px 0px 2px)", string.Join(" | ", ring));
+            var ink = Regex.Matches(ring[2], @"[\d.]+").Take(3).Select(m => double.Parse(m.Value, CultureInfo.InvariantCulture)).ToArray();
+            var decoder = await phone.NewPageAsync();
+            async Task<int> RingPixels()
+            {
+                var shot = await tab.ScreenshotAsync(new() { Clip = new() { X = float.Parse(ring[4], CultureInfo.InvariantCulture), Y = float.Parse(ring[5], CultureInfo.InvariantCulture), Width = 3, Height = float.Parse(ring[6], CultureInfo.InvariantCulture) } });
+                // Read in a page of its own, which has no content policy, at the pixel one device unit in from the ring's outer edge, on every
+                // fourth row; the count is how many of the rows stand in the ring's colour.
+                return await decoder.EvaluateAsync<int>(@"async ([b64, ink]) => { const blob = await (await fetch('data:image/png;base64,' + b64)).blob(), bitmap = await createImageBitmap(blob), canvas = new OffscreenCanvas(bitmap.width, bitmap.height), g = canvas.getContext('2d');
+                    g.drawImage(bitmap, 0, 0); let near = 0, rows = 0;
+                    for (let y = 4; y < bitmap.height - 4; y += 4) { const d = g.getImageData(1, y, 1, 1).data; rows++; if (Math.abs(d[0] - ink[0]) + Math.abs(d[1] - ink[1]) + Math.abs(d[2] - ink[2]) < 40) near++; }
+                    return rows > 0 && near === rows ? 1 : -near; }", new object[] { Convert.ToBase64String(shot), ink });
+            }
+            Check(await RingPixels() == 1, "the focus ring is broken along the frozen names");
+            // The same strip with the clip taken away is covered by the layer, which shows the probe can see a broken ring.
+            await tab.EvaluateAsync("() => { document.querySelector('#category-heatmap .lumen-freeze').style.clipPath = 'none'; }");
+            Check(await RingPixels() != 1, "the probe sees a whole ring even with the layer over it");
         });
     }
     else Console.WriteLine("SKIP Category heatmap checks: this host's Sports & performance page has no Category heatmap");
