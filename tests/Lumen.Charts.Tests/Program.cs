@@ -10005,7 +10005,7 @@ Test("Heatmap table: the drawn width is the drawing the reader sees, a hidden se
         &&css.Contains(".lumen-table caption,.lumen-grid-table caption{text-align:left;padding:10px 0}"),"the grid's look");
     // A fixed drawing's min- and max-width, which beat the drawing's own width of 100%, come after the fitted chart's rule, which is the one it was.
     const string fit=".lumen-fit>.lumen-viewport>svg{min-width:var(--lumen-drawn,0)}",hold=".lumen-fixed>.lumen-viewport>svg{min-width:var(--lumen-drawn);max-width:var(--lumen-drawn)}";
-    Check(css.Split(".lumen-fit").Length==2&&css.Contains(fit)&&css.Split(".lumen-fixed").Length==4&&css.Contains(hold)&&css.IndexOf(fit)<css.IndexOf(hold),"the fixed drawing's rule");
+    Check(css.Split(".lumen-fit").Length==2&&css.Contains(fit)&&css.Split(hold).Length==2&&css.Contains(".lumen-fixed>.lumen-viewport{display:grid}")&&css.Contains(".lumen-fixed>.lumen-viewport>svg,.lumen-freeze{grid-area:1/1}")&&css.Contains(hold)&&css.IndexOf(fit)<css.IndexOf(hold),"the fixed drawing's rule");
 });
 // 0.46.0's final fixes.
 Test("Heatmap table: the component's status line reads a selected cell as its name reads it, sub-label, value and why it is not rated included",()=>{
@@ -10340,6 +10340,17 @@ Test("Heatmap follow-ups: a grid table cell reads value, sub-label, note, then w
     var raced=ChartExport.HtmlTable(FirstCell(HeatGrid(),new ChartPoint(0,null,"2025"){SubLabel="/0 starts",GapLabel="did not race"}));
     Check(raced.Contains("<td>did not race · /0 starts</td>"),raced);
 });
+Test("Heatmap follow-ups: a grid table cell writes its note where the cell's name does, after a value or a gap label's word and never after a dash",()=>{
+    // A not-rated cell with no value says its sub-label and its reason alone, as its name does.
+    var bare=FirstCell(HeatGrid(),new ChartPoint(0,null,"2025"){SubLabel="/0 starts",NotRated="no starts",ValueNote=" · 34 pts"});
+    var table=ChartExport.HtmlTable(bare);
+    Check(table.Contains("<td>— · /0 starts, not rated: no starts</td>"),table);
+    Check(HeatNames(bare).Contains("Sprint: 2025 · /0 starts, not rated: no starts"),string.Join(" | ",HeatNames(bare)));
+    // After a gap label's word it stays, in the name and the table both.
+    var worded=FirstCell(HeatGrid(),new ChartPoint(0,null,"2025"){SubLabel="/0 starts",GapLabel="did not race",ValueNote=" (5 riders)"});
+    Check(ChartExport.HtmlTable(worded).Contains("<td>did not race · /0 starts (5 riders)</td>"),ChartExport.HtmlTable(worded));
+    Check(HeatNames(worded).Contains("Sprint: 2025 · /0 starts, did not race (5 riders)"),string.Join(" | ",HeatNames(worded)));
+});
 // The row names a drawing writes: each at its x and y, anchored at the end. The drawing and the name band write them the same way.
 (string X,string Y,string Text)[] RowNames(string svg)=>Regex.Matches(svg,"<text x='([^']*)' y='([^']*)' text-anchor='end'[^>]*>([^<]*)</text>").Select(m=>(m.Groups[1].Value,m.Groups[2].Value,m.Groups[3].Value)).ToArray();
 Test("Heatmap follow-ups: the name band holds the drawing's row names, where it draws them, and nothing else",()=>{
@@ -10354,7 +10365,7 @@ Test("Heatmap follow-ups: the name band holds the drawing's row names, where it 
         Check(at.Success&&band.Svg.Contains($"<text x='{at.Groups[1].Value}' y='{at.Groups[2].Value}'")&&band.Svg.Contains($">{name}<"),name);
     }
     Check(band.Svg.Contains($"viewBox='0 {band.Top} {band.Left} {band.Height}'"),"cropped to the band");
-    Check(band.Svg.Contains("aria-hidden='true'")&&!band.Svg.Contains("lumen-datum")&&!band.Svg.Contains("tabindex"),"no marks, not read");
+    Check(band.Svg.Contains("aria-hidden='true'")&&band.Svg.Contains("focusable='false'")&&!band.Svg.Contains("lumen-datum")&&!band.Svg.Contains("tabindex"),"no marks, not read, not focused");
     Check(ChartSvg.HeatmapNameBand(HeatGrid())is null&&ChartSvg.HeatmapNameBand(Spec())is null,"only for a heatmap with a cell width");
     // A band is painted in the chart's background, its words in the muted colour, in the drawing's own face and size.
     var style=ChartSvg.ResolveStyle(spec);
@@ -10383,7 +10394,8 @@ Test("Heatmap follow-ups: the classic finish's name band keeps its 130 column an
 Test("Heatmap follow-ups: the component freezes a fixed-width heatmap's names, from the rows shown, and pads its scrolling by them",()=>{
     var spec=Named(HeatGrid(s=>s with{CellWidth=72}),"Junior 18/19 Girls");
     var html=Operate(spec,async c=>{await c.Fit(340);},fit:true);
-    Check(html.Contains("<div class=\"lumen-freeze\" aria-hidden=\"true\" inert"),"the layer");
+    var layerTag=Regex.Match(html,"<div class=\"lumen-freeze\"[^>]*>").Value;
+    Check(layerTag.StartsWith("<div class=\"lumen-freeze\" aria-hidden=\"true\" style=\"")&&!layerTag.Contains("inert")&&!layerTag.Contains("tabindex"),"the layer: "+layerTag);
     Check(Regex.IsMatch(html,"<div class=\"lumen-viewport\"[^>]*scroll-padding-left:145px"),"scroll padding "+Regex.Match(html,"<div class=\"lumen-viewport\"[^>]*>").Value);
     // The layer stands in the viewport after the drawing and before the keys, with the band's top, width and height and the chart's colours.
     var frame=ChartSvg.HeatmapFrame(spec);
@@ -10415,6 +10427,10 @@ Test("Heatmap follow-ups: ShowDataButton keeps View data with the toolbar off, a
 Test("Heatmap follow-ups: the stylesheet freezes the layer, and keeps 24-pixel table margins for the component's own table only",()=>{
     var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
     Check(css.Contains(".lumen-freeze{position:sticky;left:0"),"sticky");
+    // Opaque and with no handler, the layer takes the pointer itself, so a cell under it is neither hovered nor clicked, and it is not selected.
+    Check(css.Contains("box-shadow:1px 0 0 var(--lumen-freeze-line);pointer-events:auto;-webkit-user-select:none;user-select:none}"),"the layer takes the pointer");
+    // The 2 px focus ring runs inside the viewport's edge, under the layer along the band: the layer gives up its left 2 px and keeps its hairline.
+    Check(css.Contains(".lumen-viewport:focus-visible>.lumen-freeze{clip-path:inset(0 -1px 0 2px)}"),"the focus ring stays whole");
     Check(css.Contains(".lumen-table{overflow:auto;max-height:320px;margin:10px 0;")&&css.Contains(".lumen-chart>.lumen-table{margin:10px 24px}"),"margins");
     Check(css.Contains(".lumen-quiet .lumen-status,.lumen-hush .lumen-status{position:absolute;"),"a hushed toolbar hides its status line as a quiet one does");
 });

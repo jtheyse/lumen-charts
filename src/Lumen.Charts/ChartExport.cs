@@ -65,13 +65,14 @@ public static class ChartExport
     }
     // A grid cell's words, which are encoded one by one so that the separators between them stay as they are written: the value, or the
     // gap label's word where there is none, then " · " and the sub-label, then the note as written, then ", not rated: " and the reason.
-    // A cell with no point, or with no value, no gap label and no not-rated reason, is empty.
+    // The note is written where the cell's name writes it, after a value or a gap label's word, and not after a bare dash. A cell with no
+    // point, or with no value, no gap label and no not-rated reason, is empty.
     private static string GridCell(ChartPoint? p,Axis values)
     {
         if(p is null||!p.Y.HasValue&&p.NotRated is null&&p.GapLabel is null)return "";
         var cell=WebUtility.HtmlEncode(p.Y.HasValue?values.Format(p.Y.Value):p.GapLabel??"—");
         if(p.SubLabel is not null)cell+=" · "+WebUtility.HtmlEncode(p.SubLabel);
-        if(p.ValueNote is not null)cell+=WebUtility.HtmlEncode(p.ValueNote);
+        if(p.ValueNote is not null&&(p.Y.HasValue||p.GapLabel is not null))cell+=WebUtility.HtmlEncode(p.ValueNote);
         if(p.NotRated is not null)cell+=", not rated: "+WebUtility.HtmlEncode(p.NotRated);
         return cell;
     }

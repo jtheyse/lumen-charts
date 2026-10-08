@@ -8,7 +8,7 @@
 else
 {
 <div class="@((FitWidth ? "lumen-chart lumen-fit" : "lumen-chart") + (drawnWidth is null ? "" : " lumen-fixed"))" @ref="root">
-    <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart" style="@DrawnStyle">@((MarkupString)svg)@if(band is { } frozen){<div class="lumen-freeze" aria-hidden="true" inert style="@FreezeStyle">@((MarkupString)frozen.Svg)</div>}</div>
+    <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart" style="@DrawnStyle">@((MarkupString)svg)@if(band is { } frozen){<div class="lumen-freeze" aria-hidden="true" style="@FreezeStyle">@((MarkupString)frozen.Svg)</div>}</div>
     @* The keys a reader moves with, hidden from view and from reading in place: the script, which makes them work, names them as the
        viewport's description while it scrolls, and otherwise the drawing's, as a sparkline's. The viewport is written as a scrolling
        region and a tab stop; the script leaves it neither while the drawing fits it (0.42.0). *@
@@ -82,12 +82,13 @@ else
     /// Draws the toolbar under the chart, the default: zoom, pan and reset where the chart zooms, the SVG, PNG and CSV exports, and the button
     /// that shows the data table. Off, none of these buttons is drawn, which suits a small phone card, but the status line stays in the page,
     /// out of sight, so a screen reader still hears the shared readout and each point chosen; dragging across the plots still zooms, and the
-    /// arrow keys still read the chart. Hiding it takes away the keyboard's way to zoom, pan and reset, and the only way to the data table, so
-    /// keep it where those matter.
+    /// arrow keys still read the chart. Hiding it takes away the keyboard's way to zoom, pan and reset, and the only way to the data table,
+    /// unless <see cref="ShowDataButton"/> keeps it, so keep it where those matter.
     /// </summary>
     [Parameter] public bool ShowToolbar { get; set; } = true;
     /// <summary>Draws the button that shows the data table. Unset, it follows <see cref="ShowToolbar"/>; set true with the toolbar off,
-    /// the tools row keeps this one button, so a small card can drop zoom and exports and keep its data a click away (0.46.1).</summary>
+    /// the tools row keeps this one button, so a small card can drop zoom and exports and keep its data a click away. A sparkline has no tools
+    /// row, so it ignores this (0.46.1).</summary>
     [Parameter] public bool? ShowDataButton { get; set; }
     private bool DataButton => ShowDataButton ?? ShowToolbar;
     // A fixed-width heatmap's row names, drawn again in a layer held at the viewport's left while its cells scroll under it (0.46.1).
