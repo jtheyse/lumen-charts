@@ -3333,9 +3333,11 @@ public static partial class ChartSvg
 
     /// <summary>Writes a heatmap cell's words where it shows no value: a not-rated cell's reason or a gap-label cell's word, 10 px in
     /// <paramref name="ink"/>, wrapped at word breaks onto as many lines, 12 units apart, as fit 4 inside the cell's height, each within 6
-    /// of its width, then its sub-label on a line of its own where one is left. Words that do not fit are cut at a word with "…", and a word
-    /// wider than a line by its characters; where not even "…" fits, nothing is written. The block is centred in the cell, its two lines
-    /// where the value and sub-label of <see cref="CellWords"/> stand. The cell's name says all of it, so none of it is read (0.46.1).</summary>
+    /// of its width, then its sub-label on a line of its own where one is left. Words that do not fit are cut at a word with "…", and a first
+    /// word wider than a line by its characters. A word after the first line that is wider than a line ends the block before it, with "…"
+    /// after the line above, and a cut first word is the whole block, so the text is always the reason's start with at most one "…". Where
+    /// not even "…" fits, nothing is written. The block is centred in the cell, its two lines where the value and sub-label of
+    /// <see cref="CellWords"/> stand. The cell's name says all of it, so none of it is read (0.46.1).</summary>
     private static void CellReason(SvgWriter w, double cx, double cy, double cw, double ch, string said, string? sub, string ink)
     {
         double room = cw - 6;
@@ -3354,9 +3356,13 @@ public static partial class ChartSvg
         var i = 0;
         while (i < words.Length && lines.Count < most)
         {
+            // A word wider than a line is cut by its characters only as the first word, and then nothing follows it: after the first line
+            // the block ends before it, as it does for words that run out of lines, so the text is only ever the reason's start.
+            if (lines.Count > 0 && Width(words[i]) > room) break;
             var line = words[i++];
             while (i < words.Length && Width(line + " " + words[i]) <= room) line += " " + words[i++];
             lines.Add(line);
+            if (Width(line) > room) break;
         }
         if (i < words.Length)
         {

@@ -10357,6 +10357,51 @@ Test("Heatmap follow-ups: a sub-label wider than its cell's room is dropped from
     Check(dropped.Select(t=>t.Text).SequenceEqual(["too few","starts to","rate"])&&dropped.Select(t=>t.Y).SequenceEqual([111d,123,135]),string.Join(" | ",dropped));
     Check((dropped[0].Y+dropped[^1].Y)/2==123,"centred");
 });
+// `rows` rows in the 320-high grid, as Packed has, whose first cell is not rated for `reason` and the others write a value alone: no sub-label
+// is drawn, so every 10 px word is the reason's. 5 rows hold two lines, 3 rows four.
+ChartSpec Reasoned(int rows,double cell,string reason)=>HeatGrid(s=>s with{CellWidth=cell,Series=Enumerable.Range(0,rows).Select(i=>new ChartSeries($"Row {i}",[i==0?new ChartPoint(0,null,"2025"){NotRated=reason}:new ChartPoint(0,i+1,"2025"),new ChartPoint(1,i+2,"2026")])).ToArray()});
+Test("Heatmap follow-ups: a word after the first line that is wider than a line ends the reason there with an ellipsis, rather than being cut among the lines",()=>{
+    // At 48 a line holds 42 and a cell three rows deep four lines: "too" fits, "abcdefghij" is far wider, so the block is "too…". It was
+    // "too / abcde… / stuvw / to" (and at 30, "too / ab… / st… / to"): a cut word between words that stand whole, or two cut words.
+    var tooWide=TenPx(ChartSvg.Render(Reasoned(3,48,"too abcdefghij stuvw to"))).Select(t=>t.Text).ToArray();
+    Check(tooWide.SequenceEqual(["too…"]),string.Join(" / ",tooWide));
+    // At 60 a line holds 54: "too few" (43.5) and its ellipsis fit the first line and "abcdefghij" cannot stand on the second: "too few…",
+    // not "too few / abcdefg… / to", which reads as though "to" followed "abcdefg".
+    var second=TenPx(ChartSvg.Render(Reasoned(3,60,"too few abcdefghij to"))).Select(t=>t.Text).ToArray();
+    Check(second.SequenceEqual(["too few…"]),string.Join(" / ",second));
+    // The same where the cell holds two lines only: the second line is the one that would have been cut.
+    var two=TenPx(ChartSvg.Render(Reasoned(5,60,"too few abcdefghij to"))).Select(t=>t.Text).ToArray();
+    Check(two.SequenceEqual(["too few…"]),string.Join(" / ",two));
+    // A word that fits after the first line is still written on its own line, with the ellipsis for the words left.
+    var fits=TenPx(ChartSvg.Render(Reasoned(5,54,"too few starts to rate"))).Select(t=>t.Text).ToArray();
+    Check(fits.SequenceEqual(["too few","starts…"]),string.Join(" / ",fits));
+    // A first word wider than a line is cut by its characters on its own line: "insufficient" at 48, where a line holds 42.
+    var first=TenPx(ChartSvg.Render(Reasoned(3,48,"insufficient")));
+    Check(first.Length==1&&first[0].Text=="insuf…",string.Join(" / ",first.Select(t=>t.Text)));
+    // Nothing follows a cut first word: the ellipsis already says the rest is not here, and the block holds one ellipsis ("injur… / rate" before).
+    var injured=TenPx(ChartSvg.Render(Reasoned(3,48,"injured rate"))).Select(t=>t.Text).ToArray();
+    Check(injured.SequenceEqual(["injur…"]),string.Join(" / ",injured));
+});
+Test("Heatmap follow-ups: a reason's block never holds more than one ellipsis, ends with it, and reads as the start of the reason",()=>{
+    var reasons=new[]{"too few starts to rate","too abcdefghij stuvw to","too few abcdefghij to","injured ab rate","injured riders rate x y","insufficient starts","ab cdefghijklmn x",
+        "WWWW WW WWWWWW","a wwwwwwwwwwwwwwwwwwww b",new string('w',24),"W W","W","too few","to rate"};
+    foreach(var rows in new[]{5,3,2})
+        foreach(var width in new double[]{24,30,36,40,48,54,60,66,72,84,90,104,120,133})
+            foreach(var reason in reasons)
+            {
+                var texts=TenPx(ChartSvg.Render(Reasoned(rows,width,reason))).Select(t=>t.Text).ToArray();
+                var where=$"{rows} rows, {width}, \"{reason}\": {string.Join(" / ",texts)}";
+                Check(texts.Sum(t=>t.Count(c=>c=='…'))<=1,"one ellipsis at most, "+where);
+                if(texts.Length==0)continue;
+                // The ellipsis, where there is one, ends the last line; every line is within the cell's room.
+                var cut=texts.Any(t=>t.Contains('…'));
+                Check(!cut||texts[^1].EndsWith('…')&&texts.Take(texts.Length-1).All(t=>!t.Contains('…')),"the ellipsis ends the block, "+where);
+                Check(texts.All(t=>ChartSvg.Wide(t)*10/11<=width-6+1e-9),"within the room, "+where);
+                // No word is skipped: the lines, joined, are the reason's start, and the whole of it where nothing was cut.
+                var read=string.Join(" ",texts).Replace("…","");
+                Check(cut?reason.StartsWith(read):read==reason,"reads as the reason, "+where);
+            }
+});
 Test("Heatmap follow-ups: a grid table cell reads value, sub-label, note, then why it is not rated; a gap cell its word",()=>{
     var noted=Noted(HeatGrid()," · 34 pts, 5 riders");
     var table=ChartExport.HtmlTable(noted);
