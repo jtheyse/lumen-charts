@@ -3185,8 +3185,10 @@ public static partial class ChartSvg
     }
 
     /// <summary>A heatmap's colour scale over its rated values. In the refined finish YMin and YMax set its ends and IncludeZero widens it
-    /// to 0, used as given; ends that leave out every value still make a scale, which those values take the nearer end of. The classic
-    /// finish builds it from the values alone, as 0.23.0 did (0.46.1).</summary>
+    /// to 0, used as given; ends that leave out every value still make a scale, which those values take the nearer end of. Where a set end
+    /// meets or crosses the other, which the data then gives, the end that is not set moves one unit past the set one, so the set end is kept
+    /// exactly: YMin 10 over values up to 3.1 runs 10 to 11, and YMax -1 over values from 0.4 runs -2 to -1. The classic finish builds it
+    /// from the values alone, as 0.23.0 did (0.46.1).</summary>
     private static LinearScale HeatmapScale(ChartSpec s, bool refined, double[] values)
     {
         if (!refined || s.YMin is null && s.YMax is null && !s.IncludeZero) return LinearScale.Create(values);
@@ -3194,6 +3196,11 @@ public static partial class ChartSvg
         if (s.IncludeZero) { low = Math.Min(low, 0); high = Math.Max(high, 0); }
         if (s.YMin is { } min) low = min;
         if (s.YMax is { } max) high = max;
+        if (low >= high)
+        {
+            if (s.YMin is not null) high = low + 1;
+            else if (s.YMax is not null) low = high - 1;
+        }
         return LinearScale.Create(low < high ? [low, high] : [low]);
     }
 
@@ -3301,7 +3308,7 @@ public static partial class ChartSvg
             if (Width(text) <= room) return text;
             var keep = text.Length;
             while (keep > 1 && Width(Short(text, keep)) > room) keep--;
-            return keep > 1 || Width("…") <= room ? Short(text, keep) : "";
+            return keep > 1 ? Short(text, keep) : Width("…") <= room ? "…" : "";
         }
         var words = said.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var lines = new List<string>();

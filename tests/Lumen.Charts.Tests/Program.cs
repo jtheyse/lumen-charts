@@ -10265,11 +10265,71 @@ Test("Heatmap follow-ups: YMin, YMax and IncludeZero set a refined heatmap's sca
     Check(ChartSvg.Render(HeatGrid(s=>s with{YMin=0,YMax=5})).Contains("Color scale: 0 low to 5 high"),"set ends");
     // A value past an end takes the end's colour: on Light the default ramp's high end, #4069D0.
     Check(ChartSvg.Render(HeatGrid(s=>s with{YMax=2})).Contains("fill='#4069D0'"),"clamped high");
-    // Ends that leave out every value still draw.
-    ChartSvg.Render(HeatGrid(s=>s with{YMin=10}));
-    ChartSvg.Render(HeatGrid(s=>s with{YMax=-1}));
+    // Ends that leave out every value still draw, and keep the set end exactly: the end that is not set moves one unit past it. HeatGrid's
+    // rated values are 0.4, 2.8 and 3.1 (the not-rated 1.2 is outside the scale), three shaded cells. The shaded cells' fills, in order:
+    string[] Shaded(string svg)=>Regex.Matches(svg,"<rect[^>]*fill='(#[0-9A-F]{6})' stroke='var[(]--lumen-muted[)]'").Select(m=>m.Groups[1].Value).ToArray();
+    // YMin 10 is above them all: the scale runs 10 to 11, and every cell takes the low colour, #E4EDFC on Light.
+    var above=ChartSvg.Render(HeatGrid(s=>s with{YMin=10}));
+    Check(above.Contains("Color scale: 10 low to 11 high"),"YMin above the data: "+Regex.Match(above,"Color scale[^<]*").Value);
+    Check(Shaded(above).SequenceEqual(["#E4EDFC","#E4EDFC","#E4EDFC"]),string.Join(",",Shaded(above)));
+    // YMax -1 is below them all: -2 to -1 (a hyphen, as LinearScale.Label writes it), and every cell takes the high colour, #4069D0.
+    var below=ChartSvg.Render(HeatGrid(s=>s with{YMax=-1}));
+    Check(below.Contains("Color scale: -2 low to -1 high"),"YMax below the data: "+Regex.Match(below,"Color scale[^<]*").Value);
+    Check(Shaded(below).SequenceEqual(["#4069D0","#4069D0","#4069D0"]),string.Join(",",Shaded(below)));
+    // A set end that only meets the data's other end is kept the same way: YMin 3.1 runs 3.1 to 4.1, YMax 0.4 runs -0.6 to 0.4.
+    Check(ChartSvg.Render(HeatGrid(s=>s with{YMin=3.1})).Contains("Color scale: 3.1 low to 4.1 high"),"YMin at the highest value");
+    Check(ChartSvg.Render(HeatGrid(s=>s with{YMax=0.4})).Contains("Color scale: -0.6 low to 0.4 high"),"YMax at the lowest value");
     var classic=new ChartStyle{Finish=ChartFinish.Classic};
     Check(ChartSvg.Render(HeatGrid(s=>s with{Style=classic,IncludeZero=true,YMin=0,YMax=5}))==ChartSvg.Render(HeatGrid(s=>s with{Style=classic})),"classic unchanged");
+    Check(ChartSvg.Render(HeatGrid(s=>s with{Style=classic,YMin=10}))==ChartSvg.Render(HeatGrid(s=>s with{Style=classic})),"classic unchanged where the ends leave out the data");
+});
+// The 10 px words a heatmap writes in its cells, top to bottom, each with the y it stands at.
+(double Y,string Text)[] TenPx(string svg)=>Regex.Matches(svg,"<text[^>]*y='([^']*)'[^>]*font-size='10'[^>]*>([^<]*)<").Select(m=>(double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),m.Groups[2].Value)).ToArray();
+// One row of `columns` columns at the default width, so each is (600 - 130 - 35) / columns wide; the first is not rated, for `reason`.
+ChartSpec Crowded(int columns,string reason)=>HeatGrid(s=>s with{Series=[new("Sprint",Enumerable.Range(0,columns).Select(i=>i==0?new ChartPoint(0,null,"S0"){NotRated=reason}:new ChartPoint(i,i+1,$"S{i}")).ToArray())]});
+Test("Heatmap follow-ups: a one-letter reason too wide for its cell is cut to an ellipsis, or left out where not even that fits",()=>{
+    // "W", "M", "w" and "m" are .9 em, 9 units at 10 px; "…" is 6.2. 30 columns are 14.5 wide, a room of 8.5: the letter does not fit, the ellipsis does.
+    foreach(var letter in new[]{"W","M","w","m"})
+    {
+        Check(TenPx(ChartSvg.Render(Crowded(30,letter))).Select(t=>t.Text).SequenceEqual(["…"]),$"{letter} at 30 columns");
+        // 40 columns are 10.875 wide, a room of 4.875, under the ellipsis's 6.2: nothing is written.
+        Check(TenPx(ChartSvg.Render(Crowded(40,letter))).Length==0,$"{letter} at 40 columns");
+        // 20 columns are 21.75 wide, a room of 15.75: the letter is written whole.
+        Check(TenPx(ChartSvg.Render(Crowded(20,letter))).Select(t=>t.Text).SequenceEqual([letter]),$"{letter} at 20 columns");
+    }
+    // Whatever the width, no word is wider than its cell's room.
+    foreach(var columns in new[]{12,16,20,24,28,30,32,34,36,40,48,60})
+        foreach(var reason in new[]{"W","M","WM","Wm","W W"})
+            foreach(var (_,text) in TenPx(ChartSvg.Render(Crowded(columns,reason))))
+                Check(ChartSvg.Wide(text)*10/11<=(600d-130-35)/columns-6+1e-9,$"{columns} columns, {reason}: {text}");
+});
+// `rows` rows in the 320-high grid, which is 80 down from the top to 240: each row is 160 / rows tall. The first row's first cell is not rated,
+// with `sub` under it; the others write a value alone.
+ChartSpec Packed(int rows,double cell,string? sub=null)=>HeatGrid(s=>s with{CellWidth=cell,Series=Enumerable.Range(0,rows).Select(i=>new ChartSeries($"Row {i}",[i==0?new ChartPoint(0,null,"2025"){NotRated="too few starts to rate",SubLabel=sub}:new ChartPoint(0,i+1,"2025"),new ChartPoint(1,i+2,"2026")])).ToArray()});
+Test("Heatmap follow-ups: a cell with room for one line writes the reason cut with an ellipsis, a cell under 16 tall writes nothing",()=>{
+    // A cell holds floor((tall - 4) / 12) lines: one from 16 to just under 28, none under 16. 6 rows are 26.7 tall, 8 rows 20, 10 rows exactly 16.
+    foreach(var rows in new[]{6,8,10})
+    {
+        // At 72 a line holds 66. "too few" is 43, "too few starts" 83.2: the line gives up "starts to rate" for "…" (49.2). It stands 3 below
+        // the cell's centre, 80 + 160 / rows / 2.
+        var one=TenPx(ChartSvg.Render(Packed(rows,72)));
+        Check(one.Length==1&&one[0].Text=="too few…"&&Math.Abs(one[0].Y-(80+80d/rows+3))<1e-6,$"{rows} rows: "+string.Join(" | ",one));
+    }
+    // 5 rows are 32 tall: two lines, "too few" and "starts to…".
+    Check(TenPx(ChartSvg.Render(Packed(5,72))).Select(t=>t.Text).SequenceEqual(["too few","starts to…"]),"5 rows");
+    // 11 rows are 14.5 tall, a room for (14.5 - 4) / 12 = 0 lines: nothing is written, and the cell is still drawn and named.
+    var packed=ChartSvg.Render(Packed(11,72));
+    Check(TenPx(packed).Length==0&&Regex.Matches(packed,"stroke-dasharray='3 2'").Count==1&&packed.Contains("not rated: too few starts to rate"),"11 rows");
+});
+Test("Heatmap follow-ups: a sub-label wider than its cell's room is dropped from a reason's block, and the lines stay centred",()=>{
+    // At 60 a line holds 54: "too few", "starts to" (52.6) and "rate". Two rows are 80 tall, a room for six lines, and the first cell's centre is 80 + 40 = 120.
+    // "/4 starts" is 52.6 and fits a fourth line: four lines start 24 above 120 + 9, at 105.
+    var fits=TenPx(ChartSvg.Render(Packed(2,60,"/4 starts")));
+    Check(fits.Select(t=>t.Text).SequenceEqual(["too few","starts to","rate","/4 starts"])&&fits.Select(t=>t.Y).SequenceEqual([105d,117,129,141]),string.Join(" | ",fits));
+    // "/14 starts" is 58.8, past the 54: it is dropped, and the three reason lines are centred at 120 + 3, from 111 to 135.
+    var dropped=TenPx(ChartSvg.Render(Packed(2,60,"/14 starts")));
+    Check(dropped.Select(t=>t.Text).SequenceEqual(["too few","starts to","rate"])&&dropped.Select(t=>t.Y).SequenceEqual([111d,123,135]),string.Join(" | ",dropped));
+    Check((dropped[0].Y+dropped[^1].Y)/2==123,"centred");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
