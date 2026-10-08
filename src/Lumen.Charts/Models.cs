@@ -797,8 +797,8 @@ public sealed record ChartSpec
     /// 28 + 3 × 36 + 24 = 160 units tall, and one is 88: no 240-unit floor applies. <see cref="Height"/> is still checked, 240 to 2160, and
     /// otherwise not used. The height follows the categories the chart draws, so the component, which draws a hidden series without its
     /// points, draws a chart shorter when the series it hides held a category alone; its <c>FitWidth</c> scaling is unchanged. A heatmap
-    /// takes 36 units a row, and with it an empty <see cref="Source"/> reserves no room under the grid. Off by default; other kinds
-    /// refuse it.
+    /// takes 36 units a row, and with it an empty <see cref="Source"/> reserves no room under the grid; it keeps the usual 240-unit floor.
+    /// Off by default; other kinds refuse it.
     /// </summary>
     public bool FitHeight { get; init; }
 }
