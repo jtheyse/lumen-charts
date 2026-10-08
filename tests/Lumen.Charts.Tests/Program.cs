@@ -10012,7 +10012,7 @@ Test("Heatmap table: the drawn width is the drawing the reader sees, a hidden se
         &&css.Contains(".lumen-table caption,.lumen-grid-table caption{text-align:left;padding:10px 0}"),"the grid's look");
     // A fixed drawing's min- and max-width, which beat the drawing's own width of 100%, come after the fitted chart's rule, which is the one it was.
     const string fit=".lumen-fit>.lumen-viewport>svg{min-width:var(--lumen-drawn,0)}",hold=".lumen-fixed>.lumen-viewport>svg{min-width:var(--lumen-drawn);max-width:var(--lumen-drawn)}";
-    Check(css.Split(".lumen-fit").Length==2&&css.Contains(fit)&&css.Split(hold).Length==2&&css.Contains(".lumen-fixed>.lumen-viewport{display:grid}")&&css.Contains(".lumen-fixed>.lumen-viewport>svg,.lumen-freeze{grid-area:1/1}")&&css.Contains(hold)&&css.IndexOf(fit)<css.IndexOf(hold),"the fixed drawing's rule");
+    Check(css.Split(".lumen-fit").Length==2&&css.Contains(fit)&&css.Split(hold).Length==2&&css.Contains(".lumen-fixed>.lumen-viewport{display:grid;direction:ltr}")&&css.Contains(".lumen-fixed>.lumen-viewport>svg,.lumen-freeze{grid-area:1/1}")&&css.Contains(hold)&&css.IndexOf(fit)<css.IndexOf(hold),"the fixed drawing's rule");
 });
 // 0.46.0's final fixes.
 Test("Heatmap table: the component's status line reads a selected cell as its name reads it, sub-label, value and why it is not rated included",()=>{
@@ -10528,6 +10528,9 @@ Test("Heatmap follow-ups: ShowDataButton keeps View data with the toolbar off, a
 Test("Heatmap follow-ups: the stylesheet freezes the layer, and keeps 24-pixel table margins for the component's own table only",()=>{
     var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
     Check(css.Contains(".lumen-freeze{position:sticky;left:0"),"sticky");
+    // The layer stands at the viewport's left edge, where the names are drawn. In a host with dir="rtl" the grid's start edge is the right one,
+    // which would put the layer over the last visible cells, so the fixed viewport is left to right whatever its page is.
+    Check(css.Contains(".lumen-fixed>.lumen-viewport{display:grid;direction:ltr}"),"left to right in a right-to-left page");
     // Opaque and with no handler, the layer takes the pointer itself, so a cell under it is neither hovered nor clicked, and it is not selected.
     Check(css.Contains("box-shadow:1px 0 0 var(--lumen-freeze-line);pointer-events:auto;-webkit-user-select:none;user-select:none}"),"the layer takes the pointer");
     // The 2 px focus ring runs inside the viewport's edge, under the layer along the band: the layer gives up its left 2 px and keeps its hairline.
