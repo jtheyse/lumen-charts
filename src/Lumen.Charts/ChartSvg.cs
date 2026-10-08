@@ -3286,10 +3286,17 @@ public static partial class ChartSvg
     private static IEnumerable<(double X, double Y, string Text)> HeatmapNames(ChartSpec s, bool refined, double left, double top, double ch) =>
         s.Series.Select((series, si) => (left - 12, top + (si + .5) * ch + 4, refined ? Fitted(series.Name, HeatmapNameRoom(left)) : Short(series.Name, 17)));
 
+    /// <summary>How far past the grid's rows the name band reaches to cover its column labels: 24 units up from the grid's top where the
+    /// labels stand on top, which clears the description's descenders at 28, and 24 down from its bottom where they stand under it, which
+    /// stops short of the colour scale's line, whose glyphs start 34 below it (0.46.1).</summary>
+    private const double HeatmapLabelRoom = 24;
+
     /// <summary>The row names of a heatmap with a cell width, as <see cref="Render"/> draws them, in a drawing of their own cropped to
-    /// the name column beside the grid's rows, painted in the chart's background. The component lays it over the scrolling drawing, held
-    /// at the left, so the names stay in view as the cells scroll (0.46.1). It holds no marks and is hidden from reading, since the
-    /// drawing beneath says it all. Null for any other chart, and for a heatmap that has no data to draw, whose drawing has no names.</summary>
+    /// the name column beside the grid's rows and its column-label row, painted in the chart's background. The component lays it over the
+    /// scrolling drawing, held at the left, so the names stay in view as the cells scroll, and the label of a column that has scrolled
+    /// under it is covered with the column (0.46.1). The names keep the places the drawing gives them; only the crop reaches further. It
+    /// holds no marks and is hidden from reading, since the drawing beneath says it all. Null for any other chart, and for a heatmap that
+    /// has no data to draw, whose drawing has no names. <c>Top</c> and <c>Height</c> are the crop's, not the grid's.</summary>
     internal static (string Svg, double Left, double Top, double Height)? HeatmapNameBand(ChartSpec spec)
     {
         if (spec.Kind != ChartKind.Heatmap || spec.CellWidth is null) return null;
@@ -3299,11 +3306,13 @@ public static partial class ChartSvg
         var style = ResolveStyle(s);
         var (left, top, bottom) = HeatmapFrame(spec);
         var ch = (bottom - top) / s.Series.Count;
-        var svg = new StringBuilder($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 {N(top)} {N(left)} {N(bottom - top)}' width='{N(left)}' height='{N(bottom - top)}' aria-hidden='true' focusable='false' font-family='{style.FontFamily}' font-size='12'>");
-        svg.Append($"<rect x='0' y='{N(top)}' width='{N(left)}' height='{N(bottom - top)}' fill='{style.Background}'/>");
+        // The crop takes in the column labels' row, above the grid or under it; the rows, and so the names, stay where they are.
+        var (cropTop, cropBottom) = s.ColumnLabelsOnTop ? (top - HeatmapLabelRoom, bottom) : (top, bottom + HeatmapLabelRoom);
+        var svg = new StringBuilder($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 {N(cropTop)} {N(left)} {N(cropBottom - cropTop)}' width='{N(left)}' height='{N(cropBottom - cropTop)}' aria-hidden='true' focusable='false' font-family='{style.FontFamily}' font-size='12'>");
+        svg.Append($"<rect x='0' y='{N(cropTop)}' width='{N(left)}' height='{N(cropBottom - cropTop)}' fill='{style.Background}'/>");
         foreach (var (x, y, text) in HeatmapNames(s, style.Finish == ChartFinish.Refined, left, top, ch))
             svg.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='end' fill='{style.Muted}'>{SvgWriter.E(text)}</text>");
-        return (svg.Append("</svg>").ToString(), left, top, bottom - top);
+        return (svg.Append("</svg>").ToString(), left, cropTop, cropBottom - cropTop);
     }
 
     /// <summary>Writes a heatmap cell's value, 11 px and weight 600, and under it its sub-label, 10 px, in <paramref name="ink"/>, centred

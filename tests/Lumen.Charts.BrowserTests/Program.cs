@@ -1739,7 +1739,7 @@ if (await sportsLink.CountAsync() > 0)
                     [...s.querySelectorAll(':scope > text.lumen-muted')].filter(t => t.textContent === 'Junior mixed team relay').length]; }";
             var drawn = await card.EvaluateAsync<double[]>(measure);
             Check(drawn[0] == 13 && drawn[1] == 14 && drawn[2] == 5 && drawn[3] == 3, $"{drawn[0]} values, {drawn[1]} starts and {drawn[2]} reason lines written, {drawn[3]} dashed cells");
-            Check(drawn[9] == 1, "the long row name is not written whole");
+            Check(drawn[9] == 1, "the long row name was not found whole in the drawing");
             Check(drawn[4] >= 87.5, $"a cell is drawn {drawn[4]:0.#} wide");
             Check(drawn[5] == 580 && Math.Abs(drawn[6] - drawn[5]) < 1, $"drawn {drawn[5]} wide and shown {drawn[6]:0.#}");
             // In a box wider than the drawing it stands at its own width rather than stretching to fill the box, which at 1400 pixels is narrower.
@@ -1748,7 +1748,7 @@ if (await sportsLink.CountAsync() > 0)
             {
                 await sports.WaitForFunctionAsync(drawnToFit);
                 var wide = await card.EvaluateAsync<double[]>(measure);
-                Check(Math.Abs(wide[6] - wide[5]) < 1 && wide[7] > wide[5] && wide[8] <= 0, $"drawn {wide[5]} wide and shown {wide[6]:0.#} in a box {wide[7]} wide that scrolls by {wide[8]}");
+                Check(wide[5] == 580 && Math.Abs(wide[6] - wide[5]) < 1 && wide[7] > wide[5] && wide[8] <= 0, $"drawn {wide[5]} wide and shown {wide[6]:0.#} in a box {wide[7]} wide that scrolls by {wide[8]}");
             }
             finally { await sports.SetViewportSizeAsync(1400, 1000); await sports.WaitForFunctionAsync(drawnToFit); }
         });
@@ -1814,9 +1814,18 @@ if (await sportsLink.CountAsync() > 0)
             var after = await tab.EvaluateAsync<double[]>(places);
             Check(Math.Abs(after[0] - before[0]) < 1, "names held: " + string.Join(",", before) + " -> " + string.Join(",", after));
             Check(before[1] - after[1] > 150, "cells scrolled: " + string.Join(",", before) + " -> " + string.Join(",", after));
-            // The layer is never read or focused, and takes the pointer itself, so what it covers can be neither hovered nor clicked.
+            // The seasons stand on top of the grid, in the row the layer reaches up over: a season whose column has scrolled under the names is
+            // covered with it, so at the centre of its label, which is left of the layer's right edge, the pointer finds the layer and not the
+            // label. Two of the four seasons are under the names after the 200 pixels, so the check has labels to prove it with.
+            var seasons = await tab.EvaluateAsync<double[][]>(@"() => { const c = document.querySelector('#category-heatmap'), v = c.querySelector('.lumen-viewport'), b = c.querySelector('.lumen-freeze'), edge = b.getBoundingClientRect().right, start = v.getBoundingClientRect().left;
+                return [...v.querySelectorAll(':scope > svg > text.lumen-muted')].filter(t => /^20\d\d$/.test(t.textContent)).map(t => { const r = t.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, hit = document.elementFromPoint(x, y);
+                    return [Number(t.textContent), x, y, x >= start && x < edge ? 1 : 0, hit && b.contains(hit) ? 1 : 0, hit && hit.closest('.lumen-datum') ? 1 : 0]; }); }");
+            var covered = seasons.Where(l => l[3] == 1).ToArray();
+            Check(seasons.Length == 4 && covered.Select(l => l[0]).SequenceEqual([2023, 2024]), "the seasons under the names: " + string.Join(" | ", seasons.Select(l => string.Join(",", l))));
+            Check(covered.All(l => l[4] == 1 && l[5] == 0), "a scrolled-away season's label shows beside the frozen names: " + string.Join(" | ", covered.Select(l => string.Join(",", l))));
+            // The layer is never read or focused, and is not switched off to the pointer; the hit test below shows that it takes it itself.
             var layer = await tab.EvaluateAsync<string[]>(@"() => { const b = document.querySelector('#category-heatmap .lumen-freeze'); return [b.getAttribute('aria-hidden'), String(b.hasAttribute('inert')), String(b.querySelectorAll('[tabindex],a,button').length), getComputedStyle(b).pointerEvents]; }");
-            Check(layer.SequenceEqual(new[] { "true", "false", "0", "auto" }), string.Join(",", layer));
+            Check(layer.Take(3).SequenceEqual(new[] { "true", "false", "0" }) && layer[3] != "none", string.Join(",", layer));
             // A frozen name now stands over cells that scrolled beneath it: the pointer reaches the layer, shows no tooltip and selects nothing.
             var name = await tab.EvaluateAsync<double[]>(@"() => { const c = document.querySelector('#category-heatmap'), b = c.querySelector('.lumen-freeze'), t = [...b.querySelectorAll('text')].find(e => e.textContent === 'Junior mixed team relay'),
                 r = t.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, hit = document.elementFromPoint(x, y);

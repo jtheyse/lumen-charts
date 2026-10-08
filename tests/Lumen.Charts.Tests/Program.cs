@@ -7624,7 +7624,8 @@ Test("Sports page: the Category heatmap closes the Racing section, its cells the
         &&written.Count(t=>(string?)t.Attribute("font-size")=="10"&&t.Value is "too few starts" or "to rate")==4&&written.Count(t=>(string?)t.Attribute("font-size")=="10"&&t.Value=="did not race")==1,$"{written.Length} words written in the cells");
     Check(drawing.Root.Elements(ns+"text").Any(t=>t.Value=="Junior mixed team relay"&&(string?)t.Attribute("text-anchor")=="end"),"the long name, whole");
     var firstCell=drawing.Descendants(ns+"rect").First(r=>(string?)r.Attribute("rx")=="3");
-    Check(drawing.Root.Elements(ns+"text").Where(t=>t.Value is "2023" or "2024" or "2025" or "2026").All(t=>Attr(t,"y")<Attr(firstCell,"y")),"the seasons above the grid");
+    var seasons=drawing.Root.Elements(ns+"text").Where(t=>t.Value is "2023" or "2024" or "2025" or "2026").ToArray();
+    Check(seasons.Length==4&&seasons.All(t=>Attr(t,"y")<Attr(firstCell,"y")),$"the {seasons.Length} seasons above the grid");
     Check(drawing.Descendants(ns+"text").Any(t=>t.Value=="Color scale: 1.7 pts low to 3.5 pts high"),"the colour scale");
     var table=ChartExport.HtmlTable(heat);
     Check(Regex.Matches(table,"<th scope='row'>").Count==4&&table.Contains("<th scope='row'>Middle distance</th>")&&table.Contains("class='lumen-grid-table'"),table);
@@ -10363,7 +10364,8 @@ Test("Heatmap follow-ups: the name band holds the drawing's row names, where it 
     var spec=Named(HeatGrid(s=>s with{CellWidth=72,FitHeight=true}),"Junior 18/19 Girls");
     var band=ChartSvg.HeatmapNameBand(spec)!.Value;
     var frame=ChartSvg.HeatmapFrame(spec);
-    Check(band.Left==frame.Left&&band.Top==frame.Top&&band.Height==frame.Bottom-frame.Top,"the frame");
+    // The labels stand under the grid here, so the crop is the grid's rows and the 24 units under them.
+    Check(band.Left==frame.Left&&band.Top==frame.Top&&band.Height==frame.Bottom-frame.Top+24,$"the frame {frame}: {band.Top}, {band.Height}");
     var drawn=ChartSvg.Render(spec);
     foreach(var name in new[]{"Junior 18/19 Girls","Long distance"})
     {
@@ -10383,6 +10385,31 @@ Test("Heatmap follow-ups: the name band holds the drawing's row names, where it 
         Check(names.Length==2&&RowNames(ChartSvg.HeatmapNameBand(named)!.Value.Svg).SequenceEqual(names),string.Join(" | ",names));
     }
     Check(RowNames(ChartSvg.HeatmapNameBand(Named(spec,"Sprint & Co <Elite>"))!.Value.Svg)[0].Text=="Sprint &amp; Co &lt;Elite&gt;","encoded");
+});
+Test("Heatmap follow-ups: the name band covers the column labels' row, above the grid where they stand on top and under it where they do not, and the names stay level",()=>{
+    var below=Named(HeatGrid(s=>s with{CellWidth=72,FitHeight=true}),"Junior 18/19 Girls");
+    // Labels at the foot stand 18 below the grid; labels on top stand 10 above it. The description's glyphs end at 52 and the colour scale's start 34 below the grid.
+    foreach(var (name,spec) in new[]{("below",below),("below, one row",below with{Series=[below.Series[0]]}),("on top",below with{ColumnLabelsOnTop=true}),
+        ("on top, with a source",below with{ColumnLabelsOnTop=true,Source="Invented"}),("below, no titles",below with{DrawTitles=false}),
+        ("on top, a two-line description",below with{ColumnLabelsOnTop=true,Description="Invented categories by season, each row an invented rider category and each column an invented season, with points per start"})})
+    {
+        var band=ChartSvg.HeatmapNameBand(spec)!.Value;
+        var frame=ChartSvg.HeatmapFrame(spec);
+        var drawn=ChartSvg.Render(spec);
+        var on=spec.ColumnLabelsOnTop;
+        Check(band.Left==frame.Left&&band.Top==(on?frame.Top-24:frame.Top)&&band.Height==frame.Bottom-frame.Top+24,$"{name}: the crop is {band.Top}, {band.Height} for the frame {frame}");
+        Check(band.Svg.Contains($"viewBox='0 {band.Top} {band.Left} {band.Height}'")&&band.Svg.Contains($"width='{band.Left}' height='{band.Height}'")&&band.Svg.Contains($"<rect x='0' y='{band.Top}' width='{band.Left}' height='{band.Height}'"),$"{name}: the viewBox, the size and the background are the crop's");
+        // Every column label of the drawing, its 12 px glyphs reaching 10 above its baseline and 3 below, stands inside the crop.
+        var labels=Regex.Matches(drawn,"<text x='[^']*' y='([^']*)' text-anchor='middle' class='lumen-muted'>20\\d\\d<").Select(m=>double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture)).ToArray();
+        Check(labels.Length==2&&labels.All(y=>band.Top<=y-10&&y+3<=band.Top+band.Height),$"{name}: labels at {string.Join(",",labels)} in a crop of {band.Top} to {band.Top+band.Height}");
+        // The crop clears the description above the grid and the colour scale's line under it.
+        var description=Regex.Match(drawn,"<text x='24' y='([^']*)' class='lumen-muted' font-size='11'>Invented").Groups[1].Value;
+        var lowest=string.IsNullOrEmpty(description)?0:double.Parse(description,CultureInfo.InvariantCulture)+14*(ChartSvg.Wrap(spec.Description,ChartSvg.AsDrawn(spec).Width-48).Length-1)+4;
+        var scale=double.Parse(Regex.Matches(drawn,$"<text x='{frame.Left}' y='([^']*)' class='lumen-muted'>").Last().Groups[1].Value,CultureInfo.InvariantCulture);
+        Check(band.Top>=lowest&&band.Top+band.Height<=scale-10,$"{name}: the crop {band.Top} to {band.Top+band.Height} clears the description at {lowest} and the scale line at {scale}");
+        // The names stand where the drawing puts them, level with their rows, however far the crop reaches.
+        Check(RowNames(band.Svg).SequenceEqual(RowNames(drawn)),$"{name}: {string.Join(" | ",RowNames(band.Svg))}");
+    }
 });
 Test("Heatmap follow-ups: the classic finish's name band keeps its 130 column and names cut at 17 characters, as the drawing writes them",()=>{
     // "Master Women Elite" is 18 characters: the refined finish widens the column for it and writes it whole; the classic keeps 130 and cuts it.
@@ -10406,7 +10433,11 @@ Test("Heatmap follow-ups: the component freezes a fixed-width heatmap's names, f
     // The layer stands in the viewport after the drawing and before the keys, with the band's top, width and height and the chart's colours.
     var frame=ChartSvg.HeatmapFrame(spec);
     Check(html.IndexOf("</svg>")<html.IndexOf("lumen-freeze")&&html.IndexOf("lumen-freeze")<html.IndexOf("class=\"lumen-keys\""),"after the drawing");
-    Check(html.Contains($"margin-top:{frame.Top}px;width:{frame.Left}px;height:{frame.Bottom-frame.Top}px;--lumen-freeze-bg:{ChartStyle.Light.Background};--lumen-freeze-line:{ChartStyle.Light.Grid}\""),Regex.Match(html,"<div class=\"lumen-freeze\"[^>]*>").Value);
+    Check(html.Contains($"margin-top:{frame.Top}px;width:{frame.Left}px;height:{frame.Bottom-frame.Top+24}px;--lumen-freeze-bg:{ChartStyle.Light.Background};--lumen-freeze-line:{ChartStyle.Light.Grid}\""),Regex.Match(html,"<div class=\"lumen-freeze\"[^>]*>").Value);
+    // With the labels on top the layer starts 24 higher and is as tall; the scroll padding is its width still.
+    var onTop=Operate(spec with{ColumnLabelsOnTop=true},async c=>{await c.Fit(340);},fit:true);
+    var topFrame=ChartSvg.HeatmapFrame(spec with{ColumnLabelsOnTop=true});
+    Check(onTop.Contains($"margin-top:{topFrame.Top-24}px;width:{topFrame.Left}px;height:{topFrame.Bottom-topFrame.Top+24}px;")&&Regex.IsMatch(onTop,"<div class=\"lumen-viewport\"[^>]*scroll-padding-left:145px"),Regex.Match(onTop,"<div class=\"lumen-freeze\"[^>]*>").Value);
     // A hidden row leaves the band as it leaves the drawing.
     var toggle=typeof(LumenChart).GetMethod("Toggle",BindingFlags.NonPublic|BindingFlags.Instance)!;
     var hidden=Operate(spec,async c=>{toggle.Invoke(c,[0]);await c.Fit(340);},fit:true);
