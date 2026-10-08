@@ -7595,30 +7595,36 @@ Test("Sports page: Season arc and Gap to the leader close the Racing section, th
     // No end label is cut on a phone's card, and every one stands inside the drawing.
     Check(Ends38(doc).All(e=>!Text38(e).EndsWith("…")&&Attr(Words38(e),"x")+Broad38(Text38(e))<=340),"a label was cut on a phone");
 });
-// 0.46.0: the Category heatmap card, a heatmap table of invented categories by season.
-Test("Sports page: the Category heatmap closes the Racing section, its cells the points per start of the points and starts behind them, and exactly the cells under ten starts not rated",()=>{
+// 0.46.0: the Category heatmap card, a heatmap table of invented categories by season; 0.46.1 sets it with its labels on top, fitted to its
+// rows, 90 pixels to a season, a long row name, a season nobody raced, and its toolbar off with only "View data" kept.
+Test("Sports page: the Category heatmap closes the Racing section, its cells the points per start of the points and starts behind them, exactly the cells under ten starts not rated and the one with none a gap",()=>{
     var card=sports.Single(c=>c.Id=="category-heatmap");var heat=card.Spec;
-    Check(card.Section=="racing"&&!card.Wide&&sports.Last(c=>c.Section=="racing")==card&&heat is{Kind:ChartKind.Heatmap,CellText:true,CellWidth:72,YUnit:" pts"},"the card");
+    Check(card.Section=="racing"&&!card.Wide&&sports.Last(c=>c.Section=="racing")==card&&heat is{Kind:ChartKind.Heatmap,CellText:true,CellWidth:90,ColumnLabelsOnTop:true,FitHeight:true,YUnit:" pts"}&&card is{ShowToolbar:false,ShowDataButton:true},"the card");
     ChartValidation.Validate(heat);
     Check(heat.Series.Select(s=>s.Name).SequenceEqual(SportsData.CategoryHistory.Select(c=>c.Category))&&heat.Series.All(s=>s.Points.Select(p=>p.Label).SequenceEqual(["2023","2024","2025","2026"])),"rows and seasons");
     foreach(var (row,history) in heat.Series.Zip(SportsData.CategoryHistory))
         foreach(var (cell,(points,starts,riders)) in row.Points.Zip(history.Seasons))
         {
-            Check(cell.SubLabel==$"/{starts} starts"&&(cell.NotRated is not null)==(starts<SportsData.RatedStarts),$"{row.Name} {cell.Label}: {starts} starts, not rated {cell.NotRated}");
+            Check(cell.SubLabel==$"/{starts} starts"&&(cell.NotRated is not null)==(starts>0&&starts<SportsData.RatedStarts)&&(cell.GapLabel=="did not race")==(starts==0)&&(cell.GapLabel is null||cell.NotRated is null),$"{row.Name} {cell.Label}: {starts} starts, not rated {cell.NotRated}, gap {cell.GapLabel}");
             Check(cell.Y==(starts>0?Math.Round((double)points/starts,1):null)&&(starts==0?cell.ValueNote is null:cell.ValueNote==$" · {points} pts, {riders} riders"),$"{row.Name} {cell.Label}: {cell.Y} {cell.ValueNote}");
         }
-    // Each name says the sub-label, the value and the note, and "not rated" with its reason on the three thin cells; the cell with no starts has no value to say.
+    // Each name says the sub-label, the value and the note, and "not rated" with its reason on the two thin cells; the relay's first season has no
+    // value to say, only its word.
     var names=PlacedNames(heat);
-    Check(names.Count(n=>n.EndsWith(", not rated: too few starts to rate"))==3&&names.Contains("Sprint: 2023 · /12 starts, 2.8 pts · 34 pts, 5 riders")
-        &&names.Contains("Long distance: 2023 · /4 starts, 2 pts · 8 pts, 3 riders, not rated: too few starts to rate")&&names.Contains("Relay: 2023 · /0 starts, not rated: too few starts to rate"),string.Join(" | ",names));
-    // The drawing is 165 pixels and four 72-pixel seasons wide whatever the spec's width, each of its thirteen rated cells writes its value and its
-    // starts beneath, each of the three not-rated cells its reason in three lines in place of both, and the colour scale leaves out the not-rated
-    // 1.6 for the rated 1.7.
+    Check(names.Count(n=>n.EndsWith(", not rated: too few starts to rate"))==2&&names.Contains("Sprint: 2023 · /12 starts, 2.8 pts · 34 pts, 5 riders")
+        &&names.Contains("Long distance: 2023 · /4 starts, 2 pts · 8 pts, 3 riders, not rated: too few starts to rate")&&names.Contains("Junior mixed team relay: 2023 · /0 starts, did not race"),string.Join(" | ",names));
+    // The drawing is a 185-unit name column and four 90-unit seasons wide, 580, whatever the spec's width, the long name written whole in it;
+    // each of its thirteen rated cells writes its value and its starts beneath, each of the two not-rated cells its reason on two lines in place
+    // of both, and the season nobody raced "did not race" and its starts under it; the seasons stand above the grid, and the colour scale leaves
+    // out the not-rated 1.6 for the rated 1.7.
     var drawing=Svg(heat with{Width=337});
-    Check(drawing.Root!.Attribute("viewBox")!.Value.StartsWith("0 0 453 "),drawing.Root.Attribute("viewBox")!.Value);
+    Check(drawing.Root!.Attribute("viewBox")!.Value.StartsWith("0 0 580 "),drawing.Root.Attribute("viewBox")!.Value);
     var written=drawing.Root.Elements(ns+"text").Where(t=>(string?)t.Attribute("aria-hidden")=="true").ToArray();
-    Check(written.Count(t=>(string?)t.Attribute("font-size")=="11")==13&&written.Count(t=>(string?)t.Attribute("font-size")=="10"&&t.Value.EndsWith(" starts"))==13
-        &&written.Count(t=>(string?)t.Attribute("font-size")=="10"&&t.Value is "too few" or "starts to" or "rate")==9,$"{written.Length} words written in the cells");
+    Check(written.Count(t=>(string?)t.Attribute("font-size")=="11")==13&&written.Count(t=>(string?)t.Attribute("font-size")=="10"&&t.Value.StartsWith('/'))==14
+        &&written.Count(t=>(string?)t.Attribute("font-size")=="10"&&t.Value is "too few starts" or "to rate")==4&&written.Count(t=>(string?)t.Attribute("font-size")=="10"&&t.Value=="did not race")==1,$"{written.Length} words written in the cells");
+    Check(drawing.Root.Elements(ns+"text").Any(t=>t.Value=="Junior mixed team relay"&&(string?)t.Attribute("text-anchor")=="end"),"the long name, whole");
+    var firstCell=drawing.Descendants(ns+"rect").First(r=>(string?)r.Attribute("rx")=="3");
+    Check(drawing.Root.Elements(ns+"text").Where(t=>t.Value is "2023" or "2024" or "2025" or "2026").All(t=>Attr(t,"y")<Attr(firstCell,"y")),"the seasons above the grid");
     Check(drawing.Descendants(ns+"text").Any(t=>t.Value=="Color scale: 1.7 pts low to 3.5 pts high"),"the colour scale");
     var table=ChartExport.HtmlTable(heat);
     Check(Regex.Matches(table,"<th scope='row'>").Count==4&&table.Contains("<th scope='row'>Middle distance</th>")&&table.Contains("class='lumen-grid-table'"),table);

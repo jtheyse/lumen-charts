@@ -56,6 +56,8 @@ public sealed record SportsCard(string Section, string Id, string Title, string 
     public bool ShowLegend { get; init; } = true;
     /// <summary>Whether the chart's component draws its toolbar: off for a card drawn as a phone app would, its status line kept out of sight.</summary>
     public bool ShowToolbar { get; init; } = true;
+    /// <summary>Whether the chart's component draws its "View data" button: unset, as its toolbar is; set on a card without a toolbar, the button alone stays.</summary>
+    public bool? ShowDataButton { get; init; }
     /// <summary>Results this card draws with <c>&lt;LumenPlacings&gt;</c> instead of its own spec.</summary>
     public IReadOnlyList<Placing>? Placings { get; init; }
 }
@@ -120,7 +122,8 @@ public static class SportsData
     /// <summary>The first of the four seasons in <see cref="CategoryHistory"/>.</summary>
     public const int FirstCategorySeason = 2023;
 
-    /// <summary>The fewest starts a category and season need to be rated. A cell with fewer starts is marked not rated instead of being coloured as a result.</summary>
+    /// <summary>The fewest starts a category and season need to be rated. A cell with fewer starts is marked not rated instead of being coloured as a result,
+    /// and one with none at all is a season nobody raced, written "did not race".</summary>
     public const int RatedStarts = 10;
 
     /// <summary>An invented history for the category heatmap card: each category's four seasons from <see cref="FirstCategorySeason"/>,
@@ -130,7 +133,7 @@ public static class SportsData
         ("Sprint", [(34, 12, 5), (41, 14, 6), (45, 13, 6), (52, 15, 7)]),
         ("Middle distance", [(27, 11, 5), (30, 12, 5), (38, 14, 6), (36, 13, 6)]),
         ("Long distance", [(8, 4, 3), (24, 10, 4), (19, 11, 4), (31, 12, 5)]),
-        ("Relay", [(0, 0, 0), (20, 10, 5), (14, 9, 6), (25, 10, 5)]),
+        ("Junior mixed team relay", [(0, 0, 0), (20, 10, 5), (14, 9, 6), (25, 10, 5)]),
     ];
 
     /// <summary>An invented race of eight riders over six laps, apart from the simulated training: each rider's name, the athlete last as
@@ -1085,18 +1088,21 @@ public static class SportsData
         };
 
         // An invented history of four categories over four seasons as a heatmap table: each cell writes its points per start and, under it,
-        // its starts as its sub-label; a cell with too few starts to rate is dashed, said in words and out of the colour scale; and each
-        // season takes 72 pixels, enough for "/15 starts" under its value, so on a phone the grid scrolls sideways rather than squeezing.
-        // The note after each value names the points and riders behind it, in the cell's name and in the grid table, with its own separator.
+        // its starts as its sub-label; a cell with too few starts to rate is dashed, writes its reason in place of its value and is out of
+        // the colour scale, and a season a category did not race is dashed too and writes "did not race"; each season takes 90 pixels, wide
+        // enough for "too few starts to rate" on two lines, so on a phone the grid scrolls sideways rather than squeezing, the row names held
+        // at the left as it does; the column labels stand above the grid and the card is as tall as its rows need. The note after each
+        // value names the points and riders behind it, in the cell's name and in the grid table, with its own separator.
         var categories = Chart(half, 340) with
         {
-            Kind = ChartKind.Heatmap, YUnit = " pts", CellText = true, CellWidth = 72,
-            Title = "Points per start, by category", Description = "Invented seasons · a dashed cell has too few starts",
+            Kind = ChartKind.Heatmap, YUnit = " pts", CellText = true, CellWidth = 90, ColumnLabelsOnTop = true, FitHeight = true,
+            Title = "Points per start, by category", Description = "Invented seasons · a dashed cell has too few starts or none",
             Series = CategoryHistory.Select(category => new ChartSeries(category.Category, category.Seasons.Select((s, i) =>
                 new ChartPoint(i, s.Starts > 0 ? Math.Round((double)s.Points / s.Starts, 1) : null, $"{FirstCategorySeason + i}")
                 {
                     SubLabel = $"/{s.Starts} starts", ValueNote = s.Starts > 0 ? $" · {s.Points} pts, {s.Riders} riders" : null,
-                    NotRated = s.Starts < RatedStarts ? "too few starts to rate" : null
+                    NotRated = s.Starts is > 0 && s.Starts < RatedStarts ? "too few starts to rate" : null,
+                    GapLabel = s.Starts == 0 ? "did not race" : null
                 }).ToArray())).ToArray()
         };
 
@@ -1167,7 +1173,7 @@ public static class SportsData
             new("racing", "gap", "Gap to the leader", "An invented race's eight riders lap by lap, `YReversed` from 0, the leader, written `+9.5s` by `ValueFormat.Signed` and `YUnit`; each line is named at its end by `EndLabel` and `EndNote`, moved apart where lines end close together, so the component's legend is off, and its toolbar too, as on a phone card, its status line kept for screen readers; `SharedReadout` reads every rider at the lap under the pointer. The athlete's line is green and wider and named \"You\".", false, gap with { SharedReadout = true }) { ShowLegend = false, ShowToolbar = false },
             new("racing", "places-points", "Places and points", "The same invented kind of season in two series, built by one call, `PlacingsChart.Build`, and drawn by `<LumenPlacings>`: each series its own line, so a place is better or worse only than the previous race of the same series, the field after each place, and the league's points in a pane beneath, the open races, which score none, have no points mark, never a zero, so the league's points join across them.", true,
                 PlacesLook(PlacingsChart.Build(Placings, new() { Style = theme == ChartTheme.Dark ? ChartStyle.Dark : ChartStyle.Light })!)) { Placings = Placings },
-            new("racing", "category-heatmap", "Category heatmap", "Invented categories by season as a `ChartKind.Heatmap` table: `CellText` writes each cell's points per start with its starts under it as a `SubLabel`; `NotRated` marks a cell with fewer than ten starts, dashed and out of the colour scale, said in its name and, when it has no value, as a dash; `CellWidth` keeps every season 72 pixels wide, wide enough for its starts under the value, so on a phone the grid scrolls sideways and stays readable; `YUnit` writes ` pts`, and each cell's `ValueNote` names the points and riders behind it. \"View data\" reads the grid as a table, a row for each category.", false, categories),
+            new("racing", "category-heatmap", "Category heatmap", "Invented categories by season as a `ChartKind.Heatmap` table: `CellText` writes each cell's points per start with its starts under it as a `SubLabel`; `NotRated` marks a cell with fewer than ten starts, dashed and out of the colour scale, its reason written in the cell in place of its value; `GapLabel` writes \"did not race\" in a season a category skipped; `CellWidth` keeps every season 90 pixels wide, wide enough for the reason on two lines, so on a phone the grid scrolls sideways and the row names, written whole however long, stay at the left; `ColumnLabelsOnTop` puts the seasons above the grid and `FitHeight` draws it as tall as its rows need; `YUnit` writes ` pts`, and each cell's `ValueNote` names the points and riders behind it. The toolbar is off with `ShowToolbar`, and `ShowDataButton` keeps \"View data\", which reads the grid as a table, a row for each category.", false, categories) { ShowToolbar = false, ShowDataButton = true },
             new("sleep", "hypnogram", "Last night's sleep stages", "A `ChartKind.Timeline`: one series per stage, each period a `ChartPoint.Span`, joined where the stage changes; the higher the HRV sits above its baseline, the more deep sleep.", true, hypnogram),
             new("sleep", "sleep-timing", "Sleep timing", "Bedtime to waking as `ChartKind.Range` bars on a reversed `ValueFormat.TimeOfDay` axis, its seconds running past 24 hours so a night never crosses zero.", false, timing),
             new("sleep", "heart-range", "Daily heart rate", "Each day's lowest and highest heart rate as `ChartPoint.Interval` range bars, the dot its average; today's highest is the run's.", false, heartRange)];
