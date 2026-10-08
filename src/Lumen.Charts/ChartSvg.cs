@@ -239,11 +239,9 @@ public static partial class ChartSvg
     public static string Render(ChartSpec spec, bool includeLegend = true, bool includeTitles = true)
     {
         ChartValidation.Validate(spec);
-        // A bar chart fitted to its rows is drawn as if it had asked for the height they need.
-        if (spec.FitHeight) spec = spec with { Height = FittedHeight(spec) };
         // A heatmap with a cell width is drawn as wide as its columns make it, whatever its Width, so its title, its source and its
-        // colour scale are laid out across that width.
-        if (spec.CellWidth is not null) spec = spec with { Width = DrawnWidth(spec) };
+        // colour scale are laid out across that width; and a chart fitted to its rows is drawn as if it had asked for the height they need.
+        spec = AsDrawn(spec);
         var style = ResolveStyle(spec);
         // A sparkline draws no gridlines, so it carries no rule for minor ones either.
         var bare = spec.Sparkline;
@@ -1377,7 +1375,7 @@ public static partial class ChartSvg
     }
 
     /// <summary>The width of a 12 px tick label, scaled from the generous estimate for 11 px text.</summary>
-    private static double Broad(string text) => Wide(text) * 12 / 11;
+    internal static double Broad(string text) => Wide(text) * 12 / 11;
     /// <summary>A generous width for 11 px text, so a label judged to fit does: digits and most letters at .62 em, wider
     /// than in the common sans and serif faces, punctuation narrower and the widest letters wider.</summary>
     internal static double Wide(string text) => text.Sum(Glyph) * 11;
@@ -1676,9 +1674,13 @@ public static partial class ChartSvg
     private const double TrackRow = 36, BarRow = 32;
     /// <summary>The height a horizontal bar chart with <see cref="ChartSpec.FitHeight"/> is drawn at: its rows, one a category, and the room
     /// round them the chart draws in, its title and description above, as <see cref="Headroom"/> moves them, and its axis or bare foot and
-    /// source under, as <see cref="Floor"/> and a second source line keep them. The legend <see cref="Render"/> may add goes under that.</summary>
+    /// source under, as <see cref="Floor"/> and a second source line keep them. The legend <see cref="Render"/> may add goes under that. A
+    /// heatmap is drawn at the height of its rows, <see cref="HeatmapRow"/> each, with <see cref="HeatmapBelow"/> under them, and no less
+    /// than 240 (0.46.1).</summary>
     internal static int FittedHeight(ChartSpec s)
     {
+        if (s.Kind == ChartKind.Heatmap)
+            return Math.Max(240, (int)Math.Ceiling(80 + Headroom(s) + s.Series.Count * HeatmapRow + HeatmapBelow(s) + 14 * Math.Max(0, Wrap(s.Source, s.Width - 48).Length - 1)));
         var rows = Math.Max(1, s.Series.SelectMany(series => series.Points).Select(p => p.X).Distinct().Count());
         var pitch = s.Series.Any(series => series.Points.Any(p => p.SubLabel is not null)) ? SubRow : s.BarTrack ? TrackRow : BarRow;
         var foot = 14 * Math.Max(0, Wrap(s.Source, s.Width - 48).Length - 1);
@@ -3084,22 +3086,54 @@ public static partial class ChartSvg
         w.Text(cx, cy + 22, "TOTAL", "text-anchor='middle' class='lumen-muted' font-size='10'");
     }
 
-    /// <summary>Where a heatmap's grid starts: 130 units in from the left, past its rows' names.</summary>
+    /// <summary>Where a heatmap's grid starts while every row name fits the 118 units its names end at: 130 units in.</summary>
     internal const double HeatmapLeft = 130;
-    /// <summary>The room a heatmap keeps beside its columns: <see cref="HeatmapLeft"/> on the left and 35 units on the right.</summary>
-    internal const double HeatmapMargin = HeatmapLeft + 35;
+    /// <summary>The widest a heatmap's name column grows for long row names (0.46.1).</summary>
+    internal const double HeatmapWidest = 240;
+    /// <summary>The height <see cref="ChartSpec.FitHeight"/> gives each of a heatmap's rows (0.46.1).</summary>
+    internal const double HeatmapRow = 36;
     /// <summary>The narrowest drawing a chart may be, in SVG units, a sparkline aside.</summary>
     internal const int MinWidth = 320;
     /// <summary>The widest drawing a chart may be, in SVG units.</summary>
     internal const int MaxWidth = 4096;
-    /// <summary>How wide a heatmap is whose <paramref name="columns"/> take <paramref name="cellWidth"/> units each: its margin and its
-    /// columns. Validation holds it within <see cref="MaxWidth"/>.</summary>
-    internal static double HeatmapWidth(int columns, double cellWidth) => HeatmapMargin + columns * cellWidth;
+    /// <summary>Where a heatmap's grid starts: 130 units in while every row name, at 12 px, fits the 118 its names end at; otherwise as far
+    /// in as its widest name and 18 more, up to <see cref="HeatmapWidest"/>, so a long name is written whole rather than cut at 17
+    /// characters (0.46.1).</summary>
+    internal static double HeatmapLeftOf(ChartSpec s)
+    {
+        var widest = s.Series.Count == 0 ? 0 : s.Series.Max(series => Broad(series.Name));
+        return widest <= HeatmapLeft - 12 ? HeatmapLeft : Math.Min(HeatmapWidest, Math.Ceiling(widest + 18));
+    }
+    /// <summary>How wide a heatmap is whose <paramref name="columns"/> take <paramref name="cellWidth"/> units each: its name column, its
+    /// columns and 35 units on the right. Validation holds it within <see cref="MaxWidth"/>.</summary>
+    internal static double HeatmapWidth(ChartSpec s, int columns, double cellWidth) => HeatmapLeftOf(s) + 35 + columns * cellWidth;
     /// <summary>The width a chart is drawn at: a heatmap with a <see cref="ChartSpec.CellWidth"/> as wide as its columns make it, rounded up
     /// to a whole unit, and never narrower than <see cref="MinWidth"/>, the room left over standing at its right, whatever its Width; any
     /// other chart its Width.</summary>
     internal static int DrawnWidth(ChartSpec spec) => spec.Kind == ChartKind.Heatmap && spec.CellWidth is { } cell
-        ? Math.Max(MinWidth, (int)Math.Ceiling(HeatmapWidth(spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count(), cell))) : spec.Width;
+        ? Math.Max(MinWidth, (int)Math.Ceiling(HeatmapWidth(spec, spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count(), cell))) : spec.Width;
+
+    /// <summary>The room under a heatmap's grid: its column labels, 26, unless they stand on top; its colour scale's line; and its source
+    /// line, 24, which a heatmap fitted to its rows leaves out when it has no source (0.46.1).</summary>
+    internal static double HeatmapBelow(ChartSpec s) => 80 - (s.ColumnLabelsOnTop ? 26 : 0) - (s.FitHeight && string.IsNullOrWhiteSpace(s.Source) ? 24 : 0);
+
+    /// <summary>The spec as <see cref="Render"/> draws it: a heatmap with a cell width as wide as its columns make it, and then a chart fitted
+    /// to its rows as tall as they make it, so a source wrapped across the drawn width is counted in the height (0.46.1).</summary>
+    internal static ChartSpec AsDrawn(ChartSpec spec)
+    {
+        if (spec.CellWidth is not null) spec = spec with { Width = DrawnWidth(spec) };
+        if (spec.FitHeight) spec = spec with { Height = FittedHeight(spec) };
+        return spec;
+    }
+
+    /// <summary>Where a heatmap's rows stand in its drawing: its name column's width and its grid's top and bottom, for a spec as given to
+    /// <see cref="Render"/>. The component freezes the names in that band (0.46.1).</summary>
+    internal static (double Left, double Top, double Bottom) HeatmapFrame(ChartSpec spec)
+    {
+        var s = AsDrawn(spec);
+        var foot = 14 * Math.Max(0, Wrap(s.Source, s.Width - 48).Length - 1);
+        return (HeatmapLeftOf(s), 80 + Headroom(s), s.Height - foot - HeatmapBelow(s));
+    }
     /// <summary>How a heatmap writes its values, in its cells, their names and its colour scale: in <see cref="ChartSpec.YFormat"/>, with
     /// <see cref="ChartSpec.YUnit"/> after each.</summary>
     internal static Axis HeatmapValues(ChartSpec s) => new(AxisKind.Linear, 0, 1) { ValueFormat = s.YFormat, Unit = s.YUnit };
@@ -3154,17 +3188,20 @@ public static partial class ChartSvg
         LinearScale? scale = values.Length > 0 ? LinearScale.Create(values) : null;
         var (low, high) = HeatmapPair(w.Style);
         var words = HeatmapValues(s);
-        // A description or a source on two lines takes its 14 pixels from the rows' height.
-        var cw = s.CellWidth ?? (s.Width - HeatmapMargin) / cats.Length; var ch = (s.Height - w.Head - w.Foot - 160d) / s.Series.Count;
+        // A description or a source on two lines takes its 14 pixels from the rows' height; column labels on top give the grid the room
+        // they would have had below it.
+        var left = HeatmapLeftOf(s);
+        double top = 80 + w.Head, bottom = s.Height - w.Foot - HeatmapBelow(s);
+        var cw = s.CellWidth ?? (s.Width - left - 35) / cats.Length; var ch = (bottom - top) / s.Series.Count;
         for (var si = 0; si < s.Series.Count; si++)
         {
             var series = s.Series[si];
-            w.Text(118, 80 + w.Head + (si + .5) * ch + 4, Short(series.Name,17), "text-anchor='end' class='lumen-muted'");
+            w.Text(left - 12, top + (si + .5) * ch + 4, Fitted(series.Name, left == HeatmapLeft ? left - 12 : left - 18), "text-anchor='end' class='lumen-muted'");
             for (var pi = 0; pi < series.Points.Count; pi++)
             {
                 var p = series.Points[pi]; if (!p.Y.HasValue && p.NotRated is null) continue;
-                var x = HeatmapLeft + Array.IndexOf(cats,p.X)*cw;
-                var y = 80+w.Head+si*ch;
+                var x = left + Array.IndexOf(cats,p.X)*cw;
+                var y = top+si*ch;
                 var name = HeatmapCellName(s, series, p);
                 var box = $"x='{N(x+1)}' y='{N(y+1)}' width='{N(Math.Max(0,cw-2))}' height='{N(Math.Max(0,ch-2))}' rx='3'";
                 string ink;
@@ -3188,7 +3225,7 @@ public static partial class ChartSvg
         // Columns of a set width keep their 12 px labels 6 units apart; otherwise every column is labelled up to 12, and fewer past them.
         var step = s.CellWidth is null ? Math.Max(1,(int)Math.Ceiling(cats.Length/12d)) : Math.Max(1,(int)Math.Ceiling((cats.Max(at => Broad(Short(Column(at),10))) + 6) / cw));
         for (var i = 0; i < cats.Length; i += step)
-            w.Text(HeatmapLeft+(i+.5)*cw, s.Height-w.Foot-62, Short(Column(cats[i]),10), "text-anchor='middle' class='lumen-muted'");
+            w.Text(left+(i+.5)*cw, s.ColumnLabelsOnTop ? top - 10 : bottom + 18, Short(Column(cats[i]),10), "text-anchor='middle' class='lumen-muted'");
         // The scale's line, in the words the refined finish gives up one step at a time: the whole line, then without its prefix, then
         // the scale's two ends alone.
         string[] lines;
@@ -3203,13 +3240,13 @@ public static partial class ChartSvg
         {
             // The 12 px line ends 12 units short of the drawing's edge: the first step that does not reach it is drawn, and where none
             // does the last, cut, so that both ends of the scale are kept before either is.
-            var room = s.Width - 12 - HeatmapLeft;
+            var room = s.Width - 12 - left;
             line = lines.FirstOrDefault(option => Broad(option) <= room) ?? lines[^1];
             var keep = line.Length;
             while (keep > 1 && Broad(Short(line, keep)) > room) keep--;
             line = Short(line, keep);
         }
-        w.Text(HeatmapLeft, s.Height-w.Foot-36, line, "class='lumen-muted'");
+        w.Text(left, bottom + (s.ColumnLabelsOnTop ? 18 : 44), line, "class='lumen-muted'");
     }
 
     /// <summary>Writes a heatmap cell's value, 11 px and weight 600, and under it its sub-label, 10 px, in <paramref name="ink"/>, centred

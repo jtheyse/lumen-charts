@@ -10099,6 +10099,77 @@ Test("Heatmap follow-ups: a longer note, a gap label with a value or beside a re
 Test("Heatmap follow-ups: labels on top left false change nothing a heatmap draws",()=>{
     Check(ChartSvg.Render(HeatGrid())==ChartSvg.Render(HeatGrid(s=>s with{ColumnLabelsOnTop=false})),"false is the default");
 });
+ChartSpec Named(ChartSpec s,string name)=>s with{Series=[s.Series[0] with{Name=name},s.Series[1]]};
+Test("Heatmap follow-ups: a row name wider than 118 widens the name column and is written whole; names that fit keep today's drawing",()=>{
+    // "Junior 18/19 Girls" is 10.52 em, 126.2 units at 12 px: the column becomes ceil(126.2 + 18) = 145, its names ending at 133.
+    var wide=Named(HeatGrid(s=>s with{CellWidth=72}),"Junior 18/19 Girls");
+    Check(ChartSvg.HeatmapLeftOf(wide)==145,"left "+ChartSvg.HeatmapLeftOf(wide));
+    var svg=ChartSvg.Render(wide);
+    Check(svg.Contains(">Junior 18/19 Girls<"),"whole");
+    Check(svg.Contains("<text x='133'"),"names end 12 short of the grid");
+    Check(svg.Contains("x='146'"),"the first cell starts one past the column");
+    Check(ChartSvg.DrawnWidth(wide)==145+35+2*72,"width "+ChartSvg.DrawnWidth(wide));
+    // Today's names fit 118: the column stays 130, and the drawing is unchanged.
+    Check(ChartSvg.HeatmapLeftOf(HeatGrid())==130,"stays 130");
+    Check(ChartSvg.Render(HeatGrid()).Contains("<text x='118'"),"names at 118");
+    // A very long name is held to 240, and cut by width with an ellipsis to the 222 left.
+    var longest=Named(HeatGrid(),"An invented category with a very long name indeed");
+    Check(ChartSvg.HeatmapLeftOf(longest)==240,"cap");
+    var cut=Regex.Match(ChartSvg.Render(longest),"<text x='228'[^>]*>([^<]*)<").Groups[1].Value;
+    Check(cut.EndsWith("…")&&ChartSvg.Broad(cut)<=222,"cut by width: "+cut);
+});
+Test("Heatmap follow-ups: the 4096 check measures the name column",()=>{
+    // 54 columns of 72 are 3888: 130 + 35 + 3888 = 4053 fits, but a 240 column makes 4163, past 4096.
+    var cols=Enumerable.Range(0,54).Select(i=>new ChartPoint(i,i+1,$"S{i}")).ToArray();
+    var fits=new ChartSpec{Title="Wide",Kind=ChartKind.Heatmap,CellWidth=72,Series=[new("Sprint",cols)]};
+    ChartValidation.Validate(fits);
+    var refused=fits with{Series=[new("An invented category with a very long name indeed",cols)]};
+    Reject(()=>ChartValidation.Validate(refused));
+    try{ChartValidation.Validate(refused);}catch(ArgumentException e){Check(e.Message.Contains("4163 pixels wide"),e.Message);}
+});
+Test("Heatmap follow-ups: labels on top are written above the grid, which takes the room they leave below",()=>{
+    var top=ChartSvg.Render(HeatGrid(s=>s with{ColumnLabelsOnTop=true}));
+    var below=ChartSvg.Render(HeatGrid());
+    // Title and a one-line description: the grid starts at 80, and labels on top stand at 70.
+    Check(Regex.IsMatch(top,"<text x='[^']*' y='70'[^>]*>2025<"),"2025 on top");
+    Check(!Regex.IsMatch(top,"y='258'[^>]*>2025<"),"not at the foot");
+    // Two rows in 320: below the grid 80 - 26 = 54, so a row is (320 - 80 - 54) / 2 = 93 and a cell 91 tall; at the foot 78.
+    Check(top.Contains("height='91'")&&below.Contains("height='78'"),"the grid grows into the room");
+    // The scale line stays 36 above the foot either way.
+    Check(Regex.IsMatch(top,"y='284'[^>]*>Color scale")&&Regex.IsMatch(below,"y='284'[^>]*>Color scale"),"scale line in place");
+});
+Test("Heatmap follow-ups: FitHeight gives each row 36 units, drops an empty source's room, and keeps the 240 floor",()=>{
+    var six=HeatGrid(s=>s with{FitHeight=true,Series=Enumerable.Range(0,6).Select(i=>new ChartSeries($"Row {i}",[new ChartPoint(0,i+1,"2025"),new ChartPoint(1,i+2,"2026")])).ToArray()});
+    // 80 above the grid, 6 x 36, then 80 - 24 below with no source: 352.
+    Check(ChartSvg.Render(six).Contains("viewBox='0 0 600 352'"),"no source: "+Regex.Match(ChartSvg.Render(six),"viewBox='[^']*'").Value);
+    Check(ChartSvg.Render(six).Contains("height='34'"),"rows of 36");
+    Check(ChartSvg.Render(six with{Source="Invented"}).Contains("viewBox='0 0 600 376'"),"a source keeps its 24");
+    Check(ChartSvg.Render(six with{ColumnLabelsOnTop=true}).Contains("viewBox='0 0 600 326'"),"labels on top free 26");
+    Check(ChartSvg.Render(HeatGrid(s=>s with{FitHeight=true})).Contains("viewBox='0 0 600 240'"),"two rows keep the floor");
+    // With a cell width the source wraps across the drawn width, and the height follows it.
+    var frame=ChartSvg.HeatmapFrame(six);
+    Check(frame.Left==130&&frame.Top==80&&frame.Bottom==80+6*36,"frame "+frame);
+    // A two-line description moves the grid down 14, and no titles drawn moves it up 50: the frame's top is the drawn grid's in every case.
+    var longer="Invented categories by season, each row an invented rider category and each column an invented season, with points per start";
+    Check(ChartSvg.Wrap(longer,552).Length==2,"two lines");
+    foreach(var (spec,head,viewBox) in new[]{(six,0,"0 0 600 352"),(six with{Description=longer},14,"0 0 600 366"),(six with{DrawTitles=false},-50,"0 0 600 302")})
+    {
+        var drawn=ChartSvg.Render(spec);
+        var cell=Regex.Match(drawn,"<rect x='[^']*' y='([^']*)' width='[^']*' height='([^']*)' rx='3'");
+        var f=ChartSvg.HeatmapFrame(spec);
+        Check(drawn.Contains($"viewBox='{viewBox}'"),$"head {head}: "+Regex.Match(drawn,"viewBox='[^']*'").Value);
+        Check(f.Top==80+head&&cell.Groups[1].Value==(f.Top+1).ToString(CultureInfo.InvariantCulture),$"head {head}: frame top {f.Top}, first cell at {cell.Groups[1].Value}");
+        Check(f.Bottom-f.Top==6*36&&cell.Groups[2].Value=="34",$"head {head}: frame {f}, cell {cell.Groups[2].Value} tall");
+    }
+    // The cell width is applied before the height is fitted: 2 columns of 72 make 320 wide, a long source wraps to two lines there, and
+    // the second takes 14 from the grid's room.
+    var narrow=six with{CellWidth=72,Source="Invented figures for the example, drawn from no real event or rider category whatever"};
+    Check(ChartSvg.Wrap(narrow.Source,320-48).Length==2&&ChartSvg.Wrap(narrow.Source,600-48).Length==1,"wraps only when narrow");
+    var narrowSvg=ChartSvg.Render(narrow);
+    var narrowFrame=ChartSvg.HeatmapFrame(narrow);
+    Check(narrowSvg.Contains("viewBox='0 0 320 390'"),"narrow: "+Regex.Match(narrowSvg,"viewBox='[^']*'").Value);
+    Check(narrowFrame.Left==130&&narrowFrame.Top==80&&narrowFrame.Bottom==80+6*36,"narrow frame "+narrowFrame);
+});
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;

@@ -723,9 +723,10 @@ public sealed record ChartSpec
     /// black or white, whichever stands out more, so every word clears 4.5:1; the cell's name always carries both. Heatmaps only; false
     /// by default.</summary>
     public bool CellText { get; init; }
-    /// <summary>On a heatmap, the width of every column in pixels, at least 24: the drawing grows to 165 plus the columns times this
-    /// width, and never narrower than 320, the room left over at its right, instead of squeezing into <see cref="Width"/>, and in
-    /// <c>&lt;LumenChart FitWidth&gt;</c> it scrolls sideways when wider than its box. Heatmaps only; null by default.</summary>
+    /// <summary>On a heatmap, the width of every column in pixels, at least 24: the drawing grows to the name column, at least 130, plus 35,
+    /// plus the columns times this width, and never narrower than 320, the room left over at its right, instead of squeezing into
+    /// <see cref="Width"/>, and in <c>&lt;LumenChart FitWidth&gt;</c> it scrolls sideways when wider than its box. Heatmaps only; null by
+    /// default.</summary>
     public double? CellWidth { get; init; }
     /// <summary>Writes a heatmap's column labels above its grid, under its title and description, as a table's header row reads, instead of
     /// under it; the grid takes the room they leave below (0.46.1). Heatmaps only, refused elsewhere; false by default, and left out of the

@@ -339,8 +339,8 @@ public static partial class ChartValidation
             var categories = spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count();
             if (categories > 100)
                 throw new ArgumentException("Category charts support at most 100 categories; aggregate first.");
-            if (spec.CellWidth is { } columnWidth && ChartSvg.HeatmapWidth(categories, columnWidth) > ChartSvg.MaxWidth)
-                throw new ArgumentException(FormattableString.Invariant($"At {columnWidth} pixels a column, {categories} {(categories == 1 ? "column makes" : "columns make")} a drawing {ChartSvg.HeatmapWidth(categories, columnWidth)} pixels wide, past the {ChartSvg.MaxWidth} a chart may be; narrow the cells or show fewer columns."));
+            if (spec.CellWidth is { } columnWidth && ChartSvg.HeatmapWidth(spec, categories, columnWidth) > ChartSvg.MaxWidth)
+                throw new ArgumentException(FormattableString.Invariant($"At {columnWidth} pixels a column, {categories} {(categories == 1 ? "column makes" : "columns make")} a drawing {ChartSvg.HeatmapWidth(spec, categories, columnWidth)} pixels wide, past the {ChartSvg.MaxWidth} a chart may be; narrow the cells or show fewer columns."));
             if (spec.Kind is not ChartKind.Heatmap && spec.Series.SelectMany(s => s.Points).Where(p => p.SubLabel is not null).GroupBy(p => p.X).Any(category => category.Select(p => p.SubLabel).Distinct().Count() > 1))
                 throw new ArgumentException("A category's sub-label is written once under its name, so the points of several series in one category may repeat it or leave it null, but not give different ones.");
         }
