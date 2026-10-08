@@ -869,6 +869,15 @@ ChartSpec CategoryGrid(ChartTheme theme, ChartStyle? style, int seasons, double?
 foreach (var (name, theme, style) in new[] { ("light", ChartTheme.Light, (ChartStyle?)null), ("dark", ChartTheme.Dark, null), ("midnight", ChartTheme.Light, ChartStyle.Midnight) })
     lines.Add($"heatmap-table/{name} {Hash(Render(CategoryGrid(theme, style, 4, null)))}");
 lines.Add($"heatmap-table/cell-width {Hash(Render(CategoryGrid(ChartTheme.Light, null, 12, 56)))}");
+// 0.46.1: heatmap follow-ups, on the same invented table: its column labels on top, its height fitted to its rows, a first row named at
+// length, a fifth season nobody raced, its colour scale pinned to include 0, and its reasons written in cells 90 wide.
+var table = CategoryGrid(ChartTheme.Light, null, 4, null);
+lines.Add($"heatmap-table/top {Hash(Render(table with { ColumnLabelsOnTop = true }))}");
+lines.Add($"heatmap-table/fit {Hash(Render(table with { FitHeight = true, Source = "" }))}");
+lines.Add($"heatmap-table/long-name {Hash(Render(table with { Series = [table.Series[0] with { Name = "Junior mixed team relay" }, .. table.Series.Skip(1)] }))}");
+lines.Add($"heatmap-table/no-race {Hash(Render(table with { Series = table.Series.Select(row => row with { Points = [.. row.Points, new ChartPoint(4, null, "2027") { SubLabel = "/0 starts", GapLabel = "did not race" }] }).ToArray() }))}");
+lines.Add($"heatmap-table/zero {Hash(Render(table with { IncludeZero = true }))}");
+lines.Add($"heatmap-table/reasons {Hash(Render(table with { CellWidth = 90, FitHeight = true }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);
