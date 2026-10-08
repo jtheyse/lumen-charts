@@ -3172,16 +3172,29 @@ public static partial class ChartSvg
 
     /// <summary>A heatmap cell's name, as the drawing gives it to the cell and as the component's status line reads the cell when it is
     /// selected: its row, its column and its sub-label, then its value and the value's note, written in <see cref="ChartSpec.YFormat"/>
-    /// and <see cref="ChartSpec.YUnit"/>, and, for a cell that is not rated, why. A cell without a value leaves it out. A heatmap draws
-    /// no band, so a point's Low and High, which it does not refuse, are not said.</summary>
+    /// and <see cref="ChartSpec.YUnit"/>, and, for a cell that is not rated, why. A cell without a value leaves it out, and one with a gap
+    /// label says its word and note in its place. A heatmap draws no band, so a point's Low and High, which it does not refuse, are not said.</summary>
     internal static string HeatmapCellName(ChartSpec spec, ChartSeries series, ChartPoint point)
     {
         // A column without a label is named by its X.
         var columns = new Axis(AxisKind.Linear, 0, 1);
         var name = point.Y.HasValue
             ? PointLabel(series, point with { Low = null, High = null }, columns, HeatmapValues(spec), sub: point.SubLabel) + Of(series, point)
-            : $"{series.Name}: {point.Label ?? columns.Format(point.X)}{Under(point.SubLabel)}";
+            : $"{series.Name}: {point.Label ?? columns.Format(point.X)}{Under(point.SubLabel)}" + (point.GapLabel is { } word ? $", {word}{point.ValueNote}" : "");
         return name + (point.NotRated is { } why ? $", not rated: {why}" : "");
+    }
+
+    /// <summary>A heatmap's colour scale over its rated values. In the refined finish YMin and YMax set its ends and IncludeZero widens it
+    /// to 0, used as given; ends that leave out every value still make a scale, which those values take the nearer end of. The classic
+    /// finish builds it from the values alone, as 0.23.0 did (0.46.1).</summary>
+    private static LinearScale HeatmapScale(ChartSpec s, bool refined, double[] values)
+    {
+        if (!refined || s.YMin is null && s.YMax is null && !s.IncludeZero) return LinearScale.Create(values);
+        double low = values.Min(), high = values.Max();
+        if (s.IncludeZero) { low = Math.Min(low, 0); high = Math.Max(high, 0); }
+        if (s.YMin is { } min) low = min;
+        if (s.YMax is { } max) high = max;
+        return LinearScale.Create(low < high ? [low, high] : [low]);
     }
 
     private static void Heatmap(SvgWriter w, ChartSpec s)
@@ -3189,7 +3202,7 @@ public static partial class ChartSvg
         var cats = HeatmapColumns(s);
         // A not-rated cell is drawn but is no result, so the colour scale is built from the rated cells alone, and from none where none is.
         var values = s.Series.SelectMany(x => x.Points).Where(p => p.Y.HasValue && p.NotRated is null).Select(p => p.Y!.Value).ToArray();
-        LinearScale? scale = values.Length > 0 ? LinearScale.Create(values) : null;
+        LinearScale? scale = values.Length > 0 ? HeatmapScale(s, w.Refined, values) : null;
         var (low, high) = HeatmapPair(w.Style);
         var words = HeatmapValues(s);
         // A description or a source on two lines takes its 14 pixels from the rows' height; column labels on top give the grid the room
@@ -3203,26 +3216,30 @@ public static partial class ChartSvg
             w.Text(left - 12, top + (si + .5) * ch + 4, w.Refined ? Fitted(series.Name, HeatmapNameRoom(left)) : Short(series.Name, 17), "text-anchor='end' class='lumen-muted'");
             for (var pi = 0; pi < series.Points.Count; pi++)
             {
-                var p = series.Points[pi]; if (!p.Y.HasValue && p.NotRated is null) continue;
+                var p = series.Points[pi]; if (!p.Y.HasValue && p.NotRated is null && p.GapLabel is null) continue;
                 var x = left + Array.IndexOf(cats,p.X)*cw;
                 var y = top+si*ch;
                 var name = HeatmapCellName(s, series, p);
                 var box = $"x='{N(x+1)}' y='{N(y+1)}' width='{N(Math.Max(0,cw-2))}' height='{N(Math.Max(0,ch-2))}' rx='3'";
                 string ink;
-                if (p.NotRated is null)
+                if (p.NotRated is null && p.GapLabel is null)
                 {
-                    var color = Mix(low, high, scale!.Value.Map(p.Y!.Value, 0, 1));
+                    var color = Mix(low, high, Math.Clamp(scale!.Value.Map(p.Y!.Value, 0, 1), 0, 1));
                     // A hairline keeps the palest cells distinguishable from the chart background.
                     Datum(w,si,pi,name,$"<rect {box} fill='{color}' stroke='var(--lumen-muted)' stroke-opacity='.4'{w.Fixed}/>");
                     ink = CellInk(color, w.Style);
                 }
                 else
                 {
-                    // Unshaded and dashed, so it is never read as a low score; its name says it is not rated.
+                    // Unshaded and dashed, so it is never read as a low score; its name says it is not rated, or its gap label's word.
                     Datum(w,si,pi,name,$"<rect {box} fill='{w.Style.Background}' stroke='{w.Style.Muted}' stroke-dasharray='3 2'{w.Fixed}/>");
                     ink = CellInk(w.Style.Background, w.Style);
                 }
-                if (s.CellText) CellWords(w, x + cw / 2, y + ch / 2, cw, ch, p.Y is { } value ? words.Format(value) : "—", p.SubLabel, ink);
+                if (s.CellText)
+                {
+                    if ((p.NotRated ?? p.GapLabel) is { } said) CellReason(w, x + cw / 2, y + ch / 2, cw, ch, said, p.SubLabel, ink);
+                    else CellWords(w, x + cw / 2, y + ch / 2, cw, ch, words.Format(p.Y!.Value), p.SubLabel, ink);
+                }
             }
         }
         string Column(double at) => HeatmapColumn(s, at);
@@ -3266,6 +3283,51 @@ public static partial class ChartSvg
         const string unread = "pointer-events='none' aria-hidden='true'";
         w.Text(cx, both ? cy - 3 : cy + 4, value, $"text-anchor='middle' font-size='11' font-weight='600' fill='{ink}' {unread}");
         if (both) w.Text(cx, cy + 9, sub, $"text-anchor='middle' font-size='10' fill='{ink}' {unread}");
+    }
+
+    /// <summary>Writes a heatmap cell's words where it shows no value: a not-rated cell's reason or a gap-label cell's word, 10 px in
+    /// <paramref name="ink"/>, wrapped at word breaks onto as many lines, 12 units apart, as fit 4 inside the cell's height, each within 6
+    /// of its width, then its sub-label on a line of its own where one is left. Words that do not fit are cut at a word with "…", and a word
+    /// wider than a line by its characters; where not even "…" fits, nothing is written. The block is centred in the cell, its two lines
+    /// where the value and sub-label of <see cref="CellWords"/> stand. The cell's name says all of it, so none of it is read (0.46.1).</summary>
+    private static void CellReason(SvgWriter w, double cx, double cy, double cw, double ch, string said, string? sub, string ink)
+    {
+        double room = cw - 6;
+        var most = (int)Math.Floor((ch - 4) / 12);
+        if (most < 1) return;
+        static double Width(string text) => Wide(text) * 10 / 11;
+        string Fit(string text)
+        {
+            if (Width(text) <= room) return text;
+            var keep = text.Length;
+            while (keep > 1 && Width(Short(text, keep)) > room) keep--;
+            return keep > 1 || Width("…") <= room ? Short(text, keep) : "";
+        }
+        var words = said.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var lines = new List<string>();
+        var i = 0;
+        while (i < words.Length && lines.Count < most)
+        {
+            var line = words[i++];
+            while (i < words.Length && Width(line + " " + words[i]) <= room) line += " " + words[i++];
+            lines.Add(line);
+        }
+        if (i < words.Length)
+        {
+            // Words are left over: the last line gives up words until an ellipsis fits after it.
+            var last = lines[^1];
+            while (Width(last + "…") > room && last.Contains(' ')) last = last[..last.LastIndexOf(' ')];
+            lines[^1] = Width(last + "…") <= room ? last + "…" : Fit(last + "…");
+        }
+        for (var k = 0; k < lines.Count; k++) lines[k] = Fit(lines[k]);
+        lines.RemoveAll(line => line.Length == 0);
+        if (lines.Count == 0) return;
+        var withSub = sub is not null && lines.Count < most && Width(sub) <= room;
+        var count = lines.Count + (withSub ? 1 : 0);
+        var first = cy - count * 6 + 9;
+        const string unread = "pointer-events='none' aria-hidden='true'";
+        for (var k = 0; k < lines.Count; k++) w.Text(cx, first + 12 * k, lines[k], $"text-anchor='middle' font-size='10' fill='{ink}' {unread}");
+        if (withSub) w.Text(cx, first + 12 * lines.Count, sub, $"text-anchor='middle' font-size='10' fill='{ink}' {unread}");
     }
 
     private static void Radar(SvgWriter w, ChartSpec s)

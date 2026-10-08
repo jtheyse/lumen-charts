@@ -7611,12 +7611,14 @@ Test("Sports page: the Category heatmap closes the Racing section, its cells the
     var names=PlacedNames(heat);
     Check(names.Count(n=>n.EndsWith(", not rated: too few starts to rate"))==3&&names.Contains("Sprint: 2023 · /12 starts, 2.8 pts · 34 pts, 5 riders")
         &&names.Contains("Long distance: 2023 · /4 starts, 2 pts · 8 pts, 3 riders, not rated: too few starts to rate")&&names.Contains("Relay: 2023 · /0 starts, not rated: too few starts to rate"),string.Join(" | ",names));
-    // The drawing is 165 pixels and four 72-pixel seasons wide whatever the spec's width, each of its sixteen cells writes its value and its starts
-    // beneath, and the colour scale leaves out the not-rated 1.6 for the rated 1.7.
+    // The drawing is 165 pixels and four 72-pixel seasons wide whatever the spec's width, each of its thirteen rated cells writes its value and its
+    // starts beneath, each of the three not-rated cells its reason in three lines in place of both, and the colour scale leaves out the not-rated
+    // 1.6 for the rated 1.7.
     var drawing=Svg(heat with{Width=337});
     Check(drawing.Root!.Attribute("viewBox")!.Value.StartsWith("0 0 453 "),drawing.Root.Attribute("viewBox")!.Value);
     var written=drawing.Root.Elements(ns+"text").Where(t=>(string?)t.Attribute("aria-hidden")=="true").ToArray();
-    Check(written.Count(t=>(string?)t.Attribute("font-size")=="11")==16&&written.Count(t=>(string?)t.Attribute("font-size")=="10"&&t.Value.EndsWith(" starts"))==16,$"{written.Length} words written in the cells");
+    Check(written.Count(t=>(string?)t.Attribute("font-size")=="11")==13&&written.Count(t=>(string?)t.Attribute("font-size")=="10"&&t.Value.EndsWith(" starts"))==13
+        &&written.Count(t=>(string?)t.Attribute("font-size")=="10"&&t.Value is "too few" or "starts to" or "rate")==9,$"{written.Length} words written in the cells");
     Check(drawing.Descendants(ns+"text").Any(t=>t.Value=="Color scale: 1.7 pts low to 3.5 pts high"),"the colour scale");
     var table=ChartExport.HtmlTable(heat);
     Check(Regex.Matches(table,"<th scope='row'>").Count==4&&table.Contains("<th scope='row'>Middle distance</th>")&&table.Contains("class='lumen-grid-table'"),table);
@@ -9835,9 +9837,9 @@ Test("Heatmap table: a format and a unit reach the cells, the names and the scal
     Check(svg.Contains(">3.1 pts<")&&svg.Contains("0.4 pts low to 3.1 pts high"),"unit");
     Check(HeatNames(HeatGrid(s=>s with{YUnit=" pts"})).Contains("Sprint: 2025 · /12 starts, 2.8 pts"),"the unit in the names");
 });
-Test("Heatmap table: a not-rated cell without a value is drawn, written '—' and named without a value",()=>{
+Test("Heatmap table: a not-rated cell without a value is drawn, writes its reason and is named without a value",()=>{
     var spec=HeatGrid(s=>s with{Series=[s.Series[0],s.Series[1] with{Points=[new ChartPoint(0,null,"2025"){SubLabel="/0 starts",NotRated="no starts"},s.Series[1].Points[1]]}]});
-    Check(HeatSvg(spec).Contains(">—<"),"dash");
+    Check(HeatSvg(spec).Contains(">no starts<")&&!HeatSvg(spec).Contains(">—<"),"its reason, not a dash");
     Check(HeatNames(spec).Contains("Long distance: 2025 · /0 starts, not rated: no starts"),string.Join(" | ",HeatNames(spec)));
 });
 Test("Heatmap table: every cell not rated draws, and says there are no rated cells",()=>{
@@ -9880,7 +9882,7 @@ Test("Heatmap table: the dark pair keys the legend too, column labels a cell wid
     var labels=Regex.Matches(HeatSvg(wide),"<text x='([0-9.]+)' y='[0-9.]+' text-anchor='middle' class='lumen-muted'>([^<]*)</text>").Select(m=>(X:double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),Width:ChartSvg.Wide(m.Groups[2].Value)*12/11)).ToArray();
     Check(labels.Length is > 1 and < 30&&labels.Zip(labels.Skip(1)).All(p=>p.Second.X-p.First.X>=(p.First.Width+p.Second.Width)/2+6),$"{labels.Length} labels");
     var empty=HeatSvg(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,null,"a"){NotRated="no starts"},new ChartPoint(1,null,"b"){NotRated="no starts"}])]}));
-    Check(!empty.Contains("No data to display")&&empty.Contains("stroke-dasharray='3 2'")&&empty.Contains(">—<")&&empty.Contains("Color scale: no rated cells"),"empty and not rated");
+    Check(!empty.Contains("No data to display")&&empty.Contains("stroke-dasharray='3 2'")&&empty.Contains(">no starts<")&&empty.Contains("Color scale: no rated cells"),"empty and not rated");
 });
 Test("Heatmap table: HtmlTable is a real grid, rows by columns, with headers, sub-labels and not-rated words",()=>{
     var html=ChartExport.HtmlTable(HeatGrid());
@@ -10026,13 +10028,13 @@ Test("Heatmap table: the component's status line reads a selected cell as its na
     Check(said.SequenceEqual(HeatNames(grid).Skip(1)),string.Join(" | ",said));
 });
 Test("Heatmap table: a not-rated cell writes in the ink every other cell does, so a text colour weak on the background still reads, and no preset's ink moves",()=>{
-    // A not-rated cell is drawn dashed on the chart's background, and writes its value, or a dash, in the first line of its cell.
+    // A not-rated cell is drawn dashed on the chart's background, and writes its reason in the first line of its cell.
     (string Ink,string Text)[] NotRated(ChartSpec spec)=>Regex.Matches(HeatSvg(spec),"<rect[^>]*stroke-dasharray='3 2'[^>]*/>\\s*(?:</?g[^>]*>\\s*)*<text[^>]*fill='(#[0-9A-Fa-f]{6})'[^>]*>([^<]*)<")
         .Select(m=>(m.Groups[1].Value,m.Groups[2].Value)).ToArray();
     // #999999 is 2.8:1 on white, where Light's own text is 10.9:1.
     var weak=ChartStyle.Light with{Text="#999999"};
-    var empty=(s:HeatGrid(c=>c with{Style=weak,Series=[c.Series[0],c.Series[1] with{Points=[new ChartPoint(0,null,"2025"){SubLabel="/0 starts",NotRated="no starts"},c.Series[1].Points[1]]}]}),text:"—");
-    foreach(var (spec,text) in new[]{(HeatGrid(c=>c with{Style=weak}),"1.2"),(empty.s,empty.text)})
+    var empty=(s:HeatGrid(c=>c with{Style=weak,Series=[c.Series[0],c.Series[1] with{Points=[new ChartPoint(0,null,"2025"){SubLabel="/0 starts",NotRated="no starts"},c.Series[1].Points[1]]}]}),text:"no starts");
+    foreach(var (spec,text) in new[]{(HeatGrid(c=>c with{Style=weak}),"too few starts to rate"),(empty.s,empty.text)})
     {
         var cell=NotRated(spec).Single();
         Check(cell.Text==text&&Lumen.Charts.Contrast.Ratio(cell.Ink,weak.Background)>=4.5,$"{text} in {cell.Ink} on {weak.Background}: {Lumen.Charts.Contrast.Ratio(cell.Ink,weak.Background):0.0}:1");
@@ -10042,7 +10044,7 @@ Test("Heatmap table: a not-rated cell writes in the ink every other cell does, s
     {
         Check(ChartSvg.CellInk(style.Background,style)==style.Text,$"{style.Background} takes {ChartSvg.CellInk(style.Background,style)}");
         var cell=NotRated(HeatGrid(c=>c with{Style=style})).Single();
-        Check(cell.Text=="1.2"&&cell.Ink==style.Text,$"{style.Background}: {cell.Ink}");
+        Check(cell.Text=="too few starts to rate"&&cell.Ink==style.Text,$"{style.Background}: {cell.Ink}");
     }
 });
 Test("Heatmap table: the refined scale keeps both ends of its scale before it cuts anything",()=>{
@@ -10222,6 +10224,52 @@ Test("Heatmap follow-ups: names are cut 12 short of the grid in a 130 column and
     Check(!svg.Contains($">{name}<"),"not whole");
     var cut=Regex.Match(svg,"<text x='228'[^>]*>([^<]*)<").Groups[1].Value;
     Check(cut.EndsWith("…")&&ChartSvg.Broad(cut)<=222&&cut.Length==name.Length-1,"cut to the 222 left: "+cut);
+});
+// Six rows, so FitHeight's rows are 36 tall rather than raised to the 240 floor: a cell 34 tall holds two 10 px lines.
+ChartSpec Six(ChartSpec s)=>s with{Series=[..s.Series,..Enumerable.Range(2,4).Select(i=>new ChartSeries($"Row {i}",[new ChartPoint(0,i,"2025"),new ChartPoint(1,i+1,"2026")]))]};
+Test("Heatmap follow-ups: a not-rated cell writes its reason, wrapped, instead of its value",()=>{
+    // HeatGrid's Long distance 2025 is not rated "too few starts to rate", with the value 1.2.
+    var ninety=ChartSvg.Render(Six(HeatGrid(s=>s with{CellWidth=90,FitHeight=true})));
+    Check(ninety.Contains(">too few starts<")&&ninety.Contains(">to rate<"),"two whole lines at 90");
+    Check(!ninety.Contains(">1.2<"),"the value is not written");
+    Check(ninety.Contains("1.2, not rated: too few starts to rate"),"the name keeps the value and the reason");
+    // At 72 a line holds 66: "too few", then "starts to", and "rate" is left over, so the second line ends with an ellipsis.
+    var seventy=ChartSvg.Render(Six(HeatGrid(s=>s with{CellWidth=72,FitHeight=true})));
+    Check(seventy.Contains(">too few<")&&seventy.Contains(">starts to…<"),"cut at a word at 72");
+    // A taller cell takes more lines and then the sub-label: two rows are raised to the 240 floor, 52 a row, four lines.
+    var tall=ChartSvg.Render(HeatGrid(s=>s with{CellWidth=72,FitHeight=true}));
+    Check(tall.Contains(">too few<")&&tall.Contains(">starts to<")&&tall.Contains(">rate<")&&Regex.IsMatch(tall,"font-size='10'[^>]*>/4 starts<"),"three lines and the sub-label");
+});
+Test("Heatmap follow-ups: no cell's words run past its cell at any width, a reason of one long word included",()=>{
+    var word=new string('w',24);
+    foreach(var width in new double[]{24,30,48,72,90,120})
+    {
+        var spec=FirstCell(HeatGrid(s=>s with{CellWidth=width,FitHeight=true}),new ChartPoint(0,null,"2025"){NotRated=word});
+        foreach(Match m in Regex.Matches(ChartSvg.Render(spec),"<text[^>]*font-size='10'[^>]*>([^<]*)<"))
+            Check(ChartSvg.Wide(m.Groups[1].Value)*10/11<=width-6+1e-9,$"{width}: {m.Groups[1].Value}");
+    }
+});
+Test("Heatmap follow-ups: a gap-label cell is drawn like a not-rated cell, writes its word and keeps its column",()=>{
+    var raced=FirstCell(HeatGrid(s=>s with{CellWidth=90,FitHeight=true}),new ChartPoint(0,null,"2025"){SubLabel="/0 starts",GapLabel="did not race"});
+    var svg=ChartSvg.Render(raced);
+    // The drawing writes the middle dot as an entity, so the names are read decoded, as the 0.46.0 tests do.
+    Check(HeatNames(raced).Contains("Sprint: 2025 · /0 starts, did not race"),string.Join(" | ",HeatNames(raced)));
+    Check(svg.Contains(">did not race<"),"written");
+    Check(Regex.Matches(svg,"stroke-dasharray='3 2'").Count==2,"dashed, beside the not-rated cell");
+    // A season every row missed is still a column.
+    var missed=HeatGrid(s=>s with{Series=[new("Sprint",[new ChartPoint(0,null,"2023"){GapLabel="did not race"},new ChartPoint(1,3.1,"2024")]),new("Relay",[new ChartPoint(0,null,"2023"){GapLabel="did not race"},new ChartPoint(1,2.0,"2024")])]});
+    Check(Regex.IsMatch(ChartSvg.Render(missed),">2023<"),"its column is labelled");
+});
+Test("Heatmap follow-ups: YMin, YMax and IncludeZero set a refined heatmap's scale ends; the classic finish ignores them",()=>{
+    Check(ChartSvg.Render(HeatGrid(s=>s with{IncludeZero=true})).Contains("Color scale: 0 low to 3.1 high"),"zero");
+    Check(ChartSvg.Render(HeatGrid(s=>s with{YMin=0,YMax=5})).Contains("Color scale: 0 low to 5 high"),"set ends");
+    // A value past an end takes the end's colour: on Light the default ramp's high end, #4069D0.
+    Check(ChartSvg.Render(HeatGrid(s=>s with{YMax=2})).Contains("fill='#4069D0'"),"clamped high");
+    // Ends that leave out every value still draw.
+    ChartSvg.Render(HeatGrid(s=>s with{YMin=10}));
+    ChartSvg.Render(HeatGrid(s=>s with{YMax=-1}));
+    var classic=new ChartStyle{Finish=ChartFinish.Classic};
+    Check(ChartSvg.Render(HeatGrid(s=>s with{Style=classic,IncludeZero=true,YMin=0,YMax=5}))==ChartSvg.Render(HeatGrid(s=>s with{Style=classic})),"classic unchanged");
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
