@@ -386,7 +386,13 @@ planner/gauteng 145DA5471521D53B
 placings/points 3A5A872CA78F9D0F
 placings/no-points F644532B9FDBED34
 placings/two-series 5462E4F4895ACDEA
-heatmap-table/light BCB592EB603CE971
-heatmap-table/dark 78DF03CBB524F976
-heatmap-table/midnight 118F352E90E118ED
-heatmap-table/cell-width 580AACF77E9265A8
+heatmap-table/light 39B2F04B0C6DC4CD
+heatmap-table/dark BE78211E3CFB1F15
+heatmap-table/midnight 4ECBB3BFD1A558F4
+heatmap-table/cell-width B4DC758F81D9D397
+heatmap-table/top 72984D7AD87BEB24
+heatmap-table/fit 558094A8738F0C51
+heatmap-table/long-name B4F8F4B728071005
+heatmap-table/no-race C874876DDAF104EA
+heatmap-table/zero ECDA3388D43E68AA
+heatmap-table/reasons A6417A8B5F206FCA
