@@ -10145,6 +10145,11 @@ Test("Heatmap follow-ups: FitHeight gives each row 36 units, drops an empty sour
     Check(ChartSvg.Render(six).Contains("height='34'"),"rows of 36");
     Check(ChartSvg.Render(six with{Source="Invented"}).Contains("viewBox='0 0 600 376'"),"a source keeps its 24");
     Check(ChartSvg.Render(six with{ColumnLabelsOnTop=true}).Contains("viewBox='0 0 600 326'"),"labels on top free 26");
+    // Labels on top and a source: 80 above the grid, 6 x 36, then 80 - 26 below and the source's 24 kept: 350.
+    var topAndSource=six with{ColumnLabelsOnTop=true,Source="Invented"};
+    Check(ChartSvg.Render(topAndSource).Contains("viewBox='0 0 600 350'"),"labels on top with a source: "+Regex.Match(ChartSvg.Render(topAndSource),"viewBox='[^']*'").Value);
+    var topFrame=ChartSvg.HeatmapFrame(topAndSource);
+    Check(topFrame.Top==80&&topFrame.Bottom==80+6*36,"top frame "+topFrame);
     Check(ChartSvg.Render(HeatGrid(s=>s with{FitHeight=true})).Contains("viewBox='0 0 600 240'"),"two rows keep the floor");
     // With a cell width the source wraps across the drawn width, and the height follows it.
     var frame=ChartSvg.HeatmapFrame(six);
@@ -10169,6 +10174,54 @@ Test("Heatmap follow-ups: FitHeight gives each row 36 units, drops an empty sour
     var narrowFrame=ChartSvg.HeatmapFrame(narrow);
     Check(narrowSvg.Contains("viewBox='0 0 320 390'"),"narrow: "+Regex.Match(narrowSvg,"viewBox='[^']*'").Value);
     Check(narrowFrame.Left==130&&narrowFrame.Top==80&&narrowFrame.Bottom==80+6*36,"narrow frame "+narrowFrame);
+});
+Test("Heatmap follow-ups: the classic finish keeps 0.23.0's name column, a name cut at 17 characters and the 4096 check measured with 130",()=>{
+    var classic=ChartStyle.Light with{Finish=ChartFinish.Classic};
+    // "Master Women Elite" is 18 characters and 136.32 units at 12 px: the refined finish widens the column for it, the classic does not.
+    var name="Master Women Elite";
+    Check(name.Length==18&&ChartSvg.Broad(name)>118,"the name is 18 characters and over 118: "+ChartSvg.Broad(name));
+    var refined=Named(HeatGrid(),name);
+    var old=refined with{Style=classic};
+    Check(ChartSvg.HeatmapLeftOf(refined)==155,"refined widens to "+ChartSvg.HeatmapLeftOf(refined));
+    Check(ChartSvg.HeatmapLeftOf(old)==130,"classic stays 130: "+ChartSvg.HeatmapLeftOf(old));
+    var svg=ChartSvg.Render(old);
+    Check(Regex.IsMatch(svg,"<text x='118'[^>]*>Master Women Eli…<"),"Short(name,17) at x=118");
+    Check(!svg.Contains(">Master Women Elite<"),"not whole");
+    Check(svg.Contains("x='131'")&&!svg.Contains("x='156'"),"the first cell starts one past 130");
+    Check(ChartSvg.DrawnWidth(old with{CellWidth=100})==130+35+2*100&&ChartSvg.DrawnWidth(refined with{CellWidth=100})==155+35+2*100,"drawn width "+ChartSvg.DrawnWidth(old with{CellWidth=100}));
+    // The 4096 check measures the classic column at 130: 54 columns of 72 fit with a very long name, 55 make 130 + 35 + 3960 = 4125.
+    ChartSeries Long(int count)=>new("An invented category with a very long name indeed",Enumerable.Range(0,count).Select(i=>new ChartPoint(i,i+1,$"S{i}")).ToArray());
+    var fits=new ChartSpec{Title="Wide",Kind=ChartKind.Heatmap,CellWidth=72,Style=classic,Series=[Long(54)]};
+    ChartValidation.Validate(fits);
+    var past=fits with{Series=[Long(55)]};
+    Reject(()=>ChartValidation.Validate(past));
+    try{ChartValidation.Validate(past);}catch(ArgumentException e){Check(e.Message.Contains("4125 pixels wide"),e.Message);}
+    // The same very long name in the refined finish is refused at 54 (see the 4096 test above), so the finish is what decides.
+    Reject(()=>ChartValidation.Validate(fits with{Style=null}));
+});
+Test("Heatmap follow-ups: the name column widens just past 118 units, and keeps 130 at or under it",()=>{
+    // "Open Women Elite" is 118.08 units, 0.08 over: the column becomes ceil(118.08 + 18) = 137, and the name is written whole, ending at 125.
+    var over=Named(HeatGrid(),"Open Women Elite");
+    Check(Math.Abs(ChartSvg.Broad("Open Women Elite")-118.08)<1e-9,"width "+ChartSvg.Broad("Open Women Elite"));
+    Check(ChartSvg.HeatmapLeftOf(over)==137,"just over: "+ChartSvg.HeatmapLeftOf(over));
+    var svg=ChartSvg.Render(over);
+    Check(Regex.IsMatch(svg,"<text x='125'[^>]*>Open Women Elite<"),"whole, ending at 125");
+    // "Sprint Men Elite" is 114.72: it fits the 118 its names end at, and the column stays 130, the name whole at 118.
+    var under=Named(HeatGrid(),"Sprint Men Elite");
+    Check(ChartSvg.Broad("Sprint Men Elite")<=118,"width "+ChartSvg.Broad("Sprint Men Elite"));
+    Check(ChartSvg.HeatmapLeftOf(under)==130,"at or under: "+ChartSvg.HeatmapLeftOf(under));
+    Check(Regex.IsMatch(ChartSvg.Render(under),"<text x='118'[^>]*>Sprint Men Elite<"),"whole at 118");
+});
+Test("Heatmap follow-ups: names are cut 12 short of the grid in a 130 column and 18 short in a widened one",()=>{
+    Check(ChartSvg.HeatmapNameRoom(130)==118&&ChartSvg.HeatmapNameRoom(145)==127&&ChartSvg.HeatmapNameRoom(240)==222,"the rooms");
+    // "An invented category with a very" is 222.24 units: it widens the column to the 240 cap, where 222 is left, so it is cut by a
+    // fraction of a unit, though the 228 the names end at would have held it whole.
+    var name="An invented category with a very";
+    Check(ChartSvg.Broad(name)>222&&ChartSvg.Broad(name)<=228,"width "+ChartSvg.Broad(name));
+    var svg=ChartSvg.Render(Named(HeatGrid(),name));
+    Check(!svg.Contains($">{name}<"),"not whole");
+    var cut=Regex.Match(svg,"<text x='228'[^>]*>([^<]*)<").Groups[1].Value;
+    Check(cut.EndsWith("…")&&ChartSvg.Broad(cut)<=222&&cut.Length==name.Length-1,"cut to the 222 left: "+cut);
 });
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);

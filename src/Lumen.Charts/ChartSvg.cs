@@ -3098,12 +3098,16 @@ public static partial class ChartSvg
     internal const int MaxWidth = 4096;
     /// <summary>Where a heatmap's grid starts: 130 units in while every row name, at 12 px, fits the 118 its names end at; otherwise as far
     /// in as its widest name and 18 more, up to <see cref="HeatmapWidest"/>, so a long name is written whole rather than cut at 17
-    /// characters (0.46.1).</summary>
+    /// characters (0.46.1). The classic finish keeps 0.23.0's 130 however long the names are.</summary>
     internal static double HeatmapLeftOf(ChartSpec s)
     {
+        if (ResolveStyle(s).Finish == ChartFinish.Classic) return HeatmapLeft;
         var widest = s.Series.Count == 0 ? 0 : s.Series.Max(series => Broad(series.Name));
         return widest <= HeatmapLeft - 12 ? HeatmapLeft : Math.Min(HeatmapWidest, Math.Ceiling(widest + 18));
     }
+    /// <summary>The room a heatmap's row names have, in units, with its name column <paramref name="left"/> wide: they end 12 units short
+    /// of the grid, and, in a column widened for them, are cut 18 short of its edge (0.46.1).</summary>
+    internal static double HeatmapNameRoom(double left) => left == HeatmapLeft ? left - 12 : left - 18;
     /// <summary>How wide a heatmap is whose <paramref name="columns"/> take <paramref name="cellWidth"/> units each: its name column, its
     /// columns and 35 units on the right. Validation holds it within <see cref="MaxWidth"/>.</summary>
     internal static double HeatmapWidth(ChartSpec s, int columns, double cellWidth) => HeatmapLeftOf(s) + 35 + columns * cellWidth;
@@ -3196,7 +3200,7 @@ public static partial class ChartSvg
         for (var si = 0; si < s.Series.Count; si++)
         {
             var series = s.Series[si];
-            w.Text(left - 12, top + (si + .5) * ch + 4, Fitted(series.Name, left == HeatmapLeft ? left - 12 : left - 18), "text-anchor='end' class='lumen-muted'");
+            w.Text(left - 12, top + (si + .5) * ch + 4, w.Refined ? Fitted(series.Name, HeatmapNameRoom(left)) : Short(series.Name, 17), "text-anchor='end' class='lumen-muted'");
             for (var pi = 0; pi < series.Points.Count; pi++)
             {
                 var p = series.Points[pi]; if (!p.Y.HasValue && p.NotRated is null) continue;
