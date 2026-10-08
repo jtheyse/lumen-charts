@@ -8,7 +8,7 @@
 else
 {
 <div class="@((FitWidth ? "lumen-chart lumen-fit" : "lumen-chart") + (drawnWidth is null ? "" : " lumen-fixed"))" @ref="root">
-    <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart" style="@DrawnStyle">@((MarkupString)svg)</div>
+    <div class="lumen-viewport" tabindex="0" role="region" aria-label="Scrollable chart" style="@DrawnStyle">@((MarkupString)svg)@if(band is { } frozen){<div class="lumen-freeze" aria-hidden="true" inert style="@FreezeStyle">@((MarkupString)frozen.Svg)</div>}</div>
     @* The keys a reader moves with, hidden from view and from reading in place: the script, which makes them work, names them as the
        viewport's description while it scrolls, and otherwise the drawing's, as a sparkline's. The viewport is written as a scrolling
        region and a tab stop; the script leaves it neither while the drawing fits it (0.42.0). *@
@@ -21,7 +21,7 @@ else
                 @if(Style.Finish==ChartFinish.Classic){<span style="background:@ChartSvg.SeriesColor(Spec.Series[i],i,Style)"></span>}else{@((MarkupString)ChartSvg.LegendKey(Spec with{Style=Style},i))}@ChartSvg.LegendLabel(Spec,i)
             </button>
         }
-    </div>}@Indent<div class="@(ShowToolbar ? "lumen-tools" : "lumen-tools lumen-quiet")">
+    </div>}@Indent<div class="@(ShowToolbar ? "lumen-tools" : DataButton ? "lumen-tools lumen-hush" : "lumen-tools lumen-quiet")">
         @if(ShowToolbar)
         {
         if(CanZoom)
@@ -35,7 +35,9 @@ else
         <button type="button" @onclick='()=>Download("svg")'>Export SVG</button>
         <button type="button" @onclick='()=>Download("png")'>Export PNG</button>
         <button type="button" @onclick='()=>Download("csv")'>Export CSV</button>
-        <button type="button" @onclick="()=>showData=!showData" aria-expanded="@(showData ? "true" : "false")">@(showData ? "Hide data" : "View data")</button>
+        }@if(DataButton)
+        {
+        @if(ShowToolbar){@Deeper}<button type="button" @onclick="()=>showData=!showData" aria-expanded="@(showData ? "true" : "false")">@(showData ? "Hide data" : "View data")</button>
         }@Deeper<span class="lumen-status" role="status">@status</span>
     </div>
     @if(showData&&Spec.Kind==ChartKind.Heatmap)
@@ -84,6 +86,13 @@ else
     /// keep it where those matter.
     /// </summary>
     [Parameter] public bool ShowToolbar { get; set; } = true;
+    /// <summary>Draws the button that shows the data table. Unset, it follows <see cref="ShowToolbar"/>; set true with the toolbar off,
+    /// the tools row keeps this one button, so a small card can drop zoom and exports and keep its data a click away (0.46.1).</summary>
+    [Parameter] public bool? ShowDataButton { get; set; }
+    private bool DataButton => ShowDataButton ?? ShowToolbar;
+    // A fixed-width heatmap's row names, drawn again in a layer held at the viewport's left while its cells scroll under it (0.46.1).
+    private (string Svg, double Left, double Top, double Height)? band;
+    private string? FreezeStyle => band is { } b ? FormattableString.Invariant($"margin-top:{b.Top}px;width:{b.Left}px;height:{b.Height}px;--lumen-freeze-bg:{Style.Background};--lumen-freeze-line:{Style.Grid}") : null;
     // The line breaks the legend and the toolbar stand on, written out, since Razor drops the whitespace beside a code block: with both
     // shown, the markup is the same as before either could be hidden. Without its toolbar the chart keeps its status line, out of sight.
     private static readonly MarkupString Indent=new("\n    "),Deeper=new("\n        ");
@@ -118,7 +127,7 @@ else
     // chart. The chart is then marked lumen-fixed and its viewport carries that width, which the stylesheet holds the drawing to, fitted
     // or not and measured or not: a narrower box scrolls it, and a wider one leaves room beside it.
     private int? drawnWidth;
-    private string? DrawnStyle => drawnWidth is { } drawn ? $"--lumen-drawn:{drawn}px" : null;
+    private string? DrawnStyle => drawnWidth is { } drawn ? $"--lumen-drawn:{drawn}px" + (band is { } b ? FormattableString.Invariant($";scroll-padding-left:{b.Left}px") : "") : null;
     private int Width => FitWidth && fitted is { } width ? width : Spec.Width;
     private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Blocks;
     private string Value(ChartSeries series,ChartPoint point)
@@ -201,6 +210,7 @@ else
         // CellWidth is refused on every other kind, so a spec that has it is a heatmap, or was refused as the drawing rendered; the width is
         // worked out from the series once they have been validated.
         drawnWidth=shown.CellWidth is not null?ChartSvg.DrawnWidth(shown):null;
+        band=ChartSvg.HeatmapNameBand(shown);
         readout=Spec.SharedReadout ? ChartSvg.Readout(shown) : null;
         plot=CanZoom&&!Spec.Sparkline ? ChartSvg.Plot(shown) : null;
     }

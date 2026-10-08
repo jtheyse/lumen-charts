@@ -3217,10 +3217,12 @@ public static partial class ChartSvg
         var left = HeatmapLeftOf(s);
         double top = 80 + w.Head, bottom = s.Height - w.Foot - HeatmapBelow(s);
         var cw = s.CellWidth ?? (s.Width - left - 35) / cats.Length; var ch = (bottom - top) / s.Series.Count;
+        var names = HeatmapNames(s, w.Refined, left, top, ch).ToArray();
         for (var si = 0; si < s.Series.Count; si++)
         {
             var series = s.Series[si];
-            w.Text(left - 12, top + (si + .5) * ch + 4, w.Refined ? Fitted(series.Name, HeatmapNameRoom(left)) : Short(series.Name, 17), "text-anchor='end' class='lumen-muted'");
+            var (nameX, nameY, nameText) = names[si];
+            w.Text(nameX, nameY, nameText, "text-anchor='end' class='lumen-muted'");
             for (var pi = 0; pi < series.Points.Count; pi++)
             {
                 var p = series.Points[pi]; if (!p.Y.HasValue && p.NotRated is null && p.GapLabel is null) continue;
@@ -3275,6 +3277,33 @@ public static partial class ChartSvg
             line = Short(line, keep);
         }
         w.Text(left, bottom + (s.ColumnLabelsOnTop ? 18 : 44), line, "class='lumen-muted'");
+    }
+
+    /// <summary>A heatmap's row names as <see cref="Heatmap"/> draws them, each at the name column's edge less 12, in the middle of its row:
+    /// in the refined finish cut by width to <see cref="HeatmapNameRoom"/>, in the classic one at 17 characters. <paramref name="s"/> is the
+    /// spec as drawn, <paramref name="left"/> its name column's width and <paramref name="top"/> and <paramref name="ch"/> where its rows
+    /// start and how tall each is (0.46.1).</summary>
+    private static IEnumerable<(double X, double Y, string Text)> HeatmapNames(ChartSpec s, bool refined, double left, double top, double ch) =>
+        s.Series.Select((series, si) => (left - 12, top + (si + .5) * ch + 4, refined ? Fitted(series.Name, HeatmapNameRoom(left)) : Short(series.Name, 17)));
+
+    /// <summary>The row names of a heatmap with a cell width, as <see cref="Render"/> draws them, in a drawing of their own cropped to
+    /// the name column beside the grid's rows, painted in the chart's background. The component lays it over the scrolling drawing, held
+    /// at the left, so the names stay in view as the cells scroll (0.46.1). It holds no marks and is hidden from reading, since the
+    /// drawing beneath says it all. Null for any other chart, and for a heatmap that has no data to draw, whose drawing has no names.</summary>
+    internal static (string Svg, double Left, double Top, double Height)? HeatmapNameBand(ChartSpec spec)
+    {
+        if (spec.Kind != ChartKind.Heatmap || spec.CellWidth is null) return null;
+        ChartValidation.Validate(spec);
+        var s = AsDrawn(spec);
+        if (!HasData(s)) return null;
+        var style = ResolveStyle(s);
+        var (left, top, bottom) = HeatmapFrame(spec);
+        var ch = (bottom - top) / s.Series.Count;
+        var svg = new StringBuilder($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 {N(top)} {N(left)} {N(bottom - top)}' width='{N(left)}' height='{N(bottom - top)}' aria-hidden='true' focusable='false' font-family='{style.FontFamily}' font-size='12'>");
+        svg.Append($"<rect x='0' y='{N(top)}' width='{N(left)}' height='{N(bottom - top)}' fill='{style.Background}'/>");
+        foreach (var (x, y, text) in HeatmapNames(s, style.Finish == ChartFinish.Refined, left, top, ch))
+            svg.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='end' fill='{style.Muted}'>{SvgWriter.E(text)}</text>");
+        return (svg.Append("</svg>").ToString(), left, top, bottom - top);
     }
 
     /// <summary>Writes a heatmap cell's value, 11 px and weight 600, and under it its sub-label, 10 px, in <paramref name="ink"/>, centred

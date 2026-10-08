@@ -7550,7 +7550,7 @@ Test("ShowLegend and ShowToolbar: off, the legend and the buttons are gone, the 
     var legendOnly=Prerender(Shown(spec,true,false));var toolsOnly=Prerender(Shown(spec,false,true));
     Check(legendOnly.Contains("lumen-legend")&&!legendOnly.Contains("Export SVG")&&!toolsOnly.Contains("lumen-legend")&&toolsOnly.Contains("Export SVG")&&toolsOnly.Contains("Reset view"),"one without the other");
     var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
-    Check(css.Contains(".lumen-quiet .lumen-status{position:absolute;width:1px;height:1px;")&&css.Contains("clip-path:inset(50%)"),"the status line is not hidden out of sight");
+    Check(css.Contains(".lumen-quiet .lumen-status,.lumen-hush .lumen-status{position:absolute;width:1px;height:1px;")&&css.Contains("clip-path:inset(50%)"),"the status line is not hidden out of sight");
     // The status line still reads a chosen point.
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
     var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
@@ -9907,7 +9907,7 @@ Test("Heatmap table: HtmlTable writes a value as the cells do, leaves a missing 
     Check(HeatSvg(spec).Contains(">3.1k pts<")&&HeatNames(spec).Contains("Long distance: 2, 3.1k pts (5 riders)"),"the drawing's value: "+string.Join(" | ",HeatNames(spec)));
     // A · inside a note or a sub-label is encoded with the rest of its words, as &#183;; the · the table puts between a value and its sub-label is its own, and plain.
     var dotted=ChartExport.HtmlTable(HeatGrid(s=>s with{Series=[new("A",[new ChartPoint(0,2.8,"a"){SubLabel="/12 · or so",ValueNote=" · 34 pts, 5 riders"}])]}));
-    Check(dotted.Contains("<td>2.8 &#183; 34 pts, 5 riders · /12 &#183; or so</td>"),dotted);
+    Check(dotted.Contains("<td>2.8 · /12 &#183; or so &#183; 34 pts, 5 riders</td>"),dotted);
 });
 Test("Heatmap table: HtmlTable validates, and refuses the kinds that have no grid with a reason",()=>{
     var why="";
@@ -9950,7 +9950,7 @@ Test("Heatmap table: the component's data table is the grid for a heatmap, and a
     // Eight columns of 48 are 165 + 384 = 549 wide, which a 340 box cannot hold: the drawing keeps its width and the viewport scrolls.
     var eight=HeatGrid(s=>s with{CellWidth=48,Series=[new("Sprint",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,i+1,$"S{i}")).ToArray()),new("Long distance",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,8-i,$"S{i}")).ToArray())]});
     var fitted=Operate(eight,async c=>{await c.Fit(340);},fit:true);
-    Check(fitted.Contains("style=\"--lumen-drawn:549px\"")&&fitted.Contains("viewBox='0 0 549 "),"drawn width kept: "+Regex.Match(fitted,"<div class=\"lumen-viewport\"[^>]*>").Value+Regex.Match(fitted,"viewBox='[^']*'").Value);
+    Check(fitted.Contains("style=\"--lumen-drawn:549px;scroll-padding-left:130px\"")&&fitted.Contains("viewBox='0 0 549 "),"drawn width kept: "+Regex.Match(fitted,"<div class=\"lumen-viewport\"[^>]*>").Value+Regex.Match(fitted,"viewBox='[^']*'").Value);
     // Two columns are drawn at the 320 floor, however wide the box.
     var small=Operate(HeatGrid(s=>s with{CellWidth=48}),async c=>{await c.Fit(340);},fit:true);
     Check(small.Contains("--lumen-drawn:320px")&&small.Contains("viewBox='0 0 320 "),"the floor");
@@ -9962,7 +9962,7 @@ Test("Heatmap table: a heatmap with CellWidth is marked fixed and carries its dr
     string Viewport(string html)=>Regex.Match(html,"<div class=\"lumen-viewport\"[^>]*>").Value;
     const string plain="<div class=\"lumen-viewport\" tabindex=\"0\" role=\"region\" aria-label=\"Scrollable chart\">";
     var eight=HeatGrid(s=>s with{CellWidth=48,Series=[new("Sprint",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,i+1,$"S{i}")).ToArray())]});
-    const string held="<div class=\"lumen-viewport\" tabindex=\"0\" role=\"region\" aria-label=\"Scrollable chart\" style=\"--lumen-drawn:549px\">";
+    const string held="<div class=\"lumen-viewport\" tabindex=\"0\" role=\"region\" aria-label=\"Scrollable chart\" style=\"--lumen-drawn:549px;scroll-padding-left:130px\">";
     // Without FitWidth, fitted before the browser has measured the box, and fitted at a narrow, a wide and a very wide box: the drawing is
     // held to the width it is drawn at, which the viewBox says too.
     (string Case,string Html,string Root)[] fixedOnes=[
@@ -9989,10 +9989,10 @@ Test("Heatmap table: the drawn width is the drawing the reader sees, a hidden se
     var two=eight with{Series=[eight.Series[0],new("Long distance",Enumerable.Range(0,10).Select(i=>new ChartPoint(i,i,$"S{i}")).ToArray())]};
     var shown=Operate(two,async c=>{await c.Fit(340);},fit:true);
     var hidden=Operate(two,async c=>{toggle.Invoke(c,[1]);await c.Fit(340);},fit:true);
-    Check(shown.Contains("style=\"--lumen-drawn:645px\"")&&hidden.Contains("style=\"--lumen-drawn:549px\"")&&hidden.Contains("viewBox='0 0 549 "),"hidden series: "+Viewport(shown)+" then "+Viewport(hidden));
+    Check(shown.Contains("style=\"--lumen-drawn:645px;scroll-padding-left:130px\"")&&hidden.Contains("style=\"--lumen-drawn:549px;scroll-padding-left:130px\"")&&hidden.Contains("viewBox='0 0 549 "),"hidden series: "+Viewport(shown)+" then "+Viewport(hidden));
     // Hiding it with nothing fitted moves the width too, and the chart stays marked.
     var unfitted=Operate(two,async c=>{toggle.Invoke(c,[1]);await c.SelectPoint(0,0);});
-    Check(unfitted.Contains("style=\"--lumen-drawn:549px\"")&&unfitted.Contains("lumen-chart lumen-fixed\""),"hidden series, not fitted");
+    Check(unfitted.Contains("style=\"--lumen-drawn:549px;scroll-padding-left:130px\"")&&unfitted.Contains("lumen-chart lumen-fixed\""),"hidden series, not fitted");
     // A hidden series is a row the grid leaves out, as the drawing does.
     var rows=Operate(HeatGrid(),async c=>{toggle.Invoke(c,[1]);typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.SelectPoint(0,0);});
     Check(rows.Contains("<th scope='row'>Sprint</th>")&&!rows.Contains("<th scope='row'>Long distance</th>"),"a hidden row");
@@ -10005,7 +10005,7 @@ Test("Heatmap table: the drawn width is the drawing the reader sees, a hidden se
         &&css.Contains(".lumen-table caption,.lumen-grid-table caption{text-align:left;padding:10px 0}"),"the grid's look");
     // A fixed drawing's min- and max-width, which beat the drawing's own width of 100%, come after the fitted chart's rule, which is the one it was.
     const string fit=".lumen-fit>.lumen-viewport>svg{min-width:var(--lumen-drawn,0)}",hold=".lumen-fixed>.lumen-viewport>svg{min-width:var(--lumen-drawn);max-width:var(--lumen-drawn)}";
-    Check(css.Split(".lumen-fit").Length==2&&css.Contains(fit)&&css.Split(".lumen-fixed").Length==2&&css.Contains(hold)&&css.IndexOf(fit)<css.IndexOf(hold),"the fixed drawing's rule");
+    Check(css.Split(".lumen-fit").Length==2&&css.Contains(fit)&&css.Split(".lumen-fixed").Length==4&&css.Contains(hold)&&css.IndexOf(fit)<css.IndexOf(hold),"the fixed drawing's rule");
 });
 // 0.46.0's final fixes.
 Test("Heatmap table: the component's status line reads a selected cell as its name reads it, sub-label, value and why it is not rated included",()=>{
@@ -10331,6 +10331,103 @@ Test("Heatmap follow-ups: a sub-label wider than its cell's room is dropped from
     Check(dropped.Select(t=>t.Text).SequenceEqual(["too few","starts to","rate"])&&dropped.Select(t=>t.Y).SequenceEqual([111d,123,135]),string.Join(" | ",dropped));
     Check((dropped[0].Y+dropped[^1].Y)/2==123,"centred");
 });
+Test("Heatmap follow-ups: a grid table cell reads value, sub-label, note, then why it is not rated; a gap cell its word",()=>{
+    var noted=Noted(HeatGrid()," · 34 pts, 5 riders");
+    var table=ChartExport.HtmlTable(noted);
+    // The separator the table writes before a sub-label is a plain ·; a · inside a note or a sub-label is encoded with the rest of it.
+    Check(table.Contains("<td>2.8 · /12 starts &#183; 34 pts, 5 riders</td>"),table);
+    Check(table.Contains("<td>1.2 · /4 starts, not rated: too few starts to rate</td>"),"not rated");
+    var raced=ChartExport.HtmlTable(FirstCell(HeatGrid(),new ChartPoint(0,null,"2025"){SubLabel="/0 starts",GapLabel="did not race"}));
+    Check(raced.Contains("<td>did not race · /0 starts</td>"),raced);
+});
+// The row names a drawing writes: each at its x and y, anchored at the end. The drawing and the name band write them the same way.
+(string X,string Y,string Text)[] RowNames(string svg)=>Regex.Matches(svg,"<text x='([^']*)' y='([^']*)' text-anchor='end'[^>]*>([^<]*)</text>").Select(m=>(m.Groups[1].Value,m.Groups[2].Value,m.Groups[3].Value)).ToArray();
+Test("Heatmap follow-ups: the name band holds the drawing's row names, where it draws them, and nothing else",()=>{
+    var spec=Named(HeatGrid(s=>s with{CellWidth=72,FitHeight=true}),"Junior 18/19 Girls");
+    var band=ChartSvg.HeatmapNameBand(spec)!.Value;
+    var frame=ChartSvg.HeatmapFrame(spec);
+    Check(band.Left==frame.Left&&band.Top==frame.Top&&band.Height==frame.Bottom-frame.Top,"the frame");
+    var drawn=ChartSvg.Render(spec);
+    foreach(var name in new[]{"Junior 18/19 Girls","Long distance"})
+    {
+        var at=Regex.Match(drawn,$"<text x='([^']*)' y='([^']*)'[^>]*>{Regex.Escape(name)}<");
+        Check(at.Success&&band.Svg.Contains($"<text x='{at.Groups[1].Value}' y='{at.Groups[2].Value}'")&&band.Svg.Contains($">{name}<"),name);
+    }
+    Check(band.Svg.Contains($"viewBox='0 {band.Top} {band.Left} {band.Height}'"),"cropped to the band");
+    Check(band.Svg.Contains("aria-hidden='true'")&&!band.Svg.Contains("lumen-datum")&&!band.Svg.Contains("tabindex"),"no marks, not read");
+    Check(ChartSvg.HeatmapNameBand(HeatGrid())is null&&ChartSvg.HeatmapNameBand(Spec())is null,"only for a heatmap with a cell width");
+    // A band is painted in the chart's background, its words in the muted colour, in the drawing's own face and size.
+    var style=ChartSvg.ResolveStyle(spec);
+    Check(band.Svg.Contains($"fill='{style.Background}'")&&band.Svg.Contains($"fill='{style.Muted}'")&&band.Svg.Contains($"font-family='{style.FontFamily}'")&&band.Svg.Contains("font-size='12'"),band.Svg);
+    // Every name, as the drawing writes it: its place, its cut and its encoding. A name with an & or a < is encoded in both.
+    foreach(var named in new[]{spec,Named(spec,"Sprint & Co <Elite>"),Named(spec,"An invented category with a very long name indeed")})
+    {
+        var names=RowNames(ChartSvg.Render(named));
+        Check(names.Length==2&&RowNames(ChartSvg.HeatmapNameBand(named)!.Value.Svg).SequenceEqual(names),string.Join(" | ",names));
+    }
+    Check(RowNames(ChartSvg.HeatmapNameBand(Named(spec,"Sprint & Co <Elite>"))!.Value.Svg)[0].Text=="Sprint &amp; Co &lt;Elite&gt;","encoded");
+});
+Test("Heatmap follow-ups: the classic finish's name band keeps its 130 column and names cut at 17 characters, as the drawing writes them",()=>{
+    // "Master Women Elite" is 18 characters: the refined finish widens the column for it and writes it whole; the classic keeps 130 and cuts it.
+    var classic=Named(HeatGrid(s=>s with{CellWidth=72,Style=ChartStyle.Light with{Finish=ChartFinish.Classic}}),"Master Women Elite");
+    var band=ChartSvg.HeatmapNameBand(classic)!.Value;
+    Check(band.Left==130&&band.Left==ChartSvg.HeatmapFrame(classic).Left,"the column stays 130: "+band.Left);
+    var drawn=RowNames(ChartSvg.Render(classic));
+    Check(drawn.Select(n=>(n.X,n.Text)).SequenceEqual([("118","Master Women Eli…"),("118","Long distance")]),string.Join(" | ",drawn));
+    Check(RowNames(band.Svg).SequenceEqual(drawn),string.Join(" | ",RowNames(band.Svg)));
+    Check(!band.Svg.Contains(">Master Women Elite<")&&band.Svg.Contains("viewBox='0 80 130 "),"cut, in a 130 band");
+    // The same name in the refined finish is whole, in a column of 155, ending at 143.
+    var refined=ChartSvg.HeatmapNameBand(classic with{Style=null})!.Value;
+    Check(refined.Left==155&&RowNames(refined.Svg)[0].Text=="Master Women Elite"&&RowNames(refined.Svg)[0].X=="143",string.Join(" | ",RowNames(refined.Svg)));
+});
+Test("Heatmap follow-ups: the component freezes a fixed-width heatmap's names, from the rows shown, and pads its scrolling by them",()=>{
+    var spec=Named(HeatGrid(s=>s with{CellWidth=72}),"Junior 18/19 Girls");
+    var html=Operate(spec,async c=>{await c.Fit(340);},fit:true);
+    Check(html.Contains("<div class=\"lumen-freeze\" aria-hidden=\"true\" inert"),"the layer");
+    Check(Regex.IsMatch(html,"<div class=\"lumen-viewport\"[^>]*scroll-padding-left:145px"),"scroll padding "+Regex.Match(html,"<div class=\"lumen-viewport\"[^>]*>").Value);
+    // The layer stands in the viewport after the drawing and before the keys, with the band's top, width and height and the chart's colours.
+    var frame=ChartSvg.HeatmapFrame(spec);
+    Check(html.IndexOf("</svg>")<html.IndexOf("lumen-freeze")&&html.IndexOf("lumen-freeze")<html.IndexOf("class=\"lumen-keys\""),"after the drawing");
+    Check(html.Contains($"margin-top:{frame.Top}px;width:{frame.Left}px;height:{frame.Bottom-frame.Top}px;--lumen-freeze-bg:{ChartStyle.Light.Background};--lumen-freeze-line:{ChartStyle.Light.Grid}\""),Regex.Match(html,"<div class=\"lumen-freeze\"[^>]*>").Value);
+    // A hidden row leaves the band as it leaves the drawing.
+    var toggle=typeof(LumenChart).GetMethod("Toggle",BindingFlags.NonPublic|BindingFlags.Instance)!;
+    var hidden=Operate(spec,async c=>{toggle.Invoke(c,[0]);await c.Fit(340);},fit:true);
+    var layer=Regex.Match(hidden,"<div class=\"lumen-freeze\".*?</div>",RegexOptions.Singleline).Value;
+    Check(!layer.Contains("Junior 18/19 Girls")&&layer.Contains("Long distance"),"shown rows only");
+    Check(!Operate(HeatGrid(),async c=>{await c.Fit(340);},fit:true).Contains("lumen-freeze"),"no layer without a cell width");
+    // With every row hidden the drawing says "No data to display" and has no names, so there is nothing to freeze or to pad by.
+    var none=Operate(spec,async c=>{toggle.Invoke(c,[0]);toggle.Invoke(c,[1]);await c.Fit(340);},fit:true);
+    Check(none.Contains("No data to display")&&!none.Contains("lumen-freeze")&&!none.Contains("scroll-padding"),"every row hidden");
+});
+Test("Heatmap follow-ups: ShowDataButton keeps View data with the toolbar off, and follows the toolbar when unset",()=>{
+    string Tools(Dictionary<string,object?> p)=>Regex.Match(ChartMarkup(Spec(),p),"<div class=\"lumen-tools[^\"]*\">.*?</div>",RegexOptions.Singleline).Value;
+    var only=Tools(new(){{"ShowToolbar",false},{"ShowDataButton",true}});
+    Check(only.Contains("View data")&&!only.Contains("Export SVG"),only);
+    Check(!Tools(new(){{"ShowToolbar",false}}).Contains("View data"),"follows the toolbar");
+    Check(Tools(new()).Contains("View data")&&Tools(new()).Contains("Export SVG"),"default");
+    // The row's class says which it is: whole, hushed (this one button, its status line out of sight) or quiet (neither).
+    Check(only.StartsWith("<div class=\"lumen-tools lumen-hush\">")&&Tools(new(){{"ShowToolbar",false}}).StartsWith("<div class=\"lumen-tools lumen-quiet\">")&&Tools(new()).StartsWith("<div class=\"lumen-tools\">"),"the classes");
+    Check(only.Contains("lumen-status")&&!only.Contains("Zoom")&&!only.Contains("Reset view"),"the status line stays; zoom and reset go with the toolbar");
+    // Set false beside a toolbar that is on, it takes only View data away.
+    var withoutData=Tools(new(){{"ShowDataButton",false}});
+    Check(!withoutData.Contains("View data")&&withoutData.Contains("Export CSV")&&withoutData.StartsWith("<div class=\"lumen-tools\">"),withoutData);
+});
+Test("Heatmap follow-ups: the stylesheet freezes the layer, and keeps 24-pixel table margins for the component's own table only",()=>{
+    var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
+    Check(css.Contains(".lumen-freeze{position:sticky;left:0"),"sticky");
+    Check(css.Contains(".lumen-table{overflow:auto;max-height:320px;margin:10px 0;")&&css.Contains(".lumen-chart>.lumen-table{margin:10px 24px}"),"margins");
+    Check(css.Contains(".lumen-quiet .lumen-status,.lumen-hush .lumen-status{position:absolute;"),"a hushed toolbar hides its status line as a quiet one does");
+});
+// Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
+string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
+{
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try {
+        var all=new Dictionary<string,object?>(parameters){{"Spec",spec}};
+        return renderer.Dispatcher.InvokeAsync(async()=>(await renderer.RenderComponentAsync<LumenChart>(ParameterView.FromDictionary(all))).ToHtmlString()).GetAwaiter().GetResult();
+    } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
+}
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed.");
 foreach(var failure in failures)Console.Error.WriteLine(failure);
 return failures.Count==0?0:1;
