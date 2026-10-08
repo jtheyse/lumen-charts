@@ -352,8 +352,9 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// </summary>
     public string? GapLabel { get; init; }
     /// <summary>On a heatmap, marks the cell as not rated and says why, 1 to 24 characters, such as "too few starts to rate": the cell
-    /// is drawn unshaded with a dashed outline, left out of the colour scale, written with its value or "—", and named
-    /// "…, not rated: {reason}". A not-rated cell is drawn even when its value is null. Heatmaps only.</summary>
+    /// is drawn unshaded with a dashed outline, left out of the colour scale, and named "…, not rated: {reason}". With
+    /// <see cref="ChartSpec.CellText"/> it writes the reason in place of its value, from 0.46.1 (before, its value or "—"), wrapped onto
+    /// the lines that fit, then its sub-label if a line is left. A not-rated cell is drawn even when its value is null. Heatmaps only.</summary>
     public string? NotRated { get; init; }
 
     /// <summary>A candle or OHLC bar, its Y the close. High must be the highest of the four prices and low the lowest.</summary>
@@ -723,8 +724,9 @@ public sealed record ChartSpec
     public DayOfWeek WeekStart { get; init; } = DayOfWeek.Monday;
     /// <summary>On a heatmap, writes each cell's value and, on a second line, its <see cref="ChartPoint.SubLabel"/>, where they fit, in
     /// whichever of the style's text and background colours stands out more against the cell where that reaches 4.5:1, and otherwise in
-    /// black or white, whichever stands out more, so every word clears 4.5:1; the cell's name always carries both. Heatmaps only; false
-    /// by default.</summary>
+    /// black or white, whichever stands out more, so every word clears 4.5:1; the cell's name always carries both. A not-rated cell writes
+    /// its <see cref="ChartPoint.NotRated"/> reason, and a cell with a <see cref="ChartPoint.GapLabel"/> its word, in place of a value, from
+    /// 0.46.1. Heatmaps only; false by default.</summary>
     public bool CellText { get; init; }
     /// <summary>On a heatmap, the width of every column in pixels, at least 24: the drawing grows to the name column, at least 130, plus 35,
     /// plus the columns times this width, and never narrower than 320, the room left over at its right, instead of squeezing into

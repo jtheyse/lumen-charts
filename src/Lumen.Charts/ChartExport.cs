@@ -38,9 +38,11 @@ public static class ChartExport
     /// A heatmap as a real HTML grid table, for a page that reads its data as a table rather than as a drawing: a table of class
     /// <c>lumen-grid-table</c> with the chart's title as its caption, its columns across the head, each labelled as the heatmap writes it
     /// but whole, not cut, and a row for each series, named by a row header. A cell holds its value as the cells' names write it, in
-    /// <see cref="ChartSpec.YFormat"/> with <see cref="ChartSpec.YUnit"/> and followed by its <see cref="ChartPoint.ValueNote"/>, then
-    /// <c> · </c> and its <see cref="ChartPoint.SubLabel"/>, then <c>, not rated: </c> and the reason of a not-rated cell, which has
-    /// <c>—</c> in place of a value it does not have. A cell is empty when it has no point, or has neither a value nor a not-rated reason.
+    /// <see cref="ChartSpec.YFormat"/> with <see cref="ChartSpec.YUnit"/>, then <c> · </c> and its <see cref="ChartPoint.SubLabel"/>,
+    /// then its <see cref="ChartPoint.ValueNote"/> as written, then <c>, not rated: </c> and the reason of a not-rated cell (from 0.46.1;
+    /// 0.46.0 put the note before the sub-label). A cell with no value starts with <c>—</c> when it is not rated and with its
+    /// <see cref="ChartPoint.GapLabel"/> word when it has one, and its note follows a value or that word, never a bare dash. A cell is
+    /// empty when it has no point, or has no value, no gap label and no not-rated reason.
     /// Every word is HTML-encoded, and the table is styled by <c>lumen.css</c>, which the Blazor package serves. The spec is validated
     /// first, and a chart that is not a heatmap has no grid and is refused.
     /// </summary>
