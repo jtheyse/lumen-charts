@@ -91,7 +91,7 @@ Every cell with `CellText` writes one block of lines:
 - **Measuring:** each cell's block is measured at its own width with every line kept, except what is dropped for width as above (a sub-label too wide, or a rated cell whose value is too wide).
 - **Example:** at `CellWidth` 90, a not-rated cell with both switches, a value, "/9 starts", a two-line note and the two-line reason needs `4 + 13 + 12 × 5 = 77`, so every row is 77.
 - **The rest of the height:** the room above the grid, the room below it and the 240 floor are as in 0.46.1. Where the floor binds, rows share its height as today.
-- **What follows the row height:** the row names, the frozen band in `<LumenChart>` and the 4,096 size check use the fitted row height, as they use 36 today.
+- **What follows the row height:** the row names and the frozen band in `<LumenChart>` use the fitted row height, as they use 36 today. The 4,096 size check is width-only and does not follow it.
 - **What moves:** a 0.46.1 fitted heatmap whose not-rated cells hold a two-line reason plus a sub-label now has 40-unit rows, so the sub-label shows. Fitted heatmaps whose blocks fit 32 units keep 36-unit rows and don't move.
 
 ### 1.5 Hash
@@ -182,6 +182,7 @@ The handover's steps:
 - **Uniform rows:** rows are one height, so one long note makes every row tall. A wider `CellWidth` keeps notes to one line.
 - **Without `FitHeight`,** a short cell gives up its note first. The name and the grid table always carry it.
 - **Static SVG** still doesn't freeze names, as in 0.46.1.
+- **No height cap on a fitted heatmap:** `Height`'s 240–2160 is checked on the spec as given, before the rows are fitted, as in 0.46.1, so many rows of long notes can now draw taller than 2160.
 
 ## Out of scope
 
