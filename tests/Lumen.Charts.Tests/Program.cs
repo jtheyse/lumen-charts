@@ -10846,6 +10846,34 @@ Test("Daily counts: the component shows a column chart with CellWidth at its dra
     var html=ChartMarkup(DailyCounts(90),new(){{"FitWidth",true}});
     Check(html.Contains("lumen-fixed")&&html.Contains("--lumen-drawn:2806px"),"fixed");
 });
+Test("Daily counts: a column chart with CellWidth is drawn at a width its own Width cannot change, end labels included",()=>{
+    // A column chart takes a line series with an end label; the longest label and note are 24 + 24 characters. The margin they ask for is
+    // the same whatever Width the spec carries (the builder's is 320), and the label is written whole.
+    const string label="Average of the last week",note="up 3 on the week before.";
+    Check(label.Length==24&&note.Length==24,"24 + 24");
+    var plain=DailyCounts(20);
+    var ended=plain with{Series=[plain.Series[0],new("Average",Enumerable.Range(0,20).Select(i=>new ChartPoint(i,2,$"D{i}")).ToArray()){Kind=ChartKind.Line,EndLabel=label,EndNote=note}]};
+    var small=ChartSvg.DrawnWidth(ended with{Width=320});
+    var large=ChartSvg.DrawnWidth(ended with{Width=900});
+    Check(small==large&&small==ChartSvg.DrawnWidth(ended),$"drawn {small} at 320, {large} at 900, {ChartSvg.DrawnWidth(ended)} by default");
+    // The room beside the 20 columns is the end label's, well past the 30 a plain column chart keeps.
+    Check(small>ChartSvg.DrawnWidth(plain)+100,$"{small} against {ChartSvg.DrawnWidth(plain)}");
+    var svg=ChartSvg.Render(ended with{Width=320});
+    Check(svg.Contains($"viewBox='0 0 {small} ")&&svg.Contains($">{label}<tspan")&&svg.Contains($"> {note}</tspan>")&&!svg.Contains("…"),"the end label is written whole at Width 320");
+});
+Test("Daily counts: a column chart's CellWidth is at most 4,096, the widest a chart may be, and its drawn width then fits an int",()=>{
+    ChartValidation.Validate(DailyCounts(10,4096));
+    foreach(var bad in new[]{4096.5,5000,1e9,double.MaxValue})
+    {
+        string why="";
+        try{ChartValidation.Validate(DailyCounts(10,bad));}catch(ArgumentException e){why=e.Message;}
+        Check(why=="A column chart's category is at most 4,096 pixels wide, the widest a chart may be.",$"{bad}: {why}");
+    }
+    // 4,000 categories at the widest pitch make 76 + 16,384,000 + 30 units: large, and still an int.
+    var widest=DailyCounts(4000,4096);
+    ChartValidation.Validate(widest);
+    Check(ChartSvg.DrawnWidth(widest)==76+4000*4096+30,"widest "+ChartSvg.DrawnWidth(widest));
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

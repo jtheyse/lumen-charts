@@ -245,8 +245,8 @@ public static partial class ChartSvg
     public static string Render(ChartSpec spec, bool includeLegend = true, bool includeTitles = true)
     {
         ChartValidation.Validate(spec);
-        // A heatmap with a cell width is drawn as wide as its columns make it, whatever its Width, so its title, its source and its
-        // colour scale are laid out across that width; and a chart fitted to its rows is drawn as if it had asked for the height they need.
+        // A heatmap or a column chart with a cell width is drawn as wide as its columns make it, whatever its Width, so its title, its source
+        // and its colour scale are laid out across that width; and a chart fitted to its rows is drawn as if it had asked for the height they need.
         spec = AsDrawn(spec);
         var style = ResolveStyle(spec);
         // A sparkline draws no gridlines, so it carries no rule for minor ones either.
@@ -3139,7 +3139,9 @@ public static partial class ChartSvg
         var flipped = s.YAxisSide == AxisSide.Right;
         var secondary = s.Series.Any(series => series.Secondary);
         var left = flipped || Unlabelled(s) ? 30d : 76d;
-        return (left, secondary || flipped ? 76d : Math.Max(30d, Ending(s, left)));
+        // The end labels' room is not capped by the spec's Width, which a chart with a cell width ignores: with the widest chart's Width the cap
+        // never bites, and the margin is the labels' own (a label and its note are at most 24 + 24 characters).
+        return (left, secondary || flipped ? 76d : Math.Max(30d, Ending(s with { Width = MaxWidth }, left)));
     }
 
     /// <summary>The width a chart is drawn at: a heatmap or, from 0.47.0, a column chart with a <see cref="ChartSpec.CellWidth"/> as wide as
@@ -3158,7 +3160,7 @@ public static partial class ChartSvg
     /// line, 24, which a heatmap fitted to its rows leaves out when it has no source (0.46.1).</summary>
     internal static double HeatmapBelow(ChartSpec s) => 80 - (s.ColumnLabelsOnTop ? 26 : 0) - (s.FitHeight && string.IsNullOrWhiteSpace(s.Source) ? 24 : 0);
 
-    /// <summary>The spec as <see cref="Render"/> draws it: a heatmap with a cell width as wide as its columns make it, and then a chart fitted
+    /// <summary>The spec as <see cref="Render"/> draws it: a heatmap or a column chart with a cell width as wide as its columns make it, and then a chart fitted
     /// to its rows as tall as they make it, so a source wrapped across the drawn width is counted in the height (0.46.1).</summary>
     internal static ChartSpec AsDrawn(ChartSpec spec)
     {

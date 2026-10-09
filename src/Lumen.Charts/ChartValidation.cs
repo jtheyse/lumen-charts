@@ -122,6 +122,8 @@ public static partial class ChartValidation
         if (spec.CellWidth < (columnPitch ? 8 : 24))
             throw new ArgumentException(columnPitch ? "A column chart's category is at least 8 pixels wide, so a bar and its focus ring fit."
                 : "A heatmap's cell is at least 24 pixels wide, so its text and focus ring fit.");
+        if (columnPitch && spec.CellWidth > ChartSvg.MaxWidth)
+            throw new ArgumentException("A column chart's category is at most 4,096 pixels wide, the widest a chart may be.");
         if ((spec.CellNotes || spec.NotRatedKeepsValue) && (spec.Kind != ChartKind.Heatmap || !spec.CellText))
             throw new ArgumentException("CellNotes and NotRatedKeepsValue write in a heatmap's cells, so they apply to heatmaps with CellText only.");
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
