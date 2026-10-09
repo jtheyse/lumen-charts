@@ -10580,6 +10580,9 @@ Test("Heatmap cells: a drawn note loses the separator its name needs, breaks aft
     // A note that is only a separator writes nothing: the cell is as it was.
     var bare=ChartSvg.Render(Notes(HeatGrid(s=>s with{CellWidth=90,Height=400,CellNotes=true})," · "));
     Check(WordsAt(bare,175).Take(2).SequenceEqual(["2.8","/12 starts"])&&!Regex.IsMatch(bare,"font-size='10'[^>]*></text>"),string.Join(" | ",WordsAt(bare,175)));
+    // 48 wide: a line holds 42; "/12 starts" (58.8) is dropped; "athletes" (49.6) is cut on a line of its own and the words after it go on.
+    var cut=ChartSvg.Render(Notes(HeatGrid(s=>s with{CellWidth=48,Height=400,CellNotes=true})," · 12 pts, 5 athletes in all, 3 riders"));
+    Check(WordsAt(cut,154).Take(7).SequenceEqual(["2.8","12 pts,","5","athle…","in all,","3","riders"]),string.Join(" | ",WordsAt(cut,154)));
 });
 Test("Heatmap cells: without the switches a not-rated cell in 36-unit rows writes 0.46.1's reason, cut at a word, in place of its value",()=>{
     // CellBlock replaces CellWords and CellReason. The 0.46.0 and 0.46.1 cell-text tests and the unchanged baseline prove the rest; this pins
@@ -10619,7 +10622,7 @@ Test("Heatmap cells: a cell too short for its block gives up its note, then its 
     // Two rows: a row is (Height - 160) / 2 and the block has that less 4.
     Check(Last(288,4).SequenceEqual(["1.2","/4 starts","too few starts","to rate"]),"60: the note goes first: "+string.Join(" | ",Last(288,4)));
     Check(Last(264,3).SequenceEqual(["1.2","too few starts","to rate"]),"48: then the sub-label: "+string.Join(" | ",Last(264,3)));
-    Check(Last(240,2).SequenceEqual(["too few starts","to rate"]),"36: then the value: "+string.Join(" | ",Last(240,2)));
+    Check(Last(240,3).SequenceEqual(["/12 starts","too few starts","to rate"]),"36: then the value: "+string.Join(" | ",Last(240,3)));
     // Six rows of (320 - 160) / 6 = 26.7: one line, so the reason is cut at a word.
     var one=WordsAt(ChartSvg.Render(Six(spec)),175);
     Check(one.Contains("too few…")&&!one.Contains("1.2"),string.Join(" | ",one));

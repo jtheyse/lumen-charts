@@ -3366,19 +3366,30 @@ public static partial class ChartSvg
     }
 
     /// <summary>The lines a drawn note takes in a cell <paramref name="room"/> wide at 10 px, as many as it needs: its clauses, each up to and
-    /// including its comma, joined on one line while they fit, and a clause wider than a line wrapped at its words as a reason is (0.46.2).</summary>
+    /// including its comma, joined on one line while they fit. A clause wider than a line starts a line of its own and wraps at its words,
+    /// joining them while they fit; a word wider than a line takes a line of its own, cut by its characters with "…" (nothing where not even
+    /// that fits), and the words and clauses after it go on from the next line, so no word of a note is left out (0.46.2).</summary>
     private static List<string> NoteLines(string note, double room)
     {
         static double Width(string text) => Wide(text) * 10 / 11;
         var parts = note.Split(", ");
         var lines = new List<string>();
+        var cut = false;   // the last line is a cut word's, which nothing joins
         for (var k = 0; k < parts.Length; k++)
         {
             var clause = (k < parts.Length - 1 ? parts[k] + "," : parts[k]).Trim();
             if (clause.Length == 0) continue;
-            if (lines.Count > 0 && Width(lines[^1] + " " + clause) <= room) lines[^1] += " " + clause;
-            else if (Width(clause) <= room) lines.Add(clause);
-            else lines.AddRange(CellLines(clause, room, int.MaxValue));
+            if (lines.Count > 0 && !cut && Width(lines[^1] + " " + clause) <= room) lines[^1] += " " + clause;
+            else if (Width(clause) <= room) { lines.Add(clause); cut = false; }
+            else
+            {
+                var open = false;   // the last line is this clause's and a word fits on it
+                foreach (var word in clause.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                    if (Width(word) > room) { lines.AddRange(CellLines(word, room, 1)); open = false; }
+                    else if (open && Width(lines[^1] + " " + word) <= room) lines[^1] += " " + word;
+                    else { lines.Add(word); open = true; }
+                cut = !open;
+            }
         }
         return lines;
     }
