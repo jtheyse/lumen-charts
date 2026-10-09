@@ -167,7 +167,7 @@ public sealed record DailyCountsOptions
 3. **Nothing to draw:** when every day in the range is 0, `Build` returns null, and the host shows its own empty state.
 4. **One point per day, in date order:**
    - `X` = 0, 1, 2 …; `Y` = the day's count.
-   - `Label` = the date in `DateFormat`, in the invariant culture, e.g. `Mon 6 Oct 2026`. It names the category in the table and CSV.
+   - `Label` = the date in `DateFormat`, in the invariant culture, e.g. `Tue 6 Oct 2026`. It names the category in the table and CSV.
    - `AxisLabel` and `Name` as below.
 5. **Axis labels:**
    - The day of the month under every bar.
@@ -178,7 +178,7 @@ public sealed record DailyCountsOptions
 6. **Names:**
    - The form is `{Label}: {count} {noun}`, then `, {running} so far` when `RunningTotal` is on. `running` includes that day.
    - Numbers are written with thousands separators, in the invariant culture. The noun is `Singular` for a count of 1 and `Plural` otherwise.
-   - Examples: `Mon 6 Oct 2026: 12 registrations, 140 so far`, `Tue 7 Oct 2026: 1 registration, 141 so far`, `Wed 8 Oct 2026: 0 registrations, 141 so far`.
+   - Examples: `Tue 6 Oct 2026: 12 registrations, 140 so far`, `Wed 7 Oct 2026: 1 registration, 141 so far`, `Thu 8 Oct 2026: 0 registrations, 141 so far`.
 7. **Whole-number ticks.** The builder sets the Y axis itself, so it never writes "0.5 registrations":
    - The step is the smallest of 1, 2, 5, 10, 20, 50 … with `floor(largest / step) + 1 ≤ 5`.
    - `YMax = step × (floor(largest / step) + 1)`, one step above the largest count's step, so the tallest bar never reaches the plot's top and its count stands clear of the description. `YTickValues` are 0, step, … `YMax`.
