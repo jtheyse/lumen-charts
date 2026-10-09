@@ -10812,6 +10812,40 @@ Test("Daily counts: the new properties left at their defaults change no drawing 
     Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{Series=[plain.Series[0] with{Points=[plain.Series[0].Points[0] with{AxisLabel="1"},..plain.Series[0].Points.Skip(1)]}]}),"AxisLabel counts when set");
     Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{Series=[plain.Series[0] with{Points=[plain.Series[0].Points[0] with{Name="one"},..plain.Series[0].Points.Skip(1)]}]}),"Name counts when set");
 });
+Test("Daily counts: a column chart with CellWidth draws its plot at exactly that pitch, its margins beside it, and keeps the 320 floor's room at its right",()=>{
+    // 90 days at 30: left 76, plot 2700, right 30 = 2806.
+    var wide=DailyCounts(90);
+    Check(ChartSvg.DrawnWidth(wide)==76+90*30+30,"drawn "+ChartSvg.DrawnWidth(wide));
+    var svg=ChartSvg.Render(wide);
+    Check(svg.Contains("viewBox='0 0 2806 "),Regex.Match(svg,"viewBox='[^']*'").Value);
+    // Each bar is 72% of the pitch: 21.6, the first one 76 + 30 x .14 = 80.2 in.
+    Check(svg.Contains("x='80.2'")&&svg.Contains("width='21.6'"),"bar geometry");
+    // Three days at 30 make 196, under the floor: the drawing is 320 and the plot still ends at 76 + 90 = 166.
+    var three=DailyCounts(3);
+    Check(ChartSvg.DrawnWidth(three)==320,"floor "+ChartSvg.DrawnWidth(three));
+    Check(ChartSvg.Render(three).Contains("x='140.2'"),"the third bar at 76 + 2 x 30 + 4.2");
+    // If the style rounds bars (BarRadius), Bar writes a path rather than a rect: check the path's start x instead, and say so.
+    // Without CellWidth nothing moves.
+    Check(ChartSvg.DrawnWidth(DailyCounts(10,null))==900,"plain");
+});
+Test("Daily counts: a CellWidth drawing writes its drawn width into its root style, so a host's box scrolls it; every other drawing still fills its box",()=>{
+    Check(ChartSvg.Render(DailyCounts(90)).Contains(";width:2806px;height:auto;"),"column");
+    Check(ChartSvg.Render(HeatGrid(s=>s with{CellWidth=90})).Contains($";width:{ChartSvg.DrawnWidth(HeatGrid(s=>s with{CellWidth=90}))}px;height:auto;"),"heatmap");
+    Check(ChartSvg.Render(DailyCounts(10,null)).Contains(";width:100%;height:auto;"),"plain column");
+    Check(ChartSvg.Render(Spec()).Contains(";width:100%;height:auto;"),"line");
+});
+Test("Daily counts: at a fixed pitch a value label is kept while it fits the category less 2, not just the bar",()=>{
+    // At 30 a bar is 21.6 wide and "1234" is 27.28: kept at the pitch, dropped without it.
+    // Ten days, so that without a pitch the plot at 320 gives each bar 214 / 10 x .72 = 15.4; three days would give 51.36 each, wide enough for it.
+    var big=DailyCounts(10) with{Series=[new("Sign-ups",Enumerable.Range(0,10).Select(i=>new ChartPoint(i,i==0?1234:i,$"D{i}")).ToArray()){ValueLabels=true}]};
+    Check(ChartSvg.Render(big).Contains(">1234<"),"kept at 30");
+    Check(!ChartSvg.Render(big with{CellWidth=24}).Contains(">1234<"),"dropped at 24: 27.28 > 22");
+    Check(!ChartSvg.Render(big with{CellWidth=null,Width=320}).Contains(">1234<"),"dropped across a bar without a pitch: 10 bars of 15.4 at 320");
+});
+Test("Daily counts: the component shows a column chart with CellWidth at its drawn width",()=>{
+    var html=ChartMarkup(DailyCounts(90),new(){{"FitWidth",true}});
+    Check(html.Contains("lumen-fixed")&&html.Contains("--lumen-drawn:2806px"),"fixed");
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

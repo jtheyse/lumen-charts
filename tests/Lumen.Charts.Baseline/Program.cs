@@ -885,6 +885,10 @@ lines.Add($"heatmap-cells/notes {Hash(Render(noted with { CellWidth = 90, FitHei
 lines.Add($"heatmap-cells/notes-fixed {Hash(Render(noted with { CellWidth = 90, CellNotes = true }))}");
 lines.Add($"heatmap-cells/keeps-value {Hash(Render(noted with { CellWidth = 90, FitHeight = true, NotRatedKeepsValue = true }))}");
 lines.Add($"heatmap-cells/both-dark {Hash(Render(CategoryGrid(ChartTheme.Dark, null, 4, 90) with { FitHeight = true, CellNotes = true, NotRatedKeepsValue = true, Series = noted.Series }))}");
+// 0.47.0: registrations per day. Ninety invented days of sign-ups at a fixed pitch of 30, with plain labels.
+var signups = Enumerable.Range(0, 90).Select(i => new ChartPoint(i, (i * 7 + 3) % 11 == 0 ? 0 : (i * 5 + 2) % 14, $"D{i + 1}")).ToArray();
+ChartSpec SignUps(ChartTheme theme) => new() { Kind = ChartKind.Column, Theme = theme, Title = "Sign-ups per day", Description = "Invented sign-ups", Width = 320, Height = 320, CellWidth = 30, Series = [new("Sign-ups", signups) { ValueLabels = true }] };
+lines.Add($"columns/cell-width {Hash(Render(SignUps(ChartTheme.Light)))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

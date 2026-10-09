@@ -24,6 +24,8 @@ internal sealed class SvgWriter
     public ChartSpec? Spec { get; init; }
     /// <summary>A sparkline's data alone: no words are written, and references draw their shapes without their labels.</summary>
     public bool Bare { get; init; }
+    /// <summary>The drawing has a cell width, so its root is written at its drawn width rather than filling its box (0.47.0).</summary>
+    public bool Drawn { get; init; }
     /// <summary>Whether the title and description are drawn at the top, as they are unless a chart sets <see cref="ChartSpec.DrawTitles"/>
     /// off; they stay its accessible name either way.</summary>
     public bool Titled { get; init; } = true;
@@ -249,7 +251,7 @@ public static partial class ChartSvg
         var style = ResolveStyle(spec);
         // A sparkline draws no gridlines, so it carries no rule for minor ones either.
         var bare = spec.Sparkline;
-        var w = new SvgWriter { Titles = includeTitles, Style = style, MinorGrid = !bare && spec.MinorGridlines && style.Gridlines != GridLine.Hidden, Spec = spec, Bare = bare, Titled = spec.DrawTitles, Painted = spec.PaintBackground };
+        var w = new SvgWriter { Titles = includeTitles, Style = style, MinorGrid = !bare && spec.MinorGridlines && style.Gridlines != GridLine.Hidden, Spec = spec, Bare = bare, Drawn = spec.CellWidth is not null, Titled = spec.DrawTitles, Painted = spec.PaintBackground };
         // A ring's key carries its value and goal as well as its name, so its columns are wider.
         var ring = spec.Kind == ChartKind.Ring;
         var legendColumns = Math.Max(1, (spec.Width - 48) / (ring ? 220 : 180));
@@ -400,8 +402,9 @@ public static partial class ChartSvg
     internal static void Begin(SvgWriter w, int width, int height, string title, string description, bool wrap = false, string? kind = null)
     {
         var style = w.Style;
-        // A chart fills the width of its box. A sparkline is shown at its own width, as a word is, and never wider than its box.
-        var shown = w.Bare ? $"width:{width}px;max-width:100%" : "width:100%";
+        // A chart fills the width of its box, except one drawn at its own width: a sparkline, as a word is, never wider than its box; and a
+        // drawing with a cell width, at exactly its drawn width, which a host's overflow box scrolls (0.47.0).
+        var shown = w.Bare ? $"width:{width}px;max-width:100%" : w.Drawn ? $"width:{width}px" : "width:100%";
         // Left unpainted, the drawing carries its background colour, which its halos are drawn in, for a host's script to read instead.
         var ground = w.Painted ? $"background:{style.Background}" : $"--lumen-ground:{style.Background}";
         w.Add($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='lumen-svg{(kind is null ? "" : " " + kind)}' role='group' aria-label='{SvgWriter.E(string.IsNullOrWhiteSpace(description) ? title : $"{title}. {description}")}' style='--lumen-grid:{style.Grid};--lumen-muted:{style.Muted};{shown};height:auto;display:block;{ground};color:{style.Text};font-family:{style.FontFamily};font-size:12px' fill='currentColor'>");
@@ -574,6 +577,9 @@ public static partial class ChartSvg
         var left = s.Sparkline ? pad : horizontal ? s.BarTrack ? Tracked(s).Left : 160d : flipped || Unlabelled(s) ? 30d : 76d; var right = s.Width - (s.Sparkline ? pad : horizontal && s.BarTrack ? Tracked(s).Right : secondary || flipped ? 76d : Math.Max(30d, Ending(s, left)));
         var points = s.Series.SelectMany(x => x.Points).ToArray();
         var cats = points.Select(p => p.X).Distinct().Order().ToArray();
+        // A column chart with a cell width lays its categories out at exactly that pitch from its left margin; the drawing is at least that
+        // wide, and where the 320 floor makes it wider, the room left over stands at its right (0.47.0).
+        if (s.Kind == ChartKind.Column && s.CellWidth is { } pitch) right = left + cats.Length * pitch;
         // A block reaches to its XEnd, and only a block has one here.
         var xs = Axis.Create(s.XAxis, points.Select(p => p.X).Concat(points.Where(p => p.XEnd.HasValue).Select(p => p.XEnd!.Value)), min: s.XMin, max: s.XMax, zone: TimeAxis.Zone(s.TimeZone),
             weekends: s.SkipWeekends, skips: s.TimeSkips.Count > 0 ? s.TimeSkips : null) with { ValueFormat = s.XFormat };
@@ -796,10 +802,11 @@ public static partial class ChartSvg
                 written.Add((x1, x1 + width, y - 9, y + 3));
                 named.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='{anchor}' font-size='11' aria-hidden='true'>{Noted(text, note)}</text>");
             }
-            // A column's label fits across the column, so it never runs into its neighbours'.
-            void Above(double x, double width, double far, bool up, string text, string? note)
+            // A column's label fits across the column, so it never runs into its neighbours'; at a fixed pitch with one series of columns it
+            // may take the category's width less 2 (0.47.0).
+            void Above(double x, double width, double far, bool up, string text, string? note, double? room = null)
             {
-                if (Wide(text + note) > width || x + width / 2 < left || x + width / 2 > right || far < top - .5 || far > bottom + .5) return;
+                if (Wide(text + note) > (room ?? width) || x + width / 2 < left || x + width / 2 > right || far < top - .5 || far > bottom + .5) return;
                 Name(x + width / 2, up ? far - 5 : far + 12, text, "middle", note);
             }
             void Beside(double far, double y, double height, bool up, string text, string? note)
@@ -1077,7 +1084,7 @@ public static partial class ChartSvg
                             if (s.BarTrack && horizontal) Name(right + TrackGap, ry + rh / 2 + 4, scale.Format(given), "start", p.ValueNote);
                             else if (s.BarTrack) Above(rx, rw, At(scale.Max), true, scale.Format(given), p.ValueNote);
                             else if (horizontal) Beside(y >= 0 ? rx + rw : rx, ry, rh, y >= 0, scale.Format(y), p.ValueNote);
-                            else Above(rx, rw, At(y), y >= 0, scale.Format(y), p.ValueNote);
+                            else Above(rx, rw, At(y), y >= 0, scale.Format(y), p.ValueNote, s.CellWidth is { } pitch && columns.Length == 1 ? pitch - 2 : null);
                         }
                     }
                     else if (place >= 0)
@@ -3124,11 +3131,28 @@ public static partial class ChartSvg
     /// <summary>How wide a heatmap is whose <paramref name="columns"/> take <paramref name="cellWidth"/> units each: its name column, its
     /// columns and 35 units on the right. Validation holds it within <see cref="MaxWidth"/>.</summary>
     internal static double HeatmapWidth(ChartSpec s, int columns, double cellWidth) => HeatmapLeftOf(s) + 35 + columns * cellWidth;
-    /// <summary>The width a chart is drawn at: a heatmap with a <see cref="ChartSpec.CellWidth"/> as wide as its columns make it, rounded up
-    /// to a whole unit, and never narrower than <see cref="MinWidth"/>, the room left over standing at its right, whatever its Width; any
-    /// other chart its Width.</summary>
-    internal static int DrawnWidth(ChartSpec spec) => spec.Kind == ChartKind.Heatmap && spec.CellWidth is { } cell
-        ? Math.Max(MinWidth, (int)Math.Ceiling(HeatmapWidth(spec, spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count(), cell))) : spec.Width;
+    /// <summary>The margins a column chart's frame keeps left and right of its plot, as <see cref="Framed"/> sets them: 76 on the left, or 30
+    /// with the Y axis on the right or no labels up the left; 30 on the right, or 76 beside a right-hand axis, or as wide as its end labels
+    /// need (0.47.0).</summary>
+    private static (double Left, double Right) ColumnMargins(ChartSpec s)
+    {
+        var flipped = s.YAxisSide == AxisSide.Right;
+        var secondary = s.Series.Any(series => series.Secondary);
+        var left = flipped || Unlabelled(s) ? 30d : 76d;
+        return (left, secondary || flipped ? 76d : Math.Max(30d, Ending(s, left)));
+    }
+
+    /// <summary>The width a chart is drawn at: a heatmap or, from 0.47.0, a column chart with a <see cref="ChartSpec.CellWidth"/> as wide as
+    /// its columns and margins make it, rounded up to a whole unit and never narrower than <see cref="MinWidth"/>, the room left over standing
+    /// at its right, whatever its Width; any other chart its Width.</summary>
+    internal static int DrawnWidth(ChartSpec spec)
+    {
+        if (spec.CellWidth is not { } cell || spec.Kind is not (ChartKind.Heatmap or ChartKind.Column)) return spec.Width;
+        var columns = spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count();
+        if (spec.Kind == ChartKind.Heatmap) return Math.Max(MinWidth, (int)Math.Ceiling(HeatmapWidth(spec, columns, cell)));
+        var (left, right) = ColumnMargins(spec);
+        return Math.Max(MinWidth, (int)Math.Ceiling(left + columns * cell + right));
+    }
 
     /// <summary>The room under a heatmap's grid: its column labels, 26, unless they stand on top; its colour scale's line; and its source
     /// line, 24, which a heatmap fitted to its rows leaves out when it has no source (0.46.1).</summary>
