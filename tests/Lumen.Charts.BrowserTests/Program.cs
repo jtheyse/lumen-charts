@@ -1692,6 +1692,27 @@ if (await sportsLink.CountAsync() > 0)
     const string drawnToFit = @"() => { const svgs = [...document.querySelectorAll('.lumen-chart .lumen-viewport > svg')];
         return svgs.length === 33 && svgs.every(s => Math.abs(Number(s.getAttribute('viewBox').split(' ')[2]) - s.getBoundingClientRect().width) < 1.5); }";
 
+    // The Category heatmap's two not-rated cells keep their values, in the muted colour (0.46.2), and the muted colour must clear 4.5:1 against
+    // the card's own background. This reads the kept values (the 11 px words that stand in a dashed cell) and, in the page, the same WCAG
+    // formula as Contrast.Ratio: [how many, the lowest contrast, whether every one is the colour the seasons above the grid are written in].
+    const string keptValues = @"() => { const s = document.querySelector('#category-heatmap .lumen-viewport > svg'),
+        channel = v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); },
+        luminance = css => { const [r, g, b] = css.match(/[\d.]+/g).map(Number); return .2126 * channel(r) + .7152 * channel(g) + .0722 * channel(b); },
+        ratio = (x, y) => { const a = luminance(x), b = luminance(y); return (Math.max(a, b) + .05) / (Math.min(a, b) + .05); },
+        background = getComputedStyle(s).backgroundColor, muted = getComputedStyle([...s.querySelectorAll(':scope > text.lumen-muted')].find(t => t.textContent === '2023')).fill,
+        thin = [...s.querySelectorAll('g.lumen-datum > rect[stroke-dasharray=""3 2""]')].map(r => ({ x: Number(r.getAttribute('x')), y: Number(r.getAttribute('y')), w: Number(r.getAttribute('width')), h: Number(r.getAttribute('height')) })),
+        kept = [...s.querySelectorAll(':scope > text[aria-hidden=""true""][font-size=""11""]')].filter(t => { const x = Number(t.getAttribute('x')), y = Number(t.getAttribute('y'));
+            return thin.some(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h); });
+        return [kept.length, Math.min(...kept.map(t => ratio(getComputedStyle(t).fill, background))), kept.every(t => getComputedStyle(t).fill === muted) ? 1 : 0]; }";
+    // The check for whichever theme the page is in, once the card has been redrawn in that theme's background.
+    async Task KeptValuesClear(IPage target, string background)
+    {
+        if (await target.Locator("#category-heatmap .lumen-chart").CountAsync() == 0) return;
+        await target.WaitForFunctionAsync("background => document.querySelector('#category-heatmap .lumen-viewport > svg')?.getAttribute('style')?.includes('background:' + background)", background, new() { Timeout = 60000 });
+        var kept = await target.EvaluateAsync<double[]>(keptValues);
+        Check(kept[0] == 2 && kept[1] >= 4.5 && kept[2] == 1, $"{kept[0]} kept values, the lowest contrast {kept[1]:0.00}:1 against {background}, all in the muted colour: {kept[2] == 1}");
+    }
+
     await Test("The Sports & performance page renders its thirty-three charts, each live and drawn at the width it is shown", async () =>
     {
         Check(await charts.CountAsync() == 33, $"the page shows {await charts.CountAsync()} charts");
@@ -1713,9 +1734,11 @@ if (await sportsLink.CountAsync() > 0)
     });
 
     // The Category heatmap is a heatmap table: each cell is named with its starts, a cell with too few starts to rate and a season nobody raced
-    // say so in words, every cell writes its value or its reason, a heatmap with CellWidth is shown at exactly the size it is drawn (it does
-    // not stretch in a wide box, and scrolls in a narrow one) with its row names held at the left while the cells scroll, the keyboard never
-    // leaves a cell under them, and its "View data", the one button its tools row keeps, reads as a grid with a row for each category.
+    // say so in words, every cell writes its value, its starts and its note, a cell with too few starts keeping its value, muted, above its
+    // reason (0.46.2: the rows grow to the tallest cell's words, the names keep to their rows), a heatmap with CellWidth is shown at exactly
+    // the size it is drawn (it does not stretch in a wide box, and scrolls in a narrow one) with its row names held at the left while the
+    // cells scroll, the keyboard never leaves a cell under them, and its "View data", the one button its tools row keeps, reads as a grid
+    // with a row for each category.
     // Its name column holds "Junior mixed team relay" whole, so the drawing is 185 + 35 + 4 x 90 = 580 wide.
     if (await sports.Locator("#category-heatmap .lumen-chart").CountAsync() > 0)
     {
@@ -1727,18 +1750,20 @@ if (await sportsLink.CountAsync() > 0)
             Check(names.Length == 16 && names.All(n => Regex.IsMatch(n, @"^[^:]+: 20\d\d · /\d+ starts")), string.Join(" | ", names));
             Check(names.Count(n => n.EndsWith(", not rated: too few starts to rate")) == 2 && names.Count(n => n.EndsWith(", did not race")) == 1, string.Join(" | ", names));
             Check(names.Contains("Sprint: 2023 · /12 starts, 2.8 pts · 34 pts, 5 riders") && names.Contains("Junior mixed team relay: 2023 · /0 starts, did not race"), string.Join(" | ", names));
-            // The browser draws the thirteen rated cells' values with their starts, the two reasons on two lines each and the season nobody
-            // raced in one line with its starts, the three thin cells dashed, the long name whole, each cell at its own width, and the drawing at
-            // exactly its viewBox.
+            // The browser draws the fifteen cells' values with their starts (13 rated, the 2 not-rated ones keeping theirs), 29 lines of notes,
+            // the two reasons on two lines each and the season nobody raced in one line with its starts, the three thin cells dashed, the long
+            // name whole, each cell at its own width, and the drawing at exactly its viewBox, 442 tall (80 + 4 rows of 77 + 54).
             const string measure = @"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg');
                 const words = [...s.querySelectorAll(':scope > text[aria-hidden=""true""]')];
                 return [words.filter(t => t.getAttribute('font-size') === '11').length, words.filter(t => t.getAttribute('font-size') === '10' && t.textContent.startsWith('/')).length,
                     words.filter(t => t.getAttribute('font-size') === '10' && !t.textContent.startsWith('/')).length,
                     s.querySelectorAll('g.lumen-datum > rect[stroke-dasharray=""3 2""]').length, s.querySelector('g.lumen-datum > rect').getBoundingClientRect().width,
                     Number(s.getAttribute('viewBox').split(' ')[2]), s.getBoundingClientRect().width, v.clientWidth, v.scrollWidth - v.clientWidth,
-                    [...s.querySelectorAll(':scope > text.lumen-muted')].filter(t => t.textContent === 'Junior mixed team relay').length]; }";
+                    [...s.querySelectorAll(':scope > text.lumen-muted')].filter(t => t.textContent === 'Junior mixed team relay').length, Number(s.getAttribute('viewBox').split(' ')[3])]; }";
             var drawn = await card.EvaluateAsync<double[]>(measure);
-            Check(drawn[0] == 13 && drawn[1] == 14 && drawn[2] == 5 && drawn[3] == 3, $"{drawn[0]} values, {drawn[1]} starts and {drawn[2]} reason lines written, {drawn[3]} dashed cells");
+            // 4 reason lines, "did not race" and 29 lines of notes are the 10 px lines that do not start with a "/".
+            Check(drawn[0] == 15 && drawn[1] == 16 && drawn[2] == 34 && drawn[3] == 3, $"{drawn[0]} values, {drawn[1]} starts and {drawn[2]} other lines written, {drawn[3]} dashed cells");
+            Check(drawn[10] == 442, $"drawn {drawn[10]} tall");
             Check(drawn[9] == 1, "the long row name was not found whole in the drawing");
             Check(drawn[4] >= 87.5, $"a cell is drawn {drawn[4]:0.#} wide");
             Check(drawn[5] == 580 && Math.Abs(drawn[6] - drawn[5]) < 1, $"drawn {drawn[5]} wide and shown {drawn[6]:0.#}");
@@ -1814,6 +1839,25 @@ if (await sportsLink.CountAsync() > 0)
             var after = await tab.EvaluateAsync<double[]>(places);
             Check(Math.Abs(after[0] - before[0]) < 1, "names held: " + string.Join(",", before) + " -> " + string.Join(",", after));
             Check(before[1] - after[1] > 150, "cells scrolled: " + string.Join(",", before) + " -> " + string.Join(",", after));
+            // The rows are as tall as the tallest cell's words need, 77, and each frozen name stands at its row's middle plus 4, read from the layer's
+            // own drawing and the cells' rectangles, so the names keep to their rows however tall the rows grow.
+            var rowNames = await tab.EvaluateAsync<double[]>(@"() => { const c = document.querySelector('#category-heatmap'), names = [...c.querySelectorAll('.lumen-freeze svg text')],
+                cells = [...c.querySelectorAll('.lumen-viewport > svg g.lumen-datum > rect')].map(r => ({ y: Number(r.getAttribute('y')), h: Number(r.getAttribute('height')) })),
+                middles = [...new Set(cells.map(r => r.y))].sort((a, b) => a - b).map(y => y + cells.find(r => r.y === y).h / 2);
+                return [names.length, middles.length, Math.max(...names.map((t, i) => Math.abs(Number(t.getAttribute('y')) - (middles[i] + 4)))), Math.min(...middles.slice(1).map((m, i) => m - middles[i]))]; }");
+            Check(rowNames[0] == 4 && rowNames[1] == 4 && rowNames[2] <= .5, $"{rowNames[0]} names for {rowNames[1]} rows, the furthest {rowNames[2]:0.##} from its row's middle plus 4");
+            Check(Math.Abs(rowNames[3] - 77) < .5, $"the rows are {rowNames[3]} apart, not 77");
+            // The kept values of the two not-rated cells clear 4.5:1 against the card's background as the browser paints them.
+            var kept = await tab.EvaluateAsync<double[]>(keptValues);
+            Check(kept[0] == 2 && kept[1] >= 4.5 && kept[2] == 1, $"{kept[0]} kept values, the lowest contrast {kept[1]:0.00}:1, all in the muted colour: {kept[2] == 1}");
+            // No word of any cell is wider than its cell less 6, as the browser sets it in its own font.
+            var fit = await tab.EvaluateAsync<double[]>(@"() => { const s = document.querySelector('#category-heatmap .lumen-viewport > svg'),
+                cells = [...s.querySelectorAll('g.lumen-datum > rect')].map(r => ({ x: Number(r.getAttribute('x')), y: Number(r.getAttribute('y')), w: Number(r.getAttribute('width')), h: Number(r.getAttribute('height')) })),
+                words = [...s.querySelectorAll(':scope > text[aria-hidden=""true""]')].map(t => { const x = Number(t.getAttribute('x')), y = Number(t.getAttribute('y'));
+                    return { wide: t.getBBox().width, cell: cells.find(q => x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h) }; }),
+                placed = words.filter(word => word.cell);
+                return [words.length, words.length - placed.length, placed.filter(word => word.wide > word.cell.w - 6 + .5).length, Math.max(...placed.map(word => word.wide - (word.cell.w - 6)))]; }");
+            Check(fit[0] == 65 && fit[1] == 0 && fit[2] == 0, $"{fit[0]} words, {fit[1]} outside every cell, {fit[2]} wider than their cell less 6, the widest {fit[3]:0.##} over");
             // The seasons stand on top of the grid, in the row the layer reaches up over: a season whose column has scrolled under the names is
             // covered with it, so at the centre of its label, which is left of the layer's right edge, the pointer finds the layer and not the
             // label. Two of the four seasons are under the names after the 200 pixels, so the check has labels to prove it with.
@@ -2113,13 +2157,14 @@ if (await sportsLink.CountAsync() > 0)
         await target.Mouse.MoveAsync(box.X + box.Width * .5f, box.Y + box.Height * .5f);
         await shown.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 60000 });
     }
-    await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page", async () => { await Hovered(sports); await SweepOf(sports); });
+    await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page", async () => { await KeptValuesClear(sports, "#FFFFFF"); await Hovered(sports); await SweepOf(sports); });
 
     await Test("axe-core reports no WCAG A or AA violation on the Sports & performance page in the dark theme", async () =>
     {
         var before = await charts.First.Locator(".lumen-viewport > svg").GetAttributeAsync("style");
         await sports.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) }).First.ClickAsync();
         await sports.WaitForFunctionAsync("before => document.querySelector('.lumen-viewport > svg')?.getAttribute('style') !== before", before);
+        await KeptValuesClear(sports, "#171E2E");
         await Hovered(sports);
         await SweepOf(sports);
     });
@@ -2130,6 +2175,7 @@ if (await sportsLink.CountAsync() > 0)
         // Every chart on the page is redrawn on the server, the ride's six channels among them, which takes longer than the default
         // wait on a slow runner.
         await sports.WaitForFunctionAsync("() => [...document.querySelectorAll('.lumen-viewport > svg')].every(s => s.getAttribute('style')?.includes('background:#0B0E14'))", null, new() { Timeout = 60000 });
+        await KeptValuesClear(sports, "#0B0E14");
         await Hovered(sports);
         await SweepOf(sports);
     });
