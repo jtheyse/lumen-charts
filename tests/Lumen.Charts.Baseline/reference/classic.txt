@@ -400,4 +400,6 @@ heatmap-cells/notes CDC61EA8C2030A4D
 heatmap-cells/notes-fixed C38BDEE1A9B8BDEA
 heatmap-cells/keeps-value 0CE8360C50CFCEB9
 heatmap-cells/both-dark 9E2CA840E9634FFF
-columns/cell-width 1E8BEA48614529A5
+columns/cell-width BDD7321B5A989EFB
+columns/axis-labels C451C38D60D86D86
+columns/mark-zero 619AE9EEEC6788F3

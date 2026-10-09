@@ -600,8 +600,10 @@ public static partial class ChartSvg
     /// <summary>How far a category's sub-label stands under its name, and the least height a horizontal bar chart's row takes for the two
     /// lines before the names are thinned.</summary>
     private const double SubLine = 14, SubRow = 38;
-    /// <summary>Whether a column or stacked column chart writes sub-labels under its categories' names, which takes a line more under the plot.</summary>
-    private static bool Subbed(ChartSpec s) => s.Kind is ChartKind.Column or ChartKind.StackedColumn && s.Series.Any(series => series.Points.Any(p => p.SubLabel is not null));
+    /// <summary>Whether a column or stacked column chart writes a second line under its categories' names, a sub-label or, from 0.47.0, an
+    /// axis label's second line, which takes a line more under the plot.</summary>
+    private static bool Subbed(ChartSpec s) => s.Kind is ChartKind.Column or ChartKind.StackedColumn
+        && s.Series.Any(series => series.Points.Any(p => p.SubLabel is not null || p.AxisLabel?.Contains('\n') == true));
     /// <summary>The sub-label a horizontal bar chart writes under a category's name: the first any series gives it, cut to 21 characters.</summary>
     private static string? SubCategory(ChartSpec s, double x) => s.Series.SelectMany(series => series.Points).FirstOrDefault(p => p.X == x && p.SubLabel is not null)?.SubLabel is { } sub ? Short(sub, 21) : null;
     /// <summary>A horizontal bar chart's category name as it is written beside its bar: its name, or its X, cut to 21 characters.</summary>
@@ -693,31 +695,63 @@ public static partial class ChartSvg
             {
                 if (category)
                 {
-                    // A bar's name with a sub-label under it takes two lines, so the rows it can be written in are taller. Columns with
-                    // sub-labels are thinned by the room their words take, in either finish, rather than by a fixed 65 units a name.
-                    var measured = subs.Count > 0 && !horizontal;
-                    var step = measured ? 1 : Math.Max(1, (int)Math.Ceiling(cats.Length / (horizontal ? (bottom - top) / (subs.Count > 0 ? SubRow : 24) : (right - left) / 65)));
-                    string Name(int i) => points.First(p => p.X == cats[i]).Label ?? LinearScale.Label(cats[i]);
-                    // A sub-label is thinned with its name: the wider of the two keeps the columns' names apart.
-                    double Widest(int i) => Math.Max(Broad(Short(Name(i), 12)), Sub(cats[i]) is { } under ? Wide(Short(under, 12)) : 0);
-                    if ((w.Refined || measured) && !horizontal)
-                        while (step < cats.Length && !Clear(Enumerable.Range(0, cats.Length).Where(i => i % step == 0).Select(i => (X(cats[i]), Widest(i))))) step++;
-                    string Side(string text) => s.BarTrack ? Fitted(Short(text, 21), left - Aside(s)) : Short(text, 21);
-                    for (var i = 0; i < cats.Length; i += step)
+                    // With a cell width, or any axis label, a column chart's labels are its axis labels or names, thinned by their measured
+                    // widths: two-line labels first, each kept unless it meets the last two-line label kept, then one-line labels where they
+                    // stand clear of the kept labels on either side (0.47.0).
+                    if (!horizontal && s.Kind == ChartKind.Column && (s.CellWidth is not null || points.Any(p => p.AxisLabel is not null)))
                     {
-                        var label = Name(i);
-                        var under = Sub(cats[i]);
-                        if (horizontal)
+                        var asked = points.Where(p => p.AxisLabel is not null).GroupBy(p => p.X).ToDictionary(g => g.Key, g => g.First().AxisLabel!);
+                        var named = points.GroupBy(p => p.X).ToDictionary(g => g.Key, g => g.First().Label);
+                        // A category's lines: its axis label's, else its name and its sub-label, as the old thinning wrote them.
+                        string[] Lines(double x) => asked.TryGetValue(x, out var words) ? words.Split('\n')
+                            : Sub(x) is { } under ? [Short(named[x] ?? LinearScale.Label(x), 12), Short(under, 12)]
+                            : [Short(named[x] ?? LinearScale.Label(x), 12)];
+                        var lines = cats.Select(Lines).ToArray();
+                        var boxes = lines.Select((words, i) => (At: X(cats[i]), Width: Math.Max(Broad(words[0]), words.Length > 1 ? Wide(words[1]) : 0))).ToArray();
+                        var kept = new List<int>();
+                        for (var i = 0; i < cats.Length; i++)
+                            if (lines[i].Length > 1 && (kept.Count == 0 || Clear([boxes[kept[^1]], boxes[i]]))) kept.Add(i);
+                        for (var i = 0; i < cats.Length; i++)
                         {
-                            // With a sub-label the name moves up half a line and the sub-label stands half a line under the bar's centre.
-                            var y = top + (i + .5) / cats.Length * (bottom - top) + 4;
-                            w.Text(left - 12, under is null ? y : y - SubLine / 2, Side(label), "text-anchor='end' class='lumen-muted'");
-                            if (under is not null) w.Text(left - 12, y + SubLine / 2, Side(under), "text-anchor='end' class='lumen-muted' font-size='11'");
+                            if (lines[i].Length > 1) continue;
+                            // The kept labels stand in order, so the ones either side of this label are the two it would sit between.
+                            var next = ~kept.BinarySearch(i);
+                            if ((next == 0 || Clear([boxes[kept[next - 1]], boxes[i]])) && (next == kept.Count || Clear([boxes[i], boxes[kept[next]]]))) kept.Insert(next, i);
                         }
-                        else
+                        foreach (var i in kept)
                         {
-                            w.Text(X(cats[i]), bottom + 21, Short(label, 12), "text-anchor='middle' class='lumen-muted'");
-                            if (under is not null) w.Text(X(cats[i]), bottom + 21 + SubLine, Short(under, 12), "text-anchor='middle' class='lumen-muted' font-size='11'");
+                            w.Text(X(cats[i]), bottom + 21, lines[i][0], "text-anchor='middle' class='lumen-muted'");
+                            if (lines[i].Length > 1) w.Text(X(cats[i]), bottom + 21 + SubLine, lines[i][1], "text-anchor='middle' class='lumen-muted' font-size='11'");
+                        }
+                    }
+                    else
+                    {
+                        // A bar's name with a sub-label under it takes two lines, so the rows it can be written in are taller. Columns with
+                        // sub-labels are thinned by the room their words take, in either finish, rather than by a fixed 65 units a name.
+                        var measured = subs.Count > 0 && !horizontal;
+                        var step = measured ? 1 : Math.Max(1, (int)Math.Ceiling(cats.Length / (horizontal ? (bottom - top) / (subs.Count > 0 ? SubRow : 24) : (right - left) / 65)));
+                        string Name(int i) => points.First(p => p.X == cats[i]).Label ?? LinearScale.Label(cats[i]);
+                        // A sub-label is thinned with its name: the wider of the two keeps the columns' names apart.
+                        double Widest(int i) => Math.Max(Broad(Short(Name(i), 12)), Sub(cats[i]) is { } under ? Wide(Short(under, 12)) : 0);
+                        if ((w.Refined || measured) && !horizontal)
+                            while (step < cats.Length && !Clear(Enumerable.Range(0, cats.Length).Where(i => i % step == 0).Select(i => (X(cats[i]), Widest(i))))) step++;
+                        string Side(string text) => s.BarTrack ? Fitted(Short(text, 21), left - Aside(s)) : Short(text, 21);
+                        for (var i = 0; i < cats.Length; i += step)
+                        {
+                            var label = Name(i);
+                            var under = Sub(cats[i]);
+                            if (horizontal)
+                            {
+                                // With a sub-label the name moves up half a line and the sub-label stands half a line under the bar's centre.
+                                var y = top + (i + .5) / cats.Length * (bottom - top) + 4;
+                                w.Text(left - 12, under is null ? y : y - SubLine / 2, Side(label), "text-anchor='end' class='lumen-muted'");
+                                if (under is not null) w.Text(left - 12, y + SubLine / 2, Side(under), "text-anchor='end' class='lumen-muted' font-size='11'");
+                            }
+                            else
+                            {
+                                w.Text(X(cats[i]), bottom + 21, Short(label, 12), "text-anchor='middle' class='lumen-muted'");
+                                if (under is not null) w.Text(X(cats[i]), bottom + 21 + SubLine, Short(under, 12), "text-anchor='middle' class='lumen-muted' font-size='11'");
+                            }
                         }
                     }
                 }
@@ -751,7 +785,7 @@ public static partial class ChartSvg
                             if (Written(s.XTickLabels, i, xTicks.Count)) w.Text(X(xTicks[i].Value), bottom + 21, xTicks[i].Label, "text-anchor='middle' class='lumen-muted'");
                 }
                 // Under columns' sub-labels the axis title moves down a line, into the room the floor keeps for them.
-                w.Text((left + right) / 2, bottom + 44 + (!horizontal && subs.Count > 0 ? SubLine : 0), horizontal ? s.YLabel : s.XLabel, "text-anchor='middle' class='lumen-muted'");
+                w.Text((left + right) / 2, bottom + 44 + (!horizontal && Subbed(s) ? SubLine : 0), horizontal ? s.YLabel : s.XLabel, "text-anchor='middle' class='lumen-muted'");
             }
             // Named above, a plot's header stands on one line over its left edge, cut to the plot's width.
             if (s.PaneTitles == PaneTitlePlacement.Above)
@@ -795,19 +829,20 @@ public static partial class ChartSvg
             var endings = new List<EndMark>();
             // A value's note follows it at normal weight in the muted colour.
             string Noted(string text, string? note) => SvgWriter.E(text) + (note is null ? "" : $"<tspan class='lumen-muted' font-weight='400'>{SvgWriter.E(note)}</tspan>");
-            void Name(double x, double y, string text, string anchor, string? note)
+            // A label may be written in a colour of its own, as a marked zero's is (0.47.0).
+            void Name(double x, double y, string text, string anchor, string? note, string? fill = null)
             {
                 var width = Wide(text + note);
                 var x1 = anchor == "middle" ? x - width / 2 : anchor == "end" ? x - width : x;
                 written.Add((x1, x1 + width, y - 9, y + 3));
-                named.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='{anchor}' font-size='11' aria-hidden='true'>{Noted(text, note)}</text>");
+                named.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='{anchor}' font-size='11'{(fill is null ? "" : $" fill='{fill}'")} aria-hidden='true'>{Noted(text, note)}</text>");
             }
             // A column's label fits across the column, so it never runs into its neighbours'; at a fixed pitch with one series of columns it
             // may take the category's width less 2 (0.47.0).
-            void Above(double x, double width, double far, bool up, string text, string? note, double? room = null)
+            void Above(double x, double width, double far, bool up, string text, string? note, double? room = null, string? fill = null)
             {
                 if (Wide(text + note) > (room ?? width) || x + width / 2 < left || x + width / 2 > right || far < top - .5 || far > bottom + .5) return;
-                Name(x + width / 2, up ? far - 5 : far + 12, text, "middle", note);
+                Name(x + width / 2, up ? far - 5 : far + 12, text, "middle", note, fill);
             }
             void Beside(double far, double y, double height, bool up, string text, string? note)
             {
@@ -1077,14 +1112,17 @@ public static partial class ChartSvg
                             w.Add(track.Insert(5, " class='lumen-bar-track'"));
                         }
                         var over = given > y ? $", above the scale, drawn at {scale.Format(y)}" : "";
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + Of(series, p) + over, Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost));
+                        // A zero drawn as a hairline: a bar 1 unit high on the baseline, in the muted colour, focusable and named as any (0.47.0).
+                        var hairline = series.MarkZero && !horizontal && y == 0;
+                        var shape = hairline ? $"<rect x='{N(rx)}' y='{N(At(0) - 1)}' width='{N(rw)}' height='1' fill='{w.Style.Muted}'/>" : Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost);
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + Of(series, p) + over, shape);
                         if (series.ValueLabels)
                         {
                             // On a track the value stands past the track's end, in the margin kept for it, or above a column's track.
                             if (s.BarTrack && horizontal) Name(right + TrackGap, ry + rh / 2 + 4, scale.Format(given), "start", p.ValueNote);
                             else if (s.BarTrack) Above(rx, rw, At(scale.Max), true, scale.Format(given), p.ValueNote);
                             else if (horizontal) Beside(y >= 0 ? rx + rw : rx, ry, rh, y >= 0, scale.Format(y), p.ValueNote);
-                            else Above(rx, rw, At(y), y >= 0, scale.Format(y), p.ValueNote, s.CellWidth is { } pitch && columns.Length == 1 ? pitch - 2 : null);
+                            else Above(rx, rw, At(y), y >= 0, scale.Format(y), p.ValueNote, s.CellWidth is { } pitch && columns.Length == 1 ? pitch - 2 : null, fill: hairline && Contrast.Ratio(w.Style.Muted, w.Style.Background) >= 4.5 ? w.Style.Muted : null);
                         }
                     }
                     else if (place >= 0)
@@ -1092,8 +1130,11 @@ public static partial class ChartSvg
                         // Centred on its X within the slot, rising from zero on the series' own axis.
                         var width = slot / columns.Length;
                         var x = X(p.X) - slot / 2 + place * width;
-                        Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + Of(series, p), Bar(w, x, Math.Min(At(0), At(y)), width, Math.Abs(At(y) - At(0)), y >= 0 ? End.Top : End.Bottom, Ink(p), series.Fill));
-                        if (series.ValueLabels) Above(x, width, At(y), y >= 0, scale.Format(y), p.ValueNote);
+                        var hairline = series.MarkZero && y == 0;
+                        Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + Of(series, p),
+                            hairline ? $"<rect x='{N(x)}' y='{N(At(0) - 1)}' width='{N(width)}' height='1' fill='{w.Style.Muted}'/>"
+                                : Bar(w, x, Math.Min(At(0), At(y)), width, Math.Abs(At(y) - At(0)), y >= 0 ? End.Top : End.Bottom, Ink(p), series.Fill));
+                        if (series.ValueLabels) Above(x, width, At(y), y >= 0, scale.Format(y), p.ValueNote, fill: hairline && Contrast.Ratio(w.Style.Muted, w.Style.Background) >= 4.5 ? w.Style.Muted : null);
                     }
                     else
                     {

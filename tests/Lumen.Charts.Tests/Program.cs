@@ -10874,6 +10874,111 @@ Test("Daily counts: a column chart's CellWidth is at most 4,096, the widest a ch
     ChartValidation.Validate(widest);
     Check(ChartSvg.DrawnWidth(widest)==76+4000*4096+30,"widest "+ChartSvg.DrawnWidth(widest));
 });
+// A month of invented days: the day number under each, the month under the first and each 1st.
+ChartSpec Month(int days,double? cell=30)=>new(){Title="Sign-ups",Kind=ChartKind.Column,CellWidth=cell,Series=[new("Sign-ups",Enumerable.Range(0,days).Select(i=>{var day=new DateOnly(2026,9,28).AddDays(i);return new ChartPoint(i,i%3,day.ToString("d MMM",CultureInfo.InvariantCulture)){AxisLabel=i==0||day.Day==1?$"{day.Day}\n{day.ToString("MMM",CultureInfo.InvariantCulture)}":$"{day.Day}"};}).ToArray()){ValueLabels=true,MarkZero=true}]};
+Test("Daily counts: axis labels write their first line where the name goes and their second 14 under it, the room under the plot growing 14",()=>{
+    var svg=ChartSvg.Render(Month(10));
+    // The plot's bottom: Height 420 less a floor of 90 = 330; first lines at 351, second at 365.
+    Check(Regex.IsMatch(svg,"<text x='[^']*' y='351' text-anchor='middle' class='lumen-muted'>28<"),"first line");
+    Check(Regex.IsMatch(svg,"<text x='[^']*' y='365' text-anchor='middle' class='lumen-muted' font-size='11'>Sep<"),"second line");
+    Check(Regex.IsMatch(svg,"y='365'[^>]*>Oct<"),"the 1st's month");
+    // The label is drawn only: the mark is named by its Label.
+    Check(HeatNames(Month(10)).Any(n=>n.StartsWith("Sign-ups: 28 Sep, ")),string.Join(" | ",HeatNames(Month(10)).Take(2)));
+    Check(!ChartExport.Csv(Month(10)).Contains("\n1\nOct"),"CSV keeps the Label");
+});
+Test("Daily counts: at a fixed pitch two-line labels are kept first and one-line labels only where they stand clear of them",()=>{
+    // At 8 a pitch, "28"/"Sep" is kept; "1"/"Oct", 24 units on, is not clear of it and is dropped whole, "1"/"Nov" is kept, and day numbers between only where clear.
+    var svg=ChartSvg.Render(Month(40,8));
+    var firsts=Regex.Matches(svg,"y='351' text-anchor='middle' class='lumen-muted'>([^<]*)<").Select(m=>m.Groups[1].Value).ToList();
+    Check(firsts[0]=="28"&&firsts.Contains("1"),string.Join(",",firsts));
+    var kept=Regex.Matches(svg,"<text x='([^']*)' y='351' text-anchor='middle' class='lumen-muted'>([^<]*)<").Select(m=>(X:double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),T:m.Groups[2].Value)).ToList();
+    // Kept neighbours stand at least half their first lines' widths and 8 apart (their second lines only widen the rule).
+    for(var i=1;i<kept.Count;i++) Check(kept[i].X-kept[i-1].X>=(ChartSvg.Broad(kept[i-1].T)+ChartSvg.Broad(kept[i].T))/2+8-1e-9,$"labels {kept[i-1]} and {kept[i]} too close");
+    // At 30 every day number stands clear.
+    Check(Regex.Matches(ChartSvg.Render(Month(40)),"y='351' text-anchor='middle' class='lumen-muted'>").Count==40,"all 40 at 30");
+});
+Test("Daily counts: MarkZero draws a zero as a 1-unit muted bar on the baseline and writes its 0 muted, and changes no other bar",()=>{
+    var svg=ChartSvg.Render(Month(4));
+    // Day 0 (28 Sep) is 0: a hairline from 329 to 330, the bar's width, in Light's muted colour.
+    Check(Regex.IsMatch(svg,$"<rect x='80.2' y='329' width='21.6' height='1' fill='{ChartStyle.Light.Muted}'/>"),"hairline");
+    Check(Regex.IsMatch(svg,$"<text[^>]*fill='{ChartStyle.Light.Muted}'[^>]*>0<"),"the muted 0");
+    Check(Lumen.Charts.Contrast.Ratio(ChartStyle.Light.Muted,ChartStyle.Light.Background)>=4.5,"clears 4.5:1");
+    Check(HeatNames(Month(4)).Contains("Sign-ups: 28 Sep, 0"),"named");
+    // A faint muted colour falls back to the text colour.
+    var faint=Month(4) with{Style=ChartStyle.Light with{Muted="#C8C8C8"}};
+    Check(!Regex.IsMatch(ChartSvg.Render(faint),"<text[^>]*fill='#C8C8C8'[^>]*>0<"),"faint muted not used for the 0");
+    // Without MarkZero a zero is a zero-height bar, as before, and its 0 in the text colour.
+    var plain=Month(4) with{Series=[Month(4).Series[0] with{MarkZero=false}]};
+    Check(!ChartSvg.Render(plain).Contains("height='1' fill="),"no hairline");
+    // A negative column is drawn as before.
+    var negative=DailyCounts(3) with{Series=[new("S",[new ChartPoint(0,-2,"A"),new ChartPoint(1,0,"B"),new ChartPoint(2,3,"C")]){MarkZero=true,ValueLabels=true}]};
+    Check(Regex.Matches(ChartSvg.Render(negative),"height='1' fill=").Count==1,"only the zero");
+});
+Test("Daily counts: the two-line labels kept are the first and those clear of the last kept, and every label stands clear of the kept labels on both sides of it",()=>{
+    // Each kept label as the thinning measures it: its first line's width, or its second line's where that is wider.
+    List<(string Key,double X,string T,string? Under,double Width)> Kept(string svg)
+    {
+        var seconds=Regex.Matches(svg,"<text x='([^']*)' y='365' text-anchor='middle' class='lumen-muted' font-size='11'>([^<]*)<").ToDictionary(m=>m.Groups[1].Value,m=>m.Groups[2].Value);
+        return Regex.Matches(svg,"<text x='([^']*)' y='351' text-anchor='middle' class='lumen-muted'>([^<]*)<")
+            .Select(m=>(Key:m.Groups[1].Value,X:double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),T:m.Groups[2].Value,Under:seconds.GetValueOrDefault(m.Groups[1].Value),Width:0d))
+            .Select(k=>k with{Width=Math.Max(ChartSvg.Broad(k.T),k.Under is null?0:ChartSvg.Wide(k.Under))}).ToList();
+    }
+    void Clear(List<(string Key,double X,string T,string? Under,double Width)> kept)
+    {
+        // The whole rule, each label as wide as its wider line: this is what stops a day number standing against a two-line label on its right.
+        for(var i=1;i<kept.Count;i++) Check(kept[i].X-kept[i-1].X>=(kept[i-1].Width+kept[i].Width)/2+8-1e-9,$"labels at {kept[i-1].X} and {kept[i].X} too close");
+    }
+    // At a pitch of 8 the 1 Oct label (24 units on) is not clear of 28 Sep (28.46 needed), so it is dropped whole; 1 Nov is clear and kept.
+    var kept=Kept(ChartSvg.Render(Month(40,8)));
+    Check(kept.Where(k=>k.Under is not null).Select(k=>k.Under).SequenceEqual(["Sep","Nov"]),string.Join(",",kept.Select(k=>k.Under)));
+    Clear(kept);
+    // 1 Nov stands at index 34, 272 units on; the label before it is a day number clear of it, and the ones between are thinned.
+    var nov=kept.Single(k=>k.Under=="Nov");
+    var before=kept.Last(k=>k.X<nov.X);
+    Check(nov.X-before.X>=(before.Width+nov.Width)/2+8,$"{before.T} stands {nov.X-before.X} before 1 Nov");
+    Check(kept.Count<40&&kept.Count>10,"thinned, not stripped: "+kept.Count);
+    // With no two-line label first, the day numbers before the first one are judged against it alone: 28, 29 and 30 Sep stand 24, 16 and 8
+    // before 1 Oct and are all dropped, and the chart starts with the 1st.
+    var lead=Month(40,8);
+    lead=lead with{Series=[lead.Series[0] with{Points=[lead.Series[0].Points[0] with{AxisLabel="28"},..lead.Series[0].Points.Skip(1)]}]};
+    var led=Kept(ChartSvg.Render(lead));
+    Check(led[0].T=="1"&&led[0].Under=="Oct",$"{led[0].T}/{led[0].Under} first");
+    Clear(led);
+});
+Test("Daily counts: a fixed pitch without axis labels thins the categories' names by their measured widths, and one-line labels add no room under the plot",()=>{
+    var plain=DailyCounts(40,8);
+    var svg=ChartSvg.Render(plain);
+    var names=Regex.Matches(svg,"<text x='([^']*)' y='365' text-anchor='middle' class='lumen-muted'>([^<]*)<").Select(m=>(X:double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),T:m.Groups[2].Value)).ToList();
+    // A floor of 76 under the plot at 420: names at 344 + 21.
+    Check(names.Count>0&&names.Count<40&&names[0].T=="D0",string.Join(",",names.Select(n=>n.T)));
+    for(var i=1;i<names.Count;i++) Check(names[i].X-names[i-1].X>=(ChartSvg.Broad(names[i-1].T)+ChartSvg.Broad(names[i].T))/2+8-1e-9,$"{names[i-1].T} and {names[i].T} too close");
+    Check(!svg.Contains("font-size='11'>D"),"no second lines");
+    // Thirty units are wide enough for the names of all ten.
+    Check(Regex.Matches(ChartSvg.Render(DailyCounts(10)),"y='365' text-anchor='middle' class='lumen-muted'>D").Count==10,"all ten at 30");
+});
+Test("Daily counts: the X axis title moves down with a second line, and stays where it was without one",()=>{
+    // The plot shrinks 14 for the second line and the title moves 14 with it, so it stands at 388 either way.
+    var two=Month(10) with{XLabel="Day registered"};
+    Check(Regex.IsMatch(ChartSvg.Render(two),"<text x='[^']*' y='388' text-anchor='middle' class='lumen-muted'>Day registered<"),"two lines");
+    var one=two with{Series=[new("Sign-ups",two.Series[0].Points.Select(p=>p with{AxisLabel=p.AxisLabel!.Split('\n')[0]}).ToArray()){ValueLabels=true,MarkZero=true}]};
+    Check(Regex.IsMatch(ChartSvg.Render(one),"<text x='[^']*' y='388' text-anchor='middle' class='lumen-muted'>Day registered<"),"one line");
+    // One-line labels keep the plot as it was: its bottom at 344, the hairline from 343.
+    Check(ChartSvg.Render(one).Contains("height='1' fill=")&&Regex.IsMatch(ChartSvg.Render(one),"y='343' width='21.6' height='1'"),"plot bottom 344");
+});
+Test("Daily counts: the hairline is a plain rect in the muted colour in every style, finish and radius, and a continuous column series takes one too",()=>{
+    foreach(var style in new[]{ChartStyle.Dark,ChartStyle.Light with{BarRadius=6}})
+        Check(ChartSvg.Render(Month(4) with{Style=style}).Contains($"y='329' width='21.6' height='1' fill='{style.Muted}'/>"),"style");
+    Check(ChartSvg.Render(Classic(Month(4))).Contains($"y='329' width='21.6' height='1' fill='{ChartStyle.Light.Muted}'/>"),"classic");
+    // Dark's muted clears 4.5:1, so its 0 is muted too.
+    Check(Regex.IsMatch(ChartSvg.Render(Month(4) with{Style=ChartStyle.Dark}),$"<text[^>]*fill='{ChartStyle.Dark.Muted}'[^>]*>0<"),"dark 0");
+    // A line chart's column series stands on the plot's bottom, 344 at 420 less 76: its zeros are hairlines there.
+    var mixed=Spec(ChartKind.Line) with{Series=[new("S",[new ChartPoint(0,0),new ChartPoint(1,2),new ChartPoint(2,0)]){Kind=ChartKind.Column,MarkZero=true,ValueLabels=true}]};
+    var svg=ChartSvg.Render(mixed);
+    Check(Regex.Matches(svg,$"<rect x='[^']*' y='343' width='[^']*' height='1' fill='{ChartStyle.Light.Muted}'/>").Count==2,"two hairlines");
+    Check(Regex.Matches(svg,$"<text[^>]*fill='{ChartStyle.Light.Muted}'[^>]*>0<").Count==2,"two muted zeros");
+    // Without MarkZero the same zeros are zero-height bars.
+    Check(!ChartSvg.Render(mixed with{Series=[mixed.Series[0] with{MarkZero=false}]}).Contains("height='1' fill="),"plain");
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
