@@ -101,7 +101,7 @@ public static partial class ChartSvg
     /// does. A series' average changes only the words its marks say, so it is never part of the hash either. A point's gap label, from 0.42.0,
     /// is null unless set, and nulls are left out already, as are a heatmap's cell width and a point's not-rated reason, from 0.46.0. A heatmap's
     /// cell text, from 0.46.0, is false by default, so it is left out unless set, as are a heatmap's labels on top, from 0.46.1, false by
-    /// default.</summary>
+    /// default, as are a heatmap's cell notes and kept not-rated values, from 0.46.2.</summary>
     private static void Unfitted(JsonTypeInfo info)
     {
         if (info.Type == typeof(ChartSeries))
@@ -113,6 +113,8 @@ public static partial class ChartSvg
             else if (property.Name == nameof(ChartSpec.FitHeight)) property.ShouldSerialize = (_, fitted) => fitted is true;
             else if (property.Name == nameof(ChartSpec.CellText)) property.ShouldSerialize = (_, text) => text is true;
             else if (property.Name == nameof(ChartSpec.ColumnLabelsOnTop)) property.ShouldSerialize = (_, top) => top is true;
+            else if (property.Name == nameof(ChartSpec.CellNotes)) property.ShouldSerialize = (_, notes) => notes is true;
+            else if (property.Name == nameof(ChartSpec.NotRatedKeepsValue)) property.ShouldSerialize = (_, kept) => kept is true;
     }
     /// <summary>A chart without bar tracks that draws its title and description, as every chart did before 0.39.0, is serialized for hashing
     /// as 0.38.0, which had neither setting, serialized it, so every chart drawn before them keeps its IDs.</summary>

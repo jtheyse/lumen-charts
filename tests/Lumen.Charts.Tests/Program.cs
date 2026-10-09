@@ -4238,11 +4238,11 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // readout, written last, which is never hashed, and since 0.37.0 the chart's sampling, written after its rendered points, and its pane
     // titles, written after its panes, and since 0.39.0 its bar tracks and drawn titles, and since 0.41.0 its painted background and
     // fitted height, written last, and since 0.46.0 its cell text, written after the week start (its cell width is null until set, so
-    // never written), and since 0.46.1 its labels on top, written after the cell text.
+    // never written), and since 0.46.1 its labels on top, written after the cell text, and since 0.46.2 its cell notes and kept not-rated values, written after its fitted height.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false}";
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false,\"CellNotes\":false,\"NotRatedKeepsValue\":false}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
@@ -10095,7 +10095,7 @@ Test("Heatmap follow-ups: a longer note, a gap label with a value or beside a re
     var fortyOne=" · "+new string('9',38);
     Reject(()=>ChartValidation.Validate(Noted(HeatGrid(),fortyOne)));
     try{ChartValidation.Validate(Noted(HeatGrid(),fortyOne));}
-    catch(ArgumentException e){Check(e.Message.StartsWith("A value note is at most 20 characters (40 on a heatmap cell, where it is never drawn)"),e.Message);}
+    catch(ArgumentException e){Check(e.Message.StartsWith("A value note is at most 20 characters (40 on a heatmap cell, where CellNotes draws it on lines of its own)"),e.Message);}
     // Every other kind keeps 20.
     Reject(()=>ChartValidation.Validate(Spec(ChartKind.Column) with{Series=[new("S",[new ChartPoint(0,1,"A"){ValueNote=new string('x',21)}])]}));
     Reject(()=>ChartValidation.Validate(FirstCell(HeatGrid(),new ChartPoint(0,2.8,"2025"){GapLabel="did not race"})));
@@ -10537,6 +10537,32 @@ Test("Heatmap follow-ups: the stylesheet freezes the layer, and keeps 24-pixel t
     Check(css.Contains(".lumen-viewport:focus-visible>.lumen-freeze{clip-path:inset(0 -1px 0 2px)}"),"the focus ring stays whole");
     Check(css.Contains(".lumen-table{overflow:auto;max-height:320px;margin:10px 0;")&&css.Contains(".lumen-chart>.lumen-table{margin:10px 24px}"),"margins");
     Check(css.Contains(".lumen-quiet .lumen-status,.lumen-hush .lumen-status{position:absolute;"),"a hushed toolbar hides its status line as a quiet one does");
+});
+// 0.46.2: heatmap cells show it all.
+Test("Heatmap cells: CellNotes and NotRatedKeepsValue are accepted on a heatmap with cell text and refused elsewhere",()=>{
+    ChartValidation.Validate(HeatGrid(s=>s with{CellNotes=true,NotRatedKeepsValue=true}));
+    foreach(var bad in new[]{HeatGrid(s=>s with{CellText=false,CellNotes=true}),HeatGrid(s=>s with{CellText=false,NotRatedKeepsValue=true}),
+        Spec(ChartKind.Column) with{CellNotes=true},Spec(ChartKind.Line) with{NotRatedKeepsValue=true}})
+    {
+        Reject(()=>ChartValidation.Validate(bad));
+        try{ChartValidation.Validate(bad);}catch(ArgumentException e){Check(e.Message.StartsWith("CellNotes and NotRatedKeepsValue write in a heatmap's cells, so they apply to heatmaps with CellText only."),e.Message);}
+    }
+});
+Test("Heatmap cells: with CellNotes a heatmap note takes no line break or tab; without it, as before, it may",()=>{
+    foreach(var note in new[]{" · 34 pts\n5 riders"," · 34 pts\r","34\tpts"})
+    {
+        ChartValidation.Validate(Noted(HeatGrid(),note));
+        var drawn=Noted(HeatGrid(s=>s with{CellNotes=true}),note);
+        Reject(()=>ChartValidation.Validate(drawn));
+        try{ChartValidation.Validate(drawn);}catch(ArgumentException e){Check(e.Message.StartsWith("With CellNotes a heatmap cell's value note is drawn in the cell, where Lumen wraps it, so it takes no line breaks or tabs."),e.Message);}
+    }
+});
+Test("Heatmap cells: the two switches left false change nothing a heatmap draws, and set they tell its gradient IDs apart",()=>{
+    Check(ChartSvg.Render(HeatGrid())==ChartSvg.Render(HeatGrid(s=>s with{CellNotes=false,NotRatedKeepsValue=false})),"false is the default");
+    var plain=HeatGrid();
+    Check(ChartSvg.IdPrefix(plain)==ChartSvg.IdPrefix(plain with{CellNotes=false,NotRatedKeepsValue=false}),"false is left out of the hash");
+    Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{CellNotes=true}),"CellNotes counts when set");
+    Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{NotRatedKeepsValue=true}),"NotRatedKeepsValue counts when set");
 });
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)

@@ -114,6 +114,8 @@ public static partial class ChartValidation
             throw new ArgumentException("A heatmap's cell width is a finite number of pixels, at least 24, so its text and focus ring fit.");
         if (spec.CellWidth < 24)
             throw new ArgumentException("A heatmap's cell is at least 24 pixels wide, so its text and focus ring fit.");
+        if ((spec.CellNotes || spec.NotRatedKeepsValue) && (spec.Kind != ChartKind.Heatmap || !spec.CellText))
+            throw new ArgumentException("CellNotes and NotRatedKeepsValue write in a heatmap's cells, so they apply to heatmaps with CellText only.");
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
         foreach (var annotation in spec.Annotations)
         {
@@ -267,7 +269,9 @@ public static partial class ChartValidation
                 if (p.ValueNote is not null)
                 {
                     if (p.ValueNote.Length > (mark == ChartKind.Heatmap ? 40 : 20))
-                        throw new ArgumentException("A value note is at most 20 characters (40 on a heatmap cell, where it is never drawn), such as /48 after a finishing position for the size of its field; longer words belong in the point's label.");
+                        throw new ArgumentException("A value note is at most 20 characters (40 on a heatmap cell, where CellNotes draws it on lines of its own), such as /48 after a finishing position for the size of its field; longer words belong in the point's label.");
+                    if (spec.CellNotes && mark == ChartKind.Heatmap && p.ValueNote.IndexOfAny(['\n', '\r', '\t']) >= 0)
+                        throw new ArgumentException("With CellNotes a heatmap cell's value note is drawn in the cell, where Lumen wraps it, so it takes no line breaks or tabs.");
                     if (mark is ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Range or ChartKind.Histogram or ChartKind.Box or ChartKind.Violin or ChartKind.Timeline or ChartKind.Calendar or ChartKind.Gauge or ChartKind.Ring)
                         throw new ArgumentException("A value note is written after a mark's one value, so it applies to lines, areas, bands, scatter points, bubbles, columns, bars, blocks, donut slices, heatmap cells and radar points; a candle reads four prices, a range bar two ends, a timeline's span has no value, histograms, boxes, violins and calendars add their points up, and a gauge or ring writes its value in its legend.");
                 }
