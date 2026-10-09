@@ -10564,6 +10564,82 @@ Test("Heatmap cells: the two switches left false change nothing a heatmap draws,
     Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{CellNotes=true}),"CellNotes counts when set");
     Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{NotRatedKeepsValue=true}),"NotRatedKeepsValue counts when set");
 });
+// The Sprint 2025 cell with a points note, and the Long distance 2025 cell (not rated, 1.2, "/4 starts") with one.
+ChartSpec Notes(ChartSpec s,string sprint=" · 34 pts, 5 riders",string distance=" · 8 pts, 3 riders")=>
+    s with{Series=[s.Series[0] with{Points=[s.Series[0].Points[0] with{ValueNote=sprint},s.Series[0].Points[1]]},s.Series[1] with{Points=[s.Series[1].Points[0] with{ValueNote=distance},s.Series[1].Points[1]]}]};
+// The words written in one cell, top to bottom: the 10 and 11 px texts whose x is the cell's centre, in drawing order.
+string[] WordsAt(string svg,double cx)=>Regex.Matches(svg,$"<text x='{cx.ToString(CultureInfo.InvariantCulture)}' y='[^']*'[^>]*font-size='1[01]'[^>]*>([^<]*)<").Select(m=>m.Groups[1].Value).ToArray();
+Test("Heatmap cells: a drawn note loses the separator its name needs, breaks after its commas first, then between words",()=>{
+    Check(ChartSvg.CellNote(" · 34 pts, 5 riders")=="34 pts, 5 riders"&&ChartSvg.CellNote(", 3 riders")=="3 riders"&&ChartSvg.CellNote("/48")=="/48"&&ChartSvg.CellNote(" · ")==""&&ChartSvg.CellNote("   ")=="","trimmed");
+    // 90 wide: a line holds 84 at 10 px. "34 pts, 5 riders" is 86.4, so it breaks after its comma, not between "5" and "riders".
+    var svg=ChartSvg.Render(Notes(HeatGrid(s=>s with{CellWidth=90,Height=400,CellNotes=true})));
+    Check(WordsAt(svg,175).Take(4).SequenceEqual(["2.8","/12 starts","34 pts,","5 riders"]),string.Join(" | ",WordsAt(svg,175)));
+    // A clause wider than a line wraps at its words: "twelve invented starters" has no comma.
+    var words=ChartSvg.Render(Notes(HeatGrid(s=>s with{CellWidth=90,Height=400,CellNotes=true})," · twelve invented starters"));
+    Check(WordsAt(words,175).Take(5).SequenceEqual(["2.8","/12 starts","twelve","invented","starters"]),string.Join(" | ",WordsAt(words,175)));
+    // A note that is only a separator writes nothing: the cell is as it was.
+    var bare=ChartSvg.Render(Notes(HeatGrid(s=>s with{CellWidth=90,Height=400,CellNotes=true})," · "));
+    Check(WordsAt(bare,175).Take(2).SequenceEqual(["2.8","/12 starts"])&&!Regex.IsMatch(bare,"font-size='10'[^>]*></text>"),string.Join(" | ",WordsAt(bare,175)));
+});
+Test("Heatmap cells: without the switches a not-rated cell in 36-unit rows writes 0.46.1's reason, cut at a word, in place of its value",()=>{
+    // CellBlock replaces CellWords and CellReason. The 0.46.0 and 0.46.1 cell-text tests and the unchanged baseline prove the rest; this pins
+    // 0.46.1's cut at a fixed height, since FitHeight's rows now grow (Task 3).
+    var seventy=ChartSvg.Render(Six(HeatGrid(s=>s with{CellWidth=72,Height=376})));
+    Check(seventy.Contains(">too few<")&&seventy.Contains(">starts to…<")&&!seventy.Contains(">1.2<"),"0.46.1's reason, cut at a word, in place of the value");
+});
+Test("Heatmap cells: a not-rated cell keeps its value, muted, then its sub-label, its note and its reason last",()=>{
+    // Long distance 2025 is row 1 at x 130..220, its centre 175. At Height 290 a row is 65, room for all five lines: 13 + 4 x 12 = 61.
+    var spec=Notes(HeatGrid(s=>s with{CellWidth=90,Height=290,CellNotes=true,NotRatedKeepsValue=true}));
+    var svg=ChartSvg.Render(spec);
+    var lines=WordsAt(svg,175);
+    Check(lines.Skip(lines.Length-5).SequenceEqual(["1.2","/4 starts","8 pts, 3 riders","too few starts","to rate"]),string.Join(" | ",lines));
+    var value=Regex.Match(svg,"<text x='175' y='([^']*)'[^>]*font-size='11' font-weight='600' fill='([^']*)'[^>]*>1.2<");
+    Check(value.Success&&value.Groups[2].Value==ChartStyle.Light.Muted,"the kept value is muted: "+value.Value);
+    Check(Lumen.Charts.Contrast.Ratio(ChartStyle.Light.Muted,ChartStyle.Light.Background)>=4.5,"Light's muted clears 4.5:1");
+    Check(HeatNames(spec).Contains("Long distance: 2025 · /4 starts, 1.2 · 8 pts, 3 riders, not rated: too few starts to rate"),string.Join(" | ",HeatNames(spec)));
+    // The five lines are 12 apart, centred on the row's middle, 145 + 65/2 = 177.5: the first at 177.5 - 30 + 9 = 156.5.
+    Check(value.Groups[1].Value=="156.5","first baseline "+value.Groups[1].Value);
+    // A style whose muted colour falls under 4.5:1 writes the value in the cell's ink instead.
+    var faint=ChartStyle.Light with{Muted="#B8B8B8"};
+    var inked=ChartSvg.Render(spec with{Style=faint});
+    Check(Regex.IsMatch(inked,$"font-weight='600' fill='{faint.Text}'[^>]*>1.2<"),"ink when muted is too faint");
+    // Without NotRatedKeepsValue the reason leads, then the sub-label, then the note, as 0.46.1 orders a not-rated cell.
+    var led=WordsAt(ChartSvg.Render(spec with{NotRatedKeepsValue=false}),175);
+    Check(led.Skip(led.Length-4).SequenceEqual(["too few starts","to rate","/4 starts","8 pts, 3 riders"]),string.Join(" | ",led));
+    // A not-rated cell with no value writes no value line and no note: its sub-label, then its reason.
+    var empty=WordsAt(ChartSvg.Render(FirstCell(spec,new ChartPoint(0,null,"2025"){SubLabel="/2 starts",NotRated="too few starts to rate",ValueNote=" · 2 pts"})),175);
+    Check(empty.Take(3).SequenceEqual(["/2 starts","too few starts","to rate"])&&!empty.Contains("2 pts")&&!empty.Contains("—"),string.Join(" | ",empty));
+    // A gap-label cell writes its word, its sub-label and its note.
+    var gap=WordsAt(ChartSvg.Render(FirstCell(spec,new ChartPoint(0,null,"2025"){SubLabel="/0 starts",GapLabel="did not race",ValueNote=" · 0 pts"})),175);
+    Check(gap.Take(3).SequenceEqual(["did not race","/0 starts","0 pts"]),string.Join(" | ",gap));
+});
+Test("Heatmap cells: a cell too short for its block gives up its note, then its sub-label, then its value, and its reason last",()=>{
+    var spec=Notes(HeatGrid(s=>s with{CellWidth=90,CellNotes=true,NotRatedKeepsValue=true}));
+    string[] Last(int height,int count){var l=WordsAt(ChartSvg.Render(spec with{Height=height}),175);return l.Skip(Math.Max(0,l.Length-count)).ToArray();}
+    // Two rows: a row is (Height - 160) / 2 and the block has that less 4.
+    Check(Last(288,4).SequenceEqual(["1.2","/4 starts","too few starts","to rate"]),"60: the note goes first: "+string.Join(" | ",Last(288,4)));
+    Check(Last(264,3).SequenceEqual(["1.2","too few starts","to rate"]),"48: then the sub-label: "+string.Join(" | ",Last(264,3)));
+    Check(Last(240,2).SequenceEqual(["too few starts","to rate"]),"36: then the value: "+string.Join(" | ",Last(240,2)));
+    // Six rows of (320 - 160) / 6 = 26.7: one line, so the reason is cut at a word.
+    var one=WordsAt(ChartSvg.Render(Six(spec)),175);
+    Check(one.Contains("too few…")&&!one.Contains("1.2"),string.Join(" | ",one));
+    // A rated cell with a note: value, sub-label and two note lines need 49; at 48 the note goes whole, never half of it.
+    Check(WordsAt(ChartSvg.Render(spec with{Height=266}),175).Take(4).SequenceEqual(["2.8","/12 starts","34 pts,","5 riders"]),"49 fits");
+    Check(WordsAt(ChartSvg.Render(spec with{Height=264}),175).Take(3).SequenceEqual(["2.8","/12 starts","1.2"]),"48: the note goes whole, and the next cell down follows");
+});
+Test("Heatmap cells: at every width, with both switches, no word runs past its cell, and a single long word is cut rather than broken letter by letter",()=>{
+    var word=new string('w',26);
+    foreach(var width in new double[]{24,30,48,72,90,120})
+    {
+        var spec=Notes(HeatGrid(s=>s with{CellWidth=width,Height=600,CellNotes=true,NotRatedKeepsValue=true})," · "+word+", 5 riders");
+        var svg=ChartSvg.Render(spec);
+        foreach(Match m in Regex.Matches(svg,"<text[^>]*font-size='10'[^>]*>([^<]*)<"))
+            Check(ChartSvg.Wide(m.Groups[1].Value)*10/11<=width-6+1e-9,$"{width}: {m.Groups[1].Value}");
+        foreach(Match m in Regex.Matches(svg,"<text[^>]*font-size='11' font-weight='600'[^>]*>([^<]*)<"))
+            Check(ChartSvg.Wide(m.Groups[1].Value)<=width-6+1e-9,$"{width}: value {m.Groups[1].Value}");
+        Check(!Regex.IsMatch(svg,"font-size='10'[^>]*>w<"),$"{width}: a word broken letter by letter");
+    }
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

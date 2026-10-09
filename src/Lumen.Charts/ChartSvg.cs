@@ -3247,11 +3247,7 @@ public static partial class ChartSvg
                     Datum(w,si,pi,name,$"<rect {box} fill='{w.Style.Background}' stroke='{w.Style.Muted}' stroke-dasharray='3 2'{w.Fixed}/>");
                     ink = CellInk(w.Style.Background, w.Style);
                 }
-                if (s.CellText)
-                {
-                    if ((p.NotRated ?? p.GapLabel) is { } said) CellReason(w, x + cw / 2, y + ch / 2, cw, ch, said, p.SubLabel, ink);
-                    else CellWords(w, x + cw / 2, y + ch / 2, cw, ch, words.Format(p.Y!.Value), p.SubLabel, ink);
-                }
+                if (s.CellText) CellBlock(w, s, p, x + cw / 2, y + ch / 2, cw, ch, ink);
             }
         }
         string Column(double at) => HeatmapColumn(s, at);
@@ -3318,33 +3314,13 @@ public static partial class ChartSvg
         return (svg.Append("</svg>").ToString(), left, cropTop, cropBottom - cropTop);
     }
 
-    /// <summary>Writes a heatmap cell's value, 11 px and weight 600, and under it its sub-label, 10 px, in <paramref name="ink"/>, centred
-    /// on (<paramref name="cx"/>, <paramref name="cy"/>) in a cell <paramref name="cw"/> by <paramref name="ch"/>: the sub-label only where
-    /// both lines fit 6 units inside its width and 4 inside its height, and the value only where it fits on one line. The cell's name says
-    /// both already, so neither is read.</summary>
-    private static void CellWords(SvgWriter w, double cx, double cy, double cw, double ch, string value, string? sub, string ink)
+    /// <summary>The lines a not-rated cell's reason, a gap label's word or a note's clause takes in a cell <paramref name="room"/> wide at
+    /// 10 px, at most <paramref name="most"/> of them: wrapped at word breaks; words that do not fit cut at a word with "…", and a first word
+    /// wider than a line by its characters. A word after the first line that is wider than a line ends the block before it, with "…" after the
+    /// line above, and a cut first word is the whole block, so the text is always the words' start with at most one "…". Empty where not even
+    /// "…" fits (0.46.1; shared from 0.46.2).</summary>
+    private static List<string> CellLines(string said, double room, int most)
     {
-        double room = cw - 6, tall = ch - 4;
-        var fits = Wide(value) <= room;
-        var both = sub is not null && fits && 13 + 12 <= tall && Wide(sub) * 10 / 11 <= room;
-        if (!both && !(fits && 13 <= tall)) return;
-        const string unread = "pointer-events='none' aria-hidden='true'";
-        w.Text(cx, both ? cy - 3 : cy + 4, value, $"text-anchor='middle' font-size='11' font-weight='600' fill='{ink}' {unread}");
-        if (both) w.Text(cx, cy + 9, sub, $"text-anchor='middle' font-size='10' fill='{ink}' {unread}");
-    }
-
-    /// <summary>Writes a heatmap cell's words where it shows no value: a not-rated cell's reason or a gap-label cell's word, 10 px in
-    /// <paramref name="ink"/>, wrapped at word breaks onto as many lines, 12 units apart, as fit 4 inside the cell's height, each within 6
-    /// of its width, then its sub-label on a line of its own where one is left. Words that do not fit are cut at a word with "…", and a first
-    /// word wider than a line by its characters. A word after the first line that is wider than a line ends the block before it, with "…"
-    /// after the line above, and a cut first word is the whole block, so the text is always the reason's start with at most one "…". Where
-    /// not even "…" fits, nothing is written. The block is centred in the cell, its two lines where the value and sub-label of
-    /// <see cref="CellWords"/> stand. The cell's name says all of it, so none of it is read (0.46.1).</summary>
-    private static void CellReason(SvgWriter w, double cx, double cy, double cw, double ch, string said, string? sub, string ink)
-    {
-        double room = cw - 6;
-        var most = (int)Math.Floor((ch - 4) / 12);
-        if (most < 1) return;
         static double Width(string text) => Wide(text) * 10 / 11;
         string Fit(string text)
         {
@@ -3355,18 +3331,19 @@ public static partial class ChartSvg
         }
         var words = said.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var lines = new List<string>();
+        if (most < 1) return lines;
         var i = 0;
         while (i < words.Length && lines.Count < most)
         {
             // A word wider than a line is cut by its characters only as the first word, and then nothing follows it: after the first line
-            // the block ends before it, as it does for words that run out of lines, so the text is only ever the reason's start.
+            // the block ends before it, as it does for words that run out of lines, so the text is only ever the words' start.
             if (lines.Count > 0 && Width(words[i]) > room) break;
             var line = words[i++];
             while (i < words.Length && Width(line + " " + words[i]) <= room) line += " " + words[i++];
             lines.Add(line);
             if (Width(line) > room) break;
         }
-        if (i < words.Length)
+        if (i < words.Length && lines.Count > 0)
         {
             // Words are left over: the last line gives up words until an ellipsis fits after it.
             var last = lines[^1];
@@ -3375,13 +3352,105 @@ public static partial class ChartSvg
         }
         for (var k = 0; k < lines.Count; k++) lines[k] = Fit(lines[k]);
         lines.RemoveAll(line => line.Length == 0);
-        if (lines.Count == 0) return;
-        var withSub = sub is not null && lines.Count < most && Width(sub) <= room;
-        var count = lines.Count + (withSub ? 1 : 0);
-        var first = cy - count * 6 + 9;
+        return lines;
+    }
+
+    /// <summary>A heatmap cell's note as <see cref="ChartSpec.CellNotes"/> draws it: without the spaces it starts with, and then one leading
+    /// <c>·</c> or <c>,</c> and the spaces after it, which part it from the value in the cell's name, so <c>" · 34 pts, 5 riders"</c> is
+    /// drawn <c>34 pts, 5 riders</c> (0.46.2).</summary>
+    internal static string CellNote(string note)
+    {
+        var text = note.TrimStart();
+        if (text.Length > 0 && text[0] is '·' or ',') text = text[1..].TrimStart();
+        return text.TrimEnd();
+    }
+
+    /// <summary>The lines a drawn note takes in a cell <paramref name="room"/> wide at 10 px, as many as it needs: its clauses, each up to and
+    /// including its comma, joined on one line while they fit, and a clause wider than a line wrapped at its words as a reason is (0.46.2).</summary>
+    private static List<string> NoteLines(string note, double room)
+    {
+        static double Width(string text) => Wide(text) * 10 / 11;
+        var parts = note.Split(", ");
+        var lines = new List<string>();
+        for (var k = 0; k < parts.Length; k++)
+        {
+            var clause = (k < parts.Length - 1 ? parts[k] + "," : parts[k]).Trim();
+            if (clause.Length == 0) continue;
+            if (lines.Count > 0 && Width(lines[^1] + " " + clause) <= room) lines[^1] += " " + clause;
+            else if (Width(clause) <= room) lines.Add(clause);
+            else lines.AddRange(CellLines(clause, room, int.MaxValue));
+        }
+        return lines;
+    }
+
+    /// <summary>What a heatmap cell with <see cref="ChartSpec.CellText"/> may write, before any of it is given up for height (0.46.2):
+    /// <list type="bullet">
+    /// <item><description><c>Value</c>: its value in its format and unit; for a not-rated cell only with
+    /// <see cref="ChartSpec.NotRatedKeepsValue"/>, when <c>Kept</c> is true; null where the cell writes none or it is wider than the cell
+    /// less 6.</description></item>
+    /// <item><description><c>Sub</c>: its sub-label where it fits that width.</description></item>
+    /// <item><description><c>Note</c>: its note's lines with <see cref="ChartSpec.CellNotes"/>, for a cell with a value or a gap
+    /// label.</description></item>
+    /// <item><description><c>Said</c>: a not-rated cell's reason or a gap label's word, which leads the block (<c>ReasonFirst</c>) unless a
+    /// not-rated cell keeps its value.</description></item>
+    /// <item><description><c>Rated</c>: neither, a cell whose value is its words: when that value does not fit, it writes nothing, as in
+    /// 0.46.0.</description></item>
+    /// </list></summary>
+    private sealed record CellParts(string? Value, bool Kept, string? Sub, List<string> Note, string? Said, bool ReasonFirst, bool Rated);
+
+    private static CellParts PartsOf(ChartSpec s, ChartPoint p, double cw)
+    {
+        var room = cw - 6;
+        var said = p.NotRated ?? p.GapLabel;
+        var kept = p.NotRated is not null && s.NotRatedKeepsValue;
+        var value = p.Y is { } y && (said is null || kept) ? HeatmapValues(s).Format(y) : null;
+        if (value is not null && Wide(value) > room) value = null;
+        var sub = p.SubLabel is { } line && Wide(line) * 10 / 11 <= room ? line : null;
+        var note = s.CellNotes && p.ValueNote is { } written && (p.Y.HasValue || p.GapLabel is not null) && CellNote(written) is { Length: > 0 } text
+            ? NoteLines(text, room) : [];
+        return new(value, kept, sub, note, said, said is not null && !kept, said is null);
+    }
+
+    /// <summary>Writes a heatmap cell's words, centred on (<paramref name="cx"/>, <paramref name="cy"/>) in a cell <paramref name="cw"/> by
+    /// <paramref name="ch"/>, as one block of lines 12 units apart within 6 of its width and 4 of its height (0.46.2):
+    /// <list type="bullet">
+    /// <item><description>a rated cell: its value, 11 px and weight 600, then its sub-label, then its note's lines;</description></item>
+    /// <item><description>a not-rated cell that keeps its value: its value, muted where <see cref="ChartStyle.Muted"/> clears 4.5:1
+    /// against the background, then its sub-label, its note and its reason;</description></item>
+    /// <item><description>any other not-rated or gap-label cell: its reason or word, then its sub-label, then its note.</description></item>
+    /// </list>
+    /// Where the cell is too short for them all it gives up its note, whole, then its sub-label, then its value, and last its reason's lines
+    /// from the end, the last kept ending in "…". The block's first line stands at <c>cy − 6 × lines + 9</c>, and a value alone at
+    /// <c>cy + 4</c>, where 0.46.0 and 0.46.1 wrote them, so a cell without the 0.46.2 switches is drawn as before. The cell's name says all
+    /// of it, so none of it is read.</summary>
+    private static void CellBlock(SvgWriter w, ChartSpec s, ChartPoint p, double cx, double cy, double cw, double ch, string ink)
+    {
+        var parts = PartsOf(s, p, cw);
+        if (parts.Rated && parts.Value is null) return;
+        double room = cw - 6, tall = ch - 4;
+        string? value = parts.Value, sub = parts.Sub;
+        var note = parts.Note;
+        var reason = parts.Said is { } said ? CellLines(said, room, int.MaxValue) : [];
+        int Count() => (value is null ? 0 : 1) + (sub is null ? 0 : 1) + note.Count + reason.Count;
+        bool Fits() => 12 * Count() + (value is null ? 0 : 1) <= tall;
+        if (!Fits()) note = [];
+        if (!Fits()) sub = null;
+        if (!Fits()) value = null;
+        if (!Fits() && parts.Said is { } cut) reason = CellLines(cut, room, (int)Math.Floor(tall / 12));
+        if (Count() == 0 || !Fits()) return;
+        var block = new List<(string Text, bool IsValue)>();
+        if (parts.ReasonFirst) block.AddRange(reason.Select(line => (line, false)));
+        if (value is not null) block.Add((value, true));
+        if (sub is not null) block.Add((sub, false));
+        block.AddRange(note.Select(line => (line, false)));
+        if (!parts.ReasonFirst) block.AddRange(reason.Select(line => (line, false)));
+        var first = block is [{ IsValue: true }] ? cy + 4 : cy - block.Count * 6 + 9;
+        var valueInk = parts.Kept && Contrast.Ratio(w.Style.Muted, w.Style.Background) >= 4.5 ? w.Style.Muted : ink;
         const string unread = "pointer-events='none' aria-hidden='true'";
-        for (var k = 0; k < lines.Count; k++) w.Text(cx, first + 12 * k, lines[k], $"text-anchor='middle' font-size='10' fill='{ink}' {unread}");
-        if (withSub) w.Text(cx, first + 12 * lines.Count, sub, $"text-anchor='middle' font-size='10' fill='{ink}' {unread}");
+        for (var k = 0; k < block.Count; k++)
+            w.Text(cx, first + 12 * k, block[k].Text, block[k].IsValue
+                ? $"text-anchor='middle' font-size='11' font-weight='600' fill='{valueInk}' {unread}"
+                : $"text-anchor='middle' font-size='10' fill='{ink}' {unread}");
     }
 
     private static void Radar(SvgWriter w, ChartSpec s)
