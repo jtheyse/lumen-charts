@@ -391,8 +391,12 @@ heatmap-table/dark BE78211E3CFB1F15
 heatmap-table/midnight 4ECBB3BFD1A558F4
 heatmap-table/cell-width B4DC758F81D9D397
 heatmap-table/top 72984D7AD87BEB24
-heatmap-table/fit 558094A8738F0C51
+heatmap-table/fit 2EC03FC9A65846D6
 heatmap-table/long-name B4F8F4B728071005
 heatmap-table/no-race C874876DDAF104EA
 heatmap-table/zero ECDA3388D43E68AA
-heatmap-table/reasons A6417A8B5F206FCA
+heatmap-table/reasons FE95EC402087992B
+heatmap-cells/notes FA791D3470C240ED
+heatmap-cells/notes-fixed 4A87FFF37D55F26F
+heatmap-cells/keeps-value 9E6C668F392F5E47
+heatmap-cells/both-dark FBC3775A4B72C9A6

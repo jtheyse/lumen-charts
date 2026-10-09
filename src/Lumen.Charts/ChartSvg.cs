@@ -1678,12 +1678,19 @@ public static partial class ChartSvg
     /// <summary>The height a horizontal bar chart with <see cref="ChartSpec.FitHeight"/> is drawn at: its rows, one a category, and the room
     /// round them the chart draws in, its title and description above, as <see cref="Headroom"/> moves them, and its axis or bare foot and
     /// source under, as <see cref="Floor"/> and a second source line keep them. The legend <see cref="Render"/> may add goes under that. A
-    /// heatmap is drawn at the height of its rows, <see cref="HeatmapRow"/> each, with <see cref="HeatmapBelow"/> under them, and no less
-    /// than 240 (0.46.1).</summary>
+    /// heatmap is drawn at the height of its rows, each as tall as its tallest cell's written words need (<see cref="CellNeed"/>, plus 4),
+    /// at least <see cref="HeatmapRow"/>, with <see cref="HeatmapBelow"/> under them, and no less than 240 (0.46.1; rows fitted to their
+    /// words from 0.46.2).</summary>
     internal static int FittedHeight(ChartSpec s)
     {
         if (s.Kind == ChartKind.Heatmap)
-            return Math.Max(240, (int)Math.Ceiling(80 + Headroom(s) + s.Series.Count * HeatmapRow + HeatmapBelow(s) + 14 * Math.Max(0, Wrap(s.Source, s.Width - 48).Length - 1)));
+        {
+            // Every row is as tall as the tallest cell's words, at the cells' width as Heatmap draws them, and at least HeatmapRow.
+            var cats = HeatmapColumns(s);
+            var cw = cats.Length == 0 ? 0 : s.CellWidth ?? (s.Width - HeatmapLeftOf(s) - 35) / cats.Length;
+            var row = Math.Max(HeatmapRow, s.Series.SelectMany(series => series.Points).Select(p => CellNeed(s, p, cw) + 4).DefaultIfEmpty(0).Max());
+            return Math.Max(240, (int)Math.Ceiling(80 + Headroom(s) + s.Series.Count * row + HeatmapBelow(s) + 14 * Math.Max(0, Wrap(s.Source, s.Width - 48).Length - 1)));
+        }
         var rows = Math.Max(1, s.Series.SelectMany(series => series.Points).Select(p => p.X).Distinct().Count());
         var pitch = s.Series.Any(series => series.Points.Any(p => p.SubLabel is not null)) ? SubRow : s.BarTrack ? TrackRow : BarRow;
         var foot = 14 * Math.Max(0, Wrap(s.Source, s.Width - 48).Length - 1);
@@ -3093,7 +3100,8 @@ public static partial class ChartSvg
     internal const double HeatmapLeft = 130;
     /// <summary>The widest a heatmap's name column grows for long row names (0.46.1).</summary>
     internal const double HeatmapWidest = 240;
-    /// <summary>The height <see cref="ChartSpec.FitHeight"/> gives each of a heatmap's rows (0.46.1).</summary>
+    /// <summary>The least height <see cref="ChartSpec.FitHeight"/> gives each of a heatmap's rows (0.46.1); a row grows past it to hold its
+    /// tallest cell's words (0.46.2).</summary>
     internal const double HeatmapRow = 36;
     /// <summary>The narrowest drawing a chart may be, in SVG units, a sparkline aside.</summary>
     internal const int MinWidth = 320;
@@ -3463,6 +3471,21 @@ public static partial class ChartSvg
             w.Text(cx, first + 12 * k, block[k].Text, block[k].IsValue
                 ? $"text-anchor='middle' font-size='11' font-weight='600' fill='{valueInk}' {unread}"
                 : $"text-anchor='middle' font-size='10' fill='{ink}' {unread}");
+    }
+
+    /// <summary>The height a heatmap cell's words take with every line kept, as <see cref="CellBlock"/> writes them in a cell tall enough: 12
+    /// units a line and 1 more where it writes a value; 0 where it writes nothing, without <see cref="ChartSpec.CellText"/>, where a
+    /// rated cell's value is wider than the cell, or where a leading reason fits nothing, not even "…". <see cref="FittedHeight"/> sizes a
+    /// heatmap's rows by its tallest cell (0.46.2).</summary>
+    internal static double CellNeed(ChartSpec s, ChartPoint p, double cw)
+    {
+        if (!s.CellText) return 0;
+        var parts = PartsOf(s, p, cw);
+        if (parts.Rated && parts.Value is null) return 0;
+        var reason = parts.Said is { } said ? CellLines(said, cw - 6, int.MaxValue).Count : 0;
+        if (parts.ReasonFirst && reason == 0) return 0;
+        var lines = (parts.Value is null ? 0 : 1) + (parts.Sub is null ? 0 : 1) + parts.Note.Count + reason;
+        return 12 * lines + (parts.Value is null ? 0 : 1);
     }
 
     private static void Radar(SvgWriter w, ChartSpec s)

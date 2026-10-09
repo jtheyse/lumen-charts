@@ -10240,8 +10240,12 @@ Test("Heatmap follow-ups: a not-rated cell writes its reason, wrapped, instead o
     Check(ninety.Contains(">too few starts<")&&ninety.Contains(">to rate<"),"two whole lines at 90");
     Check(!ninety.Contains(">1.2<"),"the value is not written");
     Check(ninety.Contains("1.2, not rated: too few starts to rate"),"the name keeps the value and the reason");
-    // At 72 a line holds 66: "too few", then "starts to", and "rate" is left over, so the second line ends with an ellipsis.
-    var seventy=ChartSvg.Render(Six(HeatGrid(s=>s with{CellWidth=72,FitHeight=true})));
+    // 0.46.2 fits the rows to the words: the reason's two lines and the sub-label take 4 + 3 x 12 = 40, so the sub-label shows under it.
+    Check(Regex.IsMatch(ninety,"font-size='10'[^>]*>/4 starts<"),"rows of 40 now hold the sub-label under the reason");
+    // 36-unit rows, set by the height: a line holds 66, so "too few", then "starts to", and "rate" is left over, and the second line ends with
+    // an ellipsis. FitHeight would now grow the rows to hold all three lines and the sub-label (52 a row), so the cut is pinned at a fixed
+    // height: 80 + 6 x 36 + 80 = 376.
+    var seventy=ChartSvg.Render(Six(HeatGrid(s=>s with{CellWidth=72,Height=376})));
     Check(seventy.Contains(">too few<")&&seventy.Contains(">starts to…<"),"cut at a word at 72");
     // A taller cell takes more lines and then the sub-label: two rows are raised to the 240 floor, 52 a row, four lines.
     var tall=ChartSvg.Render(HeatGrid(s=>s with{CellWidth=72,FitHeight=true}));
@@ -10652,6 +10656,54 @@ Test("Heatmap cells: a not-rated or gap-label cell whose reason fits nothing wri
     // With room, the same cells write their words, so the narrow drawing's silence is the guard's and not an empty spec's.
     Check(Written(ChartSvg.Render(Narrow(900))).Contains("did"),"the same cells write at 900: "+Written(ChartSvg.Render(Narrow(900))));
     Check(Written(ChartSvg.Render(Narrow(320)))=="","a reason that fits nothing writes nothing, not its sub-label or note either: "+Written(ChartSvg.Render(Narrow(320))));
+});
+Test("Heatmap cells: FitHeight rows are as tall as the tallest cell's words, at least 36",()=>{
+    // Six rows of rated values alone keep 36: 80 + 6 x 36 + 56 = 352, as in 0.46.1.
+    var six=HeatGrid(s=>s with{FitHeight=true,Series=Enumerable.Range(0,6).Select(i=>new ChartSeries($"Row {i}",[new ChartPoint(0,i+1,"2025"),new ChartPoint(1,i+2,"2026")])).ToArray()});
+    Check(ChartSvg.Render(six).Contains("viewBox='0 0 600 352'"),"36 a row");
+    // A not-rated cell at 90 needs its two reason lines and its sub-label: 4 + 3 x 12 = 40, so 80 + 6 x 40 + 56 = 376, and "/4 starts" is written.
+    var reasons=ChartSvg.Render(Six(HeatGrid(s=>s with{CellWidth=90,FitHeight=true})));
+    Check(reasons.Contains("viewBox='0 0 345 376'")&&reasons.Contains("height='38'"),"40 a row: "+Regex.Match(reasons,"viewBox='[^']*'").Value);
+    Check(Regex.IsMatch(reasons,"font-size='10'[^>]*>/4 starts<"),"the sub-label shows under the reason");
+    // Both switches with a two-line note on the not-rated cell: 4 + 13 + 5 x 12 = 77, so 80 + 6 x 77 + 56 = 598.
+    var full=Six(Notes(HeatGrid(s=>s with{CellWidth=90,FitHeight=true,CellNotes=true,NotRatedKeepsValue=true}),distance:" · 14 pts, 6 riders"));
+    var drawn=ChartSvg.Render(full);
+    Check(drawn.Contains("viewBox='0 0 345 598'"),"77 a row: "+Regex.Match(drawn,"viewBox='[^']*'").Value);
+    Check(WordsAt(drawn,175).Skip(4).Take(6).SequenceEqual(["1.2","/4 starts","14 pts,","6 riders","too few starts","to rate"]),string.Join(" | ",WordsAt(drawn,175)));
+    // The frame, the row names and the frozen band follow the fitted row.
+    var frame=ChartSvg.HeatmapFrame(full);
+    Check(frame.Top==80&&frame.Bottom==80+6*77,"frame "+frame);
+    Check(drawn.Contains($"<text x='118' y='{(80+1.5*77+4).ToString(CultureInfo.InvariantCulture)}'"),"the second row's name in the middle of its row");
+    var band=ChartSvg.HeatmapNameBand(full)!.Value;
+    Check(band.Top==80&&band.Height==6*77+24,"band "+band.Top+" "+band.Height);
+    // Two rows stay at the 240 floor, where they share its height as before.
+    Check(ChartSvg.Render(HeatGrid(s=>s with{FitHeight=true})).Contains("viewBox='0 0 600 240'"),"the floor");
+});
+Test("Heatmap cells: fitted rows never hide a word, with both switches and any note, at every width",()=>{
+    foreach(var width in new double[]{24,48,72,90,120})
+    {
+        var spec=Six(Notes(HeatGrid(s=>s with{CellWidth=width,FitHeight=true,CellNotes=true,NotRatedKeepsValue=true}),distance:" · 1840 pts, 12 athletes, 53 pts a rider"));
+        var lines=WordsAt(ChartSvg.Render(spec),130+width/2);
+        // With room for every line, nothing is given up for height: no ellipsis but where a single word is wider than the cell.
+        Check(lines.All(l=>!l.EndsWith("…")||!l.Contains(' ')),$"{width}: {string.Join(" | ",lines)}");
+        Check(width<72||lines.Contains("/4 starts")&&lines.Contains("/12 starts"),$"{width}: the sub-labels: {string.Join(" | ",lines)}");
+    }
+});
+Test("Heatmap cells: CellNeed is the height of the lines a cell writes with none given up, and 0 where it writes nothing",()=>{
+    var spec=HeatGrid(s=>s with{CellWidth=90});
+    double Need(ChartSpec s,int row,int col,double width=90)=>ChartSvg.CellNeed(s,s.Series[row].Points[col],width);
+    // A line holds 84 at 90. Sprint 2025: its value and its sub-label, 13 + 12. Long distance 2025, not rated: two reason lines and its sub-label.
+    Check(Need(spec,0,0)==25&&Need(spec,1,0)==36,$"{Need(spec,0,0)} {Need(spec,1,0)}");
+    // With both switches: a value, a sub-label and a note of two lines is 13 + 36 = 49; a kept value, sub-label, one note line and two reason lines 13 + 48 = 61.
+    var both=Notes(HeatGrid(s=>s with{CellWidth=90,CellNotes=true,NotRatedKeepsValue=true}));
+    Check(Need(both,0,0)==49&&Need(both,1,0)==61,$"{Need(both,0,0)} {Need(both,1,0)}");
+    // Nothing is written without cell text, or where a rated cell's value is wider than the cell: "2.8 pts" is wider than 24.
+    Check(ChartSvg.CellNeed(spec with{CellText=false},spec.Series[0].Points[0],90)==0,"no cell text");
+    Check(Need(spec with{YUnit=" pts"},0,0,30)==0,"a value too wide for its cell writes nothing, its sub-label too");
+    // A leading reason that fits nothing, not even "…", writes nothing at all, so it needs nothing: in 11-wide cells a line is 5.07, room for the
+    // sub-label "." (3) but not for "…" (6.2). With room, the same cell needs its reason's line and its sub-label.
+    var thin=new ChartPoint(0,null,"S0"){SubLabel=".",NotRated="no starts"};
+    Check(ChartSvg.CellNeed(spec,thin,11.07)==0&&ChartSvg.CellNeed(spec,thin,90)==24,$"{ChartSvg.CellNeed(spec,thin,11.07)} {ChartSvg.CellNeed(spec,thin,90)}");
 });
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)

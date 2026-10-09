@@ -878,6 +878,13 @@ lines.Add($"heatmap-table/long-name {Hash(Render(table with { Series = [table.Se
 lines.Add($"heatmap-table/no-race {Hash(Render(table with { Series = table.Series.Select(row => row with { Points = [.. row.Points, new ChartPoint(4, null, "2027") { SubLabel = "/0 starts", GapLabel = "did not race" }] }).ToArray() }))}");
 lines.Add($"heatmap-table/zero {Hash(Render(table with { IncludeZero = true }))}");
 lines.Add($"heatmap-table/reasons {Hash(Render(table with { CellWidth = 90, FitHeight = true }))}");
+// 0.46.2: heatmap cells show it all, on the same invented table with a points note in every cell: notes drawn with rows fitted to them,
+// notes in the fixed height that gives them up first, not-rated cells keeping their value, and both switches on the Dark preset.
+var noted = table with { Series = table.Series.Select((row, r) => row with { Points = row.Points.Select((p, c) => p with { ValueNote = $" · {12 + r * 7 + c * 3} pts, {3 + (r + c) % 4} riders" }).ToArray() }).ToArray() };
+lines.Add($"heatmap-cells/notes {Hash(Render(noted with { CellWidth = 90, FitHeight = true, CellNotes = true }))}");
+lines.Add($"heatmap-cells/notes-fixed {Hash(Render(noted with { CellWidth = 90, CellNotes = true }))}");
+lines.Add($"heatmap-cells/keeps-value {Hash(Render(noted with { CellWidth = 90, FitHeight = true, NotRatedKeepsValue = true }))}");
+lines.Add($"heatmap-cells/both-dark {Hash(Render(CategoryGrid(ChartTheme.Dark, null, 4, 90) with { FitHeight = true, CellNotes = true, NotRatedKeepsValue = true, Series = noted.Series }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);
