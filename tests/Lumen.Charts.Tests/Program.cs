@@ -7597,6 +7597,7 @@ Test("Sports page: Season arc and Gap to the leader close the Racing section, th
 });
 // 0.46.0: the Category heatmap card, a heatmap table of invented categories by season; 0.46.1 sets it with its labels on top, fitted to its
 // rows, 90 pixels to a season, a long row name, a season nobody raced, and its toolbar off with only "View data" kept.
+// 0.46.2 sets both switches on it: its points in every cell, and its thin cells keeping their value.
 Test("Sports page: the Category heatmap closes the Racing section, its cells the points per start of the points and starts behind them, exactly the cells under ten starts not rated and the one with none a gap",()=>{
     var card=sports.Single(c=>c.Id=="category-heatmap");var heat=card.Spec;
     Check(card.Section=="racing"&&!card.Wide&&sports.Last(c=>c.Section=="racing")==card&&heat is{Kind:ChartKind.Heatmap,CellText:true,CellWidth:90,ColumnLabelsOnTop:true,FitHeight:true,CellNotes:true,NotRatedKeepsValue:true,YUnit:" pts"}&&card is{ShowToolbar:false,ShowDataButton:true},"the card");
@@ -10241,7 +10242,8 @@ Test("Heatmap follow-ups: names are cut 12 short of the grid in a 130 column and
     var cut=Regex.Match(svg,"<text x='228'[^>]*>([^<]*)<").Groups[1].Value;
     Check(cut.EndsWith("…")&&ChartSvg.Broad(cut)<=222&&cut.Length==name.Length-1,"cut to the 222 left: "+cut);
 });
-// Six rows, so FitHeight's rows are 36 tall rather than raised to the 240 floor: a cell 34 tall holds two 10 px lines.
+// Six rows, so FitHeight's rows are not raised to the 240 floor, and a fixed Height of 376 gives them 36 each. FitHeight's rows are at least 36
+// and grow with the tallest cell's words (0.46.2), so a test that needs 36-unit rows sets Height=376 rather than FitHeight: a cell 34 tall holds two 10 px lines.
 ChartSpec Six(ChartSpec s)=>s with{Series=[..s.Series,..Enumerable.Range(2,4).Select(i=>new ChartSeries($"Row {i}",[new ChartPoint(0,i,"2025"),new ChartPoint(1,i+1,"2026")]))]};
 Test("Heatmap follow-ups: a not-rated cell writes its reason, wrapped, instead of its value",()=>{
     // HeatGrid's Long distance 2025 is not rated "too few starts to rate", with the value 1.2.

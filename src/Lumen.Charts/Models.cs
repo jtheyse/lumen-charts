@@ -799,8 +799,8 @@ public sealed record ChartSpec
     /// 28 + 3 × 36 + 24 = 160 units tall, and one is 88: no 240-unit floor applies. <see cref="Height"/> is still checked, 240 to 2160, and
     /// otherwise not used. The height follows the categories the chart draws, so the component, which draws a hidden series without its
     /// points, draws a chart shorter when the series it hides held a category alone; its <c>FitWidth</c> scaling is unchanged. A heatmap's
-    /// rows are as tall as the tallest cell's written words need, 12 units a line and 13 for a value, plus 4, and at least 36 (0.46.2), and
-    /// with it an empty <see cref="Source"/> reserves no room under the grid; it keeps the usual 240-unit floor.
+    /// rows are as tall as the tallest cell's written words need, 12 units a line and 13 for a value, plus 4, and at least 36 (0.46.2).
+    /// A fitted heatmap with an empty <see cref="Source"/> reserves no room under the grid, and keeps the usual 240-unit floor.
     /// Off by default; other kinds refuse it.
     /// </summary>
     public bool FitHeight { get; init; }
@@ -815,11 +815,12 @@ public sealed record ChartSpec
     /// </summary>
     public bool CellNotes { get; init; }
     /// <summary>
-    /// On a heatmap with <see cref="CellText"/>, a not-rated cell keeps its value (0.46.2): it writes its value, 11 px and weight 600, in
-    /// the style's <see cref="ChartStyle.Muted"/> colour where that clears 4.5:1 against <see cref="ChartStyle.Background"/>, and in the
-    /// cell's ink otherwise; then its sub-label; then its note, with <see cref="CellNotes"/>; then its <see cref="ChartPoint.NotRated"/>
-    /// reason, wrapped, as its last lines. The dashed outline, the reason and the cell's name still say it is not rated, so the muted
-    /// colour is never the only cue. Off, a not-rated cell writes its reason in place of its value, as 0.46.1 does. Heatmaps with cell
+    /// On a heatmap with <see cref="CellText"/>, a not-rated cell keeps its value (0.46.2): it writes its value, if it has one, 11 px and
+    /// weight 600, in the style's <see cref="ChartStyle.Muted"/> colour where that clears 4.5:1 against <see cref="ChartStyle.Background"/>,
+    /// and in the cell's ink otherwise; then its sub-label; then its note, with <see cref="CellNotes"/>, if it has a value; then its
+    /// <see cref="ChartPoint.NotRated"/> reason, wrapped, as its last lines. A not-rated cell with no value writes its sub-label and then
+    /// its reason, with no value line and no note. The dashed outline, the reason and the cell's name still say it is not rated, so the
+    /// muted colour is never the only cue. Off, a not-rated cell writes its reason in place of its value, as 0.46.1 does. Heatmaps with cell
     /// text only; false by default, and left out of the gradient-ID hash while false.
     /// </summary>
     public bool NotRatedKeepsValue { get; init; }

@@ -19,7 +19,7 @@ public static partial class ChartValidation
         if (spec.Kind == ChartKind.Strip) Strip(spec);
         Track(spec);
         if (spec.FitHeight && spec.Kind is not (ChartKind.Bar or ChartKind.Heatmap))
-            throw new ArgumentException("FitHeight works out a chart's height from its rows, a horizontal bar chart's one a category and a heatmap's 36 units each, so it applies to bar charts and heatmaps only; a strip is drawn as tall as its content already, and the other kinds lay their marks out in the Height they are given.");
+            throw new ArgumentException("FitHeight works out a chart's height from its rows, a horizontal bar chart's one a category and a heatmap's as tall as its cells' words need, at least 36 units each, so it applies to bar charts and heatmaps only; a strip is drawn as tall as its content already, and the other kinds lay their marks out in the Height they are given.");
         if (!Enum.IsDefined(spec.XAxis) || !Enum.IsDefined(spec.YAxis)) throw new ArgumentException("Unknown axis kind.");
         Style(spec.Style);
         if (spec.YAxis == AxisKind.Time) throw new ArgumentException("Time axes are supported on X only.");

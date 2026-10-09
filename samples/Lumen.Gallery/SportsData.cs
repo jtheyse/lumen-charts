@@ -1092,8 +1092,8 @@ public static class SportsData
         // colour scale, and keeps its value, muted, above its starts, its note and its reason; a season a category did not race is dashed too
         // and writes "did not race"; each season takes 90 pixels, wide enough for "too few starts to rate" on two lines, so on a phone the grid
         // scrolls sideways rather than squeezing, the row names held at the left as it does; the column labels stand above the grid and the
-        // card is as tall as its rows need, the tallest cell's words deciding. The note after each value names the points and riders behind
-        // it, in the cell, in the cell's name and in the grid table, with its own separator.
+        // card is as tall as its rows need, the tallest cell's words deciding. The note keeps its own separator for the cell's name and the
+        // grid table; the cell trims it.
         var categories = Chart(half, 340) with
         {
             Kind = ChartKind.Heatmap, YUnit = " pts", CellText = true, CellWidth = 90, ColumnLabelsOnTop = true, FitHeight = true,
