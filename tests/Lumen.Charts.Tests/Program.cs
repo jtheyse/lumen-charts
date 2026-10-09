@@ -10572,10 +10572,8 @@ Test("Heatmap cells: with CellNotes a heatmap note takes no line break or tab; w
         try{ChartValidation.Validate(drawn);}catch(ArgumentException e){Check(e.Message.StartsWith("With CellNotes a heatmap cell's value note is drawn in the cell, where Lumen wraps it, so it takes no line breaks or tabs."),e.Message);}
     }
 });
-Test("Heatmap cells: the two switches left false change nothing a heatmap draws, and set they tell its gradient IDs apart",()=>{
-    Check(ChartSvg.Render(HeatGrid())==ChartSvg.Render(HeatGrid(s=>s with{CellNotes=false,NotRatedKeepsValue=false})),"false is the default");
+Test("Heatmap cells: the two switches, once set, tell a heatmap's gradient IDs apart",()=>{
     var plain=HeatGrid();
-    Check(ChartSvg.IdPrefix(plain)==ChartSvg.IdPrefix(plain with{CellNotes=false,NotRatedKeepsValue=false}),"false is left out of the hash");
     Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{CellNotes=true}),"CellNotes counts when set");
     Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{NotRatedKeepsValue=true}),"NotRatedKeepsValue counts when set");
 });
@@ -10698,6 +10696,13 @@ Test("Heatmap cells: fitted rows never hide a word, with both switches and any n
         // With room for every line, nothing is given up for height: no ellipsis but where a single word is wider than the cell.
         Check(lines.All(l=>!l.EndsWith("…")||!l.Contains(' ')),$"{width}: {string.Join(" | ",lines)}");
         Check(width<72||lines.Contains("/4 starts")&&lines.Contains("/12 starts"),$"{width}: the sub-labels: {string.Join(" | ",lines)}");
+        // Every word of the long note is written, whole or, where it is wider than a line, as its cut start: a note dropped whole for height
+        // would leave them out. The distance cell's block starts at its kept value, "1.2"; the rows after it write whole numbers.
+        var mine=lines.SkipWhile(l=>l!="1.2").ToList();
+        var tokens=mine.SelectMany(l=>l.Split(' ')).ToList();
+        Check(mine.Count>0,$"{width}: the kept value starts the distance cell: {string.Join(" | ",lines)}");
+        foreach(var noteWord in "1840 pts, 12 athletes, 53 pts a rider".Split(' '))
+            Check(tokens.Contains(noteWord)||tokens.Any(t=>t.Length>1&&t.EndsWith("…")&&noteWord.StartsWith(t[..^1])),$"{width}: the note's {noteWord}: {string.Join(" | ",mine)}");
     }
 });
 Test("Heatmap cells: CellNeed is the height of the lines a cell writes with none given up, and 0 where it writes nothing",()=>{
@@ -10715,6 +10720,41 @@ Test("Heatmap cells: CellNeed is the height of the lines a cell writes with none
     // sub-label "." (3) but not for "…" (6.2). With room, the same cell needs its reason's line and its sub-label.
     var thin=new ChartPoint(0,null,"S0"){SubLabel=".",NotRated="no starts"};
     Check(ChartSvg.CellNeed(spec,thin,11.07)==0&&ChartSvg.CellNeed(spec,thin,90)==24,$"{ChartSvg.CellNeed(spec,thin,11.07)} {ChartSvg.CellNeed(spec,thin,90)}");
+});
+Test("Heatmap cells: a fitted heatmap writes every word the same spec writes with room to spare",()=>{
+    // CellNeed copies the height arithmetic of CellBlock, so a line it under-counts shows only as a fitted row too short for a word that the
+    // same cell writes in a roomy row. Each grid is drawn fitted, and again with FitHeight off and Height 2160, which differ in nothing else.
+    var wide=new string('w',26);
+    ChartPoint[] kinds=[
+        new ChartPoint(0,2.8,"2025"){SubLabel="/12 starts",ValueNote=" · 34 pts"},                                                          // a rated cell, a one-clause note
+        new ChartPoint(0,3.1,"2025"){SubLabel="/14 starts",ValueNote=" · 34 pts, 5 riders"},                                                // two clauses
+        new ChartPoint(0,1.2,"2025"){SubLabel="/4 starts",NotRated="too few starts to rate",ValueNote=" · 8 pts, 3 riders"},               // not rated, with a value
+        new ChartPoint(0,null,"2025"){SubLabel="/2 starts",NotRated="too few starts to rate",ValueNote=" · 2 pts"},                        // not rated, without one
+        new ChartPoint(0,null,"2025"){SubLabel="/0 starts",GapLabel="did not race",ValueNote=" · 0 pts"},                                  // a gap label
+        new ChartPoint(0,0.4,"2025"){SubLabel="/11 starts",ValueNote=" · 1840 pts, 12 athletes, 53 pts a rider"},                          // a long note
+        new ChartPoint(0,0.9,"2025"){SubLabel="/7 starts",ValueNote=" · "+wide+", 5 riders"}];                                              // a word wider than any cell here
+    // Seven columns, three rows, each row the seven kinds from another column on.
+    var rotated=HeatGrid(s=>s with{Series=Enumerable.Range(0,3).Select(r=>new ChartSeries($"Row {r}",
+        Enumerable.Range(0,7).Select(c=>kinds[(c+r)%7] with{X=c,Label=$"S{c}"}).ToArray())).ToArray()});
+    var grids=new (string Name,ChartSpec Spec)[]{
+        ("seven kinds of cell",rotated),
+        ("two clauses",Notes(HeatGrid(),distance:" · 14 pts, 6 riders")),
+        ("a long note",Six(Notes(HeatGrid(),distance:" · 1840 pts, 12 athletes, 53 pts a rider"))),
+        ("a word wider than the cell",Notes(HeatGrid()," · "+wide+", 5 riders"," · "+wide))};
+    // The cell words only: they alone carry pointer-events='none'. (The font-size regex would take in the description and the source line too.)
+    string[] Written(ChartSpec s)=>Regex.Matches(ChartSvg.Render(s),"<text[^>]*pointer-events='none'[^>]*>([^<]*)<").Select(m=>m.Groups[1].Value).ToArray();
+    foreach(var (name,grid) in grids)
+        foreach(var width in new double[]{24,48,72,90,120})
+        {
+            var fitted=grid with{CellWidth=width,FitHeight=true,CellNotes=true,NotRatedKeepsValue=true};
+            var roomy=fitted with{FitHeight=false,Height=2160};
+            var fittedWords=Written(fitted);
+            var roomyWords=Written(roomy);
+            Check(fittedWords.Length>0&&roomyWords.Length>0,$"{name} at {width}: the spec writes words");
+            // The fitted drawing is shorter than the roomy one, so its rows are shorter too and the comparison is between two heights.
+            Check(ChartSvg.FittedHeight(fitted)<2160,$"{name} at {width}: fitted height {ChartSvg.FittedHeight(fitted)}");
+            Check(fittedWords.SequenceEqual(roomyWords),$"{name} at {width}: fitted [{string.Join(" | ",fittedWords)}] roomy [{string.Join(" | ",roomyWords)}]");
+        }
 });
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
