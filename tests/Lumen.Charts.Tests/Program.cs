@@ -10640,6 +10640,16 @@ Test("Heatmap cells: at every width, with both switches, no word runs past its c
         Check(!Regex.IsMatch(svg,"font-size='10'[^>]*>w<"),$"{width}: a word broken letter by letter");
     }
 });
+Test("Heatmap cells: a not-rated or gap-label cell whose reason fits nothing writes nothing at all, its sub-label and note too, as 0.46.1 did",()=>{
+    // 14 columns in a 320-wide drawing are (320 - 130 - 35) / 14 = 11.07 wide, a line 5.07: room for "." (3 at 10 px) but not for "…" (6.2).
+    var cells=Enumerable.Range(0,14).Select(i=>new ChartPoint(i,i+1,$"S{i}"){SubLabel="."}).ToArray();
+    ChartSpec Narrow(int width)=>HeatGrid(s=>s with{Width=width,CellNotes=true,Series=[new("Sprint",[
+        cells[0] with{Y=null,NotRated="no starts",ValueNote=" · ."},cells[1] with{Y=null,GapLabel="did not race",ValueNote=" · ."},..cells.Skip(2)])]});
+    string Written(string svg)=>string.Join("|",Regex.Matches(svg,"<text[^>]*pointer-events='none'[^>]*>([^<]*)<").Select(m=>m.Groups[1].Value));
+    // With room, the same cells write their words, so the narrow drawing's silence is the guard's and not an empty spec's.
+    Check(Written(ChartSvg.Render(Narrow(900))).Contains("did"),"the same cells write at 900: "+Written(ChartSvg.Render(Narrow(900))));
+    Check(Written(ChartSvg.Render(Narrow(320)))=="","a reason that fits nothing writes nothing, not its sub-label or note either: "+Written(ChartSvg.Render(Narrow(320))));
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

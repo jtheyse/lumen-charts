@@ -3421,8 +3421,8 @@ public static partial class ChartSvg
     /// </list>
     /// Where the cell is too short for them all it gives up its note, whole, then its sub-label, then its value, and last its reason's lines
     /// from the end, the last kept ending in "…". The block's first line stands at <c>cy − 6 × lines + 9</c>, and a value alone at
-    /// <c>cy + 4</c>, where 0.46.0 and 0.46.1 wrote them, so a cell without the 0.46.2 switches is drawn as before. The cell's name says all
-    /// of it, so none of it is read.</summary>
+    /// <c>cy + 4</c>, where 0.46.0 and 0.46.1 wrote them, so a cell without the 0.46.2 switches is drawn as before; so too a cell whose
+    /// leading reason fits nothing, not even "…", which writes nothing. The cell's name says all of it, so none of it is read.</summary>
     private static void CellBlock(SvgWriter w, ChartSpec s, ChartPoint p, double cx, double cy, double cw, double ch, string ink)
     {
         var parts = PartsOf(s, p, cw);
@@ -3438,6 +3438,7 @@ public static partial class ChartSvg
         if (!Fits()) value = null;
         if (!Fits() && parts.Said is { } cut) reason = CellLines(cut, room, (int)Math.Floor(tall / 12));
         if (Count() == 0 || !Fits()) return;
+        if (parts.ReasonFirst && reason.Count == 0) return;   // a reason that fits nothing, not even "…", writes nothing, sub-label and note too, as 0.46.1 did
         var block = new List<(string Text, bool IsValue)>();
         if (parts.ReasonFirst) block.AddRange(reason.Select(line => (line, false)));
         if (value is not null) block.Add((value, true));
