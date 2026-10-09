@@ -800,7 +800,8 @@ public sealed record ChartSpec
     /// otherwise not used. The height follows the categories the chart draws, so the component, which draws a hidden series without its
     /// points, draws a chart shorter when the series it hides held a category alone; its <c>FitWidth</c> scaling is unchanged. A heatmap's
     /// rows are as tall as the tallest cell's written words need, 12 units a line and 13 for a value, plus 4, and at least 36 (0.46.2).
-    /// A fitted heatmap with an empty <see cref="Source"/> reserves no room under the grid, and keeps the usual 240-unit floor.
+    /// A fitted heatmap with an empty <see cref="Source"/> reserves no room for a source line: the grid still keeps its colour-scale line
+    /// under it, and its column labels there too unless <see cref="ColumnLabelsOnTop"/> puts them above. The usual 240-unit floor applies.
     /// Off by default; other kinds refuse it.
     /// </summary>
     public bool FitHeight { get; init; }

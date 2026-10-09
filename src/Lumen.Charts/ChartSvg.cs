@@ -3322,11 +3322,12 @@ public static partial class ChartSvg
         return (svg.Append("</svg>").ToString(), left, cropTop, cropBottom - cropTop);
     }
 
-    /// <summary>The lines a not-rated cell's reason, a gap label's word or a note's clause takes in a cell <paramref name="room"/> wide at
-    /// 10 px, at most <paramref name="most"/> of them: wrapped at word breaks; words that do not fit cut at a word with "…", and a first word
-    /// wider than a line by its characters. A word after the first line that is wider than a line ends the block before it, with "…" after the
-    /// line above, and a cut first word is the whole block, so the text is always the words' start with at most one "…". Empty where not even
-    /// "…" fits (0.46.1; shared from 0.46.2).</summary>
+    /// <summary>The lines a not-rated cell's reason or a gap label's word takes in a cell <paramref name="room"/> wide at 10 px, at most
+    /// <paramref name="most"/> of them: wrapped at word breaks; words that do not fit cut at a word with "…", and a first word wider than a
+    /// line by its characters. A word after the first line that is wider than a line ends the block before it, with "…" after the line above,
+    /// and a cut first word is the whole block, so the text is always the words' start with at most one "…". Empty where not even "…" fits.
+    /// <see cref="NoteLines"/> calls it, with one line, only for a single word of a note that is wider than a line, to cut it by its
+    /// characters (0.46.1; shared from 0.46.2).</summary>
     private static List<string> CellLines(string said, double room, int most)
     {
         static double Width(string text) => Wide(text) * 10 / 11;

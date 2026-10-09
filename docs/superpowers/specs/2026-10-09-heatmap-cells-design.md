@@ -1,6 +1,6 @@
 # Heatmap cells show it all — design (0.46.2)
 
-Date: 9 October 2026. Status: design accepted in conversation ("continue", 9 October); awaiting the owner's review of this written spec.
+Date: 9 October 2026. Status: approved by the owner 9 October 2026; amended during the build.
 
 ## Purpose
 
@@ -120,8 +120,7 @@ Every cell with `CellText` writes one block of lines:
 - **Fitted rows:**
   - the row arithmetic for 36, 40 and 77;
   - the 240 floor;
-  - the frozen band's height and the row names following the fitted row;
-  - the 4,096 check.
+  - the frozen band's height and the row names following the fitted row.
 - **Hash:** IDs unchanged at the defaults; the default-JSON pin updated.
 
 ### Baseline
@@ -183,6 +182,8 @@ The handover's steps:
 - **Without `FitHeight`,** a short cell gives up its note first. The name and the grid table always carry it.
 - **Static SVG** still doesn't freeze names, as in 0.46.1.
 - **No height cap on a fitted heatmap:** `Height`'s 240–2160 is checked on the spec as given, before the rows are fitted, as in 0.46.1, so many rows of long notes can now draw taller than 2160.
+- **Narrow fitted reasons:** a not-rated reason in a fitted heatmap still wraps as 0.46.1 wraps it. A later word wider than a line ends the reason there with "…", and the rows do not grow for the rest. Between a `CellWidth` of about 34 and 43, "too few starts to rate" reads "too" and "few…".
+- **The kept value in a short fixed row:** without `FitHeight`, a cell short of room gives up its lines in a fixed order and never adds one back. So in a short fixed row `NotRatedKeepsValue` can show less: in a 40-unit row a kept-value cell writes only its two reason lines, where the same cell without the switch writes the reason and its sub-label. With `FitHeight` nothing is given up.
 
 ## Out of scope
 
