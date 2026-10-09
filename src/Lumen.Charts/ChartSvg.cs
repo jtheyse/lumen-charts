@@ -101,12 +101,14 @@ public static partial class ChartSvg
     /// does. A series' average changes only the words its marks say, so it is never part of the hash either. A point's gap label, from 0.42.0,
     /// is null unless set, and nulls are left out already, as are a heatmap's cell width and a point's not-rated reason, from 0.46.0. A heatmap's
     /// cell text, from 0.46.0, is false by default, so it is left out unless set, as are a heatmap's labels on top, from 0.46.1, false by
-    /// default, as are a heatmap's cell notes and kept not-rated values, from 0.46.2.</summary>
+    /// default, as are a heatmap's cell notes and kept not-rated values, from 0.46.2. A series' zero hairline, from 0.47.0, is false by default and
+    /// left out unless set; a point's axis label and name are null unless set.</summary>
     private static void Unfitted(JsonTypeInfo info)
     {
         if (info.Type == typeof(ChartSeries))
             foreach (var property in info.Properties)
                 if (property.Name == nameof(ChartSeries.AverageOf)) property.ShouldSerialize = (_, _) => false;
+                else if (property.Name == nameof(ChartSeries.MarkZero)) property.ShouldSerialize = (_, zero) => zero is true;
         if (info.Type != typeof(ChartSpec)) return;
         foreach (var property in info.Properties)
             if (property.Name == nameof(ChartSpec.PaintBackground)) property.ShouldSerialize = (_, _) => false;

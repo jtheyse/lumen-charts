@@ -357,6 +357,25 @@ public sealed record ChartPoint(double X, double? Y, string? Label = null, doubl
     /// the lines that fit, then its sub-label if a line is left. With <see cref="ChartSpec.NotRatedKeepsValue"/> it keeps its value instead,
     /// muted, and writes the reason as its last lines (0.46.2). A not-rated cell is drawn even when its value is null. Heatmaps only.</summary>
     public string? NotRated { get; init; }
+    /// <summary>
+    /// Drawn-only words under a column, in place of its category's name (0.47.0): one or two lines split at <c>\n</c>, each 1 to 12
+    /// characters, such as <c>6</c> or <c>1\nOct</c>. The first line stands where the name would, 12 px and muted; the second 14 units
+    /// under it, 11 px and muted, and the room under the plot grows 14 for it, as for a sub-label. The category's <see cref="Label"/> still
+    /// names it in the mark's name, its tooltip, the data table and CSV. A category takes the axis label its points give it: two different
+    /// ones are refused. With axis labels, or with <see cref="ChartSpec.CellWidth"/>, a column chart's labels are thinned by their measured
+    /// widths, two-line labels kept first and one-line labels written where they stand clear. Column charts only, and not beside
+    /// <see cref="SubLabel"/>s, which take the same line.
+    /// </summary>
+    public string? AxisLabel { get; init; }
+    /// <summary>
+    /// This point's mark's whole spoken name and tooltip, in place of the one Lumen builds (0.47.0): its <c>aria-label</c>, its native
+    /// tooltip in static SVG, the component's tooltip and keyboard announcement, and the status line when it is selected. It replaces
+    /// everything Lumen would say, the series, label, value, note, change words, zone and "projected" included, so a host that sets it says
+    /// every state the mark shows, colour included. The drawing, value labels, the data table, CSV, the grid table and the shared readout are
+    /// unchanged. 1 to 200 characters on one line. A mark that stands for several points, such as a line thinned by averaging, keeps Lumen's
+    /// name; histogram, box, violin and calendar charts, whose marks always summarise points, refuse it. Null, the default, keeps Lumen's.
+    /// </summary>
+    public string? Name { get; init; }
 
     /// <summary>A candle or OHLC bar, its Y the close. High must be the highest of the four prices and low the lowest.</summary>
     public static ChartPoint Candle(double x, double open, double high, double low, double close, string? label = null) =>
@@ -503,6 +522,14 @@ public sealed record ChartSeries(string Name, IReadOnlyList<ChartPoint> Points, 
     /// named by several values, by none, by a count, a sum or a share, refuse it. Null, the default, says nothing.
     /// </summary>
     public string? AverageOf { get; init; }
+    /// <summary>
+    /// Draws a value of exactly 0 as a hairline (0.47.0): a bar 1 unit high on the baseline, the column's width, in the style's
+    /// <see cref="ChartStyle.Muted"/> colour, where an empty column would draw nothing, so a day with none reads as zero rather than as
+    /// missing. With <see cref="ValueLabels"/> its <c>0</c> is written in the muted colour where that clears 4.5:1 against the background,
+    /// and in the text colour otherwise. The mark stays focusable and named. Series drawn as columns only; false by default, and left out of
+    /// the gradient-ID hash while false.
+    /// </summary>
+    public bool MarkZero { get; init; }
 
     /// <summary>A series from your own objects, in the order given: <paramref name="x"/> and <paramref name="y"/> read each
     /// item's position and value, and <paramref name="label"/>, if given, its label.</summary>
@@ -732,8 +759,10 @@ public sealed record ChartSpec
     public bool CellText { get; init; }
     /// <summary>On a heatmap, the width of every column in pixels, at least 24: the drawing grows to the name column, at least 130, plus 35,
     /// plus the columns times this width, and never narrower than 320, the room left over at its right, instead of squeezing into
-    /// <see cref="Width"/>, and in <c>&lt;LumenChart FitWidth&gt;</c> it scrolls sideways when wider than its box. Heatmaps only; null by
-    /// default.</summary>
+    /// <see cref="Width"/>. On a column chart, from 0.47.0, the width of every category, at least 8: the plot is exactly the categories times
+    /// this width, the drawing its margins and the plot, never narrower than 320, and up to 4,000 categories (100 without it). Either way the
+    /// static SVG is written at that width, so a host's <c>overflow-x:auto</c> box scrolls it, and in <c>&lt;LumenChart&gt;</c> it scrolls
+    /// sideways when wider than its box. Heatmaps and column charts only, not sparklines; null by default.</summary>
     public double? CellWidth { get; init; }
     /// <summary>Writes a heatmap's column labels above its grid, under its title and description, as a table's header row reads, instead of
     /// under it; the grid takes the room they leave below (0.46.1). Heatmaps only, refused elsewhere; false by default, and left out of the

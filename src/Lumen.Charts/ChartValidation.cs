@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Lumen.Charts;
@@ -108,12 +109,19 @@ public static partial class ChartValidation
             throw new ArgumentException("Unknown calendar layout, cell or week start.");
         if (spec.Kind != ChartKind.Calendar && (spec.CalendarLayout != CalendarLayout.Weeks || spec.CalendarCell != CalendarCell.Square || spec.WeekStart != DayOfWeek.Monday))
             throw new ArgumentException("CalendarLayout, CalendarCell and WeekStart lay out a calendar's days, so they apply to calendar charts only.");
-        if (spec.Kind != ChartKind.Heatmap && (spec.CellText || spec.CellWidth is not null || spec.ColumnLabelsOnTop))
-            throw new ArgumentException("Cell text writes in a heatmap's cells, cell width sets the width of its columns and ColumnLabelsOnTop moves its column labels above its grid, so they apply to heatmap charts only; the other kinds draw other marks.");
+        if (spec.Kind != ChartKind.Heatmap && (spec.CellText || spec.ColumnLabelsOnTop))
+            throw new ArgumentException("Cell text writes in a heatmap's cells and ColumnLabelsOnTop moves its column labels above its grid, so they apply to heatmap charts only; the other kinds draw other marks.");
+        if (spec.CellWidth is not null && spec.Kind is not (ChartKind.Heatmap or ChartKind.Column))
+            throw new ArgumentException("CellWidth sets the width of a heatmap's columns or a column chart's categories, so it applies to heatmap and column charts only; the other kinds lay their marks out across Width.");
+        if (spec.CellWidth is not null && spec.Sparkline)
+            throw new ArgumentException("A sparkline is drawn at its own small Width, so it takes no CellWidth.");
+        var columnPitch = spec.Kind == ChartKind.Column;
         if (spec.CellWidth is { } cellWidth && !double.IsFinite(cellWidth))
-            throw new ArgumentException("A heatmap's cell width is a finite number of pixels, at least 24, so its text and focus ring fit.");
-        if (spec.CellWidth < 24)
-            throw new ArgumentException("A heatmap's cell is at least 24 pixels wide, so its text and focus ring fit.");
+            throw new ArgumentException(columnPitch ? "A column chart's cell width is a finite number of pixels, at least 8, so a bar and its focus ring fit."
+                : "A heatmap's cell width is a finite number of pixels, at least 24, so its text and focus ring fit.");
+        if (spec.CellWidth < (columnPitch ? 8 : 24))
+            throw new ArgumentException(columnPitch ? "A column chart's category is at least 8 pixels wide, so a bar and its focus ring fit."
+                : "A heatmap's cell is at least 24 pixels wide, so its text and focus ring fit.");
         if ((spec.CellNotes || spec.NotRatedKeepsValue) && (spec.Kind != ChartKind.Heatmap || !spec.CellText))
             throw new ArgumentException("CellNotes and NotRatedKeepsValue write in a heatmap's cells, so they apply to heatmaps with CellText only.");
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
@@ -257,6 +265,8 @@ public static partial class ChartValidation
                     throw new ArgumentException("Coordinates must be finite, magnitude <= 1e100; bubble sizes must be nonnegative.");
                 Text(p.Label); Color(p.Color); Text(p.ValueNote); Color(p.Highlight);
                 if (p.SubLabel is not null) SubLabel(spec, p.SubLabel);
+                if (p.AxisLabel is not null) AxisLabel(spec, p.AxisLabel);
+                if (p.Name is not null) PointName(mark, p.Name);
                 if (p.GapLabel is not null) GapLabel(spec, mark, p);
                 if (p.NotRated is not null) NotRated(spec, p.NotRated);
                 if (p.Highlight is not null)
@@ -341,10 +351,18 @@ public static partial class ChartValidation
             foreach (var s in spec.Series)
                 if (s.Points.Select(p => p.X).Distinct().Count() != s.Points.Count) throw new ArgumentException("Category X values must be unique within each series.");
             var categories = spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count();
-            if (categories > 100)
-                throw new ArgumentException("Category charts support at most 100 categories; aggregate first.");
-            if (spec.CellWidth is { } columnWidth && ChartSvg.HeatmapWidth(spec, categories, columnWidth) > ChartSvg.MaxWidth)
+            var fixedPitch = spec.Kind == ChartKind.Column && spec.CellWidth is not null;
+            if (fixedPitch && categories > MaxFixedCategories)
+                throw new ArgumentException($"A column chart with CellWidth takes at most 4,000 categories, and this one has {categories.ToString("N0", CultureInfo.InvariantCulture)}; aggregate first.");
+            if (!fixedPitch && categories > 100)
+                throw new ArgumentException("Category charts support at most 100 categories, or 4,000 on a column chart with CellWidth; aggregate first.");
+            if (spec.Kind == ChartKind.Heatmap && spec.CellWidth is { } columnWidth && ChartSvg.HeatmapWidth(spec, categories, columnWidth) > ChartSvg.MaxWidth)
                 throw new ArgumentException(FormattableString.Invariant($"At {columnWidth} pixels a column, {categories} {(categories == 1 ? "column makes" : "columns make")} a drawing {ChartSvg.HeatmapWidth(spec, categories, columnWidth)} pixels wide, past the {ChartSvg.MaxWidth} a chart may be; narrow the cells or show fewer columns."));
+            var columnPoints = spec.Kind == ChartKind.Column ? spec.Series.SelectMany(s => s.Points).ToArray() : [];
+            if (columnPoints.Where(p => p.AxisLabel is not null).GroupBy(p => p.X).Any(category => category.Select(p => p.AxisLabel).Distinct().Count() > 1))
+                throw new ArgumentException("A category's axis label is written once under its column, so the points of several series in one category may repeat it or leave it null, but not give different ones.");
+            if (columnPoints.Any(p => p.AxisLabel is not null) && columnPoints.Any(p => p.SubLabel is not null))
+                throw new ArgumentException("A column chart writes either axis labels or sub-labels under its columns, not both.");
             if (spec.Kind is not ChartKind.Heatmap && spec.Series.SelectMany(s => s.Points).Where(p => p.SubLabel is not null).GroupBy(p => p.X).Any(category => category.Select(p => p.SubLabel).Distinct().Count() > 1))
                 throw new ArgumentException("A category's sub-label is written once under its name, so the points of several series in one category may repeat it or leave it null, but not give different ones.");
         }
@@ -645,6 +663,9 @@ public static partial class ChartValidation
     /// <summary>The most characters a point's sub-label takes.</summary>
     private const int MaxSubLabel = 16;
 
+    /// <summary>The most categories a column chart with a cell width takes (0.47.0).</summary>
+    internal const int MaxFixedCategories = 4000;
+
     /// <summary>A sub-label is a second line under a category's name, so it needs a chart that names categories along an axis, words on one
     /// short line, and room to write them.</summary>
     private static void SubLabel(ChartSpec spec, string sub)
@@ -658,6 +679,34 @@ public static partial class ChartValidation
             throw new ArgumentException("A sub-label is written under its category's name, so it needs words; leave SubLabel null to write none.");
         if (sub.Length > MaxSubLabel || sub.Any(c => c is '\n' or '\r' or '\t'))
             throw new ArgumentException($"A sub-label is one short line under its category's name, at most {MaxSubLabel} characters and no line breaks, such as 152 bpm or 13.0 W/kg.");
+    }
+
+    /// <summary>The most characters a line of an axis label takes (0.47.0).</summary>
+    private const int MaxAxisLine = 12;
+
+    /// <summary>An axis label is drawn under a column in place of its category's name: one or two short lines (0.47.0).</summary>
+    private static void AxisLabel(ChartSpec spec, string label)
+    {
+        Text(label);
+        if (spec.Kind != ChartKind.Column)
+            throw new ArgumentException("An axis label is written under a column in place of its category's name, so it applies to column charts only; the other kinds name their categories or ticks themselves.");
+        if (spec.Sparkline)
+            throw new ArgumentException("A sparkline draws its data alone, with no words, so its points take no axis labels; write them in the words beside it.");
+        var lines = label.Split('\n');
+        if (lines.Length > 2 || lines.Any(line => string.IsNullOrWhiteSpace(line) || line.Length > MaxAxisLine || line.Any(c => c is '\r' or '\t')))
+            throw new ArgumentException($"An axis label is one or two lines under a column, split at \\n, each 1 to {MaxAxisLine} characters with no other line breaks or tabs, such as 6 or 1\\nOct.");
+    }
+
+    /// <summary>The most characters a point's own name takes (0.47.0).</summary>
+    private const int MaxPointName = 200;
+
+    /// <summary>A point's own name replaces its mark's, so it needs a mark of its own and one line of words (0.47.0).</summary>
+    private static void PointName(ChartKind mark, string name)
+    {
+        if (mark is ChartKind.Histogram or ChartKind.Box or ChartKind.Violin or ChartKind.Calendar)
+            throw new ArgumentException("A point's Name names its own mark, and histogram, box, violin and calendar charts draw marks that stand for several points, so they take none; their marks keep the names Lumen gives them.");
+        if (string.IsNullOrWhiteSpace(name) || name.Length > MaxPointName || name.Any(char.IsControl))
+            throw new ArgumentException($"A point's Name is its mark's whole spoken name and tooltip: 1 to {MaxPointName} characters on one line, not blank. Leave it null for the name Lumen gives.");
     }
 
     /// <summary>The most characters a point's gap label takes.</summary>
@@ -721,6 +770,8 @@ public static partial class ChartValidation
             throw new ArgumentException("Highlighting the last point applies to series drawn as lines or areas.");
         if (series.ValueLabels && mark is not (ChartKind.Column or ChartKind.Bar or ChartKind.Line or ChartKind.Scatter))
             throw new ArgumentException("Value labels apply to series drawn as columns, bars, lines or scatter points.");
+        if (series.MarkZero && mark != ChartKind.Column)
+            throw new ArgumentException("MarkZero draws a zero column as a hairline, so it applies to series drawn as columns only.");
         if (series.Gradient is not { } stops) return;
         if (mark == ChartKind.StackedColumn)
             throw new ArgumentException("A stacked column's colours tell its stacked series apart, so a gradient by value would hide which series each piece is; draw one series of columns, or a column chart, to colour by value.");

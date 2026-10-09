@@ -4238,7 +4238,7 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // readout, written last, which is never hashed, and since 0.37.0 the chart's sampling, written after its rendered points, and its pane
     // titles, written after its panes, and since 0.39.0 its bar tracks and drawn titles, and since 0.41.0 its painted background and
     // fitted height, written last, and since 0.46.0 its cell text, written after the week start (its cell width is null until set, so
-    // never written), and since 0.46.1 its labels on top, written after the cell text, and since 0.46.2 its cell notes and kept not-rated values, written after its fitted height.
+    // never written), and since 0.46.1 its labels on top, written after the cell text, and since 0.46.2 its cell notes and kept not-rated values, written after its fitted height, and since 0.47.0 each series' zero hairline, written last in the series.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
@@ -4247,7 +4247,8 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
     Check(json.EndsWith(defaults)&&json.Contains(trended)&&json.Contains(ticked)&&json.Contains(changed)&&json.Contains(sparked)&&json.Contains(sampled)&&json.Contains(titled),json[^120..]);
-    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(titled,"\"Panes\":[],").Replace(defaults,"}").Replace(trended,"\"Trend\":false,")
+    Check(json.Contains(",\"MarkZero\":false"),"the series' MarkZero");
+    var before="lumen-"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json.Replace(",\"MarkZero\":false","").Replace(titled,"\"Panes\":[],").Replace(defaults,"}").Replace(trended,"\"Trend\":false,")
         .Replace(ticked,"\"XLabel\":\"\",").Replace(changed,"\"ValueLabels\":false").Replace(sparked,"\"Height\":420,").Replace(sampled,"\"MaxRenderedPoints\":1200,"))))[..12].ToLowerInvariant();
     Check(Prefix(ChartSvg.Render(faded))==before,$"{Prefix(ChartSvg.Render(faded))} is not 0.25.0's {before}");
     // Gauges and rings define no IDs: a gradient gauge draws its arc in pieces.
@@ -9740,7 +9741,10 @@ Test("Heatmap table: each refusal says why, and a cell width that is no number i
     // A calendar draws cells too, but its days are its own marks: it takes neither.
     var calendar=Sample(ChartKind.Calendar);
     foreach(var other in new[]{line,calendar})
-        Check(Why(other with{CellText=true}).StartsWith("Cell text writes in a heatmap's cells, cell width sets the width of its columns and ColumnLabelsOnTop moves its column labels above its grid, so they apply to heatmap charts only;")&&Why(other with{CellWidth=30}).StartsWith("Cell text writes in a heatmap's cells"),$"{other.Kind}: cell text and width off a heatmap");
+    {
+        Check(Why(other with{CellText=true}).StartsWith("Cell text writes in a heatmap's cells and ColumnLabelsOnTop moves its column labels above its grid, so they apply to heatmap charts only;"),$"{other.Kind}: cell text off a heatmap");
+        Check(Why(other with{CellWidth=30}).StartsWith("CellWidth sets the width of a heatmap's columns or a column chart's categories, so it applies to heatmap and column charts only;"),$"{other.Kind}: cell width off a heatmap and a column chart");
+    }
     Check(Why(HeatGrid(s=>s with{CellWidth=23})).StartsWith("A heatmap's cell is at least 24 pixels wide, so its text and focus ring fit."),"width 23");
     foreach(var width in new[]{double.NaN,double.PositiveInfinity,double.NegativeInfinity})
         Check(Why(HeatGrid(s=>s with{CellWidth=width})).StartsWith("A heatmap's cell width is a finite number of pixels, at least 24, so its text and focus ring fit."),$"width {width}");
@@ -10755,6 +10759,58 @@ Test("Heatmap cells: a fitted heatmap writes every word the same spec writes wit
             Check(ChartSvg.FittedHeight(fitted)<2160,$"{name} at {width}: fitted height {ChartSvg.FittedHeight(fitted)}");
             Check(fittedWords.SequenceEqual(roomyWords),$"{name} at {width}: fitted [{string.Join(" | ",fittedWords)}] roomy [{string.Join(" | ",roomyWords)}]");
         }
+});
+// 0.47.0: registrations per day.
+ChartSpec DailyCounts(int count,double? cell=30)=>new(){Title="Sign-ups",Kind=ChartKind.Column,CellWidth=cell,Series=[new("Sign-ups",Enumerable.Range(0,count).Select(i=>new ChartPoint(i,i%4,$"D{i}")).ToArray())]};
+Test("Daily counts: CellWidth takes column charts at a pitch of 8 or more and up to 4,000 categories, and is refused on other kinds and sparklines",()=>{
+    ChartValidation.Validate(DailyCounts(10,8));
+    ChartValidation.Validate(DailyCounts(4000,8));
+    foreach(var bad in new[]{DailyCounts(10,7.9),DailyCounts(10,double.NaN),DailyCounts(4001,8),DailyCounts(101,null) with{CellWidth=null},Spec(ChartKind.Bar) with{CellWidth=30},Spec(ChartKind.StackedColumn) with{CellWidth=30},DailyCounts(10) with{Sparkline=true,Width=120,Height=40}})
+        Reject(()=>ChartValidation.Validate(bad));
+    string Why(ChartSpec s){try{ChartValidation.Validate(s);}catch(ArgumentException e){return e.Message;}return "";}
+    Check(Why(DailyCounts(10,7)).StartsWith("A column chart's category is at least 8 pixels wide"),Why(DailyCounts(10,7)));
+    Check(Why(Spec(ChartKind.Line) with{CellWidth=30}).StartsWith("CellWidth sets the width of a heatmap's columns or a column chart's categories, so it applies to heatmap and column charts only;"),Why(Spec(ChartKind.Line) with{CellWidth=30}));
+    Check(Why(Spec(ChartKind.Line) with{CellText=true}).StartsWith("Cell text writes in a heatmap's cells and ColumnLabelsOnTop moves its column labels above its grid, so they apply to heatmap charts only;"),Why(Spec(ChartKind.Line) with{CellText=true}));
+    Check(Why(DailyCounts(101,null)).Contains("4,000 on a column chart with CellWidth"),Why(DailyCounts(101,null)));
+    Check(Why(DailyCounts(4001,8)).StartsWith("A column chart with CellWidth takes at most 4,000 categories"),Why(DailyCounts(4001,8)));
+    // The 4,096-unit width cap stays a heatmap's: 4,000 columns at 30 are far wider and accepted.
+    ChartValidation.Validate(DailyCounts(4000,30));
+});
+Test("Daily counts: an axis label is one or two short lines under a column, one per category, and never beside a sub-label",()=>{
+    ChartSpec Labelled(params string?[] labels)=>DailyCounts(labels.Length) with{Series=[new("Sign-ups",labels.Select((l,i)=>new ChartPoint(i,i,$"D{i}"){AxisLabel=l}).ToArray())]};
+    ChartValidation.Validate(Labelled("6","7\nOct","8",null));
+    ChartValidation.Validate(Labelled("31","1\nJan 2027"));
+    foreach(var bad in new[]{Labelled("1\nOct\n2026"),Labelled("1\n"),Labelled(" "),Labelled("Thirteen chrs"),Labelled("1\nOct\t"),Labelled("1\r\nOct")})
+        Reject(()=>ChartValidation.Validate(bad));
+    Reject(()=>ChartValidation.Validate(Spec(ChartKind.Line) with{Series=[new("S",[new ChartPoint(0,1,"A"){AxisLabel="1"}])]}));
+    // Two series may repeat a category's axis label, never give different ones.
+    var two=DailyCounts(2) with{Series=[new("A",[new ChartPoint(0,1,"D0"){AxisLabel="1"}]),new("B",[new ChartPoint(0,2,"D0"){AxisLabel="1"}])]};
+    ChartValidation.Validate(two);
+    Reject(()=>ChartValidation.Validate(two with{Series=[two.Series[0],new("B",[new ChartPoint(0,2,"D0"){AxisLabel="2"}])]}));
+    var both=DailyCounts(2) with{Series=[new("A",[new ChartPoint(0,1,"D0"){AxisLabel="1"},new ChartPoint(1,1,"D1"){SubLabel="x"}])]};
+    try{ChartValidation.Validate(both);Check(false,"axis and sub-labels together were accepted");}catch(ArgumentException e){Check(e.Message.StartsWith("A column chart writes either axis labels or sub-labels under its columns, not both."),e.Message);}
+});
+Test("Daily counts: MarkZero is for series drawn as columns, and a point's Name is one line of up to 200 characters on marks of its own",()=>{
+    ChartValidation.Validate(DailyCounts(3) with{Series=[DailyCounts(3).Series[0] with{MarkZero=true}]});
+    ChartValidation.Validate(Spec(ChartKind.Line) with{Series=[new("S",[new ChartPoint(0,0),new ChartPoint(1,2)]){Kind=ChartKind.Column,MarkZero=true}]});
+    foreach(var kind in new[]{ChartKind.Line,ChartKind.Bar,ChartKind.StackedColumn,ChartKind.Area})
+    {
+        var s=Spec(kind) with{Series=[Spec(kind).Series[0] with{MarkZero=true}]};
+        try{ChartValidation.Validate(s);Check(false,$"{kind} took MarkZero");}catch(ArgumentException e){Check(e.Message.StartsWith("MarkZero draws a zero column as a hairline, so it applies to series drawn as columns only."),e.Message);}
+    }
+    ChartValidation.Validate(Spec(ChartKind.Line) with{Series=[new("S",[new ChartPoint(0,1,"A"){Name="Tue 6 Oct 2026: 1 registration"},new ChartPoint(1,2,"B")])]});
+    ChartValidation.Validate(HeatGrid(s=>s with{Series=[s.Series[0] with{Points=[s.Series[0].Points[0] with{Name="Sprint 2025, 2.8 points a start"},s.Series[0].Points[1]]},s.Series[1]]}));
+    foreach(var bad in new[]{""," ",new string('x',201),"two\nlines","tab\there"})
+        Reject(()=>ChartValidation.Validate(Spec(ChartKind.Line) with{Series=[new("S",[new ChartPoint(0,1,"A"){Name=bad}])]}));
+    foreach(var kind in new[]{ChartKind.Histogram,ChartKind.Box,ChartKind.Violin})
+        Reject(()=>ChartValidation.Validate(Sample(kind) with{Series=[Sample(kind).Series[0] with{Points=[Sample(kind).Series[0].Points[0] with{Name="one"},..Sample(kind).Series[0].Points.Skip(1)]}]}));
+    Reject(()=>ChartValidation.Validate(Sample(ChartKind.Calendar) with{Series=[Sample(ChartKind.Calendar).Series[0] with{Points=[Sample(ChartKind.Calendar).Series[0].Points[0] with{Name="one"},..Sample(ChartKind.Calendar).Series[0].Points.Skip(1)]}]}));
+});
+Test("Daily counts: the new properties left at their defaults change no drawing and no gradient ID, and set they count",()=>{
+    var plain=DailyCounts(5);
+    Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{Series=[plain.Series[0] with{MarkZero=true}]}),"MarkZero counts when set");
+    Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{Series=[plain.Series[0] with{Points=[plain.Series[0].Points[0] with{AxisLabel="1"},..plain.Series[0].Points.Skip(1)]}]}),"AxisLabel counts when set");
+    Check(ChartSvg.IdPrefix(plain)!=ChartSvg.IdPrefix(plain with{Series=[plain.Series[0] with{Points=[plain.Series[0].Points[0] with{Name="one"},..plain.Series[0].Points.Skip(1)]}]}),"Name counts when set");
 });
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
