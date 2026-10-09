@@ -893,6 +893,7 @@ lines.Add($"columns/cell-width {Hash(Render(SignUps(ChartTheme.Light)))}");
 ChartPoint[] Fortnight(int days) => Enumerable.Range(0, days).Select(i => { var day = new DateOnly(2026, 9, 24).AddDays(i); return new ChartPoint(i, (i * 3 + 1) % 5, day.ToString("d MMM", System.Globalization.CultureInfo.InvariantCulture)) { AxisLabel = i == 0 || day.Day == 1 ? $"{day.Day}\n{day.ToString("MMM", System.Globalization.CultureInfo.InvariantCulture)}" : $"{day.Day}" }; }).ToArray();
 lines.Add($"columns/axis-labels {Hash(Render(new ChartSpec { Kind = ChartKind.Column, Title = "Sign-ups per day", Description = "Invented sign-ups", Width = 640, Height = 320, Series = [new("Sign-ups", Fortnight(14)) { ValueLabels = true }] }))}");
 lines.Add($"columns/mark-zero {Hash(Render(SignUps(ChartTheme.Light) with { Series = [new("Sign-ups", signups) { ValueLabels = true, MarkZero = true }] }))}");
+lines.Add($"point-name/line {Hash(Render(new ChartSpec { Kind = ChartKind.Line, Title = "Named points", Description = "Invented values", Width = 640, Height = 320, Series = [new("Value", Enumerable.Range(0, 6).Select(i => new ChartPoint(i, i * 2 % 5, $"P{i}") { Name = i % 2 == 0 ? $"Point {i}: {i * 2 % 5} units" : null }).ToArray())] }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

@@ -7307,7 +7307,7 @@ Test("The component reads an averaged mark's status as its name does, and draws 
     Check(status=="S: 4 = 4",status);
     // The script draws the band, ignores touch and lets Escape go.
     var script=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.js"));
-    Check(script.Contains("export function drawn(root, readout, plot)")&&script.Contains("event.pointerType === 'touch'")&&script.Contains("< 8) return false")&&script.Contains("'ZoomTo'")&&script.Contains("event.key !== 'Escape'"),"the script's drag");
+    Check(script.Contains("export function drawn(root, readout, plot, end)")&&script.Contains("event.pointerType === 'touch'")&&script.Contains("< 8) return false")&&script.Contains("'ZoomTo'")&&script.Contains("event.key !== 'Escape'"),"the script's drag");
 });
 Test("Sampling, PaneTitles and a pane's YTickLabels round-trip through the HTTP API's JSON, a request that names none keeps the defaults, and only a setting away from its default renames gradients",()=>{
     var spec=Ride37(100) with{Panes=[new(){Label="Power",Weight=1,YTickLabels=TickLabels.Ends},new(){Label="Cadence",Weight=1}]};
@@ -10978,6 +10978,30 @@ Test("Daily counts: the hairline is a plain rect in the muted colour in every st
     Check(Regex.Matches(svg,$"<text[^>]*fill='{ChartStyle.Light.Muted}'[^>]*>0<").Count==2,"two muted zeros");
     // Without MarkZero the same zeros are zero-height bars.
     Check(!ChartSvg.Render(mixed with{Series=[mixed.Series[0] with{MarkZero=false}]}).Contains("height='1' fill="),"plain");
+});
+Test("Daily counts: a point's Name is its mark's whole name and tooltip on any kind that draws a mark for it; the table and CSV keep their words",()=>{
+    var line=Spec(ChartKind.Line) with{Series=[new("S",[new ChartPoint(0,1,"A"){Name="Tue 6 Oct 2026: 1 registration, 1 so far"},new ChartPoint(1,2,"B")])]};
+    var svg=ChartSvg.Render(line);
+    Check(svg.Contains("aria-label='Tue 6 Oct 2026: 1 registration, 1 so far'")&&svg.Contains("<title>Tue 6 Oct 2026: 1 registration, 1 so far</title>"),"line mark");
+    Check(svg.Contains("aria-label='S: B, 2"),"the other mark keeps Lumen's name");
+    Check(!ChartExport.Csv(line).Contains("registration"),"CSV unchanged");
+    var column=DailyCounts(2) with{Series=[new("S",[new ChartPoint(0,0,"D0"){Name="Zero day"},new ChartPoint(1,3,"D1")]){MarkZero=true}]};
+    Check(ChartSvg.Render(column).Contains("aria-label='Zero day'"),"column");
+    var cell=HeatGrid(s=>s with{Series=[s.Series[0] with{Points=[s.Series[0].Points[0] with{Name="Sprint 2025 cell"},s.Series[0].Points[1]]},s.Series[1]]});
+    Check(ChartSvg.Render(cell).Contains("aria-label='Sprint 2025 cell'"),"heatmap cell");
+    // The component's status line reads it when the mark is selected. The page holds the name in the mark's aria-label already, so the status span is what is read.
+    var read=Regex.Match(Operate(column,c=>c.SelectPoint(0,0)),"<span class=\"lumen-status\" role=\"status\">([^<]*)</span>").Groups[1].Value;
+    Check(read=="Zero day","status line: "+read);
+});
+Test("Daily counts: a mark that averages several points keeps Lumen's name, whatever its points' Names",()=>{
+    var many=Spec(ChartKind.Line) with{MaxRenderedPoints=16,Sampling=SamplingMethod.Average,Series=[new("S",Enumerable.Range(0,100).Select(i=>new ChartPoint(i,i%7){Name=$"own {i}"}).ToArray())]};
+    var names=Regex.Matches(ChartSvg.Render(many),"aria-label='([^']*)'").Select(m=>m.Groups[1].Value).Where(n=>n.StartsWith("S: ")||n.StartsWith("own ")).ToList();
+    Check(names.Count>0&&names.All(n=>n.StartsWith("S: ")),string.Join(" | ",names.Take(3)));
+});
+Test("Daily counts: ScrollToEnd reaches the script with each drawing, and the prerendered markup is the same with it",()=>{
+    var js=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.js"));
+    Check(js.Contains("export function drawn(root, readout, plot, end)")&&js.Contains("viewport.scrollLeft = viewport.scrollWidth"),"script");
+    Check(ChartMarkup(DailyCounts(90),new(){{"FitWidth",true},{"ScrollToEnd",true}})==ChartMarkup(DailyCounts(90),new(){{"FitWidth",true}}),"prerender unchanged");
 });
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)

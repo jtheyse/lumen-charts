@@ -13,9 +13,10 @@ export function attach(root, dotnet) {
     root.appendChild(tooltip);
     // The readout the component worked out for the drawing shown, the X it stands at, its guide and rings, the mark that is the chart's
     // one tab stop, the series the keyboard keeps to, and the drawing they belong to; and the plots a drag zooms across, the drag under
-    // way, and whether the click a drag ends with is to be ignored.
+    // way, and whether the click a drag ends with is to be ignored; and the width of the drawing a chart asked to open at its end last
+    // scrolled to the end of.
     const state = { readout: null, index: new Map(), column: -1, overlay: null, current: null, series: null, keep: false, svg: null, timer: 0,
-        plot: null, brush: null, suppress: false };
+        plot: null, brush: null, suppress: false, endWidth: null };
 
     const mark = target => {
         const found = target instanceof Element ? target.closest('.lumen-datum') : null;
@@ -306,7 +307,7 @@ export function attach(root, dotnet) {
 
     // Each new drawing: the readout it reads, its one tab stop, and, on a sparkline, the keys named in its drawing's description. A
     // drawing replaced takes its guide and tooltip with it.
-    state.drawn = (data, plot) => {
+    state.drawn = (data, plot, end) => {
         state.readout = data ? { top: data[0], bottom: data[1], left: data[2], right: data[3], columns: data[4] } : null;
         state.plot = plot ? { left: plot[0], right: plot[1], top: plot[2], bottom: plot[3] } : null;
         state.index = new Map();
@@ -325,6 +326,14 @@ export function attach(root, dotnet) {
         settle();
         region();
         if (svg && keys && root.classList.contains('lumen-spark')) svg.setAttribute('aria-describedby', keys);
+        // Asked to open at its end, a drawing whose width is new scrolls its viewport to the right end, where the latest days stand (0.47.0).
+        const viewport = root.querySelector(':scope > .lumen-viewport');
+        const width = drawing()?.viewBox?.baseVal?.width ?? 0;
+        if (end && viewport && width !== state.endWidth) {
+            state.endWidth = width;
+            requestAnimationFrame(() => { viewport.scrollLeft = viewport.scrollWidth; });
+        }
+        if (!end) state.endWidth = null;
     };
 
     const bindings = [['click', select], ['keydown', keydown], ['pointerover', over], ['pointermove', moved],
@@ -334,9 +343,10 @@ export function attach(root, dotnet) {
     handlers.set(root, { bindings, tooltip, state, escaped, sized });
 }
 
-/// Tells the script of a chart's new drawing, the shared readout it reads, or null, and the plots a drag zooms across, or null.
-export function drawn(root, readout, plot) {
-    handlers.get(root)?.state?.drawn(readout, plot);
+/// Tells the script of a chart's new drawing, the shared readout it reads, or null, the plots a drag zooms across, or null, and whether the
+/// chart is to open at its right end.
+export function drawn(root, readout, plot, end) {
+    handlers.get(root)?.state?.drawn(readout, plot, end);
 }
 
 /// Node dragging and selection for a graph. Dragging previews with a transform and commits on release.

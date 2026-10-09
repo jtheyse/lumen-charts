@@ -510,9 +510,13 @@ public static partial class ChartSvg
     }
 
     /// <summary>A focusable, labelled data mark. <paramref name="attributes"/> are presentation attributes on the group, which
-    /// its shapes inherit and the focus rule overrides, so a hollow marker still shows the focus ring.</summary>
-    private static void Datum(SvgWriter w, int series, int index, string label, string shape, string attributes = "")
+    /// its shapes inherit and the focus rule overrides, so a hollow marker still shows the focus ring. A mark that stands for one point
+    /// takes that point's own <see cref="ChartPoint.Name"/> in place of <paramref name="label"/> where it has one (0.47.0); one that stands
+    /// for several, <paramref name="single"/> false, keeps Lumen's.</summary>
+    private static void Datum(SvgWriter w, int series, int index, string label, string shape, string attributes = "", bool single = true)
     {
+        if (single && w.Spec is { } drawn && series >= 0 && series < drawn.Series.Count && index >= 0 && index < drawn.Series[series].Points.Count
+            && drawn.Series[series].Points[index].Name is { } own) label = own;
         w.Add($"<g class='lumen-datum' tabindex='0' role='button' data-series='{series}' data-point='{index}' aria-label='{SvgWriter.E(label)}'{attributes}>{(w.Titles ? $"<title>{SvgWriter.E(label)}</title>" : "")}{shape}</g>");
     }
     private static string PointLabel(ChartSeries s, ChartPoint p) => $"{s.Name}: {p.Label ?? LinearScale.Label(p.X)}, {(p.Y.HasValue ? LinearScale.Label(p.Y.Value) + p.ValueNote : "missing")}";
@@ -1010,7 +1014,7 @@ public static partial class ChartSvg
                                     _ => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", "")
                                 };
                             var followed = ending is { } e && e.Index == d.Index && e.Count == d.Count && e.Point.X == p.X;
-                            Datum(w, si, d.Index, PointLabel(series, p, xs, scale, d.Count > 1 ? null : changes[d.Index], Sub(p.X)) + (d.Count > 1 ? Averaged(d.Count) : Of(series, p)) + (followed ? Said(series) : ""), shape, attributes);
+                            Datum(w, si, d.Index, PointLabel(series, p, xs, scale, d.Count > 1 ? null : changes[d.Index], Sub(p.X)) + (d.Count > 1 ? Averaged(d.Count) : Of(series, p)) + (followed ? Said(series) : ""), shape, attributes, single: d.Count <= 1);
                             if (followed) endings.Add(new(X(p.X), At(p.Y!.Value), series, color, d.Index == last && d.Count == 1 ? 10 : p.Highlight is not null ? Highlighted + 1 : series.Markers == MarkerStyle.Hollow ? 5 : 4));
                             if (series.ValueLabels) Over(X(p.X), At(p.Y!.Value), d.Index == last && d.Count == 1 || p.Highlight is not null ? Highlighted : run.Length > 80 ? 2 : 4, scale.Format(p.Y!.Value), p.ValueNote, Lettered(MovedOf(d), p));
                         }

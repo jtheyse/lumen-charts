@@ -90,6 +90,10 @@ else
     /// the tools row keeps this one button, so a small card can drop zoom and exports and keep its data a click away. A sparkline has no tools
     /// row, so it ignores this (0.46.1).</summary>
     [Parameter] public bool? ShowDataButton { get; set; }
+    /// <summary>Opens a chart that is wider than its box, such as one with a <see cref="ChartSpec.CellWidth"/>, scrolled to its right end,
+    /// where its latest days are, and goes back there whenever a new drawing has a different width; otherwise the reader's scroll is kept.
+    /// Needs an interactive render mode: prerendered and static markup stands at the left (0.47.0).</summary>
+    [Parameter] public bool ScrollToEnd { get; set; }
     private bool DataButton => ShowDataButton ?? ShowToolbar;
     // A fixed-width heatmap's row names, drawn again in a layer held at the viewport's left while its cells scroll under it (0.46.1).
     private (string Svg, double Left, double Top, double Height)? band;
@@ -124,9 +128,9 @@ else
     private bool fitting;
     private const int Widest=4096;
     private int Narrowest => Spec.Sparkline ? 60 : 320;
-    // The width the drawing shown has when its heatmap's columns have a width of their own, which no box changes, and null for every other
-    // chart. The chart is then marked lumen-fixed and its viewport carries that width, which the stylesheet holds the drawing to, fitted
-    // or not and measured or not: a narrower box scrolls it, and a wider one leaves room beside it.
+    // The width the drawing shown has when its heatmap's columns, or its column chart's categories, have a width of their own, which no box
+    // changes, and null for every other chart. The chart is then marked lumen-fixed and its viewport carries that width, which the
+    // stylesheet holds the drawing to, fitted or not and measured or not: a narrower box scrolls it, and a wider one leaves room beside it.
     private int? drawnWidth;
     private string? DrawnStyle => drawnWidth is { } drawn ? $"--lumen-drawn:{drawn}px" + (band is { } b ? FormattableString.Invariant($";scroll-padding-left:{b.Left}px") : "") : null;
     private int Width => FitWidth && fitted is { } width ? width : Spec.Width;
@@ -208,8 +212,8 @@ else
         xAxis=FullRange;visible=Enumerable.Range(0,Spec.Series.Count).Where(i=>!hidden.Contains(i)||Candles(i)).ToArray();
         var shown=VisibleSpec();
         svg=ChartSvg.Render(shown, includeLegend:false, includeTitles:false);
-        // CellWidth is refused on every other kind, so a spec that has it is a heatmap, or was refused as the drawing rendered; the width is
-        // worked out from the series once they have been validated.
+        // CellWidth is refused on every kind but heatmap and column, so a spec that has it is one of those, or was refused as the drawing
+        // rendered; the width is worked out from the series once they have been validated.
         drawnWidth=shown.CellWidth is not null?ChartSvg.DrawnWidth(shown):null;
         band=ChartSvg.HeatmapNameBand(shown);
         readout=Spec.SharedReadout ? ChartSvg.Readout(shown) : null;
@@ -229,7 +233,7 @@ else
         if(module is not null&&!ReferenceEquals(told,svg))
         {
             told=svg;
-            await module.InvokeVoidAsync("drawn",root,Told,Brushed);
+            await module.InvokeVoidAsync("drawn",root,Told,Brushed,ScrollToEnd);
         }
         // The script measures the chart's box only while the chart is asked to fit it.
         if(module is not null&&FitWidth!=fitting)
@@ -270,6 +274,8 @@ else
             await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);
             return;
         }
+        // A point that names itself reads as its mark does (0.47.0).
+        if(p.Name is {} own){status=own;await PointSelected.InvokeAsync(new(index,point));await InvokeAsync(StateHasChanged);return;}
         // A gauge's or a ring's one point reads as its legend does, with its unit and a ring's goal.
         // A span reads from its start to its end, a block its label, its span and its height, and a range bar from its low to its
         // high and its typical value.
