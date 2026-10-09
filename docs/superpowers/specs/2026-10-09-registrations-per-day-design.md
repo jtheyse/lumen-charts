@@ -1,6 +1,6 @@
 # Registrations per day — design (0.47.0)
 
-Date: 9 October 2026. Status: approved in conversation (approach 1 and section 1 on 7 October, section 2 on 9 October); awaiting the owner's review of this written spec.
+Date: 9 October 2026. Status: approved in conversation (approach 1 and section 1 on 7 October, section 2 on 9 October); reviewed after 0.46.2 shipped and approved by the owner on 9 October 2026 with the review's amendments (the builder's height, the static-width change after 0.46.2, the range's ends, headroom over the tallest bar).
 
 ## Purpose
 
@@ -29,7 +29,7 @@ Lumen gets small, general column features (section 1), one general primitive (`C
 - 4,000 days draw at their pitch without squeezing.
 - Never colour alone: a zero day is said in its name ("0 registrations") and in its "0" label, not only by the muted colour.
 - Every drawn word clears 4.5:1, including the muted "0".
-- Existing renderings: only the two `heatmap-table/*` rows that set `CellWidth` move (§1.2), by design, in both finishes. Every other row is identical, and rows are added.
+- Existing renderings: only the six rows that set `CellWidth` move (§1.2), by design, in both finishes: their root style only. Every other row is identical, and rows are added.
 - Gradient IDs don't move: every new property is left out of the hash at its default.
 
 ## 1. Column features (Lumen.Charts)
@@ -63,7 +63,8 @@ Lumen gets small, general column features (section 1), one general primitive (`C
 - Section 1 said a `width` attribute; the root already sizes itself through its style, as a sparkline's `width:{w}px` does, so the style carries it.
 - Other drawings are unchanged.
 - Inside `<LumenChart>`, the `lumen-fixed` rules already hold the drawing at that width, so nothing visible changes there.
-- **Baseline:** `heatmap-table/cell-width` and `heatmap-table/reasons` move in both finishes, by design: only their root style changes.
+- **Baseline:** the six rows that set `CellWidth` move in both finishes, by design, their root style only: `heatmap-table/cell-width` and `heatmap-table/reasons` (0.46.0–0.46.1), and `heatmap-cells/notes`, `heatmap-cells/notes-fixed`, `heatmap-cells/keeps-value` and `heatmap-cells/both-dark` (0.46.2).
+- **Who notices:** a host that renders a `CellWidth` heatmap as static SVG. Race Face's #16, live on 0.46.2, is such a heatmap: wherever it is written statically it now stands at its drawn width (580 for its four seasons) and needs an `overflow-x:auto` box around it, or it runs past a 360 px card instead of squeezing. The 0.47.0 message to Race Face says so.
 
 ### 1.3 Axis labels: `ChartPoint.AxisLabel`
 
@@ -94,7 +95,7 @@ Lumen gets small, general column features (section 1), one general primitive (`C
 
 ### 1.5 Value labels at a fixed pitch
 
-- With `CellWidth` on a column chart, a column's value label is kept while it is no wider than `CellWidth − 2`, not the bar's width. At the default pitch of 30, "1,234" fits.
+- With `CellWidth` on a column chart, a column's value label is kept while it is no wider than `CellWidth − 2`, not the bar's width. Labels are written as Lumen writes numbers, without thousands separators: at the default pitch of 30, `1234` (27.3 units) fits.
 - Neighbouring labels stay at least 2 units apart.
 - The other rules are unchanged: a label that would fall outside the plot is still dropped.
 
@@ -159,6 +160,7 @@ public sealed record DailyCountsOptions
    - What the chart can't draw, such as a `CellWidth` below 8 or a bad colour, is refused by chart validation when the spec is rendered, as with `Placings`.
 2. **The range:**
    - It runs from `From`, or else the earliest date given, to `To`, or else the latest date given.
+   - An end that is not set stretches to take in the one that is: with `From` set after every date given and `To` unset, the range is `From` to `From` (and so empty of counts), not refused; likewise `To` set before every date. `From` after `To` is refused only when both are set.
    - With no dates given and neither bound set, there is no range, and `Build` returns null.
    - Counts outside the range are ignored. Counts on one date are summed.
    - Days in the range with no count are 0.
@@ -172,17 +174,18 @@ public sealed record DailyCountsOptions
    - A second line on the first day and on each 1st: the month as `MMM`.
    - When the range covers more than one calendar year, the first day and each 1 January read `MMM yyyy` instead.
    - Example across a year end: `28` / `Dec 2026`, `29`, `30`, `31`, `1` / `Jan 2027`, … `1` / `Feb`.
+   - A two-line label is kept first (§1.3), so at the default pitch a wide second line thins its neighbours: `Jan 2027` (about 51 units) drops the day numbers on either side of it, `31` and `2`. The docs say so.
 6. **Names:**
    - The form is `{Label}: {count} {noun}`, then `, {running} so far` when `RunningTotal` is on. `running` includes that day.
    - Numbers are written with thousands separators, in the invariant culture. The noun is `Singular` for a count of 1 and `Plural` otherwise.
    - Examples: `Mon 6 Oct 2026: 12 registrations, 140 so far`, `Tue 7 Oct 2026: 1 registration, 141 so far`, `Wed 8 Oct 2026: 0 registrations, 141 so far`.
 7. **Whole-number ticks.** The builder sets the Y axis itself, so it never writes "0.5 registrations":
-   - The step is the smallest of 1, 2, 5, 10, 20, 50 … with `ceil(largest / step) ≤ 5`.
-   - `YMax = step × ceil(largest / step)`, and `YTickValues` are 0, step, … `YMax`.
-   - Examples: largest 1 gives 0 and 1; largest 3 gives 0–3; largest 12 gives 0, 5, 10, 15; largest 140 gives 0, 50, 100, 150.
+   - The step is the smallest of 1, 2, 5, 10, 20, 50 … with `floor(largest / step) + 1 ≤ 5`.
+   - `YMax = step × (floor(largest / step) + 1)`, one step above the largest count's step, so the tallest bar never reaches the plot's top and its count stands clear of the description. `YTickValues` are 0, step, … `YMax`.
+   - Examples: largest 1 gives 0, 1, 2; largest 3 gives 0–4; largest 12 gives 0, 5, 10, 15; largest 15 gives 0, 5, 10, 15, 20; largest 140 gives 0, 50, 100, 150.
 8. **The spec:**
    - `Kind = Column`, `CellWidth` from the options.
-   - `Width = 320` (ignored for the drawn width), `Height = 260`.
+   - `Width = 320` (ignored for the drawn width), `Height = 320`. Lumen keeps 78 units above the plot for the title and description and 90 under it for two-line axis labels, so the bars get about 152 units, as Race Face's 150.
    - `Title` from the options, or the plural capitalised plus " per day" ("Registrations per day").
    - `Description = "{total} {noun} across {days} days"`, with "1 day" for a single day, e.g. `1,234 registrations across 90 days`.
    - `YLabel` empty, and `Style` from the options or Light.
@@ -248,7 +251,7 @@ There is no wrapper component. The host writes:
 
 ### Baseline
 
-- **Changed by design:** `heatmap-table/cell-width` and `heatmap-table/reasons`, in both finishes (root style only).
+- **Changed by design:** the six rows that set `CellWidth` (§1.2), in both finishes, root style only.
 - **Added, in both finishes:**
   - a fixed-pitch column chart with plain labels;
   - axis labels without `CellWidth`;
@@ -260,33 +263,33 @@ There is no wrapper component. The host writes:
 
 ### Browser
 
-On a 375 px phone (touch, scale 2), the gallery's "Registrations per day" card:
+On a 375 px phone (touch, scale 2), the gallery home page's "Registrations per day" card:
 - scrolls sideways at its drawn width, and the page does not;
 - opens scrolled to its right end (`scrollLeft + clientWidth ≥ scrollWidth − 1`);
 - names its last bar with its `Name`, and a zero day as "…: 0 registrations, … so far";
 - writes its muted "0" at 4.5:1 or more, measured in light, dark and Midnight;
 - passes axe in all three themes.
 
-The existing check that the page has one `.lumen-fixed` viewport now expects two.
+Checks that count the home page's charts or fixed-width charts move with the card.
 
 ### HTTP
 
-- The Sports page prerenders the card: two `lumen-fixed` charts, the card's `--lumen-drawn`, and a named bar.
+- The home page prerenders the card: its `lumen-fixed` chart, the card's `--lumen-drawn`, and a named bar.
 - A column spec with `CellWidth`, posted to the API, renders with `width:{drawn}px`.
 
 ### Gallery
 
-- A "Registrations per day" card on the Sports & performance page, after "Category heatmap", wide, with invented counts:
+- A "Registrations per day" card on the gallery's home page, not the Sports & performance page (counting sign-ups is not a sports chart, and the Sports page's pinned counts stay as they are), with invented counts:
   - about 75 days across a month end;
   - a few zero days;
   - `ScrollToEnd`.
-- The pinned counts that follow from it move: the sidebar's 33, the unit tests on the card ids and counts, and `verify-api.ps1`'s fixed-chart count.
+- The home page's pinned counts that follow from it move with it.
 
 ### Docs
 
 - **README:** the column features, `ChartPoint.Name`, `ScrollToEnd` and `DailyCountsChart`; "0.47.0 additions"; the limits; and what changes for existing charts (§6).
 - **The skill:** `references/api.md` and `SKILL.md`, keeping the frontmatter description at 1,024 characters or fewer.
-- **Recipes:** in `recipes-race-face.md`, "Registrations per day" (the builder) and "Course profile" (§3). `tests/Lumen.Charts.Recipes` compiles both and renders the builder's chart: `check.py` learns to render `var x = …Chart.Build(…)!`.
+- **Recipes:** in `recipes-race-face.md`, "Registrations per day" (the builder, with the host clamping its free From–To to 4,000 days before calling it) and "Course profile" (§3). `tests/Lumen.Charts.Recipes` compiles both and renders the builder's chart: `check.py` learns to render `var x = …Chart.Build(…)!`.
 - `docs/VERIFICATION.md`, and version 0.47.0.
 
 ## 5. Release
@@ -299,12 +302,12 @@ The handover's steps:
 5. Push, CI, tag.
 6. GitHub release with the three `.nupkg`.
 7. Package the skill.
-8. Message "RACEFACE RUNNING EXPANSION 2" with the swap steps for #18 and the #20 recipe.
+8. Message "RACEFACE RUNNING EXPANSION 2" with the swap steps for #18 and the #20 recipe, and the static-width note for #16 (§1.2): a statically rendered `CellWidth` heatmap needs an `overflow-x:auto` box.
 
 ## 6. What changes for existing charts
 
 - A heatmap with `CellWidth` rendered statically is now written at its drawn width instead of 100%. On a static page, put it in an `overflow-x:auto` box. Inside `<LumenChart>` nothing changes.
-- Every other spec renders byte for byte as in 0.46.1.
+- Every other spec renders byte for byte as in 0.46.2.
 
 ## Accepted limits
 
@@ -312,6 +315,7 @@ The handover's steps:
 - **Size:** 4,000 days at the default pitch make a drawing about 120,000 units wide with 4,000 marks. Static SVG keeps one tab stop per mark, as it does today.
 - **`Name` owns the whole name:** a host that sets it must say any state its colours show.
 - **`ScrollToEnd`** is interactive only.
+- **Redraw cost:** a live Blazor Server page resends the whole drawing on each redraw, and thousands of days make it a megabyte or more, as ride channels do (0.37.0). The builder refuses more than 4,000 days, so a host with a free From–To clamps it first.
 
 ## Coordination
 
