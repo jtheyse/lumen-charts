@@ -11001,7 +11001,17 @@ Test("Daily counts: a mark that averages several points keeps Lumen's name, what
 Test("Daily counts: ScrollToEnd reaches the script with each drawing, and the prerendered markup is the same with it",()=>{
     var js=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.js"));
     Check(js.Contains("export function drawn(root, readout, plot, end)")&&js.Contains("viewport.scrollLeft = viewport.scrollWidth"),"script");
+    // The component sends the flag with each drawing it tells the script of.
+    var razor=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/LumenChart.razor"));
+    Check(razor.Contains("\"drawn\",root,Told,Brushed,ScrollToEnd"),"component sends the flag");
     Check(ChartMarkup(DailyCounts(90),new(){{"FitWidth",true},{"ScrollToEnd",true}})==ChartMarkup(DailyCounts(90),new(){{"FitWidth",true}}),"prerender unchanged");
+});
+Test("Daily counts: a gauge's one point names its mark by its own Name, though the gauge draws its mark at fixed indexes",()=>{
+    var gauge=Sample(ChartKind.Gauge);
+    var named=gauge with{Series=[gauge.Series[0] with{Points=[gauge.Series[0].Points[0] with{Name="Recovery today: 72 of 100"}]}]};
+    var svg=ChartSvg.Render(named);
+    Check(svg.Contains("aria-label='Recovery today: 72 of 100'")&&svg.Contains("<title>Recovery today: 72 of 100</title>"),"gauge mark");
+    Check(!ChartSvg.Render(gauge).Contains("Recovery today"),"an unnamed gauge keeps Lumen's name");
 });
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
