@@ -182,7 +182,7 @@ The handover's steps:
 - **Without `FitHeight`,** a short cell gives up its note first. The name and the grid table always carry it.
 - **Static SVG** still doesn't freeze names, as in 0.46.1.
 - **No height cap on a fitted heatmap:** `Height`'s 240–2160 is checked on the spec as given, before the rows are fitted, as in 0.46.1, so many rows of long notes can now draw taller than 2160.
-- **Narrow fitted reasons:** a not-rated reason in a fitted heatmap still wraps as 0.46.1 wraps it. A later word wider than a line ends the reason there with "…", and the rows do not grow for the rest. Between a `CellWidth` of about 34 and 43, "too few starts to rate" reads "too" and "few…".
+- **Narrow fitted reasons:** a not-rated reason in a fitted heatmap still wraps as 0.46.1 wraps it. A later word wider than a line ends the reason there with "…", and the rows do not grow for the rest. Below a `CellWidth` of about 43 a reason loses words: "too few starts to rate" reads "too" and "few…" from about 34 to 43, "fe…" at 32 and 33, and "t…" at 24.
 - **The kept value in a short fixed row:** without `FitHeight`, a cell short of room gives up its lines in a fixed order and never adds one back. So in a short fixed row `NotRatedKeepsValue` can show less: in a 40-unit row a kept-value cell writes only its two reason lines, where the same cell without the switch writes the reason and its sub-label. With `FitHeight` nothing is given up.
 
 ## Out of scope
