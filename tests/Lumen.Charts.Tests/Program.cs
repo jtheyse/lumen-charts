@@ -11013,6 +11013,60 @@ Test("Daily counts: a gauge's one point names its mark by its own Name, though t
     Check(svg.Contains("aria-label='Recovery today: 72 of 100'")&&svg.Contains("<title>Recovery today: 72 of 100</title>"),"gauge mark");
     Check(!ChartSvg.Render(gauge).Contains("Recovery today"),"an unnamed gauge keeps Lumen's name");
 });
+DayCount Count(int y,int m,int d,int n)=>new(new DateOnly(y,m,d),n);
+Test("Daily counts: the builder fills missing days with 0, sums a day's counts, ignores counts outside the range, and returns null when there is nothing to draw",()=>{
+    var spec=DailyCountsChart.Build([Count(2026,10,4,3),Count(2026,10,6,2),Count(2026,10,6,1),Count(2026,9,1,9)],new(){From=new DateOnly(2026,10,4)})!;
+    var p=spec.Series[0].Points;
+    Check(p.Count==3&&p.Select(x=>x.Y).SequenceEqual(new double?[]{3,0,3}),string.Join(",",p.Select(x=>x.Y)));
+    Check(DailyCountsChart.Build([])==null,"no counts");
+    Check(DailyCountsChart.Build([Count(2026,10,4,0),Count(2026,10,5,0)])==null,"all zero");
+    // An unset end stretches to the set one: From after every date gives From..From, nothing in it, so null.
+    Check(DailyCountsChart.Build([Count(2026,10,4,3)],new(){From=new DateOnly(2026,10,9)})==null,"From after the data");
+    Check(DailyCountsChart.Build([Count(2026,10,4,3)],new(){To=new DateOnly(2026,10,1)})==null,"To before the data");
+    Check(DailyCountsChart.Build([],new(){From=new DateOnly(2026,10,1),To=new DateOnly(2026,10,3)})==null,"a range with no counts");
+});
+Test("Daily counts: the builder labels, names and describes each day, singular for one",()=>{
+    var spec=DailyCountsChart.Build([Count(2026,10,5,12),Count(2026,10,6,1),Count(2026,10,7,0)])!;
+    var p=spec.Series[0].Points;
+    Check(p[0].Label=="Mon 5 Oct 2026"&&p[0].AxisLabel=="5\nOct"&&p[1].AxisLabel=="6","labels: "+p[0].Label+" / "+p[0].AxisLabel);
+    Check(p[0].Name=="Mon 5 Oct 2026: 12 registrations, 12 so far"&&p[1].Name=="Tue 6 Oct 2026: 1 registration, 13 so far"&&p[2].Name=="Wed 7 Oct 2026: 0 registrations, 13 so far",string.Join(" | ",p.Select(x=>x.Name)));
+    Check(spec.Title=="Registrations per day"&&spec.Description=="13 registrations across 3 days","title and description: "+spec.Description);
+    Check(spec is{Kind:ChartKind.Column,CellWidth:30,Width:320,Height:320}&&spec.Series[0] is{Name:"Registrations",ValueLabels:true,MarkZero:true},"the spec");
+    var plain=DailyCountsChart.Build([Count(2026,10,5,1)],new(){Singular="order",Plural="orders",RunningTotal=false,Title="Orders",DateFormat="d MMM"})!;
+    Check(plain.Series[0].Points[0].Name=="5 Oct: 1 order"&&plain.Title=="Orders"&&plain.Description=="1 order across 1 day",plain.Series[0].Points[0].Name+" / "+plain.Description);
+    // Thousands are separated in names and descriptions.
+    var many=DailyCountsChart.Build([Count(2026,10,5,1200),Count(2026,10,6,34)])!;
+    Check(many.Series[0].Points[1].Name!.EndsWith("1,234 so far")&&many.Description=="1,234 registrations across 2 days",many.Description!);
+});
+Test("Daily counts: across a year end the first day and each 1 January carry the year",()=>{
+    var p=DailyCountsChart.Build([Count(2026,12,30,1),Count(2027,1,2,2)])!.Series[0].Points;
+    Check(p.Select(x=>x.AxisLabel).SequenceEqual(["30\nDec 2026","31","1\nJan 2027","2"]),string.Join(" | ",p.Select(x=>x.AxisLabel)));
+    var later=DailyCountsChart.Build([Count(2027,1,30,1),Count(2027,2,2,2)])!.Series[0].Points;
+    Check(later[0].AxisLabel=="30\nJan"&&later[2].AxisLabel=="1\nFeb","one year: no year on the 1sts");
+});
+Test("Daily counts: whole-number ticks with a step's headroom over the tallest day",()=>{
+    foreach(var (largest,top,ticks) in new[]{(1,2d,"0,1,2"),(3,4d,"0,1,2,3,4"),(4,5d,"0,1,2,3,4,5"),(5,6d,"0,2,4,6"),(12,15d,"0,5,10,15"),(15,20d,"0,5,10,15,20"),(140,150d,"0,50,100,150")})
+    {
+        var spec=DailyCountsChart.Build([Count(2026,10,5,largest),Count(2026,10,6,0)])!;
+        Check(spec.YMax==top&&string.Join(",",spec.YTickValues!.Select(t=>t.Value))==ticks,$"{largest}: {spec.YMax} {string.Join(",",spec.YTickValues!.Select(t=>t.Value))}");
+        ChartValidation.Validate(spec);
+    }
+});
+Test("Daily counts: the builder refuses what it cannot build, and draws 4,000 days but not 4,001",()=>{
+    Reject(()=>DailyCountsChart.Build([Count(2026,10,5,-1)]));
+    Reject(()=>DailyCountsChart.Build([Count(2026,10,5,1)],new(){Singular=" "}));
+    Reject(()=>DailyCountsChart.Build([Count(2026,10,5,1)],new(){Plural=""}));
+    Reject(()=>DailyCountsChart.Build([Count(2026,10,5,1)],new(){DateFormat="%"}));
+    Reject(()=>DailyCountsChart.Build([Count(2026,10,5,1)],new(){From=new DateOnly(2026,10,9),To=new DateOnly(2026,10,1)}));
+    Reject(()=>DailyCountsChart.Build([null!]));
+    try{DailyCountsChart.Build(null!);Check(false,"null counts");}catch(ArgumentNullException){}
+    var start=new DateOnly(2020,1,1);
+    var four=DailyCountsChart.Build([new DayCount(start,1)],new(){From=start,To=start.AddDays(3999)})!;
+    Check(four.Series[0].Points.Count==4000,"4,000 days");
+    ChartValidation.Validate(four);
+    try{DailyCountsChart.Build([new DayCount(start,1)],new(){From=start,To=start.AddDays(4000)});Check(false,"4,001 accepted");}
+    catch(ArgumentException e){Check(e.Message.Contains("4,001"),e.Message);}
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

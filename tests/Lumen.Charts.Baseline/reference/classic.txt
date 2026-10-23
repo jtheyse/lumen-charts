@@ -404,3 +404,5 @@ columns/cell-width BDD7321B5A989EFB
 columns/axis-labels C451C38D60D86D86
 columns/mark-zero 619AE9EEEC6788F3
 point-name/line 465AE981448498BC
+daily-counts/month D038956CDAA74CF5
+daily-counts/year 9C516D414DCA15B3
