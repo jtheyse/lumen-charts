@@ -263,10 +263,10 @@ There is no wrapper component. The host writes:
 
 ### Browser
 
-On a 375 px phone (touch, scale 2), the gallery home page's "Registrations per day" card:
+On a 375 px phone (touch, scale 2), the gallery home page's "Sign-ups per day" card:
 - scrolls sideways at its drawn width, and the page does not;
 - opens scrolled to its right end (`scrollLeft + clientWidth ≥ scrollWidth − 1`);
-- names its last bar with its `Name`, and a zero day as "…: 0 registrations, … so far";
+- names its last bar with its `Name`, and a zero day as "…: 0 sign-ups, … so far";
 - writes its muted "0" at 4.5:1 or more, measured in light, dark and Midnight;
 - passes axe in all three themes.
 
@@ -279,7 +279,7 @@ Checks that count the home page's charts or fixed-width charts move with the car
 
 ### Gallery
 
-- A "Registrations per day" card on the gallery's home page, not the Sports & performance page (counting sign-ups is not a sports chart, and the Sports page's pinned counts stay as they are), with invented counts:
+- A "Sign-ups per day" card (the builder's `Singular` and `Plural` at work; the recipe keeps "registrations") on the gallery's home page, not the Sports & performance page (counting sign-ups is not a sports chart, and the Sports page's pinned counts stay as they are), with invented counts:
   - about 75 days across a month end;
   - a few zero days;
   - `ScrollToEnd`.

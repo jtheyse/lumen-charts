@@ -290,7 +290,7 @@ export function attach(root, dotnet) {
     // A drawing waiting to open at its end scrolls its viewport to the right end, and its width counts as reached once the viewport has a size
     // to scroll in. The scroll is not read back: a smoothly scrolling viewport is still on its way there, and a right-to-left page counts
     // scrollLeft down from 0, so a read-back can miss the end, leave the drawing waiting and scroll the reader back on every resize. A viewport
-    // hidden when its drawing comes, in a closed tab, a closed <details> or a collapsed panel, has no size and cannot scroll, so the drawing
+    // hidden when its drawing comes, in a closed tab or a collapsed panel (display:none), has no size and cannot scroll, so the drawing
     // waits, and region, the viewport's ResizeObserver callback, lands it the first time the viewport is shown (0.47.0).
     const toEnd = () => {
         const viewport = root.querySelector(':scope > .lumen-viewport');
