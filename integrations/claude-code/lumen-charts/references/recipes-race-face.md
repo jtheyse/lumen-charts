@@ -1,6 +1,6 @@
 # Race results recipes
 
-Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields, a race's gaps to the leader, a ride's effort zones as a strip of shares, a race's scores on meter bars, a ride's best efforts, a race's heart rate lap by lap, a team rider's season with a missed round written in, a category-by-season heatmap table with a cell for too few starts to rate, and an organizers' season planner, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.46.2, together with the recipes in `sports.md`.
+Recipes for a race-results app's charts: a rider's season of finishing places and points, sparklines of finish times getting faster and of a growth log, how a race's whole field finished, a season's arc through its fields, a race's gaps to the leader, a ride's effort zones as a strip of shares, a race's scores on meter bars, a ride's best efforts, a race's heart rate lap by lap, a team rider's season with a missed round written in, a category-by-season heatmap table with a cell for too few starts to rate, registrations per day as columns that scroll, a course profile coloured by height, and an organizers' season planner, on a dark brand style built from design tokens, at a phone card's width. Every example uses invented data. Each is a plain `ChartSpec`; render it with `ChartSvg.Render` for a static page, an API or an image, or put it in `<LumenChart Spec="…" FitWidth="true" />` on an interactive page. They compile against Lumen.Charts 0.47.0, together with the recipes in `sports.md`.
 
 ```csharp
 using System.Globalization;
@@ -742,7 +742,7 @@ string categoryTable = ChartExport.HtmlTable(categoryHeatmap);   // the same cel
 - **Did not race.** Junior mixed team relay had no starts in 2023, so its `Y` is `null`, and `GapLabel = "did not race"` (1 to 12 characters; refused beside `NotRated` on one point, and on a point that has a value) makes the cell a "did not race" cell: drawn like a not-rated cell, unshaded, dashed and out of the colour scale, writing its word in place of a value with its sub-label under it (`did not race`, `/0 starts`), and named with the word where `missing` would stand, `Junior mixed team relay: 2023 · /0 starts, did not race`. Its column exists like any other, so a season every category missed is a column of such cells. A `null` `Y` with neither `NotRated` nor `GapLabel` draws no cell at all.
 - **Never colour alone.** The numbers say what the colours say, and the dashes and the words say what the colour of a not-rated or unraced cell cannot. The style's ramp starts at the panel colour `#1E1F22`, which stands only 1.10:1 off the card `#161618`, so the lowest cells, Long distance in 2025 here, are told apart by their hairline outline and their number, and a not-rated or unraced cell from them by its dashes and words (a kept value is muted for emphasis only). The scale line is words too: the refined finish writes `{min} low to {max} high`, which is right on any ramp, where 0.45.0 wrote `(light) to (dark)`: `Color scale: 1.7 low to 3.5 high` reads the thirteen rated cells, and the 1.6 of Junior mixed team relay in 2025 does not pull it lower. To compare two tables on one scale, pin it (refined finish only): `IncludeZero = true` widens it to start at 0, and `YMin` and `YMax` set its ends, used as given, with a value past an end taking that end's colour.
 - **Width and height.** `CellWidth = 90` gives each season 90 pixels, enough for the reason on two lines (a column of 72 holds `/15 starts` under a value but wraps "too few starts to rate" onto three lines, `too few`, `starts to` and `rate`, so every fitted row grows to hold them; a fixed `Height` that is too short cuts it to `too few` and `starts to…`). The name column is 130 units while every name fits 118 at 12 px; "Junior mixed team relay" does not, so it widens to the name's measured width plus 18, 185 here, up to 240, and a name longer than that is cut by width with `…`. The drawing is then 185 + 35 + 4 × 90 = 580 wide whatever `Width` says (it is not used), and more than 4096 in all is refused with the number of columns and pixels. `FitHeight = true` draws it as tall as its rows need, each row as tall as the tallest cell's words need (12 units a line, 13 for a value, plus 4, and never under 36; all rows one height, and a table too short to reach the usual 240-unit floor is raised to it), with the room above the grid, 26 less below it because the seasons stand on top and 24 less again because there is no source line. The note takes three lines at 90, so the tallest cell is Junior mixed team relay in 2025, a not-rated cell of a value, its starts, three note lines and a two-line reason, 7 lines in all: 4 + 13 + 12 × 6 = 89, so each of the four rows is 89 units tall. `Height` is then unused. `ColumnLabelsOnTop` is refused on any other kind, and `FitHeight` on any but a heatmap or a horizontal bar chart.
-- **In the component.** `<LumenChart>` shows a `CellWidth` heatmap at exactly its drawn size, with or without `FitWidth`: in a card narrower than 580 pixels it scrolls sideways (its viewport is then a `role=region` stop, as any scrolling chart's is) and it is never squeezed or stretched. The row names do not scroll away: a copy of the names, cropped from the drawing, is held at the left of the viewport (`position:sticky`) while the cells pass under it, painted in the style's background, with a hairline on its right edge. It is `aria-hidden`, holds nothing focusable, and takes the pointer itself, so a cell under it can't be hovered or clicked; the marks, tooltips, keys and "View data" all stay on the one real drawing, and a key that reaches a cell stops it beside the names (`scroll-padding-left`). The copy covers the grid's rows and the row of season labels, so a label that has scrolled under it is covered with its column; the title, description, scale line and source scroll with the drawing. With very narrow columns (`CellWidth` about 24 to 60) the copy can clip the overhang of the first season's label at rest. `PaintBackground = false` leaves the drawing unpainted, but the copy is still painted in `Style.Background`, an opaque patch on a card of another colour. The static SVG has no such copy: the root is `width:100%`, so a page that draws it must keep it from squeezing itself, in a box that scrolls with an inner box of the drawn width, `<div style="overflow-x:auto"><div style="min-width:580px">…svg…</div></div>`, and a reader on a phone has the table below for the names.
+- **In the component.** `<LumenChart>` shows a `CellWidth` heatmap at exactly its drawn size, with or without `FitWidth`: in a card narrower than 580 pixels it scrolls sideways (its viewport is then a `role=region` stop, as any scrolling chart's is) and it is never squeezed or stretched. The row names do not scroll away: a copy of the names, cropped from the drawing, is held at the left of the viewport (`position:sticky`) while the cells pass under it, painted in the style's background, with a hairline on its right edge. It is `aria-hidden`, holds nothing focusable, and takes the pointer itself, so a cell under it can't be hovered or clicked; the marks, tooltips, keys and "View data" all stay on the one real drawing, and a key that reaches a cell stops it beside the names (`scroll-padding-left`). The copy covers the grid's rows and the row of season labels, so a label that has scrolled under it is covered with its column; the title, description, scale line and source scroll with the drawing. With very narrow columns (`CellWidth` about 24 to 60) the copy can clip the overhang of the first season's label at rest. `PaintBackground = false` leaves the drawing unpainted, but the copy is still painted in `Style.Background`, an opaque patch on a card of another colour. The static SVG has no such copy: from 0.47.0 its root is written at its drawn width, `width:580px`, so a page that draws it keeps it from running past a narrow card in a box that scrolls, `<div style="overflow-x:auto">…svg…</div>` (0.46.x wrote `width:100%`, which needed an inner box of `min-width:580px`), and a reader on a phone has the table below for the names.
 - **The table.** `ChartExport.HtmlTable(spec)` returns a `<table class='lumen-grid-table'>` of the same cells, the seasons across the head and a row for each category, each `<th scope='row'>`, and each cell the value, then ` · ` and the sub-label, then the `ValueNote` as written, then `, not rated: …` where it applies: `2.8 · /12 starts &#183; 34 pts, 5 riders, 7 pts a rider`, `2 · /4 starts &#183; 8 pts, 3 riders, 3 pts a rider, not rated: too few starts to rate`. A "did not race" cell starts with its word, `did not race · /0 starts`, and a not-rated cell with no value with a dash. Every word is HTML-encoded, so the `·` inside a note is written `&#183;`. It is a bare table: on a static page wrap it in the region `<LumenChart>`'s "View data" uses, so a table taller than its box can be scrolled from the keyboard, and link `lumen.css`, which styles the wrapper and the grid and gives the wrapper its focus ring. A `.lumen-table` on its own has no side margins (the component's own table keeps 24 px), so the wrapper sits flush in its page:
 
 ```html
@@ -750,6 +750,97 @@ string categoryTable = ChartExport.HtmlTable(categoryHeatmap);   // the same cel
 ```
 
 - **Data.** `ChartExport.Csv(spec)` writes a `Note` column, since cells carry notes, and after it a `NotRated` column, since some cell is not rated, empty for the rated ones; a "did not race" cell has an empty value and no word in the CSV, and there is no column for sub-labels. The invented history above stands for the app's own: Lumen does not work out starts, riders or points per start, and does not decide which cells are rated or which seasons nobody raced.
+
+## Registrations per day
+
+A count for every day, such as new accounts on an admin page, as one column a day at a fixed pitch: the number above every bar, the day number under it and the month under the first bar and each 1st, a zero day a 1-unit muted hairline with a muted "0", and each bar named with its date, its count and the total so far. The reader chooses the span, 7, 30, 90 or 365 days or any From–To, and a long span scrolls sideways instead of squeezing (0.47.0). `DailyCountsChart.Build` makes the chart from the app's counts; Race Face's words are its `Singular` and `Plural` options.
+
+```csharp
+// The app's own counts, one for each day that had any, as DayCounts. Invented here (a real page reads its accounts table):
+// a launch week that tails off, then a steady trickle with quiet days left out.
+var registrationCounts = Enumerable.Range(0, 63).Where(i => i % 9 != 4)
+    .Select(i => new DayCount(new DateOnly(2026, 8, 24).AddDays(i), i < 7 ? 20 - i * 2 : 3 + i * 7 % 11)).ToArray();
+// The reader's free From-To. One chart draws at most DailyCountsChart.MaxDays (4,000) days and Build refuses a longer range, so clamp
+// it first, keeping the latest days. (A From after To is refused too: have the form stop it.)
+DateOnly readerFrom = new(2026, 9, 1), readerTo = new(2026, 10, 25);
+if (readerTo.DayNumber - readerFrom.DayNumber + 1 > DailyCountsChart.MaxDays) readerFrom = readerTo.AddDays(1 - DailyCountsChart.MaxDays);
+var registrationWords = new DailyCountsOptions
+{
+    Singular = "registration", Plural = "registrations",     // Race Face's nouns, which are also the defaults
+    From = readerFrom, To = readerTo,                        // left null, the earliest and latest date given
+    Style = raceFace, Color = "#E30613"                      // race red on the card, for a filled bar: 3.70:1, enough for a mark
+};
+// Build returns null when every day in the range is 0, or there is nothing at all: a page keeps the null, without the "!", and shows its own empty state.
+var registrationsChart = DailyCountsChart.Build(registrationCounts, registrationWords)!;
+string registrationsSvg = ChartSvg.Render(registrationsChart, includeLegend: false);   // 55 days: 76 + 55 × 30 + 30 = 1756 wide, shown at exactly that width
+// Interactive: <LumenChart Spec="registrationsChart" FitWidth="true" ScrollToEnd="true" ShowLegend="false" />
+```
+
+In a Blazor page, with an interactive render mode, and the app's own empty state for a range with no registration (a razor block, not compiled by the recipe check):
+
+```razor
+@if (registrationsChart is { } chart)
+{
+    <LumenChart Spec="chart" FitWidth="true" ScrollToEnd="true" ShowLegend="false" />
+}
+else
+{
+    <p>No registrations in this range.</p>
+}
+
+@code {
+    ChartSpec? registrationsChart;   // DailyCountsChart.Build(counts, words) for the reader's range, as above: null when every day in it is 0
+}
+```
+
+On a static page the SVG stands at its drawn width, so put it in a box that scrolls (a script of your own opens it at the latest day; `ScrollToEnd` is the component's):
+
+```html
+<div id="registrations" style="overflow-x:auto">…registrationsSvg…</div>
+<script>const box = document.getElementById('registrations'); box.scrollLeft = box.scrollWidth;</script>
+```
+
+- **The range.** It runs from `From`, or the earliest date given, to `To`, or the latest. An end left null stretches to take in the one that is set, so a `From` after every date given, with `To` null, is that one day, not an error. Counts outside the range are ignored, several counts on one date are added up, and a day with no count is 0. The gallery's home page draws the same chart as its "Sign-ups per day" card, with `sign-up` and `sign-ups` as the nouns.
+- **Width and bars.** `CellWidth` is 30 by default, so the drawing is the left margin of 76, plus the days × 30, plus 30 at the right, rounded up and never under 320 (a short range keeps its pitch and the room stands at the right); `Width` is not used. A bar is 72% of its day, 21.6 at 30. The count above a bar is kept while it is no wider than the pitch less 2, 28 at 30: `1234` fits, `12345` does not. 4,000 days make a drawing 120,106 wide with 4,000 marks.
+- **Under the bars.** The day of the month under every bar, 12 px and muted; on the first day and each 1st a second line 14 units under it, the month as `MMM`, 11 px and muted, and the room under the plot grows by 14 for it. Where the range crosses a calendar year, the first day and each 1 January read `MMM yyyy` instead: `28` over `Dec 2026`, `29`, `30`, `31`, `1` over `Jan 2027`, … `1` over `Feb`. A label is kept where it stands clear of its neighbours (centres half their widths' sum plus 8 apart, by Lumen's estimate of text widths), the two-line ones first. At 30 a month name (`Oct`, about 20 wide) fits beside the day numbers, but a year label (`Jan 2027`, about 51 wide) is wider than the pitch and takes its neighbours' room: `1` over `Jan 2027` drops `31` and `2`, and the first day's label, `24` over `Dec 2026`, drops `25`. A `CellWidth` of 43 or more keeps every day number beside a year label; a range that starts on 31 December puts two year labels side by side, which need a `CellWidth` of 60, so below it the 1 January label is dropped, its day number with it.
+- **Names.** `{date}: {count} {noun}`, then `, {running total} so far` (`RunningTotal = false` leaves it out), with thousands separators in the invariant culture and `Singular` for exactly 1: `Tue 6 Oct 2026: 12 registrations, 140 so far`, `Wed 7 Oct 2026: 1 registration, 141 so far`. The date reads in `DateFormat`, `ddd d MMM yyyy` by default, and also names the category in the data table and the CSV. The name is the bar's whole name, its `aria-label`, tooltip and status line (`ChartPoint.Name`), so it carries every state the bar shows.
+- **A zero is seen and said.** With `MarkZero` a day with none is a bar 1 unit high on the baseline, as wide as a bar, in the style's `Muted`, still focusable and named `Thu 8 Oct 2026: 0 registrations, 141 so far`, and its "0" is written in `Muted` where that clears 4.5:1 against the card (`#80858E` on `#161618` is 4.87:1) and in the text colour where it does not. Never colour alone: the name and the "0" say it.
+- **Whole-number ticks.** The builder sets the Y axis itself, so it never writes "0.5 registrations": the step is the smallest of 1, 2, 5, 10, 20, 50 … that gives at most five steps, and the axis ends one step above the tallest day, so the tallest count stands clear of the description. A tallest day of 13, as in this range, or of 12 gives 0, 5, 10, 15; of 20, 0, 5, 10, 15, 20, 25.
+- **The chart.** A column chart, 320 wide (unused) and 320 tall, with 78 units above the plot for the title and description and 90 under it for two-line labels, so the bars get about 152. The title is `Registrations per day` (the plural capitalised; `Title` overrides it), the description `1,234 registrations across 90 days` (`1 day` for one), the Y title empty, and there is one series, named `Registrations`, in `Color` or the style's first series colour, with `ValueLabels` and `MarkZero`. Change anything else with `registrationsChart with { … }`.
+- **On a phone.** `FitWidth` does not squeeze this chart: a `CellWidth` chart is shown at exactly its drawn width, in a viewport that scrolls sideways (a `role=region` stop, then the marks), and `ScrollToEnd` opens it at its right end, the latest day. It goes back to the end when a new span changes the drawing's width, and otherwise keeps the reader's scroll. It runs in the component's script, so prerendered markup and a static page stand at the left.
+- **Limits.** The Y axis scrolls away with the bars, and each bar's count carries its value. A live Blazor Server page resends the whole drawing on each redraw, a megabyte or more at thousands of days, so keep a free From–To clamped, as above, or offer preset spans. Refusals throw `ArgumentException`: a null entry, a negative count, a blank `Singular` or `Plural`, a `DateFormat` that cannot format a date, `From` after `To`, and more than 4,000 days (the message names the day count); a `CellWidth` below 8 or a bad colour is refused when the chart is rendered.
+
+## Course profile
+
+The height of a course along its distance, as a line coloured by height: a ride or run's elevation profile, here an invented gentle 10 km loop with 35 m between its lowest and highest points. It needs no new Lumen feature; it uses `ChartSeries.Gradient`, `YMinSpan` and `YUnit`.
+
+```csharp
+// The app's course: distance in km and height in metres, a sample every 250 m. Invented:
+var courseProfile = Enumerable.Range(0, 41)
+    .Select(i => (Km: i * 0.25, Metres: Math.Round(132 + 16 * Math.Sin(i / 6.0) + 6 * Math.Sin(i / 1.9), 1))).ToArray();
+var courseChart = new ChartSpec
+{
+    Title = "Course profile", Description = "Height along a 10 km course, coloured by height",
+    Kind = ChartKind.Line, Style = raceFace, Width = 340, Height = 260,
+    XLabel = "Distance (km)", YLabel = "Height", YUnit = " m",          // a unit for Y only: X's goes in its title and in each point's label
+    YMinSpan = 60,                // the axis spans at least 60 m, centred on the data, so a gentle course does not fill the plot
+    XTicks = TickSource.Axis,     // the axis's own ticks in km, not the points' labels, however few points are in view
+    Series = [new ChartSeries("Height", courseProfile.Select(p => new ChartPoint(p.Km, p.Metres, p.Km.ToString("0.##", CultureInfo.InvariantCulture) + " km")).ToArray())
+    {
+        Markers = MarkerStyle.None,   // a line, not dots: each point stays a focusable, named mark
+        Gradient = [new(115, "#D7DDE5"), new(130, "#F5B642"), new(145, "#FF5A54")]   // steel low, gold, red high; the colours carry on past the ends
+    }]
+};
+string courseSvg = ChartSvg.Render(courseChart);
+// Interactive: <LumenChart Spec="courseChart" FitWidth="true" />
+```
+
+- **Colour by height.** `Gradient` colours the stroke continuously along the Y axis: each stop is a value and its colour, the values rising, and past the first and last stop their colours carry on. The stops sit at heights the course reaches (115, 130 and 145 m here), and each stop's colour clears 3:1 against the card `#161618` (steel `#D7DDE5` 13.22:1, gold `#F5B642` 10.03:1, red `#FF5A54` 5.89:1). A gradient and `Zones` are exclusive; use `Zones` for colour in steps.
+- **Never colour alone.** The height is on the axis (`Height`, its ticks written in metres with `YUnit`) and in each point's name, `Height: 3.5 km, 148.9 m`, so the colour carries nothing on its own.
+- **The axis.** `YMinSpan = 60` keeps the axis from stretching a 35 m range over the whole plot: it runs from the middle of the data less 30 to the middle plus 30, and a hillier course, wider than 60, fits as before. `YUnit = " m"` is written straight after every value the left axis writes, ticks, names and tooltips. There is no unit for the X axis (`XFormat` is `Number`, `Duration`, `Compact`, `TimeOfDay` or `Signed`): `XLabel = "Distance (km)"` and each point's `Label` carry the unit. With 41 labelled points the axis keeps its own ticks anyway (the points' labels replace them from 1 to 24 in view), and `XTicks = TickSource.Axis` keeps them when a zoomed view shows fewer.
+- **No markers.** `MarkerStyle.None` draws no dots; the points stay focusable and named as any others are, so the keys and tooltips reach each. A course of thousands of samples is thinned to `MaxRenderedPoints` (1200 by default) over the range shown, and the thinned line keeps its extrema.
+- **Why a line, not an area.** An area stands on zero, and Lumen refuses `YMinSpan` beside one (*YMinSpan centres an axis on its data, and an axis that must include zero is held at zero instead …*), so an area would draw a gentle course as a thin sliver at the top of a plot that starts at zero. A profile filled down to the axis floor would need a feature Lumen does not have; this one is a line.
+- **Phone width.** `Width = 340` draws it at a card's width with labels of 11 px or larger; `FitWidth="true"` redraws it at the card's width on an interactive page.
 
 ## Season planner
 

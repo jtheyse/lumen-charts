@@ -759,9 +759,10 @@ public sealed record ChartSpec
     public bool CellText { get; init; }
     /// <summary>On a heatmap, the width of every column in pixels, at least 24: the drawing grows to the name column, at least 130, plus 35,
     /// plus the columns times this width, and never narrower than 320, the room left over at its right, instead of squeezing into
-    /// <see cref="Width"/>. On a column chart, from 0.47.0, the width of every category, at least 8: the plot is exactly the categories times
-    /// this width, the drawing its margins and the plot, never narrower than 320, and up to 4,000 categories (100 without it). Either way the
-    /// static SVG is written at that width, so a host's <c>overflow-x:auto</c> box scrolls it, and in <c>&lt;LumenChart&gt;</c> it scrolls
+    /// <see cref="Width"/>. On a column chart, from 0.47.0, the width of every category, at least 8 and at most 4,096 (<c>ChartSvg.MaxWidth</c>,
+    /// the widest a chart may be: a larger pitch is refused, though the drawing itself may be far wider): the plot is exactly the categories
+    /// times this width, the drawing its margins and the plot, never narrower than 320, and up to 4,000 categories (100 without it). Either way
+    /// the static SVG is written at that width, so a host's <c>overflow-x:auto</c> box scrolls it, and in <c>&lt;LumenChart&gt;</c> it scrolls
     /// sideways when wider than its box. Heatmaps and column charts only, not sparklines; null by default.</summary>
     public double? CellWidth { get; init; }
     /// <summary>Writes a heatmap's column labels above its grid, under its title and description, as a table's header row reads, instead of

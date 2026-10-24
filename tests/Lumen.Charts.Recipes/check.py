@@ -19,7 +19,9 @@ inputs = io.open(os.path.join(here, 'Inputs.txt'), encoding='utf-8').read()
 recipes = ''.join(b + '\n' for b in sports + race)
 # Each chart a recipe declares, and each a recipe's own ChartSpec function makes, such as one range of a chart the app slices.
 makers = set(re.findall(r"\bChartSpec (\w+)\(", recipes))
-specs = sorted(set(re.findall(r"\bvar (\w+) = new ChartSpec\b", recipes)) | {name for name, maker in re.findall(r"\bvar (\w+) = (\w+)\(", recipes) if maker in makers})
+# And each chart a builder makes, written `var x = <Something>Chart.Build(...)!;` (a line that goes on to `with { … }` is not matched: its recipe renders it).
+built = set(re.findall(r"\bvar (\w+) = \w+Chart\.Build\([^;]*?\)!;", recipes))
+specs = sorted(set(re.findall(r"\bvar (\w+) = new ChartSpec\b", recipes)) | {name for name, maker in re.findall(r"\bvar (\w+) = (\w+)\(", recipes) if maker in makers} | built)
 
 program = '\n'.join(usings) + '\n' + inputs + recipes
 program += 'var specs = new (string, ChartSpec)[] {' + ','.join(f'("{n}", {n})' for n in specs) + '};\n'

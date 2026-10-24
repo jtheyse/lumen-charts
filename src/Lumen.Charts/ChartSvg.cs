@@ -1186,7 +1186,8 @@ public static partial class ChartSvg
     private static string Said(ChartSeries series) => $", labelled {series.EndLabel}{(series.EndNote is { } note ? " · " + note : "")}";
     /// <summary>The right margin end labels ask for: the widest label and note, by the generous estimate for 12 px text, after its lead and
     /// the step a label moved off its point takes, and the room kept from the edge; capped so the plot keeps at least half the drawing's
-    /// width. None where no series has one.</summary>
+    /// width. None where no series has one. <see cref="ColumnMargins"/> calls it with <c>Width = MaxWidth</c> for a column chart with a
+    /// fixed pitch, which ignores its <c>Width</c>, so the cap never bites there and that chart's end-label room does not depend on <c>Width</c>.</summary>
     private static double Ending(ChartSpec s, double left)
     {
         var need = 0d;
