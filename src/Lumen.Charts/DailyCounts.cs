@@ -49,14 +49,16 @@ public static class DailyCountsChart
     /// <summary>The chart of <paramref name="counts"/>, or null when there is no day to draw or every day in the range is 0, so the page shows
     /// its own empty state. Counts outside the range are left out.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="counts"/> is null.</exception>
-    /// <exception cref="ArgumentException">A count is null or negative, a word is blank, the date format cannot format a date, From is after To,
-    /// or the range is longer than <see cref="MaxDays"/> days.</exception>
+    /// <exception cref="ArgumentException">A count is null or negative, a word is blank, the date format is blank or cannot format a date, From
+    /// is after To, the range is longer than <see cref="MaxDays"/> days, or the style has no series colours and <see cref="DailyCountsOptions.Color"/>
+    /// is null.</exception>
     public static ChartSpec? Build(IEnumerable<DayCount> counts, DailyCountsOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(counts);
         var o = options ?? new DailyCountsOptions();
         if (string.IsNullOrWhiteSpace(o.Singular) || string.IsNullOrWhiteSpace(o.Plural))
             throw new ArgumentException("A daily-counts chart needs a word for one and a word for several (Singular and Plural), such as registration and registrations.");
+        if (string.IsNullOrWhiteSpace(o.DateFormat)) throw new ArgumentException("A daily-counts chart needs a date format (DateFormat) to name each day by its date.");
         try { new DateOnly(2027, 1, 1).ToString(o.DateFormat, CultureInfo.InvariantCulture); }
         catch (FormatException) { throw new ArgumentException("DateFormat must be a valid format string for DateOnly.ToString."); }
         if (o.From is { } setFrom && o.To is { } setTo && setFrom > setTo)

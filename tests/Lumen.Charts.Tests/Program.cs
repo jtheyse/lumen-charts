@@ -10884,7 +10884,10 @@ Test("Daily counts: axis labels write their first line where the name goes and t
     Check(Regex.IsMatch(svg,"y='365'[^>]*>Oct<"),"the 1st's month");
     // The label is drawn only: the mark is named by its Label.
     Check(HeatNames(Month(10)).Any(n=>n.StartsWith("Sign-ups: 28 Sep, ")),string.Join(" | ",HeatNames(Month(10)).Take(2)));
-    Check(!ChartExport.Csv(Month(10)).Contains("\n1\nOct"),"CSV keeps the Label");
+    // The CSV is the same as the CSV of the same chart with every axis label taken away, so no axis label reaches it.
+    var labelled=Month(10);
+    var bare=labelled with{Series=[labelled.Series[0] with{Points=labelled.Series[0].Points.Select(p=>p with{AxisLabel=null}).ToArray()}]};
+    Check(labelled.Series[0].Points.All(p=>p.AxisLabel is not null)&&ChartExport.Csv(labelled)==ChartExport.Csv(bare),"CSV keeps the Label: "+ChartExport.Csv(labelled));
 });
 Test("Daily counts: at a fixed pitch two-line labels are kept first and one-line labels only where they stand clear of them",()=>{
     // At 8 a pitch, "28"/"Sep" is kept; "1"/"Oct", 24 units on, is not clear of it and is dropped whole, "1"/"Nov" is kept, and day numbers between only where clear.
@@ -11057,6 +11060,10 @@ Test("Daily counts: the builder refuses what it cannot build, and draws 4,000 da
     Reject(()=>DailyCountsChart.Build([Count(2026,10,5,1)],new(){Singular=" "}));
     Reject(()=>DailyCountsChart.Build([Count(2026,10,5,1)],new(){Plural=""}));
     Reject(()=>DailyCountsChart.Build([Count(2026,10,5,1)],new(){DateFormat="%"}));
+    // A blank format formats a date as blanks, so it is refused first, as a places chart refuses one.
+    Reject(()=>DailyCountsChart.Build([Count(2026,10,5,1)],new(){DateFormat="  "}));
+    try{DailyCountsChart.Build([Count(2026,10,5,1)],new(){DateFormat=""});Check(false,"an empty DateFormat accepted");}
+    catch(ArgumentException e){Check(e.Message=="A daily-counts chart needs a date format (DateFormat) to name each day by its date.",e.Message);}
     Reject(()=>DailyCountsChart.Build([Count(2026,10,5,1)],new(){From=new DateOnly(2026,10,9),To=new DateOnly(2026,10,1)}));
     Reject(()=>DailyCountsChart.Build([null!]));
     try{DailyCountsChart.Build(null!);Check(false,"null counts");}catch(ArgumentNullException){}

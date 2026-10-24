@@ -1219,13 +1219,15 @@ const string zeroLabels = @"() => { const s = document.querySelector('#sign-ups 
     days = [...s.querySelectorAll('g.lumen-datum[data-point]')].filter(g => /: 0 sign-ups, /.test(g.getAttribute('aria-label'))).length,
     labels = [...s.querySelectorAll(':scope > text[aria-hidden=""true""][font-size=""11""]')].filter(t => t.textContent === '0');
     return [days, labels.length, Math.min(...labels.map(t => ratio(getComputedStyle(t).fill, background))), labels.filter(t => t.getAttribute('fill') === muted).length]; }";
-// The check for whichever theme the page is in, once the card has been redrawn in that theme's background.
+// The check for whichever theme the page is in, once the card has been redrawn in that theme's background. The muted colour of each of the light,
+// dark and Midnight looks clears 4.5:1 on its background (4.93:1, 8.30:1 and 7.70:1), so every zero day's 0 is written in it: a 0 in the text
+// colour there would mean the muted path was never taken.
 async Task ZeroLabelsClear(IPage target, string background)
 {
     if (await target.Locator("#sign-ups .lumen-chart").CountAsync() == 0) return;
     await target.WaitForFunctionAsync("background => document.querySelector('#sign-ups .lumen-viewport > svg')?.getAttribute('style')?.includes('background:' + background)", background, new() { Timeout = 60000 });
     var zeros = await target.EvaluateAsync<double[]>(zeroLabels);
-    Check(zeros[0] >= 3 && zeros[1] == zeros[0] && zeros[2] >= 4.5, $"{zeros[0]} zero days, {zeros[1]} with a 0 label, the lowest contrast {zeros[2]:0.00}:1 against {background}, {zeros[3]} in the muted colour");
+    Check(zeros[0] >= 3 && zeros[1] == zeros[0] && zeros[2] >= 4.5 && zeros[3] == zeros[1], $"{zeros[0]} zero days, {zeros[1]} with a 0 label, the lowest contrast {zeros[2]:0.00}:1 against {background}, {zeros[3]} in the muted colour");
 }
 
 await Test("axe-core reports no WCAG A or AA violation", async () => { await ZeroLabelsClear(page, "#FFFFFF"); await Sweep(); });

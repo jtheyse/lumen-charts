@@ -603,10 +603,17 @@ ChartSpec? chart = DailyCountsChart.Build(signUps, new DailyCountsOptions { Sing
 string svg = chart is null ? "" : ChartSvg.Render(chart, includeLegend: false);   // 7 days: 76 + 7 × 30 + 30 is 316, so the 320 floor applies
 ```
 
-In a Blazor page, with an interactive render mode, the chart opens at its latest day and fills a phone card with a scroll rather than a squeeze:
+In a Blazor page, with an interactive render mode, the chart opens at its latest day and fills a phone card with a scroll rather than a squeeze; `Build` returns `null` when every day is 0, so the page shows its own empty state then:
 
 ```razor
-<LumenChart Spec="chart" FitWidth="true" ScrollToEnd="true" ShowLegend="false" />
+@if (chart is { } c)
+{
+    <LumenChart Spec="c" FitWidth="true" ScrollToEnd="true" ShowLegend="false" />
+}
+else
+{
+    <p>No sign-ups in this range.</p>
+}
 ```
 
 On a static page the SVG stands at its drawn width, so put it in a box of your own that scrolls: `<div style="overflow-x:auto">@((MarkupString)svg)</div>`.
@@ -618,9 +625,9 @@ On a static page the SVG stands at its drawn width, so put it in a box of your o
 - **Under the bars.** Each bar's `AxisLabel` is the day of the month, with a second line, the month as `MMM`, on the first day and each 1st. Where the range crosses a calendar year, the first day and each 1 January read `MMM yyyy` instead: `28` over `Dec 2026`, `29`, `30`, `31`, `1` over `Jan 2027`, … `1` over `Feb`. Two-line labels are kept first (below), so at the default pitch a year label, `Jan 2027`, about 51 units wide, drops the day numbers either side of it, `31` and `2`, and the first day's label, `24` over `Dec 2026`, drops `25`; a month name, about 20 wide, fits beside the day numbers, and a `CellWidth` of 43 or more keeps every day number beside a year label. A range that starts on 31 December puts two year labels side by side, which need a `CellWidth` of 60: below it the 1 January label is dropped, its day number with it.
 - **Names.** Each bar's `Name` is `{Label}: {count} {noun}`, then `, {running total} so far` while `RunningTotal` is on, the running total including that day. Numbers have thousands separators in the invariant culture, and the noun is `Singular` for a count of exactly 1: `Tue 6 Oct 2026: 12 registrations, 140 so far`, `Wed 7 Oct 2026: 1 registration, 141 so far`, `Thu 8 Oct 2026: 0 registrations, 141 so far`.
 - **Whole-number ticks.** The builder sets the Y axis itself, so it never writes "0.5 registrations": the step is the smallest of 1, 2, 5, 10, 20, 50 … that gives at most five steps (`floor(largest / step) + 1 ≤ 5`), and `YMax` is one step above the tallest day's, `step × (floor(largest / step) + 1)`, so the tallest bar never reaches the plot's top and its count stands clear of the description. A tallest day of 1 gives 0, 1, 2; of 3, 0 to 4; of 12, 0, 5, 10, 15; of 15, 0, 5, 10, 15, 20; of 140, 0, 50, 100, 150.
-- **The spec.** `Kind = Column`, `CellWidth` from the options, `Width = 320` (not used for the drawn width) and `Height = 320`: Lumen keeps 78 units above the plot for the title and description and 90 under it for two-line labels, so the bars get about 152. `Title` is the option, or the plural capitalised with " per day" (`Registrations per day`); `Description` is `{total} {noun} across {days} days`, with `1 day` for one (`1,234 registrations across 90 days`); `YLabel` is empty; there is one series, named the plural capitalised, in `Color` or the style's first series colour, with `ValueLabels = true` and `MarkZero = true`. Change anything else with `spec with { … }`.
+- **The spec.** `Kind = Column`, `CellWidth` from the options, `Width = 320` (not used for the drawn width) and `Height = 320`: Lumen keeps 78 units above the plot for the title and description and 90 under it for two-line labels, so the bars get about 152. `Title` is the option, or the plural capitalised with " per day" (`Registrations per day`); `Description` is `{total} {noun} across {days} days`, with `1 day` for one (`1,234 registrations across 90 days`); `YLabel` is empty; there is one series, named the plural capitalised, in `Color` or the style's first series colour, with `ValueLabels = true` and `MarkZero = true`. Change anything else with `spec with { … }`. The spec carries its `Style` (Light when the option is null) and its series' `Color`, which win over a host's `Theme`, `<LumenBrand>` or `spec with { Theme = … }`, so on a dark or branded page pass `Style`, or clear both, `spec with { Theme = theme, Style = null, Series = [spec.Series[0] with { Color = null }] }`, as the gallery does.
 - **Options.** `DailyCountsOptions`: `Singular` (`registration`), `Plural` (`registrations`), `From`, `To`, `CellWidth` (30, a bar about 22 wide), `DateFormat`, `RunningTotal` (true), `Title`, `Color` (`#RRGGBB`) and `Style` (the Light preset when null).
-- **Refusals.** `Build` throws `ArgumentNullException` for a null `counts`, and `ArgumentException`, saying why, for a null entry, a negative count, a blank `Singular` or `Plural`, a `DateFormat` that cannot format a date, `From` after `To`, and a range longer than 4,000 days (the message names the day count). What the chart cannot draw, such as a `CellWidth` below 8 or a bad colour, is refused by the chart's own validation when it renders.
+- **Refusals.** `Build` throws `ArgumentNullException` for a null `counts`, and `ArgumentException`, saying why, for a null entry, a negative count, a blank `Singular` or `Plural`, a blank `DateFormat` or one that cannot format a date, `From` after `To`, a range longer than 4,000 days (the message names the day count), and a style with no series colours when `Color` is null. What the chart cannot draw, such as a `CellWidth` below 8 or a bad colour, is refused by the chart's own validation when it renders.
 - **No component, no endpoint.** The host writes the `<LumenChart>` above, or renders the SVG itself; there is no wrapper component and no HTTP endpoint for the builder, though the HTTP API's `/api/charts/svg` and `/csv` take the properties below in JSON (`"cellWidth":30`, `"axisLabel":"1\nOct"`, `"markZero":true`, `"name":"…"`).
 
 **The column features.** Each is general, and none is on unless the spec asks.

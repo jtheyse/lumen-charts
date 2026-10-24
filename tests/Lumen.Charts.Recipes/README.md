@@ -1,6 +1,6 @@
 # Recipe check
 
-The Claude Code skill's recipes are code that people paste. This check builds one program from every `csharp` block in `integrations/claude-code/lumen-charts/references/sports.md` and `recipes-race-face.md`, **together and as written**, with warnings as errors. Recipes that reuse one another's variable names, call API that does not exist, or no longer compile all fail here. It then renders every `var … = new ChartSpec` the recipes declare.
+The Claude Code skill's recipes are code that people paste. This check builds one program from every `csharp` block in `integrations/claude-code/lumen-charts/references/sports.md` and `recipes-race-face.md`, **together and as written**, with warnings as errors. Recipes that reuse one another's variable names, call API that does not exist, or no longer compile all fail here. It then renders every chart the recipes declare: each `var … = new ChartSpec`, and each `var x = …Chart.Build(…)!;` a builder makes.
 
 ```bash
 python check.py            # writes obj/Recipes.g.cs from the recipes
