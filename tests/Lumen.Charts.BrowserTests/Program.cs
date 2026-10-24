@@ -1756,7 +1756,7 @@ if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
         // The reader scrolls back to the first days; the dark theme redraws the card at the same width, and once the script has taken the new drawing
         // and two frames have passed, the scroll stands where the reader left it.
         var toDark = tab.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) });
-        if (await toDark.CountAsync() == 0) return;
+        if (await toDark.CountAsync() == 0) { Console.WriteLine("SKIP sign-ups redraw check: this host has no theme switch"); return; }
         await tab.EvaluateAsync("() => { document.querySelector('#sign-ups .lumen-viewport').scrollLeft = 240; }");
         await toDark.First.ClickAsync();
         await tab.WaitForFunctionAsync("() => document.querySelector('#sign-ups .lumen-viewport > svg')?.getAttribute('style')?.includes('background:#171E2E')", null, new() { Timeout = 60_000 });
@@ -1764,6 +1764,29 @@ if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
         await tab.EvaluateAsync(frames);
         var kept = await tab.EvaluateAsync<double[]>(box);
         Check(kept[0] == 240 && kept[3] == 2356, $"redrawn {kept[3]} wide in the dark theme, the card stands scrolled to {kept[0]}, not the reader's 240");
+    });
+    // A host may make its scrolling boxes scroll smoothly (scroll-behavior:smooth), so a scroll the script sets is not there yet when it is read
+    // back. The card, opened at its end, must still keep the reader's scroll when the page is resized: the resize reaches the script's
+    // ResizeObserver at once and FitWidth's redraw at the same width some 150 ms later, and neither may scroll the reader back to the end.
+    await Test("With smooth scrolling on its viewport, the Sign-ups per day card opens at its latest day and keeps the reader's scroll when the page is resized", async () =>
+    {
+        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 } });
+        await context.AddInitScriptAsync("document.addEventListener('DOMContentLoaded', () => { const s = document.createElement('style'); s.textContent = '#sign-ups .lumen-viewport { scroll-behavior: smooth !important; }'; document.head.appendChild(s); });");
+        var tab = await Fresh41(context);
+        var card = tab.Locator("#sign-ups .lumen-chart");
+        if (await card.CountAsync() == 0) { Console.WriteLine("SKIP sign-ups smooth-scroll check: this host's first page has no Sign-ups per day card"); return; }
+        await card.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 60_000 });
+        const string box = "() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return [v.scrollLeft, v.clientWidth, v.scrollWidth]; }";
+        await tab.WaitForFunctionAsync("() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return getComputedStyle(v).scrollBehavior === 'smooth' && v.clientWidth > 0 && v.scrollWidth > v.clientWidth && v.scrollLeft + v.clientWidth >= v.scrollWidth - 1; }", null, new() { Timeout = 30_000 });
+        await tab.EvaluateAsync("() => document.querySelector('#sign-ups .lumen-viewport').scrollTo({ left: 240, behavior: 'instant' })");
+        var before = await tab.EvaluateAsync<double[]>(box);
+        Check(before[0] == 240, $"the reader's scroll reads {before[0]}, not 240");
+        await tab.SetViewportSizeAsync(1100, 900);
+        await tab.WaitForFunctionAsync("width => document.querySelector('#sign-ups .lumen-viewport').clientWidth !== width", before[1], new() { Timeout = 10_000 });
+        // Long enough for the redraw, and for any smooth scroll back to the end to finish.
+        await tab.WaitForTimeoutAsync(1500);
+        var after = await tab.EvaluateAsync<double[]>(box);
+        Check(after[0] == 240, $"resized from a box {before[1]} wide to {after[1]}, the card stands scrolled to {after[0]} of {after[2]}, not the reader's 240");
     });
 }
 else Console.WriteLine("SKIP sign-ups card checks: this host's first page has no Sign-ups per day card");

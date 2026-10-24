@@ -287,14 +287,17 @@ export function attach(root, dotnet) {
     // The markup is written as a region, so a page without this script keeps the stop; the script settles it on load, for each new
     // drawing and whenever the viewport or its drawing changes size.
     const viewport = root.classList.contains('lumen-spark') ? null : root.querySelector(':scope > .lumen-viewport');
-    // A drawing waiting to open at its end scrolls its viewport to the right end, and its width counts as reached only once the scroll has
-    // landed there. A viewport hidden when its drawing comes, in a closed tab, a closed <details> or a collapsed panel, has no size and cannot
-    // scroll, so the drawing waits, and region, the viewport's ResizeObserver callback, lands it the first time the viewport is shown (0.47.0).
+    // A drawing waiting to open at its end scrolls its viewport to the right end, and its width counts as reached once the viewport has a size
+    // to scroll in. The scroll is not read back: a smoothly scrolling viewport is still on its way there, and a right-to-left page counts
+    // scrollLeft down from 0, so a read-back can miss the end, leave the drawing waiting and scroll the reader back on every resize. A viewport
+    // hidden when its drawing comes, in a closed tab, a closed <details> or a collapsed panel, has no size and cannot scroll, so the drawing
+    // waits, and region, the viewport's ResizeObserver callback, lands it the first time the viewport is shown (0.47.0).
     const toEnd = () => {
         const viewport = root.querySelector(':scope > .lumen-viewport');
         if (state.endPending === null || !viewport?.clientWidth) return;
         viewport.scrollLeft = viewport.scrollWidth;
-        if (viewport.scrollLeft + viewport.clientWidth >= viewport.scrollWidth - 1) { state.endWidth = state.endPending; state.endPending = null; }
+        state.endWidth = state.endPending;
+        state.endPending = null;
     };
     const region = () => {
         if (!viewport) return;
