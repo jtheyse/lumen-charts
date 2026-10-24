@@ -1207,7 +1207,28 @@ async Task SweepOf(IPage target)
     Check(result.Violations.Length == 0, string.Join("; ", result.Violations.Select(v => $"{v.Id} on {v.Nodes.Length} node(s)")));
 }
 
-await Test("axe-core reports no WCAG A or AA violation", Sweep);
+// 0.47.0: the Sign-ups per day card writes each zero day's "0" in the muted colour where that clears 4.5:1 on the drawing's background and in the
+// text colour where it does not, so every one must clear it. This reads each zero day's bar and its value label (the 11 px words above the bars,
+// which the drawing hides from readers because the bar's name says them) and, in the page, the same WCAG formula as Contrast.Ratio:
+// [how many zero days, how many of them have a "0" label, the lowest contrast among the labels, how many labels carry the muted colour].
+const string zeroLabels = @"() => { const s = document.querySelector('#sign-ups .lumen-viewport > svg'),
+    channel = v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); },
+    luminance = css => { const [r, g, b] = css.match(/[\d.]+/g).map(Number); return .2126 * channel(r) + .7152 * channel(g) + .0722 * channel(b); },
+    ratio = (x, y) => { const a = luminance(x), b = luminance(y); return (Math.max(a, b) + .05) / (Math.min(a, b) + .05); },
+    background = getComputedStyle(s).backgroundColor, muted = getComputedStyle(s).getPropertyValue('--lumen-muted').trim(),
+    days = [...s.querySelectorAll('g.lumen-datum[data-point]')].filter(g => /: 0 sign-ups, /.test(g.getAttribute('aria-label'))).length,
+    labels = [...s.querySelectorAll(':scope > text[aria-hidden=""true""][font-size=""11""]')].filter(t => t.textContent === '0');
+    return [days, labels.length, Math.min(...labels.map(t => ratio(getComputedStyle(t).fill, background))), labels.filter(t => t.getAttribute('fill') === muted).length]; }";
+// The check for whichever theme the page is in, once the card has been redrawn in that theme's background.
+async Task ZeroLabelsClear(IPage target, string background)
+{
+    if (await target.Locator("#sign-ups .lumen-chart").CountAsync() == 0) return;
+    await target.WaitForFunctionAsync("background => document.querySelector('#sign-ups .lumen-viewport > svg')?.getAttribute('style')?.includes('background:' + background)", background, new() { Timeout = 60000 });
+    var zeros = await target.EvaluateAsync<double[]>(zeroLabels);
+    Check(zeros[0] >= 3 && zeros[1] == zeros[0] && zeros[2] >= 4.5, $"{zeros[0]} zero days, {zeros[1]} with a 0 label, the lowest contrast {zeros[2]:0.00}:1 against {background}, {zeros[3]} in the muted colour");
+}
+
+await Test("axe-core reports no WCAG A or AA violation", async () => { await ZeroLabelsClear(page, "#FFFFFF"); await Sweep(); });
 
 // A theme belongs to the host, not to a component, so there is no component selector for it: the switch is
 // found the way a user finds it, as a button named for the theme.
@@ -1220,6 +1241,7 @@ if (await theme.CountAsync() > 0)
         await theme.First.ClickAsync();
         // The chart redraws in the theme's colours, so the sweep cannot run against the light page by mistake.
         await page.WaitForFunctionAsync("before => document.querySelector('.lumen-chart svg')?.getAttribute('style') !== before", before);
+        await ZeroLabelsClear(page, "#171E2E");
         await Sweep();
     });
 }
@@ -1233,6 +1255,7 @@ if (await midnight.CountAsync() > 0)
     {
         await midnight.First.ClickAsync();
         await page.WaitForFunctionAsync("() => document.querySelector('.lumen-chart svg')?.getAttribute('style')?.includes('background:#0B0E14')");
+        await ZeroLabelsClear(page, "#0B0E14");
         await Sweep();
     });
 }
@@ -1674,6 +1697,36 @@ if (await page.EvaluateAsync<int>(gappedIndex) >= 0)
             await tab.Keyboard.PressAsync("Escape");
         });
 else Console.WriteLine("SKIP gap label checks: this host's first page draws no missing value written with a gap label");
+// 0.47.0: the gallery's Sign-ups per day card draws 75 invented days from 20 Aug 2026 at a pitch of 30, so its drawing is 76 + 75 x 30 + 30 = 2356
+// wide, and opens at its latest day, 2 Nov 2026 (20 Aug plus 74 days), with ScrollToEnd. A host without the card says SKIP.
+if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
+    await Test("On a 375-pixel phone the Sign-ups per day card scrolls sideways at its drawn width of 2356 and opens at its latest day, the page does not scroll, every day is named, and each zero day's 0 clears 4.5:1", async () =>
+    {
+        await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+        var tab = await Fresh41(phone);
+        var card = tab.Locator("#sign-ups .lumen-chart");
+        await card.ScrollIntoViewIfNeededAsync();
+        // The chart is interactive once its own script has added its tooltip; the script then scrolls it to its end, which the check waits for.
+        await card.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 60_000 });
+        await tab.WaitForFunctionAsync("() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return v.scrollWidth > v.clientWidth && v.scrollLeft + v.clientWidth >= v.scrollWidth - 1; }", null, new() { Timeout = 60_000 });
+        var read = await card.EvaluateAsync<System.Text.Json.JsonElement>(@"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg'), bars = [...s.querySelectorAll('g.lumen-datum[data-point]')], last = bars.at(-1).getBoundingClientRect(), box = v.getBoundingClientRect();
+            return [v.scrollWidth, v.clientWidth, v.scrollLeft, Number(s.getAttribute('viewBox').split(' ')[2]), s.getBoundingClientRect().width, document.documentElement.scrollWidth, last.left - box.left, box.right - last.right, bars.length,
+                v.getAttribute('tabindex'), v.getAttribute('role'), v.getAttribute('aria-label')]; }");
+        var m = read.EnumerateArray().Take(9).Select(e => e.GetDouble()).ToArray();
+        var scroller = read.EnumerateArray().Skip(9).Select(e => e.GetString()).ToArray();
+        Check(Math.Abs(m[0] - 2356) <= 2 && m[0] > m[1], $"the card's box is {m[1]} wide and holds {m[0]}, not about 2356");
+        Check(m[3] == 2356 && Math.Abs(m[4] - m[3]) < 1, $"drawn {m[3]} wide and shown {m[4]:0.#}");
+        Check(m[5] <= 375, $"the page is {m[5]} wide");
+        Check(m[2] > 0 && m[2] + m[1] >= m[0] - 1, $"scrolled to {m[2]} in a box {m[1]} wide holding {m[0]}");
+        Check(m[8] == 75 && m[6] >= -1 && m[7] >= -1, $"{m[8]} bars, the last {m[6]:0.#} inside the box's left edge and {m[7]:0.#} inside its right");
+        Check(scroller.SequenceEqual(["0", "region", "Scrollable chart"]), $"the scrolling region reads {string.Join(" | ", scroller)}");
+        // Each bar is named with its day, its count and the total so far, the last with 20 Aug plus 74 days, and a zero day says "0 sign-ups".
+        var names = await card.Locator(".lumen-datum[data-point]").EvaluateAllAsync<string[]>("marks => marks.map(m => m.getAttribute('aria-label') ?? '')");
+        Check(names.Length == 75 && names[0].StartsWith("Thu 20 Aug 2026: ") && names[^1].StartsWith("Mon 2 Nov 2026: ") && names[^1].EndsWith(" so far"), $"{names.Length} bars, the first {names[0]}, the last {names[^1]}");
+        Check(names.Count(n => Regex.IsMatch(n, @"^\w{3} \d{1,2} \w{3} 2026: 0 sign-ups, [\d,]+ so far$")) >= 3, string.Join(" | ", names.Where(n => n.Contains(": 0 "))));
+        await ZeroLabelsClear(tab, "#FFFFFF");
+    });
+else Console.WriteLine("SKIP sign-ups card check: this host's first page has no Sign-ups per day card");
 var quietHere = page.Locator(".lumen-chart:has(.lumen-quiet)");
 if (await quietHere.CountAsync() > 0) await QuietChecks(page, quietHere.First, address, "This host");
 else Console.WriteLine("SKIP quiet chart checks: this host's first page draws no chart without its toolbar");

@@ -11067,6 +11067,25 @@ Test("Daily counts: the builder refuses what it cannot build, and draws 4,000 da
     try{DailyCountsChart.Build([new DayCount(start,1)],new(){From=start,To=start.AddDays(4000)});Check(false,"4,001 accepted");}
     catch(ArgumentException e){Check(e.Message.Contains("4,001"),e.Message);}
 });
+Test("Home page: the sign-ups card is 75 invented days from 20 Aug 2026 with named zero days and two-line month labels, drawn 76 + 75 x 30 + 30 = 2356 wide, and follows the theme",()=>{
+    var spec=DemoData.SignUps(ChartTheme.Light)!;
+    ChartValidation.Validate(spec);
+    var p=spec.Series[0].Points;
+    Check(p.Count==75,$"{p.Count} bars");
+    var zeros=p.Where(x=>x.Y==0).ToList();
+    Check(zeros.Count>=3&&zeros.All(x=>Regex.IsMatch(x.Name!,@"^\w{3} \d{1,2} \w{3} 2026: 0 sign-ups, [\d,]+ so far$")),string.Join(" | ",zeros.Select(x=>x.Name)));
+    Check(p[0].Label=="Thu 20 Aug 2026"&&p[0].AxisLabel=="20\nAug"&&p.Single(x=>x.AxisLabel=="1\nSep").Label=="Tue 1 Sep 2026",$"{p[0].Label} / {p[0].AxisLabel}");
+    Check(p[^1].Name!.StartsWith("Mon 2 Nov 2026: ")&&p[^1].Name!.EndsWith(" so far"),p[^1].Name!);
+    Check(spec.Title=="Sign-ups per day"&&spec.Series[0].Name=="Sign-ups"&&spec is{Kind:ChartKind.Column,CellWidth:30},$"{spec.Title} / {spec.Series[0].Name}");
+    Check(ChartSvg.DrawnWidth(spec)==76+75*30+30&&ChartSvg.Render(spec).Contains(";width:2356px;"),$"drawn {ChartSvg.DrawnWidth(spec)}");
+    // The builder pins the Light style and its colour, and the card sheds both, so each theme draws its own and a brand cascaded round the card shows.
+    foreach(var (theme,style) in new[]{(ChartTheme.Light,ChartStyle.Light),(ChartTheme.Dark,ChartStyle.Dark)})
+    {
+        var themed=DemoData.SignUps(theme)!;
+        var svg=ChartSvg.Render(themed);
+        Check(themed.Style is null&&themed.Series[0].Color is null&&svg.Contains($"background:{style.Background}")&&svg.Contains($"fill='{style.Series[0]}'"),$"{theme}: {themed.Style?.Background} / {themed.Series[0].Color}");
+    }
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

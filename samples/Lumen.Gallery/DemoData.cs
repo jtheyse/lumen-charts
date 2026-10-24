@@ -404,6 +404,17 @@ public static class DemoData
                 : new Lumen.Charts.ChartPoint(i,null,$"Round {r.Round}"){GapLabel="absent",Color=theme==Lumen.Charts.ChartTheme.Dark?"#E0A800":"#8A6500"}).ToArray()){StrokeWidth=2,Markers=Lumen.Charts.MarkerStyle.Filled}]
         };
     }
+    // 0.47.0: counts per day. Every number is invented.
+    /// <summary>Seventy-five invented days of sign-ups, 20 Aug to 2 Nov 2026, across three month ends, drawn by
+    /// <see cref="Lumen.Charts.DailyCountsChart.Build"/>: the counts come from a formula, and four quiet days are 0. The builder pins the Light
+    /// style and its first colour, which are dropped here so the card follows the page's theme and brand as its neighbours do.</summary>
+    public static Lumen.Charts.ChartSpec? SignUps(Lumen.Charts.ChartTheme theme)
+    {
+        var first=new DateOnly(2026,8,20);
+        var days=Enumerable.Range(0,75).Select(i=>new Lumen.Charts.DayCount(first.AddDays(i),i%19==7?0:Math.Max(1,(int)Math.Round(16+9*Math.Sin(i/6.0)+5*Math.Sin(i*1.9))))).ToArray();
+        var built=Lumen.Charts.DailyCountsChart.Build(days,new(){Singular="sign-up",Plural="sign-ups"});
+        return built is null?null:built with{Theme=theme,Style=null,Series=[built.Series[0] with{Color=null}]};
+    }
     /// <summary>A place in words: 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st.</summary>
     public static string Ordinal(int place)=>place+(place%100 is 11 or 12 or 13?"th":(place%10) switch{1=>"st",2=>"nd",3=>"rd",_=>"th"});
     public static Lumen.Charts.GraphSpec Graph(Lumen.Charts.GraphLayout layout,Lumen.Charts.ChartTheme theme)=>new()
