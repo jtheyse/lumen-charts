@@ -1700,6 +1700,7 @@ else Console.WriteLine("SKIP gap label checks: this host's first page draws no m
 // 0.47.0: the gallery's Sign-ups per day card draws 75 invented days from 20 Aug 2026 at a pitch of 30, so its drawing is 76 + 75 x 30 + 30 = 2356
 // wide, and opens at its latest day, 2 Nov 2026 (20 Aug plus 74 days), with ScrollToEnd. A host without the card says SKIP.
 if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
+{
     await Test("On a 375-pixel phone the Sign-ups per day card scrolls sideways at its drawn width of 2356 and opens at its latest day, the page does not scroll, every day is named, and each zero day's 0 clears 4.5:1", async () =>
     {
         await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
@@ -1726,7 +1727,44 @@ if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
         Check(names.Count(n => Regex.IsMatch(n, @"^\w{3} \d{1,2} \w{3} 2026: 0 sign-ups, [\d,]+ so far$")) >= 3, string.Join(" | ", names.Where(n => n.Contains(": 0 "))));
         await ZeroLabelsClear(tab, "#FFFFFF");
     });
-else Console.WriteLine("SKIP sign-ups card check: this host's first page has no Sign-ups per day card");
+    // A card hidden when its chart's script takes the drawing, as in a closed tab, a closed <details> or a collapsed panel, has a viewport with no
+    // size, which cannot scroll, so ScrollToEnd waits and lands at the latest day the first time the card is shown. The card is hidden by a style
+    // the page gets before Blazor starts, kept until the chart is interactive, its script has taken its drawing (one mark left a tab stop, the rest
+    // at -1) and two frames have passed, and then removed. A theme switch then redraws the card at the same width, which keeps the reader's scroll.
+    await Test("Hidden when its script takes its drawing, the Sign-ups per day card opens at its latest day the first time it is shown, and a redraw at the same width keeps the reader's scroll", async () =>
+    {
+        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 } });
+        await context.AddInitScriptAsync("document.addEventListener('DOMContentLoaded', () => { const s = document.createElement('style'); s.id = 'hidden-card'; s.textContent = '#sign-ups { display: none !important; }'; document.head.appendChild(s); });");
+        var tab = await Fresh41(context);
+        var card = tab.Locator("#sign-ups .lumen-chart");
+        await card.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 60_000 });
+        const string taken = "() => document.querySelectorAll('#sign-ups .lumen-viewport > svg .lumen-datum[tabindex=\"-1\"]').length > 0";
+        const string frames = "() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))";
+        const string box = "() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return [v.scrollLeft, v.clientWidth, v.scrollWidth, Number(v.querySelector(':scope > svg').getAttribute('viewBox').split(' ')[2])]; }";
+        await tab.WaitForFunctionAsync(taken, null, new() { Timeout = 60_000 });
+        await tab.EvaluateAsync(frames);
+        var hidden = await tab.EvaluateAsync<double[]>(box);
+        Check(hidden[0] == 0 && hidden[1] == 0, $"hidden, the card's box is {hidden[1]} wide and scrolled to {hidden[0]}");
+        await tab.EvaluateAsync("() => document.getElementById('hidden-card').remove()");
+        var opened = true;
+        try { await tab.WaitForFunctionAsync("() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return v.clientWidth > 0 && v.scrollWidth > v.clientWidth && v.scrollLeft + v.clientWidth >= v.scrollWidth - 1; }", null, new() { Timeout = 10_000 }); }
+        catch (TimeoutException) { opened = false; }
+        var shown = await tab.EvaluateAsync<double[]>(box);
+        Check(opened && shown[3] == 2356, $"shown, the card's box {shown[1]} wide holding {shown[2]} (drawn {shown[3]}) stands scrolled to {shown[0]}, not at its end");
+        // The reader scrolls back to the first days; the dark theme redraws the card at the same width, and once the script has taken the new drawing
+        // and two frames have passed, the scroll stands where the reader left it.
+        var toDark = tab.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) });
+        if (await toDark.CountAsync() == 0) return;
+        await tab.EvaluateAsync("() => { document.querySelector('#sign-ups .lumen-viewport').scrollLeft = 240; }");
+        await toDark.First.ClickAsync();
+        await tab.WaitForFunctionAsync("() => document.querySelector('#sign-ups .lumen-viewport > svg')?.getAttribute('style')?.includes('background:#171E2E')", null, new() { Timeout = 60_000 });
+        await tab.WaitForFunctionAsync(taken, null, new() { Timeout = 60_000 });
+        await tab.EvaluateAsync(frames);
+        var kept = await tab.EvaluateAsync<double[]>(box);
+        Check(kept[0] == 240 && kept[3] == 2356, $"redrawn {kept[3]} wide in the dark theme, the card stands scrolled to {kept[0]}, not the reader's 240");
+    });
+}
+else Console.WriteLine("SKIP sign-ups card checks: this host's first page has no Sign-ups per day card");
 var quietHere = page.Locator(".lumen-chart:has(.lumen-quiet)");
 if (await quietHere.CountAsync() > 0) await QuietChecks(page, quietHere.First, address, "This host");
 else Console.WriteLine("SKIP quiet chart checks: this host's first page draws no chart without its toolbar");

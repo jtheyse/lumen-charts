@@ -13,10 +13,10 @@ export function attach(root, dotnet) {
     root.appendChild(tooltip);
     // The readout the component worked out for the drawing shown, the X it stands at, its guide and rings, the mark that is the chart's
     // one tab stop, the series the keyboard keeps to, and the drawing they belong to; and the plots a drag zooms across, the drag under
-    // way, and whether the click a drag ends with is to be ignored; and the width of the drawing a chart asked to open at its end last
-    // scrolled to the end of.
+    // way, and whether the click a drag ends with is to be ignored; and, for a chart asked to open at its end, the width of the drawing its
+    // viewport last landed at the end of, and the width of a drawing still waiting to land there, or null.
     const state = { readout: null, index: new Map(), column: -1, overlay: null, current: null, series: null, keep: false, svg: null, timer: 0,
-        plot: null, brush: null, suppress: false, endWidth: null };
+        plot: null, brush: null, suppress: false, endWidth: null, endPending: null };
 
     const mark = target => {
         const found = target instanceof Element ? target.closest('.lumen-datum') : null;
@@ -287,6 +287,15 @@ export function attach(root, dotnet) {
     // The markup is written as a region, so a page without this script keeps the stop; the script settles it on load, for each new
     // drawing and whenever the viewport or its drawing changes size.
     const viewport = root.classList.contains('lumen-spark') ? null : root.querySelector(':scope > .lumen-viewport');
+    // A drawing waiting to open at its end scrolls its viewport to the right end, and its width counts as reached only once the scroll has
+    // landed there. A viewport hidden when its drawing comes, in a closed tab, a closed <details> or a collapsed panel, has no size and cannot
+    // scroll, so the drawing waits, and region, the viewport's ResizeObserver callback, lands it the first time the viewport is shown (0.47.0).
+    const toEnd = () => {
+        const viewport = root.querySelector(':scope > .lumen-viewport');
+        if (state.endPending === null || !viewport?.clientWidth) return;
+        viewport.scrollLeft = viewport.scrollWidth;
+        if (viewport.scrollLeft + viewport.clientWidth >= viewport.scrollWidth - 1) { state.endWidth = state.endPending; state.endPending = null; }
+    };
     const region = () => {
         if (!viewport) return;
         const svg = drawing();
@@ -301,6 +310,7 @@ export function attach(root, dotnet) {
             viewport.removeAttribute('aria-label');
             if (keys) { viewport.removeAttribute('aria-describedby'); svg?.setAttribute('aria-describedby', keys); }
         }
+        toEnd();
     };
     const sized = viewport ? new ResizeObserver(region) : null;
     if (viewport) { sized.observe(viewport); region(); }
@@ -326,14 +336,11 @@ export function attach(root, dotnet) {
         settle();
         region();
         if (svg && keys && root.classList.contains('lumen-spark')) svg.setAttribute('aria-describedby', keys);
-        // Asked to open at its end, a drawing whose width is new scrolls its viewport to the right end, where the latest days stand (0.47.0).
-        const viewport = root.querySelector(':scope > .lumen-viewport');
+        // Asked to open at its end, a drawing whose width differs from the drawing before it waits to stand at its viewport's right end, where
+        // the latest days are; a drawing of the same width keeps the reader's scroll (0.47.0).
         const width = drawing()?.viewBox?.baseVal?.width ?? 0;
-        if (end && viewport && width !== state.endWidth) {
-            state.endWidth = width;
-            requestAnimationFrame(() => { viewport.scrollLeft = viewport.scrollWidth; });
-        }
-        if (!end) state.endWidth = null;
+        if (!end) { state.endWidth = null; state.endPending = null; }
+        else if (width !== (state.endPending ?? state.endWidth)) { state.endPending = width; requestAnimationFrame(toEnd); }
     };
 
     const bindings = [['click', select], ['keydown', keydown], ['pointerover', over], ['pointermove', moved],
