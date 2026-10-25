@@ -74,7 +74,7 @@ else
     /// accepts, or 60 for a sparkline, and the SVG and PNG exports take the width it is drawn at.
     /// </summary>
     [Parameter] public bool FitWidth { get; set; }
-    /// <summary>Draws the legend of toggle buttons under the chart, the default; a strip never draws it, since the key in its drawing names its parts and its one series cannot be hidden. Off, the chart has none, and every series stays shown: for a
+    /// <summary>Draws the legend of toggle buttons under the chart, the default; a strip or a heatmap never draws it: a strip's key names its parts and its one series cannot be hidden, and a heatmap's rows are named in its grid. Off, the chart has none, and every series stays shown: for a
     /// chart whose series are named in its drawing already, by <see cref="ChartSeries.EndLabel"/> or by pane headers, or a single series named
     /// by the title. A series can then not be hidden from the page.</summary>
     [Parameter] public bool ShowLegend { get; set; } = true;
