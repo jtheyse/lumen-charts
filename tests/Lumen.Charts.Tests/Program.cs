@@ -11135,6 +11135,29 @@ Test("0.47.1: Home page: the sign-ups card's 30-day span is the last 30 of the s
     Check(whole.Series[0].Points.Count==75&&ChartSvg.DrawnWidth(whole)==2356,$"{whole.Series[0].Points.Count} bars");
     Check(DemoData.SignUps(ChartTheme.Light,75)!.Series[0].Points.Count==75,"75 asked for is the whole");
 });
+Test("0.47.1: a series hidden under a line chart does not stay hidden when the same component is given a heatmap or a strip, which draw no legend to bring it back, and a new line chart still keeps what the reader hid",()=>{
+    var flags=BindingFlags.NonPublic|BindingFlags.Instance;
+    var toggle=typeof(LumenChart).GetMethod("Toggle",flags)!;
+    var lines=Spec() with{Series=[new("Sprint",[new(0,2),new(1,3)]),new("Long distance",[new(0,1),new(1,2)])]};
+    // The reader hides one series of a line chart, then the host sets another spec on the same instance.
+    string Swapped(ChartSpec next,int hide)=>Operate(lines,async c=>{
+        toggle.Invoke(c,[hide]);
+        typeof(LumenChart).GetField("showData",flags)!.SetValue(c,true);
+        await c.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",next}}));
+    });
+    // Every row of the heatmap is drawn and in its grid, whichever series was hidden.
+    foreach(var hide in new[]{0,1})
+    {
+        var grid=Swapped(HeatGrid(),hide);
+        Check(grid.Contains("aria-label='Sprint: ")&&grid.Contains("aria-label='Long distance: ")&&grid.Contains("<th scope='row'>Sprint</th>")&&grid.Contains("<th scope='row'>Long distance</th>"),$"a heatmap after series {hide} was hidden");
+    }
+    // The strip's one series is not hidden either.
+    var strip=Swapped(Sample(ChartKind.Strip),0);
+    Check(!strip.Contains("No data to display")&&strip.Contains("lumen-datum"),"a strip after its series was hidden");
+    // A line chart given another spec keeps the series the reader hid.
+    var kept=Swapped(lines with{Title="Next"},1);
+    Check(kept.Contains("aria-label='Sprint: ")&&!kept.Contains("aria-label='Long distance: "),"a line chart keeps its hidden series");
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

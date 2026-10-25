@@ -42,7 +42,7 @@ else
     </div>
     @if(showData&&Spec.Kind==ChartKind.Heatmap)
     {
-        @* A heatmap's data is a grid, its rows by its columns, as the drawing is, of the rows the reader has not hidden. *@
+        @* A heatmap's data is a grid, its rows by its columns, as the drawing is, of every row, since a heatmap draws no legend to hide one. *@
         <div class="lumen-table" tabindex="0" role="region" aria-label="Chart data">@((MarkupString)ChartExport.HtmlTable(VisibleSpec()))</div>
     }
     else if(showData)
@@ -60,7 +60,7 @@ else
 }
 @code {
     /// <summary>The chart to draw. Set a new spec to update it. Whenever it is set, the zoom resets and the series the reader
-    /// has hidden stay hidden.</summary>
+    /// has hidden stay hidden, except under a strip or a heatmap, which draw no legend and show every series (0.47.1).</summary>
     [Parameter, EditorRequired] public ChartSpec Spec { get; set; } = new();
     /// <summary>Raised when a mark is clicked, or chosen with Enter or Space, with the series and point it came from in the
     /// original <see cref="Spec"/>, whatever is hidden or zoomed. Needs an interactive render mode.</summary>
@@ -183,7 +183,8 @@ else
         viewMin=full.Invert(from,0,1);viewMax=full.Invert(from+span,0,1);Render();
     }
     private void ResetView() { viewMin=null;viewMax=null;Render(); }
-    protected override void OnParametersSet() { hidden.RemoveWhere(i=>i>=Spec.Series.Count);viewMin=null;viewMax=null;Render(); }
+    // A strip and a heatmap draw no legend, so nothing could bring back a series the reader hid under a spec of another kind, and none stays hidden (0.47.1).
+    protected override void OnParametersSet() { if(Spec.Kind is ChartKind.Strip or ChartKind.Heatmap)hidden.Clear();else hidden.RemoveWhere(i=>i>=Spec.Series.Count);viewMin=null;viewMax=null;Render(); }
     private ChartSpec VisibleSpec()
     {
         var spec=Spec with { Width=Width, Style=Style, XMin=CanZoom ? viewMin ?? Spec.XMin : Spec.XMin, XMax=CanZoom ? viewMax ?? Spec.XMax : Spec.XMax, Series=visible.Select(i=>Spec.Series[i] with {Color=ChartSvg.SeriesColor(Spec.Series[i],i,Style),Points=hidden.Contains(i)?[]:Spec.Series[i].Points}).ToArray() };
