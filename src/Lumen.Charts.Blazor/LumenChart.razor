@@ -92,7 +92,8 @@ else
     [Parameter] public bool? ShowDataButton { get; set; }
     /// <summary>Opens a chart that is wider than its box, such as one with a <see cref="ChartSpec.CellWidth"/>, scrolled to its right end,
     /// where its latest days are, and goes back there whenever a new drawing has a different width; otherwise the reader's scroll is kept.
-    /// Needs an interactive render mode: prerendered and static markup stands at the left (0.47.0).</summary>
+    /// Needs an interactive render mode: prerendered and static markup stands at the left (0.47.0). With it, the chart's one tab stop is its
+    /// last point, and a new span moves it to its last bar (0.47.1).</summary>
     [Parameter] public bool ScrollToEnd { get; set; }
     private bool DataButton => ShowDataButton ?? ShowToolbar;
     // A fixed-width heatmap's row names, drawn again in a layer held at the viewport's left while its cells scroll under it (0.46.1).
