@@ -296,6 +296,30 @@ await Test("Export PNG rasterizes through the canvas", async () =>
     Check(bytes[0] == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G', "not a PNG signature");
 });
 
+// 0.47.1: a drawing wider than 8,192 is scaled down to fit, so the longest edge of the image is at most 8,192 pixels at any width. No gallery
+// chart is that wide, so the check calls the component's script module on a synthetic SVG. A host that serves no module says SKIP.
+if (await page.EvaluateAsync<bool>("() => fetch('/_content/Lumen.Charts.Blazor/lumen.js', { method: 'HEAD' }).then(r => r.ok, () => false)"))
+    await Test("Export PNG keeps the longest edge within 8,192 pixels at any width", async () =>
+    {
+        // The image's size is in its header: the width and height are big-endian 32-bit integers at bytes 16 and 20.
+        async Task<int[]> Exported(int height)
+        {
+            var download = await page.RunAndWaitForDownloadAsync(async () => await page.EvaluateAsync(@"async height => {
+                const lumen = await import('/_content/Lumen.Charts.Blazor/lumen.js');
+                await lumen.png(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20000 ${height}'><rect width='20000' height='${height}' fill='#2A6F97'/></svg>`, 'wide.png', 2);
+            }", height));
+            Check(download.SuggestedFilename == "wide.png", download.SuggestedFilename);
+            var bytes = await File.ReadAllBytesAsync((await download.PathAsync())!);
+            Check(bytes.Length > 24 && bytes[0] == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G', "not a PNG signature");
+            return [System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(16)), System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(20))];
+        }
+        var wide = await Exported(300);
+        Check(wide[0] == 8192 && wide[1] == 123, $"a drawing 20000 by 300 exports at {wide[0]} by {wide[1]}, not 8192 by 123");
+        var flat = await Exported(3);
+        Check(flat[0] == 8192 && flat[1] >= 1, $"a drawing 20000 by 3 exports at {flat[0]} by {flat[1]}, not 8192 wide and at least 1 tall");
+    });
+else Console.WriteLine("SKIP wide PNG export check: this host serves no component script at /_content/Lumen.Charts.Blazor/lumen.js");
+
 await Test("Hiding a series removes its marks", async () =>
 {
     var legend = chart.Locator(".lumen-legend button");
@@ -1787,6 +1811,39 @@ if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
         await tab.WaitForTimeoutAsync(1500);
         var after = await tab.EvaluateAsync<double[]>(box);
         Check(after[0] == 240, $"resized from a box {before[1]} wide to {after[1]}, the card stands scrolled to {after[0]} of {after[2]}, not the reader's 240");
+    });
+    // 0.47.1: a chart that opens at its end gives its one tab stop to its latest bar, so a reader who tabs in is not scrolled back to the first
+    // day, and a redraw at the same width (a theme switch) keeps the stop the reader moved to. The theme switch leaves the page in the dark
+    // theme, so the check runs in a context of its own, as the hidden-card check does.
+    await Test("With ScrollToEnd the Sign-ups per day card's one tab stop is its latest bar, Tab reaches it without scrolling the chart back, and a redraw at the same width keeps the reader's stop", async () =>
+    {
+        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 } });
+        var tab = await Fresh41(context);
+        var card = tab.Locator("#sign-ups .lumen-chart");
+        await card.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 60_000 });
+        const string taken = "() => document.querySelectorAll('#sign-ups .lumen-viewport > svg .lumen-datum[tabindex=\"-1\"]').length > 0";
+        const string atEnd = "() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return v.scrollWidth > v.clientWidth && v.scrollLeft + v.clientWidth >= v.scrollWidth - 1; }";
+        var stops = card.Locator(".lumen-datum[tabindex='0']");
+        async Task<string> Stop() => await stops.First.GetAttributeAsync("aria-label") ?? "";
+        await tab.WaitForFunctionAsync(taken, null, new() { Timeout = 60_000 });
+        await tab.WaitForFunctionAsync(atEnd, null, new() { Timeout = 60_000 });
+        var count = await stops.CountAsync();
+        Check(count == 1 && (await Stop()).StartsWith("Mon 2 Nov 2026: "), $"{count} tab stop(s), the first reading {await Stop()}, not the latest bar, Mon 2 Nov 2026");
+        // Focusing the stop does not scroll the chart back to its first day.
+        await stops.First.FocusAsync();
+        var focused = await tab.EvaluateAsync<double[]>("() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return [v.scrollLeft, v.clientWidth, v.scrollWidth]; }");
+        Check(focused[0] + focused[1] >= focused[2] - 1, $"focused, the card stands scrolled to {focused[0]} in a box {focused[1]} wide holding {focused[2]}, not at its end");
+        await tab.Keyboard.PressAsync("ArrowLeft");
+        await tab.Keyboard.PressAsync("ArrowLeft");
+        Check((await Stop()).StartsWith("Sat 31 Oct 2026: "), $"two ArrowLefts from the latest bar leave the stop reading {await Stop()}");
+        // A theme switch redraws the card at the same width, which keeps the reader's stop as it keeps their scroll.
+        var toDark = tab.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) });
+        if (await toDark.CountAsync() == 0) { Console.WriteLine("SKIP sign-ups redraw tab-stop check: this host has no theme switch"); return; }
+        await toDark.First.ClickAsync();
+        await tab.WaitForFunctionAsync("() => document.querySelector('#sign-ups .lumen-viewport > svg')?.getAttribute('style')?.includes('background:#171E2E')", null, new() { Timeout = 60_000 });
+        await tab.WaitForFunctionAsync(taken, null, new() { Timeout = 60_000 });
+        count = await stops.CountAsync();
+        Check(count == 1 && (await Stop()).StartsWith("Sat 31 Oct 2026: "), $"redrawn in the dark theme, {count} tab stop(s), the first reading {await Stop()}, not the reader's Sat 31 Oct 2026");
     });
 }
 else Console.WriteLine("SKIP sign-ups card checks: this host's first page has no Sign-ups per day card");

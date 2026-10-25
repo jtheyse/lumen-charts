@@ -11093,6 +11093,17 @@ Test("Home page: the sign-ups card is 75 invented days from 20 Aug 2026 with nam
         Check(themed.Style is null&&themed.Series[0].Color is null&&svg.Contains($"background:{style.Background}")&&svg.Contains($"fill='{style.Series[0]}'"),$"{theme}: {themed.Style?.Background} / {themed.Series[0].Color}");
     }
 });
+// 0.47.1: the tab stop on a chart that opens at its end, and PNG export at any width. Both rules are plain in the script's source.
+Test("0.47.1: the script's PNG factor has no floor of 1, so the longest edge is at most 8,192 pixels, and its default tab stop is the last point of the lowest series when the chart opens at its end, cleared for a new span",()=>{
+    var js=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.js"));
+    Check(js.Contains("const factor = Math.min(scale || 2, 8192 / Math.max(width, height));")&&!js.Contains("Math.max(1, Math.min(scale"),"png factor");
+    Check(js.Contains("canvas.width = Math.max(1, Math.round(width * factor));")&&js.Contains("canvas.height = Math.max(1, Math.round(height * factor));"),"png canvas edges");
+    // settle takes the flag, and with it the point with the highest index wins within the lowest series; without it the lowest does, as before.
+    Check(js.Contains("const settle = end =>")&&js.Contains("end ? Number(m.dataset.point) > Number(best.dataset.point) : Number(m.dataset.point) < Number(best.dataset.point)"),"settle chooses the last point");
+    // A ScrollToEnd drawing of a new width forgets the remembered stop before settle runs, then settles with the flag.
+    var drawn=js[js.IndexOf("state.drawn = (data, plot, end) =>",StringComparison.Ordinal)..];
+    Check(drawn.Contains("state.current = null;")&&drawn.IndexOf("state.current = null;",StringComparison.Ordinal)<drawn.IndexOf("settle(end);",StringComparison.Ordinal)&&drawn.IndexOf("settle(end);",StringComparison.Ordinal)<drawn.IndexOf("region();",StringComparison.Ordinal),"a new span resets the stop before settle");
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

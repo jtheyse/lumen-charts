@@ -116,18 +116,19 @@ export function attach(root, dotnet) {
         state.timer = setTimeout(() => dotnet.invokeMethodAsync('Readout', column), 150);
     };
 
-    // One tab stop for every chart: the mark last focused, or else the first point of the first series, takes Tab; the others are reached
-    // with the arrow keys. The drawing itself keeps every mark at tabindex 0, so a static page stays readable without this script.
+    // One tab stop for every chart: the mark last focused, or else the first point of the first series (the last, on a chart asked to open at
+    // its end, so that Tab does not scroll it back to its first day), takes Tab; the others are reached with the arrow keys. The drawing
+    // itself keeps every mark at tabindex 0, so a static page stays readable without this script.
     const rove = current => {
         for (const element of marks()) element.setAttribute('tabindex', element === current ? '0' : '-1');
         state.current = key(current);
     };
-    const settle = () => {
+    const settle = end => {
         const all = marks();
         if (!all.length) return;
         const points = all.filter(m => m.dataset.series !== undefined);
         const first = points.length ? points.reduce((best, m) => Number(m.dataset.series) < Number(best.dataset.series)
-            || m.dataset.series === best.dataset.series && Number(m.dataset.point) < Number(best.dataset.point) ? m : best) : all[0];
+            || m.dataset.series === best.dataset.series && (end ? Number(m.dataset.point) > Number(best.dataset.point) : Number(m.dataset.point) < Number(best.dataset.point)) ? m : best) : all[0];
         rove(all.find(m => key(m) === state.current) || first);
     };
     // The chart's marks in the rows the arrow keys move along: each series' points in order, then the aggregates — references, bins,
@@ -336,12 +337,14 @@ export function attach(root, dotnet) {
             hide();
             if (sized && svg) sized.observe(svg);
         }
-        settle();
+        // Asked to open at its end, a drawing whose width differs from the drawing before it starts afresh: its tab stop is its last bar, not the
+        // one the reader left in the old span, and it waits to stand at its viewport's right end, where the latest days are. A drawing of the
+        // same width keeps the reader's stop and scroll (0.47.0; the stop, 0.47.1).
+        const width = drawing()?.viewBox?.baseVal?.width ?? 0;
+        if (end && width !== (state.endPending ?? state.endWidth)) state.current = null;
+        settle(end);
         region();
         if (svg && keys && root.classList.contains('lumen-spark')) svg.setAttribute('aria-describedby', keys);
-        // Asked to open at its end, a drawing whose width differs from the drawing before it waits to stand at its viewport's right end, where
-        // the latest days are; a drawing of the same width keeps the reader's scroll (0.47.0).
-        const width = drawing()?.viewBox?.baseVal?.width ?? 0;
         if (!end) { state.endWidth = null; state.endPending = null; }
         else if (width !== (state.endPending ?? state.endWidth)) { state.endPending = width; requestAnimationFrame(toEnd); }
     };
@@ -721,14 +724,15 @@ export function png(svg, filename, scale) {
         // Firefox rasterizes only when the document carries intrinsic dimensions.
         root.setAttribute('width', width);
         root.setAttribute('height', height);
-        const factor = Math.max(1, Math.min(scale || 2, 8192 / Math.max(width, height)));
+        // The longest edge is at most 8,192 pixels whatever the width: a drawing wider than that is scaled down to fit, so its words shrink.
+        const factor = Math.min(scale || 2, 8192 / Math.max(width, height));
         const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(root)], { type: 'image/svg+xml;charset=utf-8' }));
         const image = new Image();
         image.onload = () => {
             try {
                 const canvas = document.createElement('canvas');
-                canvas.width = Math.round(width * factor);
-                canvas.height = Math.round(height * factor);
+                canvas.width = Math.max(1, Math.round(width * factor));
+                canvas.height = Math.max(1, Math.round(height * factor));
                 const context = canvas.getContext('2d');
                 // A drawing left unpainted, which carries its colour as --lumen-ground instead, stays transparent.
                 const ground = root.style.background || (root.style.getPropertyValue('--lumen-ground') ? '' : '#FFFFFF');
