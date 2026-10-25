@@ -546,7 +546,9 @@ if (await page.Locator("#playground .lumen-chart.lumen-fit").CountAsync() > 0)
 }
 else Console.WriteLine("SKIP home explorer phone check: this host has no fitted chart explorer");
 
-var graph = page.Locator(".lumen-chart").Nth(1);
+// The gallery's network graph stands in its own card, section#network, so the checks find it by the card, not by its place among the page's
+// charts. A host whose first page has no such graph says SKIP.
+var graph = page.Locator("#network .lumen-chart");
 if (await graph.CountAsync() > 0 && await graph.Locator("[data-node]").CountAsync() > 0)
 {
     await Test("Dragging a graph node moves it and its edges", async () =>
@@ -571,7 +573,7 @@ if (await graph.CountAsync() > 0 && await graph.Locator("[data-node]").CountAsyn
     await Test("Reset layout restores the computed positions", async () =>
     {
         await graph.Locator(".lumen-tools button", new() { HasTextString = "Reset layout" }).ClickAsync();
-        await page.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart')[1].querySelector('.lumen-status')?.textContent.includes('Layout reset')");
+        await page.WaitForFunctionAsync("() => document.querySelector('#network .lumen-chart').querySelector('.lumen-status')?.textContent.includes('Layout reset')");
         Check(true);
     });
 
@@ -579,10 +581,11 @@ if (await graph.CountAsync() > 0 && await graph.Locator("[data-node]").CountAsyn
     {
         var node = graph.Locator("[data-node]").First;
         await node.ClickAsync();
-        await page.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart')[1].querySelector('.lumen-status')?.textContent.startsWith('Selected')");
+        await page.WaitForFunctionAsync("() => document.querySelector('#network .lumen-chart').querySelector('.lumen-status')?.textContent.startsWith('Selected')");
         Check(true);
     });
 }
+else Console.WriteLine("SKIP graph checks: this host's first page has no network graph");
 
 // A graph set to FitWidth is drawn at the width of its box, holds a dragged node in proportion when the box changes, and lets it
 // go when a narrow box turns the graph top to bottom. A host whose graph does not fit its box says SKIP.
@@ -1844,6 +1847,53 @@ if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
         await tab.WaitForFunctionAsync(taken, null, new() { Timeout = 60_000 });
         count = await stops.CountAsync();
         Check(count == 1 && (await Stop()).StartsWith("Sat 31 Oct 2026: "), $"redrawn in the dark theme, {count} tab stop(s), the first reading {await Stop()}, not the reader's Sat 31 Oct 2026");
+    });
+    // 0.47.1: the card's range switch is what changes the drawing's width on the home page: the 75 days draw 2356 wide, the last 30 (4 Oct to
+    // 2 Nov) 76 + 30 x 30 + 30 = 1006. A chart that opens at its end opens each new span at its end with its latest bar the tab stop, wherever the
+    // reader had scrolled to: at 240 in the 75 days is not the end of the 30, and the end of the 30 is not the end of the 75.
+    await Test("Picking Last 30 days redraws the Sign-ups per day card 1,006 wide at its end with its last bar the tab stop, and All 75 days brings back 2,356 at its end", async () =>
+    {
+        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 } });
+        var tab = await Fresh41(context);
+        var scope = tab.Locator("#sign-ups");
+        var card = scope.Locator(".lumen-chart");
+        var last30 = scope.GetByRole(AriaRole.Button, new() { Name = "Last 30 days" });
+        var all75 = scope.GetByRole(AriaRole.Button, new() { Name = "All 75 days" });
+        await card.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 60_000 });
+        const string drawn = "width => Number(document.querySelector('#sign-ups .lumen-viewport > svg')?.getAttribute('viewBox').split(' ')[2]) === width";
+        const string taken = "() => document.querySelectorAll('#sign-ups .lumen-viewport > svg .lumen-datum[tabindex=\"-1\"]').length > 0";
+        const string frames = "() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))";
+        const string atEnd = "() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return v.scrollWidth > v.clientWidth && v.scrollLeft + v.clientWidth >= v.scrollWidth - 1; }";
+        const string box = "() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return [v.scrollLeft, v.clientWidth, v.scrollWidth, Number(v.querySelector(':scope > svg').getAttribute('viewBox').split(' ')[2])]; }";
+        var stops = card.Locator(".lumen-datum[tabindex='0']");
+        async Task<string> Pressed() => $"{await last30.GetAttributeAsync("aria-pressed")}/{await all75.GetAttributeAsync("aria-pressed")}";
+        // Once the drawing is the new width and the script has taken it (one mark left a tab stop, the rest at -1) and two frames have passed.
+        async Task Opens(string span, int width, int bars)
+        {
+            await tab.WaitForFunctionAsync(drawn, width, new() { Timeout = 60_000 });
+            await tab.WaitForFunctionAsync(taken, null, new() { Timeout = 60_000 });
+            await tab.EvaluateAsync(frames);
+            var ended = true;
+            try { await tab.WaitForFunctionAsync(atEnd, null, new() { Timeout = 10_000 }); }
+            catch (TimeoutException) { ended = false; }
+            var m = await tab.EvaluateAsync<double[]>(box);
+            Check(ended && m[3] == width && Math.Abs(m[2] - width) <= 2, $"{span}: the box {m[1]} wide holds {m[2]} (drawn {m[3]}) and stands scrolled to {m[0]}, not at its end");
+            var count = await stops.CountAsync();
+            var bar = count == 1 ? await stops.First.GetAttributeAsync("aria-label") ?? "" : "";
+            var marks = await card.Locator(".lumen-datum[data-point]").CountAsync();
+            Check(marks == bars && count == 1 && bar.StartsWith("Mon 2 Nov 2026: "), $"{span}: {marks} bars and {count} tab stop(s), the stop reading \"{bar}\", not the latest bar, Mon 2 Nov 2026");
+        }
+        await Opens("the 75 days", 2356, 75);
+        Check(await Pressed() == "false/true", $"before the pick, Last 30 days / All 75 days read aria-pressed {await Pressed()}, not false/true");
+        // The reader has scrolled back to the first days when they pick.
+        await tab.EvaluateAsync("() => { document.querySelector('#sign-ups .lumen-viewport').scrollLeft = 240; }");
+        Check((await tab.EvaluateAsync<double[]>(box))[0] == 240, "the reader's scroll did not hold at 240");
+        await last30.ClickAsync();
+        await Opens("Last 30 days", 1006, 30);
+        Check(await Pressed() == "true/false", $"after picking Last 30 days, Last 30 days / All 75 days read aria-pressed {await Pressed()}, not true/false");
+        await all75.ClickAsync();
+        await Opens("All 75 days", 2356, 75);
+        Check(await Pressed() == "false/true", $"after picking All 75 days, Last 30 days / All 75 days read aria-pressed {await Pressed()}, not false/true");
     });
 }
 else Console.WriteLine("SKIP sign-ups card checks: this host's first page has no Sign-ups per day card");

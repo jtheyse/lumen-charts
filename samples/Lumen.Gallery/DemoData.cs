@@ -407,12 +407,16 @@ public static class DemoData
     // 0.47.0: counts per day. Every number is invented.
     /// <summary>Seventy-five invented days of sign-ups, 20 Aug to 2 Nov 2026, across three month ends, drawn by
     /// <see cref="Lumen.Charts.DailyCountsChart.Build"/>: the counts come from a formula, and four quiet days are 0. The builder pins the Light
-    /// style and its first colour, which are dropped here so the card follows the page's theme and brand as its neighbours do.</summary>
-    public static Lumen.Charts.ChartSpec? SignUps(Lumen.Charts.ChartTheme theme)
+    /// style and its first colour, which are dropped here so the card follows the page's theme and brand as its neighbours do. Below 75
+    /// <paramref name="days"/> only the last that many are drawn, ending 2 Nov: the same days and counts, from <c>From</c> = 2 Nov minus one fewer than
+    /// <paramref name="days"/>, so 30 days run 4 Oct to 2 Nov and draw 1,006 wide instead of 2,356.</summary>
+    /// <param name="theme">The theme the card is drawn in.</param>
+    /// <param name="days">How many of the 75 days to draw, counted back from 2 Nov 2026; 75 or more draws them all.</param>
+    public static Lumen.Charts.ChartSpec? SignUps(Lumen.Charts.ChartTheme theme,int days=75)
     {
         var first=new DateOnly(2026,8,20);
-        var days=Enumerable.Range(0,75).Select(i=>new Lumen.Charts.DayCount(first.AddDays(i),i%19==7?0:Math.Max(1,(int)Math.Round(16+9*Math.Sin(i/6.0)+5*Math.Sin(i*1.9))))).ToArray();
-        var built=Lumen.Charts.DailyCountsChart.Build(days,new(){Singular="sign-up",Plural="sign-ups"});
+        var counts=Enumerable.Range(0,75).Select(i=>new Lumen.Charts.DayCount(first.AddDays(i),i%19==7?0:Math.Max(1,(int)Math.Round(16+9*Math.Sin(i/6.0)+5*Math.Sin(i*1.9))))).ToArray();
+        var built=Lumen.Charts.DailyCountsChart.Build(counts,new(){Singular="sign-up",Plural="sign-ups",From=days<75?new DateOnly(2026,11,2).AddDays(-(days-1)):null});
         return built is null?null:built with{Theme=theme,Style=null,Series=[built.Series[0] with{Color=null}]};
     }
     /// <summary>A place in words: 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st.</summary>

@@ -11119,6 +11119,22 @@ Test("0.47.1: a heatmap draws no series legend under ShowLegend, and a line char
     Check(!ChartMarkup(Sample(ChartKind.Heatmap),new(){{"ShowLegend",true}}).Contains("lumen-legend"),"heatmap");
     Check(ChartMarkup(Sample(ChartKind.Line),new(){{"ShowLegend",true}}).Contains("lumen-legend"),"line");
 });
+Test("0.47.1: Home page: the sign-ups card's 30-day span is the last 30 of the same invented days, 4 Oct to 2 Nov 2026, drawn 76 + 30 x 30 + 30 = 1006 wide, and the default is still the 75 days",()=>{
+    var spec=DemoData.SignUps(ChartTheme.Light,30)!;
+    ChartValidation.Validate(spec);
+    var p=spec.Series[0].Points;
+    Check(p.Count==30,$"{p.Count} bars");
+    Check(p[0].Name!.StartsWith("Sun 4 Oct 2026: ")&&p[0].AxisLabel=="4\nOct",$"{p[0].Name} / {p[0].AxisLabel}");
+    Check(p[^1].Name!.StartsWith("Mon 2 Nov 2026: "),p[^1].Name!);
+    Check(spec.Title=="Sign-ups per day"&&spec is{Kind:ChartKind.Column,CellWidth:30,Style:null}&&spec.Series[0].Color is null,$"{spec.Title} / {spec.Style?.Background} / {spec.Series[0].Color}");
+    Check(ChartSvg.DrawnWidth(spec)==76+30*30+30&&ChartSvg.Render(spec).Contains(";width:1006px;"),$"drawn {ChartSvg.DrawnWidth(spec)}");
+    // The span is the same days as the 75's last 30: each bar names the same day and count, and only the total so far starts again at 4 Oct.
+    var all=DemoData.SignUps(ChartTheme.Light)!.Series[0].Points;
+    Check(Enumerable.Range(0,30).All(i=>all[45+i].Name!.Split(", ")[0]==p[i].Name!.Split(", ")[0]&&all[45+i].Y==p[i].Y),"the 30 days are the last 30 of the 75");
+    var whole=DemoData.SignUps(ChartTheme.Light)!;
+    Check(whole.Series[0].Points.Count==75&&ChartSvg.DrawnWidth(whole)==2356,$"{whole.Series[0].Points.Count} bars");
+    Check(DemoData.SignUps(ChartTheme.Light,75)!.Series[0].Points.Count==75,"75 asked for is the whole");
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
