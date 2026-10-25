@@ -315,8 +315,9 @@ if (await page.EvaluateAsync<bool>("() => fetch('/_content/Lumen.Charts.Blazor/l
         }
         var wide = await Exported(300);
         Check(wide[0] == 8192 && wide[1] == 123, $"a drawing 20000 by 300 exports at {wide[0]} by {wide[1]}, not 8192 by 123");
-        var flat = await Exported(3);
-        Check(flat[0] == 8192 && flat[1] >= 1, $"a drawing 20000 by 3 exports at {flat[0]} by {flat[1]}, not 8192 wide and at least 1 tall");
+        // 20,000 by 1 scales to 8,192 by 0.4096, which rounds to 0: without the canvas floor of 1 the canvas is empty and toBlob gives no data.
+        var flat = await Exported(1);
+        Check(flat[0] == 8192 && flat[1] == 1, $"a drawing 20000 by 1 exports at {flat[0]} by {flat[1]}, not 8192 by 1");
     });
 else Console.WriteLine("SKIP wide PNG export check: this host serves no component script at /_content/Lumen.Charts.Blazor/lumen.js");
 
@@ -546,13 +547,20 @@ if (await page.Locator("#playground .lumen-chart.lumen-fit").CountAsync() > 0)
 }
 else Console.WriteLine("SKIP home explorer phone check: this host has no fitted chart explorer");
 
-// The gallery's network graph stands in its own card, section#network, so the checks find it by the card, not by its place among the page's
-// charts. A host whose first page has no such graph says SKIP.
-var graph = page.Locator("#network .lumen-chart");
-if (await graph.CountAsync() > 0 && await graph.Locator("[data-node]").CountAsync() > 0)
+// A host's graph is the one chart that holds node marks: only the graph engine writes data-node, and each host's first page has one graph. The
+// checks find it by those marks, not by its place among the page's charts or by a card the host may not have. A host whose first page draws no
+// graph says SKIP.
+var graph = page.Locator(".lumen-chart:has([data-node])");
+// What a graph is drawn at (its viewBox's width and height) and the width of its box, which a FitWidth graph is drawn at, once it has settled.
+const string graphDrawn = "c => [...c.querySelector(':scope > .lumen-viewport > svg').getAttribute('viewBox').split(' ').slice(2).map(Number), Math.max(320, c.querySelector(':scope > .lumen-viewport').clientWidth)]";
+if (await graph.CountAsync() > 0)
 {
     await Test("Dragging a graph node moves it and its edges", async () =>
     {
+        // The test before resized the page to 375 and back to 1400 and waited only for the explorer, so a FitWidth graph may still be drawing at
+        // the other width: wait until it is drawn at its box's width, as SettleGraph does, or its node moves under the mouse. A graph that is
+        // not fitted keeps the width it has.
+        await page.WaitForFunctionAsync($"c => {{ if (!c.classList.contains('lumen-fit')) return true; const d = ({graphDrawn})(c); return d[0] === d[2]; }}", await graph.ElementHandleAsync());
         var node = graph.Locator("[data-node]").Nth(2);
         var id = await node.GetAttributeAsync("data-node");
         var before = await node.GetAttributeAsync("data-position");
@@ -573,7 +581,7 @@ if (await graph.CountAsync() > 0 && await graph.Locator("[data-node]").CountAsyn
     await Test("Reset layout restores the computed positions", async () =>
     {
         await graph.Locator(".lumen-tools button", new() { HasTextString = "Reset layout" }).ClickAsync();
-        await page.WaitForFunctionAsync("() => document.querySelector('#network .lumen-chart').querySelector('.lumen-status')?.textContent.includes('Layout reset')");
+        await page.WaitForFunctionAsync("() => document.querySelector('.lumen-chart:has([data-node])').querySelector('.lumen-status')?.textContent.includes('Layout reset')");
         Check(true);
     });
 
@@ -581,11 +589,11 @@ if (await graph.CountAsync() > 0 && await graph.Locator("[data-node]").CountAsyn
     {
         var node = graph.Locator("[data-node]").First;
         await node.ClickAsync();
-        await page.WaitForFunctionAsync("() => document.querySelector('#network .lumen-chart').querySelector('.lumen-status')?.textContent.startsWith('Selected')");
+        await page.WaitForFunctionAsync("() => document.querySelector('.lumen-chart:has([data-node])').querySelector('.lumen-status')?.textContent.startsWith('Selected')");
         Check(true);
     });
 }
-else Console.WriteLine("SKIP graph checks: this host's first page has no network graph");
+else Console.WriteLine("SKIP graph checks: this host's first page draws no graph");
 
 // A graph set to FitWidth is drawn at the width of its box, holds a dragged node in proportion when the box changes, and lets it
 // go when a narrow box turns the graph top to bottom. A host whose graph does not fit its box says SKIP.
@@ -593,7 +601,6 @@ var fittedGraph = page.Locator(".lumen-chart.lumen-fit:has([data-node])").First;
 if (await fittedGraph.CountAsync() > 0)
 {
     var box = await fittedGraph.ElementHandleAsync();
-    const string graphDrawn = "c => [...c.querySelector(':scope > .lumen-viewport > svg').getAttribute('viewBox').split(' ').slice(2).map(Number), Math.max(320, c.querySelector(':scope > .lumen-viewport').clientWidth)]";
     async Task<double[]> Drawing() => await fittedGraph.EvaluateAsync<double[]>(graphDrawn);
     async Task SettleGraph() => await page.WaitForFunctionAsync($"c => {{ const d = ({graphDrawn})(c); return d[0] === d[2]; }}", box);
     async Task<double[]> Position(string id) => (await fittedGraph.Locator($"[data-node='{id}']").GetAttributeAsync("data-position"))!.Split(',').Select(v => double.Parse(v, CultureInfo.InvariantCulture)).ToArray();
@@ -1804,7 +1811,9 @@ if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
         if (await card.CountAsync() == 0) { Console.WriteLine("SKIP sign-ups smooth-scroll check: this host's first page has no Sign-ups per day card"); return; }
         await card.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 60_000 });
         const string box = "() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return [v.scrollLeft, v.clientWidth, v.scrollWidth]; }";
-        await tab.WaitForFunctionAsync("() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return getComputedStyle(v).scrollBehavior === 'smooth' && v.clientWidth > 0 && v.scrollWidth > v.clientWidth && v.scrollLeft + v.clientWidth >= v.scrollWidth - 1; }", null, new() { Timeout = 30_000 });
+        // The smooth scroll to the end may still be running when the viewport first reads within a pixel of it, so the wait is for a scrollLeft that
+        // reads the same on two consecutive animation frames (the wait polls on each), at the end; the scroll to 240 is then taken from rest.
+        await tab.WaitForFunctionAsync("() => { const v = document.querySelector('#sign-ups .lumen-viewport'); const was = window.lumenScrollSeen; window.lumenScrollSeen = v.scrollLeft; return was === v.scrollLeft && getComputedStyle(v).scrollBehavior === 'smooth' && v.clientWidth > 0 && v.scrollWidth > v.clientWidth && v.scrollLeft + v.clientWidth >= v.scrollWidth - 1; }", null, new() { Timeout = 30_000 });
         await tab.EvaluateAsync("() => document.querySelector('#sign-ups .lumen-viewport').scrollTo({ left: 240, behavior: 'instant' })");
         var before = await tab.EvaluateAsync<double[]>(box);
         Check(before[0] == 240, $"the reader's scroll reads {before[0]}, not 240");
