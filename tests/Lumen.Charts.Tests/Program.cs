@@ -11104,6 +11104,21 @@ Test("0.47.1: the script's PNG factor has no floor of 1, so the longest edge is 
     var drawn=js[js.IndexOf("state.drawn = (data, plot, end) =>",StringComparison.Ordinal)..];
     Check(drawn.Contains("state.current = null;")&&drawn.IndexOf("state.current = null;",StringComparison.Ordinal)<drawn.IndexOf("settle(end);",StringComparison.Ordinal)&&drawn.IndexOf("settle(end);",StringComparison.Ordinal)<drawn.IndexOf("region();",StringComparison.Ordinal),"a new span resets the stop before settle");
 });
+Test("0.47.1: a zero on a column track writes its 0 muted where Muted clears 4.5:1, and in the text colour where it does not",()=>{
+    var track=new ChartSpec{Kind=ChartKind.Column,Title="Zero on a track",YMax=100,BarTrack=true,Series=[new("Score",[new(0,82,"A"),new(1,0,"B"),new(2,64,"C")]){ValueLabels=true,MarkZero=true}]};
+    // A value label is an aria-hidden text, and it has no fill where it takes the text colour.
+    string? ValueFill(ChartSpec spec,string text)=>Svg(spec).Descendants(ns+"text").Single(e=>e.Value==text&&e.Attribute("aria-hidden") is not null).Attribute("fill")?.Value;
+    Check(ValueFill(track,"0")==ChartStyle.Light.Muted,"the zero is muted");
+    Check(ValueFill(track,"82") is null&&ValueFill(track,"64") is null,"the other labels keep the text colour");
+    Check(ChartSvg.Render(track).Contains($"height='1' fill='{ChartStyle.Light.Muted}'"),"the hairline is drawn");
+    var faint=track with{Style=ChartStyle.Light with{Muted="#B0B8C4"}};
+    Check(Contrast("#B0B8C4",ChartStyle.Light.Background)<4.5,"the faint Muted is under 4.5:1");
+    Check(ValueFill(faint,"0") is null,"under 4.5:1 the zero is in the text colour");
+});
+Test("0.47.1: a heatmap draws no series legend under ShowLegend, and a line chart keeps its own",()=>{
+    Check(!ChartMarkup(Sample(ChartKind.Heatmap),new(){{"ShowLegend",true}}).Contains("lumen-legend"),"heatmap");
+    Check(ChartMarkup(Sample(ChartKind.Line),new(){{"ShowLegend",true}}).Contains("lumen-legend"),"line");
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

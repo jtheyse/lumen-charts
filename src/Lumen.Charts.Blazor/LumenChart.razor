@@ -12,7 +12,7 @@ else
     @* The keys a reader moves with, hidden from view and from reading in place: the script, which makes them work, names them as the
        viewport's description while it scrolls, and otherwise the drawing's, as a sparkline's. The viewport is written as a scrolling
        region and a tab stop; the script leaves it neither while the drawing fits it (0.42.0). *@
-    <span class="lumen-keys" hidden>@Keys</span>@if(ShowLegend&&Spec.Kind!=ChartKind.Strip){@Indent<div class="lumen-legend" aria-label="Chart series">
+    <span class="lumen-keys" hidden>@Keys</span>@if(ShowLegend&&Spec.Kind is not (ChartKind.Strip or ChartKind.Heatmap)){@Indent<div class="lumen-legend" aria-label="Chart series">
         @for(var i=0;i<Spec.Series.Count;i++)
         {
             var index=i;

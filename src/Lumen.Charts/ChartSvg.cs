@@ -1124,7 +1124,7 @@ public static partial class ChartSvg
                         {
                             // On a track the value stands past the track's end, in the margin kept for it, or above a column's track.
                             if (s.BarTrack && horizontal) Name(right + TrackGap, ry + rh / 2 + 4, scale.Format(given), "start", p.ValueNote);
-                            else if (s.BarTrack) Above(rx, rw, At(scale.Max), true, scale.Format(given), p.ValueNote);
+                            else if (s.BarTrack) Above(rx, rw, At(scale.Max), true, scale.Format(given), p.ValueNote, fill: hairline && Contrast.Ratio(w.Style.Muted, w.Style.Background) >= 4.5 ? w.Style.Muted : null);
                             else if (horizontal) Beside(y >= 0 ? rx + rw : rx, ry, rh, y >= 0, scale.Format(y), p.ValueNote);
                             else Above(rx, rw, At(y), y >= 0, scale.Format(y), p.ValueNote, s.CellWidth is { } pitch && columns.Length == 1 ? pitch - 2 : null, fill: hairline && Contrast.Ratio(w.Style.Muted, w.Style.Background) >= 4.5 ? w.Style.Muted : null);
                         }

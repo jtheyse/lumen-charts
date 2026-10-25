@@ -898,6 +898,8 @@ lines.Add($"point-name/line {Hash(Render(new ChartSpec { Kind = ChartKind.Line, 
 DayCount[] Invented(DateOnly start, int days) => Enumerable.Range(0, days).Select(i => new DayCount(start.AddDays(i), (i * 7 + 2) % 9 == 0 ? 0 : (i * 5 + 3) % 13)).ToArray();
 lines.Add($"daily-counts/month {Hash(Render(DailyCountsChart.Build(Invented(new DateOnly(2026, 9, 10), 40))!))}");
 lines.Add($"daily-counts/year {Hash(Render(DailyCountsChart.Build(Invented(new DateOnly(2026, 12, 24), 12))!))}");
+// 0.47.1: a zero on a column track, muted as a plain column's zero is; its 0 is written in Muted where Muted clears 4.5:1.
+lines.Add($"columns/track-mark-zero {Hash(Render(new ChartSpec { Kind = ChartKind.Column, Title = "Zero on a track", YMax = 100, BarTrack = true, Series = [new("Score", [new(0, 82, "A"), new(1, 0, "B"), new(2, 64, "C")]) { ValueLabels = true, MarkZero = true }] }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);
