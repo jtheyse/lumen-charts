@@ -24,7 +24,7 @@ These stay as documented limits, unchanged:
 - A zero day's hairline is a 1-unit tap target.
 - The right-hand Y title stands apart from its ticks under the 320 floor.
 - `ColumnMargins` repeats `Framed`'s margin rule (an internal refactor with no reader-visible effect).
-- Counts of a million or more write `1E+6` on the axis and over the bars, as every Lumen axis does (see §4).
+- Counts of a million or more write `1E+6` on the axis and over the bars in the default `ValueFormat.Number` (see §4).
 
 ### Anti-goals
 
@@ -67,7 +67,7 @@ An earlier draft had the builder label its ticks with `N0`, so a million would r
 - **The labels would disagree.** The count over each bar goes through the axis's own format (`LinearScale.Label`). Above 999 the axis would read `2,000` over a bar labelled `2000`, and a wide bar of 1,400,000 would still read `1.4E+6`.
 - **Bar labels can't follow.** Making them match needs a new property, which this release doesn't add.
 
-A million registrations a day is not a real case for this builder, so the ticks stay as 0.47.0 draws them. The limit is documented: counts of a million or more read in E-notation on the axis and over the bars, as on every Lumen axis.
+A million registrations a day is not a real case for this builder, so the ticks stay as 0.47.0 draws them. The limit is documented: with the default `ValueFormat.Number`, counts of a million or more read in E-notation on the axis and over a bar wide enough to hold the label. `spec with { YFormat = ValueFormat.Compact }` writes them `1M`. Amended at release: an earlier sentence here said "as on every Lumen axis", which `ValueFormat.Compact` disproves.
 
 ## 5. A zero on a track is muted (ChartSvg.cs)
 
@@ -81,8 +81,9 @@ Today the bar-track branch writes a column's value label at the track's top thro
 ### The graph tests
 
 In tests/Lumen.Charts.BrowserTests, three home-page tests (drag a node, then Reset layout, then select a node) find the graph with `.lumen-chart` at index 1. Since 0.41.0 that is the meters card, and they skip without a word.
-- They find the graph by a stable hook instead: the `section#network` card's chart (`#network .lumen-chart`, or the suite's existing `.lumen-chart.lumen-fit:has([data-node])`).
-- When it is missing (the WebAssembly host has none) they print one SKIP line, as the suite's other host-dependent tests do.
+- They find the graph by its node marks instead: `.lumen-chart:has([data-node])`. Only the graph writes `data-node`.
+- Amended at release: an earlier draft used `#network .lumen-chart` and said the WebAssembly host has no graph. It has one, in a card without `#network`, so that locator would have skipped it.
+- A host with no graph prints one SKIP line, as the suite's other host-dependent tests do.
 - They have not run for many releases. If one fails for a reason in the product rather than the test, the implementer stops and reports it with evidence. The fix is then ruled on and is not assumed to be in scope.
 
 ### A range switch on the gallery card, and its check
