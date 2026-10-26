@@ -585,6 +585,9 @@ if (await graph.CountAsync() > 0)
     {
         // Without the node the drag test moved there is nothing to compare, and the status alone must not pass this test.
         Check(draggedId is not null && draggedFrom is not null, "the drag test moved no node, so there is no position to restore");
+        // And the node must be away from there now, or putting it back proves nothing.
+        var moved = await graph.Locator($"[data-node='{draggedId}']").GetAttributeAsync("data-position");
+        Check(moved != draggedFrom, "the node did not move, so Reset layout has nothing to restore");
         await graph.Locator(".lumen-tools button", new() { HasTextString = "Reset layout" }).ClickAsync();
         await page.WaitForFunctionAsync("() => document.querySelector('.lumen-chart:has([data-node])').querySelector('.lumen-status')?.textContent.includes('Layout reset')");
         var restored = await graph.Locator($"[data-node='{draggedId}']").GetAttributeAsync("data-position");
