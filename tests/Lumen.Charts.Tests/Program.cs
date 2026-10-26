@@ -11158,6 +11158,23 @@ Test("0.47.1: a series hidden under a line chart does not stay hidden when the s
     var kept=Swapped(lines with{Title="Next"},1);
     Check(kept.Contains("aria-label='Sprint: ")&&!kept.Contains("aria-label='Long distance: "),"a line chart keeps its hidden series");
 });
+// gallery polish: the sign-ups card writes its title and description above its range switch, because a chart that opens at its end scrolls the ones it draws away.
+Test("Gallery polish: the sign-ups card's chart draws no title or description, which stay its <title>, <desc> and accessible name, and its description follows the span",()=>{
+    foreach(var days in new[]{75,30})
+    {
+        var spec=DemoData.SignUps(ChartTheme.Light,days)!;
+        ChartValidation.Validate(spec);
+        Check(spec.DrawTitles==false&&spec.Title=="Sign-ups per day",$"{days} days: DrawTitles {spec.DrawTitles}, title {spec.Title}");
+        Check(Regex.IsMatch(spec.Description!,$@"^[\d,]+ sign-ups across {days} days$"),spec.Description!);
+        var svg=ChartSvg.Render(spec);
+        Check(svg.Contains("<title>Sign-ups per day</title>")&&svg.Contains($"<desc>{spec.Description}</desc>")&&svg.Contains($"aria-label='Sign-ups per day. {spec.Description}'"),$"{days} days: the drawing's own title, description and name");
+        // Neither is drawn as text, where the same spec with them on does draw both.
+        bool Drawn(ChartSpec s,string text)=>Svg(s).Descendants(ns+"text").Any(t=>t.Value==text);
+        Check(!Drawn(spec,"Sign-ups per day")&&!Drawn(spec,spec.Description!),$"{days} days: drawn");
+        Check(Drawn(spec with{DrawTitles=true},"Sign-ups per day")&&Drawn(spec with{DrawTitles=true},spec.Description!),$"{days} days: drawn when asked");
+    }
+    Check(DemoData.SignUps(ChartTheme.Dark)!.DrawTitles==false,"dark too");
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

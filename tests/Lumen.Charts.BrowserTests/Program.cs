@@ -555,6 +555,8 @@ var graph = page.Locator(".lumen-chart:has([data-node])");
 const string graphDrawn = "c => [...c.querySelector(':scope > .lumen-viewport > svg').getAttribute('viewBox').split(' ').slice(2).map(Number), Math.max(320, c.querySelector(':scope > .lumen-viewport').clientWidth)]";
 if (await graph.CountAsync() > 0)
 {
+    // The node the drag test moves and where the layout had put it, for the reset test to find back. Both stay null if the drag test never got that far.
+    string? draggedId = null, draggedFrom = null;
     await Test("Dragging a graph node moves it and its edges", async () =>
     {
         // The test before resized the page to 375 and back to 1400 and waited only for the explorer, so a FitWidth graph may still be drawing at
@@ -564,6 +566,7 @@ if (await graph.CountAsync() > 0)
         var node = graph.Locator("[data-node]").Nth(2);
         var id = await node.GetAttributeAsync("data-node");
         var before = await node.GetAttributeAsync("data-position");
+        (draggedId, draggedFrom) = (id, before);
         // Aim at the painted circle: the group's own box spans the gap between the circle and its label.
         // The mouse works in viewport coordinates and does not scroll on its own, unlike ClickAsync.
         await node.ScrollIntoViewIfNeededAsync();
@@ -580,9 +583,12 @@ if (await graph.CountAsync() > 0)
 
     await Test("Reset layout restores the computed positions", async () =>
     {
+        // Without the node the drag test moved there is nothing to compare, and the status alone must not pass this test.
+        Check(draggedId is not null && draggedFrom is not null, "the drag test moved no node, so there is no position to restore");
         await graph.Locator(".lumen-tools button", new() { HasTextString = "Reset layout" }).ClickAsync();
         await page.WaitForFunctionAsync("() => document.querySelector('.lumen-chart:has([data-node])').querySelector('.lumen-status')?.textContent.includes('Layout reset')");
-        Check(true);
+        var restored = await graph.Locator($"[data-node='{draggedId}']").GetAttributeAsync("data-position");
+        Check(restored == draggedFrom, $"node {draggedId} is at {restored} after Reset layout, not back at {draggedFrom}");
     });
 
     await Test("Selecting a graph node reports it", async () =>
