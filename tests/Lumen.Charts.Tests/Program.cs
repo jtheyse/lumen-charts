@@ -11409,7 +11409,7 @@ Test("0.48.0: the title level, the density and the columns are written",()=>{
     Check(h4.Contains("<h4 class='lumen-stats-title'>T</h4>"),h4);
     var named=StatTilesHtml.Render(new([t]){Description="Only a description"});
     Check(named.Contains("aria-label='Only a description'")&&StatTilesHtml.Render(new([t])).Contains("aria-label='Statistics'"));
-    var compact=StatTilesHtml.Render(new([t]){Density=TileDensity.Compact});
+    var compact=StatTilesHtml.Render(new([t]){Density=Density.Compact});
     Check(compact.Contains("lumen-stats-compact")&&compact.Contains("repeat(auto-fill,minmax(96px,1fr))")&&compact.Contains("font-size:20px"),"compact");
     var regular=StatTilesHtml.Render(new([t]));
     Check(regular.Contains("repeat(auto-fill,minmax(150px,1fr))")&&regular.Contains("font-size:26px"),"regular");
@@ -11430,7 +11430,7 @@ Test("0.48.0: every rule is scoped under .lumen-stats and no text is under 11 px
 Test("0.48.0: a missing value writes its words and a hidden 'none'",()=>{
     var dash=Tiles480(Stats480(StatTilesHtml.Render(One480(new("Best finish",null))))).Single();
     var value=Parts480(dash).Single(p=>Cls480(p)=="lumen-stat-value");
-    Check(value.Value=="— none"&&value.Element("span") is {} s&&Cls480(s)=="lumen-sr"&&s.Value==" none",value.ToString());
+    Check(value.Value=="— none"&&value.Elements("span").Last() is {} s&&Cls480(s)=="lumen-sr"&&s.Value==" none"&&value.Elements("span").First().Attribute("aria-hidden")?.Value=="true",value.ToString());
     var words=Tiles480(Stats480(StatTilesHtml.Render(One480(new("Best finish",null){Missing="No race yet",Previous=3,ChangeText="new",Target=5,Note="n"})))).Single();
     var v2=Parts480(words).Single(p=>Cls480(p)=="lumen-stat-value");
     Check(v2.Value=="No race yet"&&!v2.Elements().Any(),v2.ToString());
@@ -11562,8 +11562,34 @@ Test("0.48.0: <LumenStats> takes a cascaded style when the spec sets none",()=>{
     var spec=new StatTilesSpec([new("Races",12)]);
     var dark=StatsMarkup480(spec,ChartStyle.Dark);
     Check(dark.Contains("--lumen-bg:#171E2E"),dark);
-    Check(dark==StatTilesHtml.Render(spec with{Style=ChartStyle.Dark}));
+    Check(dark==StatTilesHtml.Render(spec with{Style=ChartStyle.Dark}),"<LumenStats> with a cascaded Dark style differs from the core's fragment for Dark");
     Check(StatsMarkup480(spec,null)==StatTilesHtml.Render(spec with{Style=ChartStyle.Light}),"no style at all means Light");
+});
+Test("0.48.0: a trend tile writes no <title>, in the drawing or in a mark",()=>{
+    var html=StatTilesHtml.Render(One480(new("Points",20){Trend=[12,null,9,15,20]}));
+    Check(html.Contains("<svg")&&!html.Contains("<title"),"a <title> in a tile");
+});
+Test("0.48.0: a small negative value against a target writes 0%, never -0%",()=>{
+    var html=StatTilesHtml.Render(One480(new("Podiums",-0.2){Target=50}));
+    Check(html.Contains(">0% of target 50<")&&html.Contains("width:0%")&&!html.Contains("-0%"),html);
+});
+Test("0.48.0: a blank title, description or change text is none, and a blank Missing is refused",()=>{
+    var html=StatTilesHtml.Render(new StatTilesSpec([new("Races",12){Previous=10,ChangeText="  "}]){Title="  ",Description=" 	"});
+    Check(html.Contains("aria-label='Statistics'")&&!html.Contains("<h2")&&!html.Contains("class='lumen-stats-desc'"),html);
+    Check(html.Contains("▲ 2 &#183; up"),"a blank ChangeText leaves the computed change");
+    var onlyText=StatTilesHtml.Render(One480(new("Races",12){ChangeText=" "}));
+    Check(!onlyText.Contains("class='lumen-stat-change'"),"no empty change paragraph");
+    var described=StatTilesHtml.Render(new StatTilesSpec([new("Races",12)]){Title=" ",Description="Season"});
+    Check(described.Contains("aria-label='Season'"),"the description names the section");
+    Reject(()=>StatTilesHtml.Render(One480(new("A",null){Missing="   "})));
+});
+Test("0.48.0: the default missing dash is hidden from readers and ' none' is read",()=>{
+    var html=StatTilesHtml.Render(One480(new("Best finish",null)));
+    Check(html.Contains("<span aria-hidden='true'>—</span><span class='lumen-sr'> none</span>"),html);
+});
+Test("0.48.0: SafeLink reads a colon after a fragment or a path as part of a relative address, or a scheme",()=>{
+    Check(!LumenHtml.SafeLink("page#a:b"),"page#a:b has a scheme of page#a");
+    Check(LumenHtml.SafeLink("/a#b:c"),"/a#b:c is a path");
 });
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 Test("0.48.0: a tile's sparkline is hidden from readers and none of its marks takes a Tab stop",()=>{
@@ -11573,7 +11599,7 @@ Test("0.48.0: a tile's sparkline is hidden from readers and none of its marks ta
 });
 Test("0.48.0: a compact set and a regular set on one page keep their own sizes, and a column count is written on its list",()=>{
     var t=new StatTile("Races",12);
-    var regular=StatTilesHtml.Render(new([t])); var compact=StatTilesHtml.Render(new([t]){Density=TileDensity.Compact}); var three=StatTilesHtml.Render(new([t]){Columns=3});
+    var regular=StatTilesHtml.Render(new([t])); var compact=StatTilesHtml.Render(new([t]){Density=Density.Compact}); var three=StatTilesHtml.Render(new([t]){Columns=3});
     Check(regular.Contains(".lumen-stats.lumen-stats-regular .lumen-stats-grid")&&!regular.Contains("lumen-stats-compact{")&&!regular.Contains(".lumen-stats.lumen-stats-compact"),"the regular rules are scoped to the regular root");
     Check(compact.Contains(".lumen-stats.lumen-stats-compact .lumen-stats-grid")&&!compact.Contains(".lumen-stats.lumen-stats-regular"),"the compact rules are scoped to the compact root");
     Check(three.Contains("<ul class='lumen-stats-grid' role='list' style='grid-template-columns:repeat(3,minmax(0,1fr))'>")&&three.Split("repeat(3,").Length==2,"the column count is written once, on the list");

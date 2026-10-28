@@ -246,7 +246,7 @@ A cancelled event counts as neither clash nor close in any busy count (the wide 
 
 ## Stat tiles
 
-`StatTile`, `StatTilesSpec`, `TileDensity`, `Better`, `ChangeAs` and `StatTilesHtml` are in `Lumen.Charts` (0.48.0), immutable records, enums and a static class like the other builders: build with an object initializer, change a spec with `with { … }`. The output is an HTML fragment, not SVG. The component `LumenStats` is in `Lumen.Charts.Blazor`, and `POST …/stats/html` in `Lumen.Charts.AspNetCore`. Described in the README's "Stat tiles"; the recipe is "Season at a glance" in `recipes-race-face.md`.
+`StatTile`, `StatTilesSpec`, `Density`, `Better`, `ChangeAs` and `StatTilesHtml` are in `Lumen.Charts` (0.48.0), immutable records, enums and a static class like the other builders: build with an object initializer, change a spec with `with { … }`. The output is an HTML fragment, not SVG. The component `LumenStats` is in `Lumen.Charts.Blazor`, and `POST …/stats/html` in `Lumen.Charts.AspNetCore`. Described in the README's "Stat tiles"; the recipe is "Season at a glance" in `recipes-race-face.md`.
 
 | Type | Members |
 |---|---|
@@ -258,7 +258,7 @@ A cancelled event counts as neither clash nor close in any busy count (the wide 
 | | `Trend` (`IReadOnlyList<double?>`, at most 400, at least 2 not null, nulls are gaps): a 120 by 28 sparkline, hidden from readers, with a summary in words (`6 values, lowest 6, highest 20, last 20`). |
 | | `Target` (`double?`, above 0): a meter and `50% of target 4`; the meter stops at 100%, the words do not. |
 | | `Href`: makes the tile a link. http, https, mailto or relative only; `javascript:`, `data:` and `vbscript:` are refused, whatever the case or the white space. |
-| `StatTilesSpec(IReadOnlyList<StatTile> Tiles)` | 1 to 48 tiles, written in order. `Title` (at most 120) and `Description` (at most 300) name the section; `TitleLevel` (2 to 6, default 2); `Columns` (null for automatic, or 1 to 6, written inline so host CSS cannot override it); `Density` (`TileDensity.Regular`, tiles of at least 150 px, or `Compact`, at least 96 px); `Style` (null is `ChartStyle.Light`). |
+| `StatTilesSpec(IReadOnlyList<StatTile> Tiles)` | 1 to 48 tiles, written in order. `Title` (at most 120) and `Description` (at most 300) name the section; `TitleLevel` (2 to 6, default 2); `Columns` (null for automatic, or 1 to 6, written inline so host CSS cannot override it); `Density` (`Density.Regular`, tiles of at least 150 px, or `Compact`, at least 96 px); `Style` (null is `ChartStyle.Light`). |
 
 | Member | Returns |
 |---|---|

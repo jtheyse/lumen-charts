@@ -120,7 +120,7 @@
 ### Task 2: Stat tiles in the core
 
 **Files:**
-- Create: `src/Lumen.Charts/StatTiles.cs`, holding `StatTile`, `StatTilesSpec`, `TileDensity` and `StatTilesHtml`.
+- Create: `src/Lumen.Charts/StatTiles.cs`, holding `StatTile`, `StatTilesSpec`, `Density` and `StatTilesHtml`.
 - Create: `src/Lumen.Charts/StatTilesValidation.cs`, holding `internal static class StatTilesValidation`.
 - Test: `tests/Lumen.Charts.Tests/Program.cs`, in the `// 0.48.0` block.
 - Modify: `tests/Lumen.Charts.Baseline/Program.cs` (add `tiles/*` rows after the last row) and both `reference/*.txt` files (added rows only).
@@ -133,8 +133,8 @@
     - `double? Previous`, `Better Better` (default `Neither`), `ChangeAs ChangeAs` (default `Difference`) and `string? Since`;
     - `string? ChangeText` (it wins over computed words, written in the muted colour);
     - `string Missing` (default `"—"`), `string? Note`, `IReadOnlyList<double?>? Trend`, `double? Target` and `string? Href`.
-  - `public enum TileDensity { Regular, Compact }`.
-  - `public sealed record StatTilesSpec(IReadOnlyList<StatTile> Tiles)`, with `string? Title`, `string? Description`, `int TitleLevel` (default 2), `int? Columns`, `TileDensity Density` and `ChartStyle? Style` (null means `ChartStyle.Light`).
+  - `public enum Density { Regular, Compact }`.
+  - `public sealed record StatTilesSpec(IReadOnlyList<StatTile> Tiles)`, with `string? Title`, `string? Description`, `int TitleLevel` (default 2), `int? Columns`, `Density Density` and `ChartStyle? Style` (null means `ChartStyle.Light`).
   - `public static class StatTilesHtml` with `public static string Render(StatTilesSpec spec)`. It validates first.
 
 **Validation (exact limits):**

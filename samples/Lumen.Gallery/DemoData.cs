@@ -457,7 +457,7 @@ public static class DemoData
         {
             Title = "Round by round",
             Description = "Each round's place, with its change on the round before.",
-            Density = Lumen.Charts.TileDensity.Compact,
+            Density = Lumen.Charts.Density.Compact,
             Style = style
         };
     }

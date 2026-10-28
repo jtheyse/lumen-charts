@@ -612,5 +612,5 @@ $many=(1..49|ForEach-Object{'{"label":"T'+$_+'","value":'+$_+'}'}) -join ','
 $r=Invoke-WebRequest "$BaseUrl/api/charts/stats/html" -Method Post -ContentType application/json -Body ('{"tiles":['+$many+']}') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid stat tiles')) "Forty-nine stat tiles are refused with 400 titled Invalid stat tiles ($($r.StatusCode))"
 $r=Invoke-WebRequest "$BaseUrl/api/charts/stats/html" -Method Post -ContentType application/json -Body '{"tiles":[{"label":"Races","value":12,"href":"JavaScript:alert(1)"}]}' -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 400) "A javascript: link on a stat tile is refused with 400 ($($r.StatusCode))"
+Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid stat tiles')) "A javascript: link on a stat tile is refused with 400 titled Invalid stat tiles ($($r.StatusCode))"
 Write-Output "$checks HTTP checks passed."

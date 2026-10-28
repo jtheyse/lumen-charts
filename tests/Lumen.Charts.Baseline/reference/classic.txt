@@ -409,8 +409,8 @@ daily-counts/year F32173FD46B97D94
 columns/track-mark-zero 050204042DFDDCC1
 columns/cell-width-right-title 2C5B9D57E1D32F32
 columns/cell-width-y2-title 7309552BE978661D
-tiles/regular-light FE3F1E8A9CFCB7A2
-tiles/regular-dark 9E2A515E5CB66969
-tiles/compact-strip E6D6AA7196B2DB9E
-tiles/missing-and-link A838D24FD9826368
-tiles/fixed-columns 9EF2C9F5F7885C2F
+tiles/regular-light 71D2C9847C70E0B5
+tiles/regular-dark 1C6F32EF2BE4A58D
+tiles/compact-strip E059197B72E078EE
+tiles/missing-and-link 021648D8AB1E37AA
+tiles/fixed-columns 9D205360BBFD8BBE

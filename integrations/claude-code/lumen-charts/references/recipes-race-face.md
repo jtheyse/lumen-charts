@@ -913,7 +913,7 @@ var glanceTiles = new StatTilesSpec(
 ])
 {
     Title = "Season at a glance",
-    Description = "Five invented numbers for one rider's season, each with its change from last season in words.",
+    Description = "Six invented tiles for one rider's season, most with their change from last season in words.",
     Style = raceFace                                                                                                          // the card's own colours; null is the Light preset
 };
 // A compact strip of rounds: each round's place, with its change on the round before. The first round has no previous, so it writes none.
@@ -924,7 +924,7 @@ var roundStrip = new StatTilesSpec(roundResults.Select((place, i) => new StatTil
     Better = Better.Lower
 }).ToArray())
 {
-    Title = "Round by round", TitleLevel = 3, Density = TileDensity.Compact, Style = raceFace
+    Title = "Round by round", TitleLevel = 3, Density = Density.Compact, Style = raceFace
 };
 string glanceHtml = StatTilesHtml.Render(glanceTiles);     // a fragment, with its own style block: write it into a page as it is
 string roundStripHtml = StatTilesHtml.Render(roundStrip);  // both can share a page: no tile or rule collides with another set's
@@ -946,7 +946,7 @@ Over HTTP, `POST /api/charts/stats/html` takes the spec as JSON and answers `tex
 - **Change words.** With a `Previous` the tile writes the arrow, the size of the change and a word: `▲ 1 · better than last season`, `▼ 5 · better than last season`, `▲ 8 (17%) · better than last season`. `Better.Neither` (the default) says "up" and "down" in the muted colour (`▲ 3 · up`), `Higher` and `Lower` say "better" and "worse", and an unchanged value reads `= same`. `ChangeAs.Percent` and `Both` take the percentage of the previous value's size, and a previous value of 0 writes the difference instead. `ChangeText` replaces all of it, such as `new best`, in the muted colour.
 - **Colour is a second voice.** "Better" is written in `Rising` and "worse" in `Falling` only where that colour clears 4.5:1 against the card, and in the text colour otherwise. Race Face's `#34d399` and `#f87171` clear it on `#161618`; on the Light preset they do not, so there the words carry the meaning alone.
 - **A target** draws a thin meter and writes `33% of target 3`; the meter is hidden from readers and the words are not. A **trend** is the sparkline the charts draw, 120 by 28, hidden from readers and followed by words (`5 values, lowest 0, highest 20, last 20`); its marks take no Tab stop.
-- **Limits.** 1 to 48 tiles; a label of 1 to 40 characters; a note of at most 60; `Since` and `ChangeText` at most 40; `Missing` 1 to 24 characters; a trend of at most 400 values with at least 2 that are not null; `Columns` null (as many as fit, two on a 360 px phone) or 1 to 6. `Columns` is written on the list itself, so host CSS cannot override it. A link may be http, https, mailto or relative, and is always HTML-encoded; `javascript:` is refused with a message.
+- **Limits.** 1 to 48 tiles; a label of 1 to 40 characters; a note of at most 60; `Since` and `ChangeText` at most 40; `Missing` 1 to 24 characters; a trend of at most 400 values with at least 2 that are not null; `Columns` null (as many as fit: two a row wherever the grid is at least 312 px wide, as on a 360 px phone with little page padding) or 1 to 6. `Columns` is written on the list itself, so host CSS cannot override it. A link may be http, https, mailto or relative, and is always HTML-encoded; `javascript:` is refused with a message.
 
 ## Rendering notes
 

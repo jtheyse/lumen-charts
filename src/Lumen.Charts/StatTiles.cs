@@ -3,8 +3,8 @@ using System.Text;
 
 namespace Lumen.Charts;
 
-/// <summary>How closely a row of stat tiles is packed.</summary>
-public enum TileDensity
+/// <summary>How closely a row of Lumen's HTML components is packed. Stat tiles use it; the components that follow share it.</summary>
+public enum Density
 {
     /// <summary>Tiles of at least 150 px with a 26 px value. This is the default.</summary>
     Regular,
@@ -56,7 +56,7 @@ public sealed record StatTilesSpec(IReadOnlyList<StatTile> Tiles)
     /// <summary>A fixed number of columns from 1 to 6, or null to fit as many tiles as the width holds.</summary>
     public int? Columns { get; init; }
     /// <summary>How closely the tiles are packed.</summary>
-    public TileDensity Density { get; init; } = TileDensity.Regular;
+    public Density Density { get; init; } = Density.Regular;
     /// <summary>The colours and font, or null for <see cref="ChartStyle.Light"/>.</summary>
     public ChartStyle? Style { get; init; }
 }
@@ -70,15 +70,18 @@ public static class StatTilesHtml
     {
         StatTilesValidation.Spec(spec);
         var style = spec.Style ?? ChartStyle.Light;
-        var compact = spec.Density == TileDensity.Compact;
+        var compact = spec.Density == Density.Compact;
         var sb = new StringBuilder();
-        var name = spec.Title ?? spec.Description ?? "Statistics";
+        // A blank title, description or change text is none: no empty heading or paragraph is written.
+        var title = string.IsNullOrWhiteSpace(spec.Title) ? null : spec.Title;
+        var description = string.IsNullOrWhiteSpace(spec.Description) ? null : spec.Description;
+        var name = title ?? description ?? "Statistics";
         sb.Append("<section class='lumen-stats lumen-stats-").Append(compact ? "compact" : "regular")
           .Append("' style='").Append(LumenHtml.RootStyle(style)).Append("' aria-label='").Append(LumenHtml.E(name)).Append("'>");
         sb.Append("<style>").Append(Css(compact)).Append("</style>");
-        if (spec.Title is not null)
-            sb.Append("<h").Append(spec.TitleLevel).Append(" class='lumen-stats-title'>").Append(LumenHtml.E(spec.Title)).Append("</h").Append(spec.TitleLevel).Append('>');
-        if (spec.Description is not null) sb.Append("<p class='lumen-stats-desc'>").Append(LumenHtml.E(spec.Description)).Append("</p>");
+        if (title is not null)
+            sb.Append("<h").Append(spec.TitleLevel).Append(" class='lumen-stats-title'>").Append(LumenHtml.E(title)).Append("</h").Append(spec.TitleLevel).Append('>');
+        if (description is not null) sb.Append("<p class='lumen-stats-desc'>").Append(LumenHtml.E(description)).Append("</p>");
         // A fixed column count is written on the list itself, so tile sets of different columns or densities share a page without their rules meeting.
         sb.Append("<ul class='lumen-stats-grid' role='list'");
         if (spec.Columns is { } columns) sb.Append(" style='grid-template-columns:repeat(").Append(columns.ToString(CultureInfo.InvariantCulture)).Append(",minmax(0,1fr))'");
@@ -94,13 +97,13 @@ public static class StatTilesHtml
         var pad = compact ? 8 : 12;
         // The density is part of the selector, so a compact set and a regular one on the same page each keep their own sizes.
         var r = compact ? ".lumen-stats.lumen-stats-compact" : ".lumen-stats.lumen-stats-regular";
-        return $"{r}{{display:block;box-sizing:border-box;background:var(--lumen-bg);color:var(--lumen-text);font-family:var(--lumen-font);font-size:14px;line-height:1.3}}"
+        return $"{r}{{display:block;box-sizing:border-box;margin:0;padding:0;background:var(--lumen-bg);color:var(--lumen-text);font-family:var(--lumen-font);font-size:14px;line-height:1.3}}"
             + $"{r} *{{box-sizing:border-box}}"
             + $"{r} p{{margin:0}}"
             + $"{r} .lumen-stats-title{{margin:0 0 4px;font-size:18px;font-weight:600;color:var(--lumen-text)}}"
             + $"{r} .lumen-stats-desc{{margin:0 0 10px;font-size:13px;color:var(--lumen-muted)}}"
             + $"{r} .lumen-stats-grid{{display:grid;grid-template-columns:{grid};gap:{(compact ? 8 : 12)}px;margin:0;padding:0;list-style:none}}"
-            + $"{r} .lumen-stat{{position:relative;min-width:0;padding:{pad}px;border:1px solid var(--lumen-grid);border-radius:8px;background:var(--lumen-bg)}}"
+            + $"{r} .lumen-stat{{position:relative;min-width:0;margin:0;padding:{pad}px;border:1px solid var(--lumen-grid);border-radius:8px;background:var(--lumen-bg)}}"
             + $"{r} .lumen-stat-link{{display:block;margin:-{pad}px;padding:{pad}px;color:inherit;text-decoration:none;border-radius:8px}}"
             + $"{r} .lumen-stat-link:focus-visible{{outline:2px solid var(--lumen-accent);outline-offset:2px}}"
             + $"{r} .lumen-stat-label{{font-size:{(compact ? 12 : 13)}px;color:var(--lumen-muted);overflow-wrap:anywhere}}"
@@ -124,15 +127,17 @@ public static class StatTilesHtml
         if (t.Value is { } value) sb.Append(LumenHtml.E(ChangeWords.Value(value, t.Format, t.Unit)));
         else
         {
-            sb.Append(LumenHtml.E(t.Missing));
-            if (t.Missing == "—") sb.Append("<span class='lumen-sr'> none</span>");
+            // The default dash is hidden from readers and " none" is read in its place, so nobody hears "em dash none".
+            if (t.Missing == "—") sb.Append("<span aria-hidden='true'>—</span><span class='lumen-sr'> none</span>");
+            else sb.Append(LumenHtml.E(t.Missing));
         }
         sb.Append("</p>");
 
-        if (t.Value is { } now && (t.Previous is not null || !string.IsNullOrEmpty(t.ChangeText)))
+        var changeText = string.IsNullOrWhiteSpace(t.ChangeText) ? null : t.ChangeText;
+        if (t.Value is { } now && (t.Previous is not null || changeText is not null))
         {
-            var (text, colour) = !string.IsNullOrEmpty(t.ChangeText)
-                ? (t.ChangeText, LumenHtml.Readable(style.Muted, style))
+            var (text, colour) = changeText is not null
+                ? (changeText, LumenHtml.Readable(style.Muted, style))
                 : ChangeWords.Of(now, t.Previous!.Value, t.Better, t.ChangeAs, t.Since, t.Format, t.Unit, style);
             sb.Append("<p class='lumen-stat-change' style='color:").Append(colour).Append("'>").Append(LumenHtml.E(text)).Append("</p>");
         }
@@ -141,7 +146,8 @@ public static class StatTilesHtml
 
         if (t.Value is { } reached && t.Target is { } target)
         {
-            var pct = Math.Round(reached / target * 100, MidpointRounding.AwayFromZero);
+            // + 0.0 turns a negative zero, which a small negative value rounds to, into zero, so no "-0%" is written.
+            var pct = Math.Round(reached / target * 100, MidpointRounding.AwayFromZero) + 0.0;
             var width = Math.Clamp(pct, 0, 100).ToString("0", CultureInfo.InvariantCulture);
             sb.Append("<div class='lumen-stat-meter' aria-hidden='true'><span style='width:").Append(width).Append("%'></span></div>");
             sb.Append("<p class='lumen-stat-target'>").Append(pct.ToString("0", CultureInfo.InvariantCulture)).Append("% of target ")
@@ -153,9 +159,11 @@ public static class StatTilesHtml
             var points = trend.Select((v, i) => new ChartPoint(i, v)).ToArray();
             var spark = ChartSvg.Render(new ChartSpec
             {
-                Kind = ChartKind.Line, Sparkline = true, Width = 120, Height = 28, Style = style,
+                Kind = ChartKind.Line, Sparkline = true, Width = 120, Height = 28, Style = style, Title = t.Label,
                 Series = [new ChartSeries(t.Label, points)]
-            }, includeLegend: false);
+            }, includeLegend: false, includeTitles: false);
+            // The drawing is aria-hidden, so its root title, which includeTitles leaves, is no use to a reader and would show as a tooltip.
+            spark = spark.Replace($"<title>{LumenHtml.E(t.Label)}</title>", "");
             var seen = trend.Where(v => v is not null).Select(v => v!.Value).ToArray();
             string F(double v) => LumenHtml.E(ChangeWords.Value(v, t.Format, t.Unit));
             // The drawing is hidden from readers, so none of its marks may take a Tab stop; the words below give its numbers.

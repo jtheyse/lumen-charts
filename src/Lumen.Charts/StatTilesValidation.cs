@@ -30,8 +30,8 @@ internal static class StatTilesValidation
         if (!Enum.IsDefined(tile.Format)) throw new ArgumentException(at + "unknown value format.");
         if (!Enum.IsDefined(tile.Better)) throw new ArgumentException(at + "unknown Better.");
         if (!Enum.IsDefined(tile.ChangeAs)) throw new ArgumentException(at + "unknown ChangeAs.");
-        if (tile.Missing is null || tile.Missing.Length is 0 or > 24)
-            throw new ArgumentException(at + "the words for a missing value may be from 1 to 24 characters.");
+        if (string.IsNullOrWhiteSpace(tile.Missing) || tile.Missing.Length > 24)
+            throw new ArgumentException(at + "the words for a missing value may be from 1 to 24 characters and cannot be blank.");
         if (tile.Note is { Length: > 60 }) throw new ArgumentException(at + "a note may be at most 60 characters.");
         if (tile.Since is { Length: > 40 }) throw new ArgumentException(at + "a since phrase may be at most 40 characters.");
         if (tile.ChangeText is { Length: > 40 }) throw new ArgumentException(at + "change text may be at most 40 characters.");

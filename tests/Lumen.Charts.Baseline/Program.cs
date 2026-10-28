@@ -915,9 +915,9 @@ StatTile[] Season() =>
 ];
 lines.Add($"tiles/regular-light {Hash(Tiles(new(Season()) { Title = "Season at a glance", Description = "Invented figures for one rider" }))}");
 lines.Add($"tiles/regular-dark {Hash(Tiles(new(Season()) { Title = "Season at a glance", Description = "Invented figures for one rider", Style = ChartStyle.Dark }, ChartTheme.Dark))}");
-lines.Add($"tiles/compact-strip {Hash(Tiles(new(Enumerable.Range(1, 8).Select(i => new StatTile($"Round {i}", i * 10 + (i % 3) * 5) { Format = ValueFormat.Number, Previous = i == 1 ? null : i * 10 - 5, Better = Better.Higher }).ToArray()) { Density = TileDensity.Compact, Title = "Rounds", TitleLevel = 3 }))}");
+lines.Add($"tiles/compact-strip {Hash(Tiles(new(Enumerable.Range(1, 8).Select(i => new StatTile($"Round {i}", i * 10 + (i % 3) * 5) { Format = ValueFormat.Number, Previous = i == 1 ? null : i * 10 - 5, Better = Better.Higher }).ToArray()) { Density = Density.Compact, Title = "Rounds", TitleLevel = 3 }))}");
 lines.Add($"tiles/missing-and-link {Hash(Tiles(new([new("Best finish", null), new("Next race", null) { Missing = "No race yet", Note = "Entries open soon" }, new("Riders", 48) { Href = "/riders" }, new("Contact", 1) { Href = "mailto:desk@example.test", ChangeText = "new" }])))}");
-lines.Add($"tiles/fixed-columns {Hash(Tiles(new(Season()[..5]) { Columns = 3, Density = TileDensity.Regular }))}");
+lines.Add($"tiles/fixed-columns {Hash(Tiles(new(Season()[..5]) { Columns = 3, Density = Density.Regular }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);
