@@ -11756,6 +11756,43 @@ Test("0.49.0: a column's natural first sort is descending only where higher is b
     Check(!TableView.NaturalDescending(new TableColumn("A"){Better=Better.Lower}),"lower");
     Check(!TableView.NaturalDescending(new TableColumn("A")),"neither");
 });
+Test("0.49.0: the CSV prefixes text that a spreadsheet would run, in cells, headers and footer, and leaves numbers bare",()=>{
+    var spec=new TableSpec([new TableColumn("=Name"),new TableColumn("N"){Kind=ColumnKind.Number}],
+        [TRow(TableCell.Of("=1+1"),TableCell.Of((double?)-3)),TRow(TableCell.Of("@x"),TableCell.Of((double?)1)),TRow(TableCell.Of("  -x"),TableCell.Of((double?)2)),TRow(TableCell.Of("safe"),TableCell.Of((double?)3))])
+        {Caption="C",Footer=[TableCell.Of("+total"),TableCell.Of((double?)-4)]};
+    var csv=TableExport.Csv(spec);
+    Check(csv=="'=Name,N\r\n'=1+1,-3\r\n'@x,1\r\n'  -x,2\r\nsafe,3\r\n'+total,-4\r\n",csv);
+});
+Test("0.49.0: sorting is stable in both directions over many repeated keys, with missing values last",()=>{
+    double?[] values=Enumerable.Range(0,60).Select(i=>i%7==6?(double?)null:i%3).ToArray();
+    var spec=Numbers(values);
+    foreach(var descending in new[]{false,true})
+    {
+        var order=TableView.Of(spec,0,descending).Order;
+        var firstNull=order.ToList().FindIndex(i=>values[i] is null);
+        Check(firstNull>=0&&order.Skip(firstNull).All(i=>values[i] is null),"nulls last, descending="+descending);
+        for(var k=1;k<order.Count;k++)
+        {
+            if(values[order[k]] is null||values[order[k-1]] is null) continue;
+            Check(descending?values[order[k-1]]>=values[order[k]]:values[order[k-1]]<=values[order[k]],"ordered, descending="+descending);
+            if(values[order[k]]==values[order[k-1]]) Check(order[k-1]<order[k],$"stable at {k}, descending={descending}");
+        }
+        Check(order.Skip(firstNull).Zip(order.Skip(firstNull+1),(a,b)=>a<b).All(x=>x),"nulls keep their order");
+    }
+});
+Test("0.49.0: text comparison ignores case, so apple sorts before Banana",()=>{
+    Check(TableView.Of(Texts("Banana","apple"),0,false).Order.SequenceEqual([1,0]),"apple first ascending");
+    Check(TableView.Of(Texts("apple","Banana"),0,true).Order.SequenceEqual([1,0]),"Banana first descending");
+});
+Test("0.49.0: an empty table has one page and opens on it, even from the end",()=>{
+    var view=TableView.Of(Many(0,25) with{StartAtEnd=true},null,false);
+    Check(view.Pages==1&&view.DefaultPage==0&&view.RowsOn(0)==(0,-1),$"{view.Pages} {view.DefaultPage} {view.RowsOn(0)}");
+});
+Test("0.49.0: a change cell with no number but a previous value sorts last",()=>{
+    var change=TSpec([new TableColumn("C"){Kind=ColumnKind.Change}],[TRow(new TableCell{Previous=3}),TRow(new TableCell{Number=2,Previous=1}),TRow(new TableCell{Number=9,Previous=1})]);
+    Check(TableView.Of(change,0,false).Order.SequenceEqual([1,2,0]),"ascending");
+    Check(TableView.Of(change,0,true).Order.SequenceEqual([2,1,0]),"descending");
+});
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
