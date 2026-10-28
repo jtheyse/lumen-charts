@@ -11541,6 +11541,30 @@ Test("0.48.0: the target meter caps at 100% and says its percentage",()=>{
     var neg=StatTilesHtml.Render(One480(new("Points",-5){Target=50}));
     Check(neg.Contains("<span style='width:0%'></span>")&&neg.Contains("-10% of target 50"),neg);
 });
+string StatsMarkup480(StatTilesSpec spec,ChartStyle? cascaded)
+{
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try {
+        RenderFragment stats=b=>{b.OpenComponent<LumenStats>(0);b.AddAttribute(1,"Spec",spec);b.CloseComponent();};
+        return renderer.Dispatcher.InvokeAsync(async()=>{
+            var root=await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",cascaded},{"ChildContent",stats}}));
+            return root.ToHtmlString();
+        }).GetAwaiter().GetResult();
+    } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
+}
+Test("0.48.0: <LumenStats> prerenders exactly what StatTilesHtml.Render writes",()=>{
+    var spec=new StatTilesSpec([new("Races",12){Previous=10,Better=Better.Higher},new("Wins",3)]){Title="Season",Style=ChartStyle.Light};
+    Check(StatsMarkup480(spec,null)==StatTilesHtml.Render(spec),"component differs from Render");
+    Check(StatsMarkup480(spec,ChartStyle.Dark)==StatTilesHtml.Render(spec),"the spec's own style must win over a cascaded one");
+});
+Test("0.48.0: <LumenStats> takes a cascaded style when the spec sets none",()=>{
+    var spec=new StatTilesSpec([new("Races",12)]);
+    var dark=StatsMarkup480(spec,ChartStyle.Dark);
+    Check(dark.Contains("--lumen-bg:#171E2E"),dark);
+    Check(dark==StatTilesHtml.Render(spec with{Style=ChartStyle.Dark}));
+    Check(StatsMarkup480(spec,null)==StatTilesHtml.Render(spec with{Style=ChartStyle.Light}),"no style at all means Light");
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

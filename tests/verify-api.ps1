@@ -603,4 +603,12 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/layout" -Method Post -ContentTyp
 Verify ($r.StatusCode -eq 400) 'Cyclic layered graph rejected'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/layout" -Method Post -ContentType application/json -Body '{"nodes":[{"id":"a","label":"A"}],"edges":[{"source":"a","target":"a"}]}' -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200) 'Layered self-loop accepted'
+$stats='{"title":"Season","tiles":[{"label":"Races","value":12,"previous":10,"better":"Higher"},{"label":"Wins","value":3}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/stats/html" -Method Post -ContentType application/json -Body $stats -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Headers['Content-Type'] -like 'text/html*' -and $r.Content.Contains("class='lumen-stats")) 'Stat tiles answer 200 as text/html with the lumen-stats root'
+$many=(1..49|ForEach-Object{'{"label":"T'+$_+'","value":'+$_+'}'}) -join ','
+$r=Invoke-WebRequest "$BaseUrl/api/charts/stats/html" -Method Post -ContentType application/json -Body ('{"tiles":['+$many+']}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid stat tiles')) "Forty-nine stat tiles are refused with 400 titled Invalid stat tiles ($($r.StatusCode))"
+$r=Invoke-WebRequest "$BaseUrl/api/charts/stats/html" -Method Post -ContentType application/json -Body '{"tiles":[{"label":"Races","value":12,"href":"JavaScript:alert(1)"}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) "A javascript: link on a stat tile is refused with 400 ($($r.StatusCode))"
 Write-Output "$checks HTTP checks passed."

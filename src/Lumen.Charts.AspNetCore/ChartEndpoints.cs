@@ -23,6 +23,7 @@ public static class ChartEndpoints
         group.MapPost("/graph/layout",(GraphSpec spec)=>Json(()=>GraphEngine.Layout(spec)));
         group.MapPost("/graph/routes",(GraphSpec spec)=>Json(()=>GraphEngine.Routes(spec)));
         group.MapPost("/planner/svg",(PlannerRequest request)=>Render(()=>PlannerSvg.Render(request.Spec,request.View??PlannerView.WholePeriod,request.Layout),"image/svg+xml"));
+        group.MapPost("/stats/html",(StatTilesSpec spec)=>Render(()=>StatTilesHtml.Render(spec),"text/html","Invalid stat tiles"));
         return group;
     }
     private static IResult Json<T>(Func<T> value)
@@ -30,9 +31,9 @@ public static class ChartEndpoints
         try { return Results.Ok(value()); }
         catch(ArgumentException error) { return Results.Problem(error.Message,statusCode:400,title:"Invalid graph"); }
     }
-    private static IResult Render(Func<string> render,string type)
+    private static IResult Render(Func<string> render,string type,string title="Invalid chart")
     {
         try { return Results.Text(render(),type); }
-        catch(ArgumentException error) { return Results.Problem(error.Message,statusCode:400,title:"Invalid chart"); }
+        catch(ArgumentException error) { return Results.Problem(error.Message,statusCode:400,title:title); }
     }
 }

@@ -1,0 +1,7 @@
+@((MarkupString)StatTilesHtml.Render(Spec with { Style = Spec.Style ?? CascadingStyle ?? ChartStyle.Light }))
+@code {
+    /// <summary>The tiles to draw, with their title, density and columns; see <see cref="StatTilesSpec"/>. A style set on it wins over a cascaded one.</summary>
+    [Parameter, EditorRequired] public StatTilesSpec Spec { get; set; } = new([]);
+    /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style in <see cref="Spec"/> wins; without either, <see cref="ChartStyle.Light"/> is used.</summary>
+    [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }
+}
