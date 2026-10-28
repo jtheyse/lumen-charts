@@ -11811,7 +11811,7 @@ Test("0.49.0: the table's structure: caption, scopes, aria-sort on the sorted co
     var heads=Els(Els(root,"thead").Single(),"th").ToArray();
     Check(heads.Length==5&&heads.All(h=>h.Attribute("scope")!.Value=="col"),"column scopes");
     Check(heads.Select(h=>h.Attribute("aria-sort")?.Value).SequenceEqual([null,null,"ascending",null,null]),"aria-sort only on the sorted column");
-    Check(heads[0].Attribute("class")!.Value=="lumen-datatable-right"&&heads[1].Attribute("class")!.Value=="lumen-datatable-left","auto alignment");
+    Check(heads[0].Attribute("class")!.Value=="lumen-datatable-right lumen-datatable-corner"&&heads[1].Attribute("class")!.Value=="lumen-datatable-left","auto alignment");
     var rows=Els(Els(root,"tbody").Single(),"tr").ToArray();
     Check(rows.Length==2&&rows[0].Elements().First().Name.LocalName=="th"&&rows[0].Elements().First().Attribute("scope")!.Value=="row"&&rows[0].Elements().Skip(1).All(c=>c.Name.LocalName=="td"),"row header");
     Check(rows[0].Elements().First().Value=="2"&&rows[1].Elements().First().Value=="1","sorted by time, the missing time last");
@@ -11838,15 +11838,15 @@ Test("0.49.0: the controls markup adds sort buttons and page buttons to the stat
     var plain=TableHtml.Render(spec,2);
     var live=TableHtml.Render(spec,2,null,false,true);
     Check(!plain.Contains("<button")&&!plain.Contains("data-lumen"),"static markup has no buttons");
-    Check(live.Contains("<th scope='col' class='lumen-datatable-right'><button type='button' class='lumen-datatable-sort' data-lumen-sort='0'>N</button></th>"),"sort button");
-    var stripped=Regex.Replace(Regex.Replace(live,"<div class='lumen-datatable-pages'>.*?<span","<div class='lumen-datatable-pages'><span"),"</span><button.*?</div>","</span></div>");
-    stripped=Regex.Replace(stripped,"<th scope='col' class='lumen-datatable-right'><button[^>]*>N</button></th>","<th scope='col' class='lumen-datatable-right'>N</th>");
+    Check(live.Contains("<th scope='col' class='lumen-datatable-right lumen-datatable-corner'><button type='button' class='lumen-datatable-sort' data-lumen-sort='0'>N</button></th>"),"sort button");
+    var stripped=Regex.Replace(Regex.Replace(live,"(<div class='lumen-datatable-pages'[^>]*>).*?<span","$1<span"),"</span><button.*?</div>","</span></div>");
+    stripped=Regex.Replace(stripped,"(<th scope='col' class='lumen-datatable-right lumen-datatable-corner'>)<button[^>]*>N</button></th>","$1N</th>");
     Check(stripped==plain,"removing the buttons gives the static markup");
-    Check(live.Contains("<div class='lumen-datatable-pages'><button type='button' data-lumen-page='0'>First</button><button type='button' data-lumen-page='1'>Previous</button><span class='lumen-datatable-range'>Rows 21–30 of 60</span><button type='button' data-lumen-page='3'>Next</button><button type='button' data-lumen-page='5'>Last</button></div>"),"paging line");
+    Check(live.Contains("<div class='lumen-datatable-pages' role='group' aria-label='Pages of Results'><button type='button' data-lumen-page='0' aria-label='First page'>First</button><button type='button' data-lumen-page='1' aria-label='Previous page'>Previous</button><span class='lumen-datatable-range'>Rows 21–30 of 60</span><button type='button' data-lumen-page='3' aria-label='Next page'>Next</button><button type='button' data-lumen-page='5' aria-label='Last page'>Last</button></div>"),"paging line, named and grouped");
     var first=TableHtml.Render(spec,0,null,false,true);
-    Check(first.Contains("data-lumen-page='0' disabled>First")&&first.Contains("disabled>Previous")&&!first.Contains("disabled>Next"),"first page: first and previous disabled");
+    Check(first.Contains("aria-label='First page' aria-disabled='true'>First")&&first.Contains("aria-label='Previous page' aria-disabled='true'>Previous")&&!first.Contains("aria-label='Next page' aria-disabled")&&!first.Contains(" disabled"),"first page: first and previous aria-disabled, none disabled, so focus is kept");
     var last=TableHtml.Render(spec,5,null,false,true);
-    Check(last.Contains("disabled>Next")&&last.Contains("disabled>Last")&&!last.Contains("disabled>First"),"last page");
+    Check(last.Contains("aria-label='Next page' aria-disabled='true'>Next")&&last.Contains("aria-label='Last page' aria-disabled='true'>Last")&&!last.Contains("aria-label='First page' aria-disabled")&&!last.Contains(" disabled"),"last page");
     var sorted=TableHtml.Render(Riders(),null,2,true,true);
     Check(sorted.Contains("data-lumen-sort='1'")&&!sorted.Contains("data-lumen-sort='4'")&&sorted.Contains("aria-sort='descending'"),"a sparkline header is plain text; the chosen sort shows");
     var unsortable=Riders() with{Columns=[Riders().Columns[0],Riders().Columns[1] with{Sortable=false},..Riders().Columns.Skip(2)]};
@@ -11924,7 +11924,7 @@ Test("0.49.0: an empty table writes No rows in place of a range, and an unpaged 
     var html=TableHtml.Render(empty);
     Check(html.Contains("<span class='lumen-datatable-range'>No rows</span>")&&!html.Contains("Rows 1–0")&&!html.Contains("of 0"),"no rows text");
     var live=TableHtml.Render(empty with{StartAtEnd=true},null,null,false,true);
-    Check(live.Contains("No rows")&&live.Contains("data-lumen-page='0' disabled>First")&&live.Contains("disabled>Previous")&&live.Contains("disabled>Last")&&live.Contains("disabled>Next"),"all four buttons disabled");
+    Check(live.Contains("No rows")&&Regex.Matches(live,"' aria-disabled='true'>").Count==4&&!live.Contains(" disabled"),"all four buttons aria-disabled");
     var unpaged=TableHtml.Render(Many(0,null));
     Check(!unpaged.Contains("<div class='lumen-datatable-pages'")&&!unpaged.Contains("No rows")&&XElement.Parse(unpaged)!=null,"an unpaged empty table is a header only");
 });
@@ -11950,6 +11950,31 @@ Test("0.49.0: the dark style colours the fragment and every text colour clears 4
     var html=TableHtml.Render(Riders() with{Style=ChartStyle.Dark});
     Check(html.Contains("--lumen-bg:"+ChartStyle.Dark.Background),"dark background");
     foreach(Match m in Regex.Matches(html,@"style='color:(#[0-9a-fA-F]{3,8})'")) Check(Lumen.Charts.Contrast.Ratio(m.Groups[1].Value,ChartStyle.Dark.Background)>=4.5,m.Value);
+});
+Test("0.49.0: the row-header column's own header is the sticky corner, and only that one",()=>{
+    var spec=Riders();
+    foreach(var header in new[]{0,1,2})
+    {
+        var cols=spec.Columns.Select((c,i)=>c with{RowHeader=i==header}).ToArray();
+        var heads=Els(Els(XElement.Parse(TableHtml.Render(spec with{Columns=cols})),"thead").Single(),"th").ToArray();
+        Check(heads.Select(h=>h.Attribute("class")!.Value.Contains("lumen-datatable-corner")).SequenceEqual(Enumerable.Range(0,5).Select(i=>i==header)),"corner on column "+header);
+    }
+    var first=Els(Els(XElement.Parse(TableHtml.Render(spec)),"thead").Single(),"th").First().Attribute("class")!.Value;
+    Check(first=="lumen-datatable-right lumen-datatable-corner","the default row header is column 0, its align class kept: "+first);
+    Check(TableHtml.Render(spec).Contains("thead th.lumen-datatable-corner{left:0;z-index:3;background:var(--lumen-bg)}"),"corner css");
+});
+Test("0.49.0: the caption is visible, the paging group is named by it, and aria-disabled buttons are muted",()=>{
+    var html=TableHtml.Render(Many(30,10));
+    Check(!html.Contains("caption{position:absolute")&&html.Contains("caption{margin:0;"),"the caption is not hidden");
+    Check(html.Contains("role='group' aria-label='Pages of Results'"),"group");
+    Check(TableHtml.Render(Many(30,10) with{Caption="A <b> & c"}).Contains("aria-label='Pages of A &lt;b&gt; &amp; c'"),"group label encoded");
+    Check(html.Contains("button[aria-disabled='true']{color:var(--lumen-muted);cursor:default}")&&html.Contains("--lumen-muted:"),"muted via the Readable custom property");
+});
+Test("0.49.0: a bar column's footer is its number as text, with no bar",()=>{
+    var spec=TSpec([new TableColumn("Pts"){Kind=ColumnKind.Bar}],[TRow(new TableCell{Number=-5}),TRow(new TableCell{Number=10})]) with{Footer=[new TableCell{Number=5}]};
+    var foot=Els(XElement.Parse(TableHtml.Render(spec)),"tfoot").Single();
+    Check(foot.Value=="5"&&!Els(foot,"span").Any(),"footer: "+foot);
+    Check(Els(Els(XElement.Parse(TableHtml.Render(spec)),"tbody").Single(),"span").Any(s=>s.Attribute("class")?.Value=="lumen-datatable-bar"),"body bars remain");
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

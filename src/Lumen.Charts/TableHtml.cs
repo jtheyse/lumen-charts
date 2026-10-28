@@ -34,7 +34,7 @@ public static class TableHtml
         sb.Append("<div class='lumen-datatable-scroll' role='region' tabindex='0' aria-label='").Append(LumenHtml.E(spec.Caption)).Append("'>");
         sb.Append("<table><caption>").Append(LumenHtml.E(spec.Caption)).Append("</caption><thead><tr>");
         var rowHeader = RowHeaderColumn(spec);
-        for (var c = 0; c < spec.Columns.Count; c++) Header(sb, spec.Columns[c], c, sortBy, descending, controls);
+        for (var c = 0; c < spec.Columns.Count; c++) Header(sb, spec.Columns[c], c, sortBy, descending, controls, c == rowHeader);
         sb.Append("</tr></thead><tbody>");
 
         var bars = spec.Columns.Select((col, c) => col.Kind == ColumnKind.Bar ? BarScale(spec, col, c) : default).ToArray();
@@ -54,7 +54,7 @@ public static class TableHtml
         }
         sb.Append("</table></div>");
 
-        if (spec.PageSize is not null) Paging(sb, view, current, first, last, controls);
+        if (spec.PageSize is not null) Paging(sb, spec, view, current, first, last, controls);
         return sb.Append("</div>").ToString();
     }
 
@@ -72,9 +72,10 @@ public static class TableHtml
         _ => column.Kind is ColumnKind.Number or ColumnKind.Change or ColumnKind.Bar ? "right" : "left"
     };
 
-    private static void Header(StringBuilder sb, TableColumn column, int index, int? sortBy, bool descending, bool controls)
+    private static void Header(StringBuilder sb, TableColumn column, int index, int? sortBy, bool descending, bool controls, bool corner)
     {
-        sb.Append("<th scope='col' class='lumen-datatable-").Append(Align(column)).Append('\'');
+        // The row-header column's own header is the corner: it stays put in both directions.
+        sb.Append("<th scope='col' class='lumen-datatable-").Append(Align(column)).Append(corner ? " lumen-datatable-corner" : "").Append('\'');
         if (sortBy == index) sb.Append(" aria-sort='").Append(descending ? "descending" : "ascending").Append('\'');
         sb.Append('>');
         if (controls && column.Sortable && column.Kind != ColumnKind.Sparkline)
@@ -84,13 +85,13 @@ public static class TableHtml
         sb.Append("</th>");
     }
 
-    private static void Paging(StringBuilder sb, TableView view, int page, int first, int last, bool controls)
+    private static void Paging(StringBuilder sb, TableSpec spec, TableView view, int page, int first, int last, bool controls)
     {
-        sb.Append("<div class='lumen-datatable-pages'>");
+        sb.Append("<div class='lumen-datatable-pages' role='group' aria-label='Pages of ").Append(LumenHtml.E(spec.Caption)).Append("'>");
         if (controls)
         {
-            PageButton(sb, "First", 0, page == 0);
-            PageButton(sb, "Previous", Math.Max(0, page - 1), page == 0);
+            PageButton(sb, "First", "First page", 0, page == 0);
+            PageButton(sb, "Previous", "Previous page", Math.Max(0, page - 1), page == 0);
         }
         sb.Append("<span class='lumen-datatable-range'>");
         // An empty table has no rows to number: RowsOn(0) is (0,-1), which would read "Rows 1–0 of 0".
@@ -101,16 +102,17 @@ public static class TableHtml
         sb.Append("</span>");
         if (controls)
         {
-            PageButton(sb, "Next", Math.Min(view.Pages - 1, page + 1), page == view.Pages - 1);
-            PageButton(sb, "Last", view.Pages - 1, page == view.Pages - 1);
+            PageButton(sb, "Next", "Next page", Math.Min(view.Pages - 1, page + 1), page == view.Pages - 1);
+            PageButton(sb, "Last", "Last page", view.Pages - 1, page == view.Pages - 1);
         }
         sb.Append("</div>");
     }
 
-    private static void PageButton(StringBuilder sb, string label, int target, bool disabled)
+    private static void PageButton(StringBuilder sb, string label, string name, int target, bool disabled)
     {
-        sb.Append("<button type='button' data-lumen-page='").Append(target.ToString(CultureInfo.InvariantCulture)).Append('\'');
-        if (disabled) sb.Append(" disabled");
+        sb.Append("<button type='button' data-lumen-page='").Append(target.ToString(CultureInfo.InvariantCulture)).Append("' aria-label='").Append(name).Append('\'');
+        // aria-disabled, not disabled, so a button that stops moving keeps keyboard focus; the component ignores a press on it.
+        if (disabled) sb.Append(" aria-disabled='true'");
         sb.Append('>').Append(label).Append("</button>");
     }
 
@@ -149,7 +151,12 @@ public static class TableHtml
                 else main.Append(MissingMarkup);
                 break;
             case ColumnKind.Bar:
-                if (cell.Number is { } v) Bar(main, column, v, bar);
+                if (cell.Number is { } v)
+                {
+                    // A footer total is a number in words, with no bar drawn against the column's scale.
+                    if (footer) main.Append(LumenHtml.E(ChangeWords.Value(v, column.Format, column.Unit)));
+                    else Bar(main, column, v, bar);
+                }
                 else main.Append(MissingMarkup);
                 break;
             case ColumnKind.Sparkline:
@@ -214,9 +221,10 @@ public static class TableHtml
             + $"{r} .lumen-datatable-scroll{{position:relative;overflow:auto;max-height:var(--lumen-datatable-height,none);margin:0;padding:0;border:1px solid var(--lumen-grid);border-radius:8px;background:var(--lumen-bg)}}"
             + $"{r} .lumen-datatable-scroll:focus-visible,{r} button:focus-visible{{outline:2px solid var(--lumen-accent);outline-offset:2px}}"
             + $"{r} table{{border-collapse:separate;border-spacing:0;margin:0;padding:0;width:100%}}"
-            + $"{r} caption{{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}"
+            + $"{r} caption{{margin:0;padding:{pad};text-align:left;font-weight:600;color:var(--lumen-text)}}"
             + $"{r} th,{r} td{{margin:0;padding:{pad};border-bottom:1px solid var(--lumen-grid);background:var(--lumen-bg);color:var(--lumen-text);vertical-align:top;font-weight:400}}"
             + $"{r} thead th{{position:sticky;top:0;z-index:2;font-weight:600;white-space:nowrap}}"
+            + $"{r} thead th.lumen-datatable-corner{{left:0;z-index:3;background:var(--lumen-bg)}}"
             + $"{r} tbody th,{r} tfoot th{{position:sticky;left:0;z-index:1;font-weight:600;text-align:left}}"
             + $"{r} tfoot td,{r} tfoot th{{border-top:2px solid var(--lumen-grid);font-weight:600}}"
             + $"{r} .lumen-datatable-left{{text-align:left}}"
@@ -234,7 +242,7 @@ public static class TableHtml
             + $"{r} a{{color:inherit}}"
             + $"{r} .lumen-datatable-pages{{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0 0;padding:0;font-size:13px;color:var(--lumen-muted)}}"
             + $"{r} .lumen-datatable-pages button{{margin:0;padding:4px 10px;border:1px solid var(--lumen-grid);border-radius:6px;background:var(--lumen-bg);color:var(--lumen-text);font:inherit;cursor:pointer}}"
-            + $"{r} .lumen-datatable-pages button:disabled{{color:var(--lumen-muted);cursor:default}}"
+            + $"{r} .lumen-datatable-pages button[aria-disabled='true']{{color:var(--lumen-muted);cursor:default}}"
             + LumenHtml.HiddenRule(".lumen-datatable");
     }
 }
