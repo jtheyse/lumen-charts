@@ -171,7 +171,7 @@ The X ticks are dates, `13 Apr`, `8 Jun`, `3 Aug`, read in Johannesburg, and eac
 
 ## Season strip
 
-The strip of round tiles stays HTML: it is a grid of facts, not a chart. Its ▲ and ▼ follow `ChangeColors.LowerIsBetter`, so the strip and the chart never disagree: each round against the nearest earlier round that has a place, whether or not that round has a tile of its own, fewer places being better.
+The strip of round tiles stays HTML: it is a grid of facts, not a chart. Its ▲ and ▼ follow `ChangeColors.LowerIsBetter`, so the strip and the chart never disagree: each round against the nearest earlier round that has a place, whether or not that round has a tile of its own, fewer places being better. Since 0.48.0 `StatTilesSpec` can write the strip for you, with the same arrows and words: see "Season at a glance" below; each tile is compared with the `Previous` you give it, so for the strip above pass the last round that had a place, and leave a round without one out.
 
 ```csharp
 int? lastPlace = null;
@@ -895,6 +895,58 @@ The same planner in a Blazor page with an interactive render mode, beside those 
 - **Sizes.** The drawing's text is 10 to 12 units, so for readable text on screen the drawing's width must equal the box's CSS width. `<LumenPlanner>` measures its box and draws at that width, from 320 to 4096 pixels (it has no `FitWidth`; it always fits), and is drawn at `Spec.Width` and scaled only until it is interactive. For the static calls, render `Width` equal to the box's CSS width.
 - **Not colour.** Provisional is an outline with hatching, cancelled an outline with a strike line, yours an outline in the text colour, and every one is also said in words. On the card, words clear 4.5:1 (`hi` 16.70:1, `low` 4.87:1) and every mark 3:1, including on a weekend band, where `hi` stands 12.70:1 and `low` 3.71:1; check a style of your own with `ContrastIssues()`.
 - **Limits.** View only, no editing, dragging or adding; at most 400 days, 2000 events, 1000 periods and 500 regions, and 200 characters in a title, description or name; at most three stripes a day in the year; a month's lines cut long names; `PlannerSvg.Table` is the month's words for a static page. Interactive zoom has arrived with `<LumenPlanner>` (0.44.0), which needs an interactive render mode, and a keyboard reaches an event in the year or a month by opening its day; a page without the component draws the view it asks for.
+
+## Season at a glance
+
+Headline numbers for a rider's season, as HTML and not a chart: a label, a value, and its change from last season written in words, with an optional note, a trend and a target. Every number here is invented; a real page fills the tiles from its own results (0.48.0).
+
+```csharp
+// A season's numbers, invented. A tile writes its change in words (▲ or ▼, then "better" or "worse"), so nothing rests on colour.
+var glanceTiles = new StatTilesSpec(
+[
+    new("Rounds raced", 5) { Previous = 4, Better = Better.Higher, Since = "last season", Note = "Points each round", Trend = [12, 0, 9, 15, 20] },
+    new("Best place", 19) { Previous = 24, Better = Better.Lower, Since = "last season" },   // lower is better, so a fall of 5 places reads ▼ 5 · better than last season
+    new("Total time", 15120) { Format = ValueFormat.Duration, Previous = 15840, Better = Better.Lower, Since = "last season" },   // 4:12:00, and the change reads ▼ 12:00 · better than last season
+    new("Podiums", 1) { Target = 3 },                                                                                         // 33% of target 3, as a meter and in words
+    new("Points", 56) { Previous = 48, Better = Better.Higher, ChangeAs = ChangeAs.Both, Since = "last season" },
+    new("Next round", null) { Missing = "No round yet", Href = "/calendar" }                                                  // a link tile; null is a word, never a zero
+])
+{
+    Title = "Season at a glance",
+    Description = "Five invented numbers for one rider's season, each with its change from last season in words.",
+    Style = raceFace                                                                                                          // the card's own colours; null is the Light preset
+};
+// A compact strip of rounds: each round's place, with its change on the round before. The first round has no previous, so it writes none.
+int[] roundResults = [31, 24, 27, 21, 19];
+var roundStrip = new StatTilesSpec(roundResults.Select((place, i) => new StatTile($"Round {i + 1}", place)
+{
+    Previous = i == 0 ? null : roundResults[i - 1],
+    Better = Better.Lower
+}).ToArray())
+{
+    Title = "Round by round", TitleLevel = 3, Density = TileDensity.Compact, Style = raceFace
+};
+string glanceHtml = StatTilesHtml.Render(glanceTiles);     // a fragment, with its own style block: write it into a page as it is
+string roundStripHtml = StatTilesHtml.Render(roundStrip);  // both can share a page: no tile or rule collides with another set's
+```
+
+In a Blazor page (a razor block, not compiled by the recipe check). `<LumenStats>` writes the same fragment, with the style a `<LumenBrand>` or a cascaded `ChartStyle` gives it unless the spec sets its own:
+
+```razor
+<LumenStats Spec="glanceTiles" />
+<LumenStats Spec="roundStrip" />
+```
+
+Over HTTP, `POST /api/charts/stats/html` takes the spec as JSON and answers `text/html`. A host that registers `JsonStringEnumConverter`, as the gallery does, writes enums by name (`"better":"Lower"`, `"format":"Duration"`); without it they are numbers:
+
+```json
+{"title":"Season at a glance","tiles":[{"label":"Best place","value":19,"previous":24,"better":"Lower","since":"last season"},{"label":"Podiums","value":1,"target":3}]}
+```
+
+- **Change words.** With a `Previous` the tile writes the arrow, the size of the change and a word: `▲ 1 · better than last season`, `▼ 5 · better than last season`, `▲ 8 (17%) · better than last season`. `Better.Neither` (the default) says "up" and "down" in the muted colour (`▲ 3 · up`), `Higher` and `Lower` say "better" and "worse", and an unchanged value reads `= same`. `ChangeAs.Percent` and `Both` take the percentage of the previous value's size, and a previous value of 0 writes the difference instead. `ChangeText` replaces all of it, such as `new best`, in the muted colour.
+- **Colour is a second voice.** "Better" is written in `Rising` and "worse" in `Falling` only where that colour clears 4.5:1 against the card, and in the text colour otherwise. Race Face's `#34d399` and `#f87171` clear it on `#161618`; on the Light preset they do not, so there the words carry the meaning alone.
+- **A target** draws a thin meter and writes `33% of target 3`; the meter is hidden from readers and the words are not. A **trend** is the sparkline the charts draw, 120 by 28, hidden from readers and followed by words (`5 values, lowest 0, highest 20, last 20`); its marks take no Tab stop.
+- **Limits.** 1 to 48 tiles; a label of 1 to 40 characters; a note of at most 60; `Since` and `ChangeText` at most 40; `Missing` 1 to 24 characters; a trend of at most 400 values with at least 2 that are not null; `Columns` null (as many as fit, two on a 360 px phone) or 1 to 6. `Columns` is written on the list itself, so host CSS cannot override it. A link may be http, https, mailto or relative, and is always HTML-encoded; `javascript:` is refused with a message.
 
 ## Rendering notes
 

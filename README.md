@@ -1,6 +1,6 @@
 # Lumen Charts
 
-A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.47.2. No third-party charting engine or CDN is required.
+A standalone C# chart library, Blazor components, ASP.NET Core rendering API, and an interactive gallery. Preview 0.48.0. No third-party charting engine or CDN is required.
 
 ## Run the gallery
 
@@ -1187,6 +1187,62 @@ Dragging a node previews with a transform and commits on release; arrow keys nud
 
 The component needs an interactive render mode: prerendered, it draws the year with its toolbar and chips, and nothing answers a click until the browser takes over. Under Blazor Server a large year can need the larger SignalR `MaximumReceiveMessageSize` described above. The unpainted day cells that make the wide year clickable are described under [Planning a season](#planning-a-season). The gallery's `#planner` section and the WebAssembly host show the component.
 
+### Stat tiles
+
+Not every number wants an axis. A stat tile is a label, a value and, if you give them, its change from a previous value, a note, a target and a trend: "Best finish 3, ▼ 2 · better than last season". Tiles are HTML, not SVG, so they wrap, reflow, select and read as text. `StatTilesHtml.Render(spec)` in `Lumen.Charts` returns the HTML fragment for a `StatTilesSpec` (0.48.0), and `<LumenStats>` in `Lumen.Charts.Blazor` writes that same fragment, so a prerender, a circuit, a static page and an HTTP response give the same markup for the same spec. `<LumenStats>` adds nothing interactive and needs no render mode.
+
+```razor
+<LumenStats Spec="season" />
+
+@code {
+    // Invented figures. A tile with a Previous writes the change; Better says which direction is an improvement.
+    StatTilesSpec season = new(
+    [
+        new("Races", 12) { Previous = 9, Better = Better.Higher, Since = "last season", Note = "Points each round", Trend = [6, 14, 9, 18, 11, 20] },
+        new("Best finish", 3) { Previous = 5, Better = Better.Lower, Since = "last season" },
+        new("Total time", 15120) { Format = ValueFormat.Duration, Previous = 15840, Better = Better.Lower, Since = "last season" },
+        new("Podiums", 2) { Target = 4 },
+        new("Next race", null) { Missing = "No race yet", Href = "/calendar" }
+    ])
+    {
+        Title = "Season at a glance",
+        Description = "Invented figures for one rider's season."
+    };
+}
+```
+
+Outside Blazor, `string html = StatTilesHtml.Render(season);` is the fragment.
+
+**What a tile writes.** In this order: the label, the value, the change, the note, the target, the trend. A value is written as an axis writes it, in `Format` (`Number` by default, `Duration`, `Compact` and the others) with `Unit` after it, in the invariant culture. A null `Value` writes `Missing` instead, 1 to 24 characters; its default is a dash, which a screen reader hears as "none". The change appears only when the tile has a value and either a `Previous` or a `ChangeText`.
+
+**The change words.** With a `Previous`, the tile writes an arrow, the size of the change and a word, and `Since` names what `Previous` was.
+
+- `Better.Neither`, the default, writes `▲ 3 · up` or `▼ 3 · down`, in the muted colour. `Better.Higher` or `Better.Lower` says which direction is an improvement, and the words are `better` or `worse`: `▲ 3 · better than last season`, `▼ 0:42 · worse than last season`. A value equal to its previous reads `= same` or `= same as last season`.
+- `ChangeAs` is `Difference` (the default: the size of the change, in the value's own format), `Percent` or `Both` (the difference followed by the percentage in brackets: `▲ 8 (17%) · better`). A percentage is of the size of the previous value, so a negative `Previous` takes it of `|Previous|`; a `Previous` of 0 cannot have one and writes the difference instead. A percentage under 10 has one decimal (a trailing `.0` is dropped) and a larger one is whole.
+- `ChangeText`, at most 40 characters, replaces all of it with words you choose, such as `new best`, in the muted colour, for a change Lumen should not compute.
+- The colour is a second voice, never the only one: the arrow and the words say the same thing.
+
+**Light and dark.** A change word is coloured in the style's `Rising` (better) or `Falling` (worse) only where that colour reaches 4.5:1 against the tile's background, and is written in the text colour where it does not. In the Light preset, Lumen's `Rising` and `Falling` do not reach 4.5:1 on white, so the change words are written in the text colour there, and the arrow and the words carry the meaning. Dark shows them in colour. Muted text follows the same rule, so a style whose muted colour is too faint writes it in the text colour.
+
+**A target and a trend.** A `Target`, above 0, draws a thin meter and writes the percentage reached in words, `50% of target 4`; the meter is drawn to 100% at most, and the words keep the true figure (`125% of target 4`). A `Trend` of up to 400 values, with at least 2 that are not null (nulls are gaps), draws the sparkline the charts draw, 120 by 28, and writes a summary for readers, `6 values, lowest 6, highest 20, last 20`. The drawing is hidden from assistive technology and none of its marks takes a Tab stop: the words carry its numbers. A tile's trend sparkline carries the chart renderer's own `<style>`, and every rule in it is scoped to `.lumen-svg`, as on every chart; that is the one place a tile writes rules outside `.lumen-stats`.
+
+**Links.** An `Href` makes the whole tile one link, with a focus ring in the style's accent. Links accept only `http`, `https`, `mailto` and relative addresses (`/riders/7`, `riders/7`, `#next`), and are always HTML-encoded on output, as is every label, value, note and title. The scheme is matched without regard to case and after trimming, so `JavaScript:alert(1)`, ` javascript:`, `data:` and `vbscript:` are refused with an `ArgumentException`.
+
+**Layout.** The fragment is a `<section>` named by its `Title`, else by its `Description`, else "Statistics", holding a `<ul>` of tiles. A `Title` is written as a heading at `TitleLevel` (2 to 6, 2 by default), so choose the level that fits the page's outline; a `Description` is a paragraph under it. `Columns` is null to fit as many tiles as the width holds, or 1 to 6 for a fixed count. `Density` is `Regular` (tiles of at least 150 px, a 26 px value) or `Compact` (at least 96 px, a 20 px value) for a strip of rounds or a dense summary. `Style` is the colours and font; null is the Light preset, and in `<LumenStats>` a style set on the spec wins over one a `<LumenBrand>` cascades.
+
+**Several sets on one page.** The markup has no `id` attribute, and every rule sits under the set's own two classes, `.lumen-stats.lumen-stats-regular` or `.lumen-stats.lumen-stats-compact`, so any number of sets, of either density, share a page without their rules meeting. Nothing is written outside `.lumen-stats` apart from the sparkline's rules above, and nothing changes a MudBlazor or Bootstrap page around it. A host that restyles the tiles should know two things:
+
+- `Columns` cannot be overridden. It is written inline, on the list itself (`grid-template-columns:repeat(n,minmax(0,1fr))`), so host CSS or a media query cannot override it. Leave `Columns` null and style the auto-fill grid if you want it to change per breakpoint.
+- The tile rules carry two classes (`.lumen-stats.lumen-stats-regular`), so a rule of one class loses to them. Match them with the same two classes, or use more specificity, to win.
+
+**Over HTTP.** `POST /api/charts/stats/html` takes a `StatTilesSpec` as JSON and answers `text/html`, the same fragment. A spec that breaks a rule is answered with 400, titled `Invalid stat tiles`, and the rule's message. The endpoint reads enums by name (`"better":"Lower"`, `"format":"Duration"`) only when the host registers `JsonStringEnumConverter`, as the gallery does and the [HTTP API](#http-api) section shows; without it, enums are numbers.
+
+```json
+{"title":"Season at a glance","columns":3,"tiles":[{"label":"Best finish","value":3,"previous":5,"better":"Lower","since":"last season"},{"label":"Podiums","value":2,"target":4},{"label":"Next race","value":null,"missing":"No race yet"}]}
+```
+
+**Limits.** From 1 to 48 tiles; a label of 1 to 40 characters; a note of at most 60; `Since` and `ChangeText` at most 40; a title of at most 120 and a description of at most 300. Values, previous values, targets and trend values must be finite, and a target above 0. A tile is read-only: there is no sorting, no selection event, no tooltip and no animation. The gallery's `/components` page ("Beyond charts") shows two sets, "Season at a glance" and "Round by round", in the Lumen, Harbour, page-CSS and Midnight brands.
+
 ## Training metrics
 
 `Training` computes the numbers endurance-training charts draw, as Allen and Coggan's *Training and Racing with a Power Meter* and TrainingPeaks define them; [FITNESS.md](docs/FITNESS.md) gives the sources and the published values the tests check against. It draws nothing itself. The results are plain numbers and records for the chart kinds above; the [duration axes](#durations-compact-numbers-and-reversed-axes) arrived in 0.19.0, [zones on charts](#training-zones) in 0.20.0, [several marks in one chart](#several-marks-in-one-chart) in 0.21.0, which draws the example below as the apps do, with daily stress as columns, form as an area and planned days dashed, and [panes](#panes) in 0.22.0, which stack an activity stream's heart rate, pace and elevation over one elapsed-time axis. The gallery's [Sports & performance page](#run-the-gallery) shows them all together.
@@ -1242,6 +1298,7 @@ app.MapLumenCharts();
 | POST | `/api/charts/graph/layout` | GraphSpec JSON → node positions |
 | POST | `/api/charts/graph/routes` | GraphSpec JSON → edge polylines |
 | POST | `/api/charts/planner/svg` | PlannerRequest JSON (`spec`, optional `view`, `layout`) → SVG |
+| POST | `/api/charts/stats/html` | StatTilesSpec JSON → HTML fragment (`text/html`) |
 
 ```json
 {"title":"Revenue","kind":"Column","series":[{"name":"Sales","points":[{"x":1,"y":24,"label":"Jan"},{"x":2,"y":38,"label":"Feb"}]}]}
@@ -1325,9 +1382,26 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 - A heatmap's 0.46.1 follow-ups: a note on a heatmap cell is up to 40 characters, a `GapLabel` cell or a not-rated cell writes its words in the cell (wrapped onto as many 10 px lines as fit, cut with `…`, or left out where nothing fits), and the pinned colour scale (`YMin`, `YMax`, `IncludeZero`) and the measured name column (130 to 240 units) are for the refined finish only. In `<LumenChart>` the row names of a `CellWidth` heatmap are held at the left by a second copy of the drawing that takes the pointer and is hidden from reading; static SVG does not freeze them, and the copy's crop clips the overhang of the first column label at rest when narrow columns (about 24 to 60) leave it wider than its cell. `FitHeight` gives a heatmap rows as tall as its tallest cell's words need, at least 36 units (0.46.2), all one height and with no setting for another row height, and there is no sticky header row.
 - A heatmap's 0.46.2 switches: `CellNotes` writes each cell's note under its sub-label at 10 px in the cell's ink, trimmed of its separator and wrapped (after its commas first, then between words, a word wider than the cell cut by its characters), and `NotRatedKeepsValue` makes a not-rated cell write its value, muted only where `Style.Muted` clears 4.5:1 against the background, then its sub-label, its note and its reason. Both are for heatmaps with `CellText` only. Without `FitHeight`, a short cell gives up its whole note first, then its sub-label, then its value, then its reason's lines from the end; the name and the grid table keep all of it. A fitted heatmap's rows are one height, so a long note makes every row tall, and its height has no upper cap (`Height`'s 240 to 2160 is checked before the rows are fitted). A heatmap note takes no line break or tab while `CellNotes` is on.
 - Counts per day (0.47.0) are built from the counts the app passes in: a range of at most 4,000 days (`DailyCountsChart.MaxDays`; a longer one is refused, and `null` is returned when every day is 0), one column a day at a `CellWidth` of 8 or more (30 by default; a pitch above 4,096 is refused, and a column chart with `CellWidth` takes 4,000 categories where other category charts take 100), drawn exactly the left margin + days × `CellWidth` + the right margin wide, never under 320 with the room left over at the right, and written statically at `width:{drawn}px`, so a static page needs an `overflow-x:auto` box. The Y axis scrolls away with the bars, since columns have no frozen band, and each bar's count carries its value; a value label is kept up to `CellWidth − 2` wide, so at 30 a four-digit count fits and a five-digit one is dropped. An axis label is one or two lines of 1 to 12 characters, thinned by their measured widths with two-line labels kept first, so a year label thins its neighbours (at 30, `Jan 2027` drops `31` and `2`, and the first day's `Dec 2026` drops the day after; a range that starts on 31 December loses its 1 January label below a `CellWidth` of 60), and a column chart takes axis labels or sub-labels, not both. `MarkZero` draws a zero as a 1-unit hairline in `Style.Muted`, with its `0` muted only where that clears 4.5:1 and, since 0.47.2, a transparent hit area 24 units high on the baseline so a tap lands. `ChartPoint.Name` is the mark's whole name, 1 to 200 characters, so the host says any state its colours show; it leaves the data table, CSV, grid table and shared readout alone, an averaged mark keeps Lumen's name, and histogram, box, violin and calendar charts refuse it. `ScrollToEnd` runs in the component's script and is interactive only, it makes "View data" list each series' last 500 points (0.47.2), and a chart that opens at its end has its title scroll away with the bars (write the title in the host's own heading and set `DrawTitles = false`; 0.47.1). With the default `ValueFormat.Number`, counts of a million or more read in E-notation on the axis and over the bars (`1E+6`; `YFormat = ValueFormat.Compact` writes `1M`). A live Blazor Server page resends the whole drawing on each redraw, a megabyte or more at thousands of days, as ride channels do (0.37.0), so a host with a free From–To clamps it to 4,000 days before calling the builder. There is no wrapper component and no HTTP endpoint for the builder.
+- Stat tiles (0.48.0) are a read-only row or grid of at most 48 tiles, written as HTML by `StatTilesHtml.Render` and `<LumenStats>`: a label of at most 40 characters, a note of at most 60, `Since` and `ChangeText` of at most 40, a trend of at most 400 values (at least 2 not null), a `Columns` of 1 to 6 or automatic. A change is written only for a tile with a value, and only in words the library composes or the `ChangeText` the app gives; there is no threshold below which a change counts as level, no comparison with anything but the one `Previous`, no sorting, selection or tooltip, and no animation. Change words take `Rising` and `Falling` only where they reach 4.5:1 against the tile, so in the Light preset they are written in the text colour and the arrow and words carry the meaning. `Columns` is written inline and cannot be overridden by host CSS; the tile rules carry two classes (`.lumen-stats.lumen-stats-regular`). A tile's sparkline carries the chart renderer's `<style>`, every rule scoped to `.lumen-svg`, the one place a tile writes rules outside `.lumen-stats`. Links accept only http, https, mailto and relative addresses, always HTML-encoded. The endpoint reads enums by name only when the host registers `JsonStringEnumConverter`. The sparkline's drawing is hidden from readers and takes no Tab stop; its words give the numbers. See [Stat tiles](#stat-tiles).
 - Research materials are excluded from packages. No vendor source code or book images are redistributed.
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
+
+## 0.48.0 additions
+
+Stat tiles, the first of three components that are mostly words and numbers (a data table and an event timeline follow). A tile is a label, a value and, if the app gives them, its change from a previous value in words, a note, a target and a trend. It adds a shared HTML foundation, one public component and one endpoint; each part is described where it belongs, under [Stat tiles](#stat-tiles) and the [HTTP API](#http-api). No chart is changed.
+
+- **`StatTilesHtml.Render(StatTilesSpec)`.** The core writes the tiles as an HTML fragment, not SVG, so they wrap, reflow, select and read as text. The records are `StatTile(Label, Value)`, with `Format`, `Unit`, `Previous`, `Better`, `ChangeAs`, `Since`, `ChangeText`, `Missing`, `Note`, `Trend`, `Target` and `Href`, and `StatTilesSpec(Tiles)`, with `Title`, `Description`, `TitleLevel`, `Columns`, `Density` and `Style`. Two enums are new, `Better` (`Neither`, `Higher`, `Lower`) and `ChangeAs` (`Difference`, `Percent`, `Both`), and one more, `TileDensity` (`Regular`, `Compact`).
+- **Change words.** A tile with a `Previous` writes an arrow, the size of the change and a word, `▼ 5 · better than last season`. A percentage of a previous value of 0 writes the difference instead, and a negative previous value takes its percentage of its size. A change word is coloured only where its colour reaches 4.5:1 against the tile, and is written in the text colour where it does not: in the Light preset Lumen's `Rising` and `Falling` do not reach 4.5:1 on white, so the arrow and the words carry the meaning there, and Dark shows them in colour.
+- **`<LumenStats Spec="…" />`.** The Blazor component writes the core's fragment and adds nothing interactive, so a prerender, a circuit and a static page give the same markup. A style set on the spec wins over one `<LumenBrand>` cascades.
+- **`POST /api/charts/stats/html`.** Takes a `StatTilesSpec` as JSON and answers `text/html`; a broken spec is a 400 titled `Invalid stat tiles`. Enums are read by name only when the host registers `JsonStringEnumConverter`, as the gallery does.
+- **Scoped, with no `id`.** A fragment carries its own `<style>` with every rule under `.lumen-stats.lumen-stats-regular` or `.lumen-stats.lumen-stats-compact`, writes its colours as `--lumen-*` custom properties on its root and has no `id` attribute, so several sets share a page. The one exception is a tile's trend sparkline, which carries the chart renderer's own style block, every rule scoped to `.lumen-svg`. `Columns` is written inline on the list, so host CSS cannot override it.
+- **Links and escaping.** An `Href` accepts only http, https, mailto and relative addresses, matched without regard to case or surrounding white space, and refuses `javascript:`, `data:` and `vbscript:`; it and every text are HTML-encoded on output.
+- **The gallery.** A new page, `/components` ("Beyond charts"), shows "Season at a glance" (six tiles) and "Round by round" (a compact strip of eight), in the Lumen, Harbour, page-CSS and Midnight brands, light and dark.
+
+The charts are untouched. All 411 of 0.47.2's baseline rows are identical to it in both finishes, and five rows are added in each, `tiles/regular-light`, `tiles/regular-dark`, `tiles/compact-strip`, `tiles/missing-and-link` and `tiles/fixed-columns`, 416 in all; they hash the HTML fragment. The unit suite goes from 772 to 795 with 23 tests named for 0.48.0, the HTTP script from 302 to 306, and the gallery's browser suite from 123 to 128. The WebAssembly host has no `/components` page and runs its 63 unchanged, with two checks of the new page skipped. The recipe check has one more race-results recipe block, "Season at a glance", 28 where there were 27, and the same 41 charts, since tiles are not charts.
+
+Limits. A tile set is read-only: no sorting, selection or tooltip. It holds 1 to 48 tiles, a label of 40 characters, a note of 60, `Since` and `ChangeText` of 40, a trend of 400 values, `Columns` of 1 to 6. The Light preset writes change words in the text colour. `Columns` cannot be overridden by host CSS, and the tile rules carry two classes, so a host's override needs the same two or more. A trend sparkline carries its own `.lumen-svg`-scoped style block. The visible change is written only for a tile with a value. Enums in the endpoint's JSON are names only with `JsonStringEnumConverter`.
 
 ## 0.47.2 additions
 
