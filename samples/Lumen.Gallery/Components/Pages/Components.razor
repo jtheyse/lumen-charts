@@ -9,10 +9,12 @@
         <a class="nav-item" href="/#network"><span>⌘</span> Network graphs <b>2</b></a>
         <a class="nav-item" href="/#integration"><span>⌁</span> Developer API</a>
         <a class="nav-item" href="sports"><span>∿</span> Sports &amp; performance <b>33</b></a>
-        <a class="nav-item active" href="components" aria-current="page"><span>▤</span> Beyond charts <b>2</b></a>
+        <a class="nav-item active" href="components" aria-current="page"><span>▤</span> Beyond charts <b>4</b></a>
         <div class="nav-label">ON THIS PAGE</div>
         <a class="purpose" href="components#season">Season at a glance<span>↓</span></a>
         <a class="purpose" href="components#rounds">Round by round<span>↓</span></a>
+        <a class="purpose" href="components#results">Results<span>↓</span></a>
+        <a class="purpose" href="components#log">Training log<span>↓</span></a>
         <div class="sidebar-bottom"><span class="live-dot"></span> Invented season<p>One rider, twelve rounds.</p><a href="/#integration">Start building →</a></div>
     </aside>
     <main>
@@ -31,6 +33,17 @@
         </section>
         <section id="rounds" class="sports-section">
             <div class="chart-card comp-card">@Branded(@<LumenStats Spec="DemoData.RoundStrip(Style)"/>)</div>
+        </section>
+        <section class="sports-intro">
+            <div class="eyebrow"><span></span> DATA TABLE</div>
+            <h1>Rows to read. <em>Columns to sort.</em></h1>
+            <p><code>LumenTable</code> writes a real HTML table: press a header to sort, page through long lists, and scroll sideways on a phone while the header row and the first column stay in view. Every arrow, bar and trend line is also written in words, and <code>ShowExport</code> adds a CSV of the rows.</p>
+        </section>
+        <section id="results" class="sports-section">
+            <div class="chart-card comp-card comp-table">@Branded(@<LumenTable Spec="DemoData.ResultsTable(Style)" ShowExport="true"/>)</div>
+        </section>
+        <section id="log" class="sports-section">
+            <div class="chart-card comp-card comp-table">@Branded(@<LumenTable Spec="DemoData.TrainingLog(Style)"/>)</div>
         </section>
         <footer><span class="brand">lumen.</span><span>Charts that help you see.</span><span>Invented data · Built with Blazor</span></footer>
     </main>

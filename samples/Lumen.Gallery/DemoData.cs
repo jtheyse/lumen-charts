@@ -461,4 +461,88 @@ public static class DemoData
             Style = style
         };
     }
+
+    private static readonly string[] Riders =
+    [
+        "Maren Holt", "Idris Vale", "Tamsin Rook", "Joaquim Brandt", "Odile Marsh", "Kwame Ellery", "Linnea Frost", "Bastian Quill",
+        "Saoirse Penn", "Yusuf Ashdown", "Petra Lindqvist", "Corin Wells", "Anneke Dray", "Rafferty Moon", "Isolde Barrow", "Desmond Okoye",
+        "Thea Marlowe", "Lucan Pryce", "Noor Hadley", "Emeric Stone", "Freya Kellner", "Osric Dane", "Bryony Sutcliffe", "Matteo Varga",
+        "Ingrid Foss", "Caleb Ironside", "Zadie Wren", "Hollis Crane", "Mirela Costin", "Tobias Greaves", "Sunniva Aalto", "Ezra Whitlock",
+        "Delphine Roux", "Arlo Pemberton", "Katya Norland", "Gideon Marsh", "Wilhelmina Bay", "Ravi Thorne", "Elodie Fenn", "Anders Vik"
+    ];
+
+    private static readonly string[] Clubs = ["Harbour Wheelers", "Ridge CC", "Northgate Velo", "Fenland RT", "Kestrel Cycling", "Moorside Road Club"];
+
+    /// <summary>"Results": forty invented riders, each with a place, a club, a time, the change on the previous race's place, points drawn as a bar and eight rounds of a season. Five names link to a fragment. A null <paramref name="style"/> leaves the style to the brand around the table.</summary>
+    public static Lumen.Charts.TableSpec ResultsTable(Lumen.Charts.ChartStyle? style)
+    {
+        var rows = Riders.Select((name, i) =>
+        {
+            var place = i + 1;
+            // Times drift upward with the place, with a time bonus here and there so the fastest rider is not always the winner.
+            var seconds = 5040 + i * 19 + (i * 7 % 5) * 14;
+            var before = Math.Max(1, place + (i * 5 % 7) - 3);
+            var points = 200 - place * 4;
+            double?[] season = Enumerable.Range(0, 8).Select(round => (double?)Math.Max(0, points + ((i + 3) * (round + 5) % 9) * 5 - 20)).ToArray();
+            return new Lumen.Charts.TableRow(
+            [
+                new() { Number = place },
+                new() { Text = name, Href = place is 1 or 2 or 3 or 10 or 20 ? "#rider-" + place : null },
+                new() { Text = Clubs[i * 3 % Clubs.Length] },
+                new() { Number = seconds },
+                new() { Number = place, Previous = before },
+                new() { Number = points },
+                new() { Trend = season }
+            ]);
+        }).ToArray();
+        return new(
+        [
+            new("Place") { Kind = Lumen.Charts.ColumnKind.Number },
+            new("Name") { RowHeader = true },
+            new("Club"),
+            new("Time") { Kind = Lumen.Charts.ColumnKind.Number, Format = Lumen.Charts.ValueFormat.Duration, Better = Lumen.Charts.Better.Lower },
+            new("Change") { Kind = Lumen.Charts.ColumnKind.Change, Better = Lumen.Charts.Better.Lower },
+            new("Points") { Kind = Lumen.Charts.ColumnKind.Bar },
+            new("Season") { Kind = Lumen.Charts.ColumnKind.Sparkline }
+        ], rows)
+        {
+            Caption = "Results",
+            Description = "Forty invented riders, with each one's change on the previous race's place and their points over eight rounds.",
+            SortBy = 0,
+            Style = style
+        };
+    }
+
+    /// <summary>"Training log": four hundred invented days ending 28 October 2026, 25 to a page, opening on the last page, with a footer of totals. A null <paramref name="style"/> leaves the style to the brand around the table.</summary>
+    public static Lumen.Charts.TableSpec TrainingLog(Lumen.Charts.ChartStyle? style)
+    {
+        string[] sessions = ["Easy ride", "Intervals", "Long ride", "Recovery spin", "Hill repeats", "Tempo", "Rest"];
+        var last = new DateOnly(2026, 10, 28);
+        var rows = Enumerable.Range(0, 400).Select(i =>
+        {
+            var session = sessions[i % 7];
+            var rest = session == "Rest";
+            var km = rest ? (double?)null : 20 + (i * 11 % 17) * 4 + (session == "Long ride" ? 60 : 0);
+            var seconds = km is { } k ? (double?)(k * 130 + (i % 5) * 60) : null;
+            var load = km is { } d ? (double?)Math.Round(d * (session is "Intervals" or "Hill repeats" ? 1.6 : session == "Recovery spin" ? 0.5 : 1)) : null;
+            return new Lumen.Charts.TableRow([new() { Date = last.AddDays(i - 399) }, new() { Text = session }, new() { Number = km }, new() { Number = seconds }, new() { Number = load }]);
+        }).ToArray();
+        double Total(int cell) => rows.Sum(r => r.Cells[cell].Number ?? 0);
+        return new(
+        [
+            new("Date") { Kind = Lumen.Charts.ColumnKind.Date, RowHeader = true },
+            new("Session"),
+            new("Distance") { Kind = Lumen.Charts.ColumnKind.Number, Unit = "km" },
+            new("Time") { Kind = Lumen.Charts.ColumnKind.Number, Format = Lumen.Charts.ValueFormat.Duration },
+            new("Load") { Kind = Lumen.Charts.ColumnKind.Bar }
+        ], rows)
+        {
+            Caption = "Training log",
+            Description = "Four hundred invented days of riding, 25 to a page, opening on the latest.",
+            PageSize = 25,
+            StartAtEnd = true,
+            Footer = [new() { Text = "Totals" }, new() { Text = "400 days" }, new() { Number = Total(2) }, new() { Number = Total(3) }, new() { Number = Total(4) }],
+            Style = style
+        };
+    }
 }

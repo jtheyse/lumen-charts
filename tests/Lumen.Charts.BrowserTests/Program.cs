@@ -2624,6 +2624,112 @@ if (await beyondLink.CountAsync() > 0)
         Check(Bare(both[2]) == Bare(both[3]), "Round by round differs between the first response and the circuit");
         await tab.CloseAsync();
     });
+    // 0.49.0: the data tables below the tiles. Results is 40 riders in a scrolling region; the Training log is 400 days, 25 to a page,
+    // opening on its last page.
+    await Test("Components page: both tables pass axe in Light, Dark and Midnight", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        Check(await tab.Locator(".lumen-datatable").CountAsync() == 2, $"the page shows {await tab.Locator(".lumen-datatable").CountAsync()} tables, not 2");
+        await SweepOf(tab);
+        await ClickUntil(tab, tab.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) }), "() => !!document.querySelector('.app.dark') && document.querySelector('#results .lumen-datatable').getAttribute('style').includes('#171E2E')");
+        await SweepOf(tab);
+        await ClickUntil(tab, tab.GetByRole(AriaRole.Button, new() { Name = "Midnight", Exact = true }), "() => ['#results', '#log'].every(id => document.querySelector(id + ' .lumen-datatable').getAttribute('style').includes('#0B0E14'))");
+        await SweepOf(tab);
+        await tab.CloseAsync();
+    });
+
+    await Test("Components page: clicking Time sorts the results fastest first, says so, and keeps focus on the header", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        const string seconds = @"() => [...document.querySelectorAll('#results tbody tr')].map(r => { const t = r.children[3].textContent.trim(), m = /^\d+(:\d\d)+/.exec(t);
+            if (!m) throw new Error('not a time: ' + t); return m[0].split(':').reduce((a, p) => a * 60 + Number(p), 0); })";
+        var header = tab.Locator("#results [data-lumen-sort='3']");
+        await ClickUntil(tab, header, "() => document.querySelector('#results th[aria-sort=\"ascending\"] [data-lumen-sort=\"3\"]') !== null");
+        await tab.WaitForFunctionAsync("() => document.activeElement?.matches('#results [data-lumen-sort=\"3\"]') === true");
+        Check((await tab.Locator("#results .lumen-status").TextContentAsync())!.Trim() == "Sorted by Time, fastest first", $"status: {await tab.Locator("#results .lumen-status").TextContentAsync()}");
+        var up = await tab.EvaluateAsync<double[]>(seconds);
+        Check(up.Length == 40 && up.Zip(up.Skip(1)).All(p => p.First <= p.Second), "the times are not fastest first");
+        var fastest = await tab.EvaluateAsync<string>("() => document.querySelector('#results tbody tr th').textContent.trim()");
+        await header.ClickAsync();
+        await tab.WaitForFunctionAsync("() => document.querySelector('#results th[aria-sort=\"descending\"] [data-lumen-sort=\"3\"]') !== null");
+        await tab.WaitForFunctionAsync("() => document.activeElement?.matches('#results [data-lumen-sort=\"3\"]') === true");
+        Check((await tab.Locator("#results .lumen-status").TextContentAsync())!.Trim() == "Sorted by Time, slowest first", "the second click did not say slowest first");
+        var down = await tab.EvaluateAsync<double[]>(seconds);
+        Check(down.Zip(down.Skip(1)).All(p => p.First >= p.Second) && down[0] == up[^1], "the times are not slowest first");
+        Check(await tab.EvaluateAsync<string>("() => document.querySelector('#results tbody tr th').textContent.trim()") != fastest, "the fastest rider is still first");
+        await tab.CloseAsync();
+    });
+
+    await Test("Components page: the log opens on its last page", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        var range = (await tab.Locator("#log .lumen-datatable-range").TextContentAsync())!.Trim();
+        Check(range == "Rows 376–400 of 400", $"the range reads {range}");
+        Check(await tab.Locator("#log tbody tr").CountAsync() == 25, "the last page does not hold 25 rows");
+        await tab.CloseAsync();
+    });
+
+    await Test("Components page: Tab to Previous on the log and Enter pages back, and Previous keeps focus", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        await ClickUntil(tab, tab.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) }), "() => !!document.querySelector('.app.dark')");
+        const string previous = "() => document.activeElement?.matches('#log [data-lumen-page][aria-label=\"Previous page\"]') === true";
+        var reached = false;
+        for (var i = 0; i < 250 && !reached; i++)
+        {
+            await tab.Keyboard.PressAsync("Tab");
+            reached = await tab.EvaluateAsync<bool>(previous);
+        }
+        Check(reached, "Tab never reached Previous page on the log");
+        await tab.Keyboard.PressAsync("Enter");
+        await tab.WaitForFunctionAsync("() => document.querySelector('#log .lumen-datatable-range')?.textContent.trim() === 'Rows 351–375 of 400'");
+        Check((await tab.Locator("#log .lumen-status").TextContentAsync())!.Trim() == "Rows 351–375 of 400", $"status: {await tab.Locator("#log .lumen-status").TextContentAsync()}");
+        await tab.WaitForFunctionAsync(previous);
+        await tab.CloseAsync();
+    });
+
+    await Test("Components page on a 360-pixel phone: the results scroll inside their region, the header and the rider stay in view and the page does not scroll sideways", async () =>
+    {
+        await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 360, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+        var tab = await ComponentsPage(phone);
+        var wide = await tab.EvaluateAsync<double[]>("() => { const r = document.querySelector('#results .lumen-datatable-scroll'); return [r.scrollWidth, r.clientWidth, r.scrollHeight, r.clientHeight]; }");
+        Check(wide[0] > wide[1], $"the results region is {wide[0]} wide in {wide[1]}: it does not scroll sideways");
+        Check(wide[2] > wide[3], $"the results region is {wide[2]} tall in {wide[3]}: it does not scroll up and down");
+        var stuck = await tab.EvaluateAsync<double[]>(@"async () => {
+            const region = document.querySelector('#results .lumen-datatable-scroll');
+            region.scrollLeft = 200; region.scrollTop = 300;
+            await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+            const box = region.getBoundingClientRect();
+            return [region.scrollLeft, region.scrollTop, document.querySelector('#results tbody tr th').getBoundingClientRect().left - box.left,
+                document.querySelector('#results thead th').getBoundingClientRect().top - box.top]; }");
+        Check(stuck[0] > 100 && stuck[1] > 100, $"the region scrolled to {stuck[0]}, {stuck[1]}");
+        Check(Math.Abs(stuck[2]) <= 1.01, $"the rider column is {stuck[2]} from the region's left");
+        Check(Math.Abs(stuck[3]) <= 1.01, $"the header row is {stuck[3]} from the region's top");
+        var fits = await tab.EvaluateAsync<double[]>(@"() => [document.documentElement.scrollWidth, document.documentElement.clientWidth,
+            ...['#results', '#log'].map(id => document.querySelector(id + ' .lumen-datatable-scroll').getBoundingClientRect().right)]");
+        Check(fits[0] <= fits[1], $"the page is {fits[0]} wide in a {fits[1]} window");
+        Check(fits[2] <= fits[1] && fits[3] <= fits[1], $"the regions end at {fits[2]} and {fits[3]} in a {fits[1]} window");
+        await tab.CloseAsync();
+    });
+
+    await Test("Components page: Export CSV downloads the results under the caption's name, header row first", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        var button = tab.Locator("#results").GetByRole(AriaRole.Button, new() { Name = "Export CSV" });
+        // The first clicks are lost while the circuit connects, so the click repeats until a download starts.
+        IDownload? download = null;
+        for (var attempt = 0; attempt < 30 && download is null; attempt++)
+        {
+            try { download = await tab.RunAndWaitForDownloadAsync(async () => await button.ClickAsync(), new() { Timeout = 1_500 }); } catch (TimeoutException) { }
+        }
+        Check(download is not null, "no download started");
+        Check(download!.SuggestedFilename == "results.csv", download.SuggestedFilename);
+        var csv = await File.ReadAllTextAsync((await download.PathAsync())!);
+        Check(csv.Split("\r\n")[0] == "Place,Name,Club,Time,Change,Points,Season", csv.Split("\r\n")[0]);
+        Check(csv.Split("\r\n").Count(l => l.Length > 0) == 41, "the file does not hold the header and 40 riders");
+        await tab.CloseAsync();
+    });
+
     await plain.CloseAsync();
 }
 else Console.WriteLine("SKIP Components page checks: this host has no Beyond charts page");

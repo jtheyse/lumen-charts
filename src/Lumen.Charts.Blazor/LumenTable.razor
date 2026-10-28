@@ -10,7 +10,7 @@
     /// <summary>The table to draw: its columns, rows, sort and paging; see <see cref="TableSpec"/>. A new instance returns the
     /// table to the spec's own sort and opening page; the same instance keeps the reader's sort and page. A style set on it wins over a cascaded one.</summary>
     [Parameter, EditorRequired] public TableSpec Spec { get; set; } = new([], []) { Caption = "Table" };
-    /// <summary>Shows an Export CSV button under the table. It saves <see cref="TableExport.Csv"/> of the spec, in the spec's own
+    /// <summary>Shows an Export CSV button under the table. It saves, in a file named for the caption (Results is results.csv), <see cref="TableExport.Csv"/> of the spec, in the spec's own
     /// row order and not the reader's current sort, as the <c>POST table/csv</c> endpoint writes it. False by default.</summary>
     [Parameter] public bool ShowExport { get; set; }
     /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style in <see cref="Spec"/> wins; without either, <see cref="ChartStyle.Light"/> is used.</summary>
@@ -89,13 +89,21 @@
         StateHasChanged();
     });
 
+    // The caption in lower case with its runs of other characters made one hyphen: "Training log" is training-log.csv.
+    private static string FileName(string caption)
+    {
+        var slug = System.Text.RegularExpressions.Regex.Replace(caption.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+        return (slug.Length == 0 ? "table" : slug) + ".csv";
+    }
+
     private async Task Export()
     {
         if (module is null) return;
         try
         {
-            await module.InvokeVoidAsync("download", TableExport.Csv(Spec), "table.csv", "text/csv");
-            status = "Exported table.csv";
+            var file = FileName(Spec.Caption);
+            await module.InvokeVoidAsync("download", TableExport.Csv(Spec), file, "text/csv");
+            status = "Exported " + file;
         }
         catch (JSException error) { status = $"Export failed: {error.Message}"; }
     }
