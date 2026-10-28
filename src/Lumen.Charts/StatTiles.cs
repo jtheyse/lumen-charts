@@ -75,21 +75,25 @@ public static class StatTilesHtml
         var name = spec.Title ?? spec.Description ?? "Statistics";
         sb.Append("<section class='lumen-stats lumen-stats-").Append(compact ? "compact" : "regular")
           .Append("' style='").Append(LumenHtml.RootStyle(style)).Append("' aria-label='").Append(LumenHtml.E(name)).Append("'>");
-        sb.Append("<style>").Append(Css(spec.Columns, compact)).Append("</style>");
+        sb.Append("<style>").Append(Css(compact)).Append("</style>");
         if (spec.Title is not null)
             sb.Append("<h").Append(spec.TitleLevel).Append(" class='lumen-stats-title'>").Append(LumenHtml.E(spec.Title)).Append("</h").Append(spec.TitleLevel).Append('>');
         if (spec.Description is not null) sb.Append("<p class='lumen-stats-desc'>").Append(LumenHtml.E(spec.Description)).Append("</p>");
-        sb.Append("<ul class='lumen-stats-grid' role='list'>");
+        // A fixed column count is written on the list itself, so tile sets of different columns or densities share a page without their rules meeting.
+        sb.Append("<ul class='lumen-stats-grid' role='list'");
+        if (spec.Columns is { } columns) sb.Append(" style='grid-template-columns:repeat(").Append(columns.ToString(CultureInfo.InvariantCulture)).Append(",minmax(0,1fr))'");
+        sb.Append('>');
         foreach (var tile in spec.Tiles) Tile(sb, tile, style);
         return sb.Append("</ul></section>").ToString();
     }
 
-    private static string Css(int? columns, bool compact)
+    private static string Css(bool compact)
     {
-        var grid = columns is { } n ? $"repeat({n},minmax(0,1fr))" : $"repeat(auto-fill,minmax({(compact ? 96 : 150)}px,1fr))";
+        var grid = $"repeat(auto-fill,minmax({(compact ? 96 : 150)}px,1fr))";
         var value = compact ? 20 : 26;
         var pad = compact ? 8 : 12;
-        const string r = ".lumen-stats";
+        // The density is part of the selector, so a compact set and a regular one on the same page each keep their own sizes.
+        var r = compact ? ".lumen-stats.lumen-stats-compact" : ".lumen-stats.lumen-stats-regular";
         return $"{r}{{display:block;box-sizing:border-box;background:var(--lumen-bg);color:var(--lumen-text);font-family:var(--lumen-font);font-size:14px;line-height:1.3}}"
             + $"{r} *{{box-sizing:border-box}}"
             + $"{r} p{{margin:0}}"
@@ -154,7 +158,8 @@ public static class StatTilesHtml
             }, includeLegend: false);
             var seen = trend.Where(v => v is not null).Select(v => v!.Value).ToArray();
             string F(double v) => LumenHtml.E(ChangeWords.Value(v, t.Format, t.Unit));
-            sb.Append("<div class='lumen-stat-trend' aria-hidden='true'>").Append(spark).Append("</div>");
+            // The drawing is hidden from readers, so none of its marks may take a Tab stop; the words below give its numbers.
+            sb.Append("<div class='lumen-stat-trend' aria-hidden='true'>").Append(spark.Replace(" tabindex='0'", "")).Append("</div>");
             sb.Append("<span class='lumen-sr'>").Append(seen.Length.ToString(CultureInfo.InvariantCulture)).Append(" values, lowest ")
               .Append(F(seen.Min())).Append(", highest ").Append(F(seen.Max())).Append(", last ").Append(F(seen[^1])).Append("</span>");
         }

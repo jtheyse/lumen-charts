@@ -11566,6 +11566,18 @@ Test("0.48.0: <LumenStats> takes a cascaded style when the spec sets none",()=>{
     Check(StatsMarkup480(spec,null)==StatTilesHtml.Render(spec with{Style=ChartStyle.Light}),"no style at all means Light");
 });
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
+Test("0.48.0: a tile's sparkline is hidden from readers and none of its marks takes a Tab stop",()=>{
+    var html=StatTilesHtml.Render(new([new("Races",12){Trend=[38,41,36,44]},new("Wins",3){Href="/wins",Trend=[1,2,3]}]));
+    Check(html.Contains("aria-hidden='true'")&&html.Contains("lumen-stat-trend"),"the sparkline is hidden from readers");
+    Check(!html.Contains("tabindex"),"a mark of the hidden sparkline takes a Tab stop");
+});
+Test("0.48.0: a compact set and a regular set on one page keep their own sizes, and a column count is written on its list",()=>{
+    var t=new StatTile("Races",12);
+    var regular=StatTilesHtml.Render(new([t])); var compact=StatTilesHtml.Render(new([t]){Density=TileDensity.Compact}); var three=StatTilesHtml.Render(new([t]){Columns=3});
+    Check(regular.Contains(".lumen-stats.lumen-stats-regular .lumen-stats-grid")&&!regular.Contains("lumen-stats-compact{")&&!regular.Contains(".lumen-stats.lumen-stats-compact"),"the regular rules are scoped to the regular root");
+    Check(compact.Contains(".lumen-stats.lumen-stats-compact .lumen-stats-grid")&&!compact.Contains(".lumen-stats.lumen-stats-regular"),"the compact rules are scoped to the compact root");
+    Check(three.Contains("<ul class='lumen-stats-grid' role='list' style='grid-template-columns:repeat(3,minmax(0,1fr))'>")&&three.Split("repeat(3,").Length==2,"the column count is written once, on the list");
+});
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();

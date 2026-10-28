@@ -2540,6 +2540,93 @@ if (await sportsLink.CountAsync() > 0)
 }
 else Console.WriteLine("SKIP Sports & performance checks: this host has no Sports & performance page");
 
+// 0.48.0: the Beyond charts page belongs to the gallery, so the suite finds it as a visitor does, by the link that names it, and a host
+// without one (the WebAssembly host) says SKIP. A page of its own starts in the light theme and the Lumen brand; the circuit is live once a
+// click on a button of the page has taken effect, so the checks click until it has.
+var beyondLink = page.GetByRole(AriaRole.Link, new() { Name = "Beyond charts" });
+if (await beyondLink.CountAsync() > 0)
+{
+    var componentsUrl = new Uri(new Uri(address.TrimEnd('/') + "/"), await beyondLink.First.GetAttributeAsync("href")).ToString();
+    async Task<IPage> ComponentsPage(IBrowserContext context)
+    {
+        var tab = await context.NewPageAsync();
+        tab.SetDefaultTimeout(15_000);
+        await tab.GotoAsync(componentsUrl, new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+        await tab.WaitForSelectorAsync("#season .lumen-stats");
+        return tab;
+    }
+    // Clicks the button until the page shows what the click does: the first clicks are lost while the circuit connects.
+    async Task ClickUntil(IPage tab, ILocator button, string condition)
+    {
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            if (await tab.EvaluateAsync<bool>(condition)) return;
+            await button.ClickAsync();
+            try { await tab.WaitForFunctionAsync(condition, null, new() { Timeout = 1_000 }); return; } catch (TimeoutException) { }
+        }
+        throw new Exception($"the click never took effect: {condition}");
+    }
+    var plain = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 } });
+
+    await Test("Components page: the tiles pass axe in Light, Dark and Midnight", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        Check(await tab.Locator(".lumen-stat").CountAsync() == 14, $"the page shows {await tab.Locator(".lumen-stat").CountAsync()} tiles, not 14");
+        await SweepOf(tab);
+        await ClickUntil(tab, tab.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) }), "() => !!document.querySelector('.app.dark') && document.querySelector('#season .lumen-stats').getAttribute('style').includes('#171E2E')");
+        await SweepOf(tab);
+        await ClickUntil(tab, tab.GetByRole(AriaRole.Button, new() { Name = "Midnight", Exact = true }), "() => document.querySelector('#season .lumen-stats').getAttribute('style').includes('#0B0E14') && document.querySelector('#rounds .lumen-stats').getAttribute('style').includes('#0B0E14')");
+        await SweepOf(tab);
+        await tab.CloseAsync();
+    });
+
+    await Test("Components page on a 375-pixel phone: the season grid shows two tiles a row and the page does not scroll sideways", async () =>
+    {
+        await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+        var tab = await ComponentsPage(phone);
+        var measured = await tab.EvaluateAsync<double[]>(@"() => { const tops = [...document.querySelectorAll('#season .lumen-stat')].map(t => t.getBoundingClientRect().top);
+            return [tops.length, tops[0], tops[1], tops[2], document.documentElement.scrollWidth, document.documentElement.clientWidth]; }");
+        Check(measured[0] == 6, $"{measured[0]} season tiles");
+        Check(Math.Abs(measured[1] - measured[2]) < 1 && measured[3] > measured[1] + 20, $"tile tops {measured[1]}, {measured[2]}, {measured[3]}: the first two share a row and the third is lower");
+        Check(measured[4] <= measured[5], $"the page is {measured[4]} wide in a {measured[5]} window");
+        await tab.CloseAsync();
+    });
+
+    await Test("Components page: Tab reaches the link tile and its focus ring is drawn", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        var reached = false;
+        for (var i = 0; i < 80 && !reached; i++)
+        {
+            await tab.Keyboard.PressAsync("Tab");
+            reached = await tab.EvaluateAsync<bool>("() => document.activeElement?.classList.contains('lumen-stat-link') === true");
+        }
+        Check(reached, "Tab never reached the link tile");
+        var ring = await tab.EvaluateAsync<string>("() => getComputedStyle(document.activeElement).outlineStyle");
+        Check(ring != "none", $"the focused link tile's outline-style is {ring}");
+        await tab.CloseAsync();
+    });
+
+    await Test("Components page: the prerendered tiles equal the interactive ones", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        // The circuit is live once the theme switch has worked; switching back leaves the page in the state its first response drew.
+        var toggle = tab.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) });
+        await ClickUntil(tab, toggle, "() => !!document.querySelector('.app.dark')");
+        await ClickUntil(tab, toggle, "() => !document.querySelector('.app.dark') && document.querySelector('#season .lumen-stats').getAttribute('style').includes('#FFFFFF')");
+        var both = await tab.EvaluateAsync<string[]>(@"async () => { const doc = new DOMParser().parseFromString(await (await fetch(location.href)).text(), 'text/html');
+            return ['#season', '#rounds'].flatMap(id => [doc.querySelector(id).outerHTML, document.querySelector(id).outerHTML]); }");
+        // Blazor's own markers for the component are comments, not tile markup.
+        string Bare(string html) => Regex.Replace(html, "<!--.*?-->", "");
+        Check(Bare(both[0]).Contains("Season at a glance") && Bare(both[2]).Contains("Round by round"), "the sections do not hold the tiles");
+        Check(Bare(both[0]) == Bare(both[1]), "Season at a glance differs between the first response and the circuit");
+        Check(Bare(both[2]) == Bare(both[3]), "Round by round differs between the first response and the circuit");
+        await tab.CloseAsync();
+    });
+    await plain.CloseAsync();
+}
+else Console.WriteLine("SKIP Components page checks: this host has no Beyond charts page");
+
 Console.WriteLine($"\n{passed} passed; {failures.Count} failed. ({address})");
 foreach (var failure in failures) Console.Error.WriteLine(failure);
 return failures.Count == 0 ? 0 : 1;

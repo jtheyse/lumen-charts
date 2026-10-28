@@ -428,4 +428,37 @@ public static class DemoData
         Nodes=[new("sources","Sources"),new("ingest","Ingestion"),new("validate","Validation"),new("transform","Transform"),new("charts","Charts"),new("api","Chart API"),new("reports","Reports")],
         Edges=[new("sources","ingest"),new("ingest","validate"),new("validate","transform"),new("transform","charts"),new("transform","api"),new("charts","reports"),new("api","reports"),new("ingest","reports","audit trail")]
     };
+
+    /// <summary>"Season at a glance": six invented tiles, each showing a different part of <c>StatTile</c>. A null <paramref name="style"/> leaves the style to the brand around the tiles.</summary>
+    public static Lumen.Charts.StatTilesSpec SeasonTiles(Lumen.Charts.ChartStyle? style) => new(
+    [
+        new("Races", 12) { Previous = 9, Better = Lumen.Charts.Better.Higher, Since = "last season", Note = "Field size each round", Trend = [38, 41, 36, 44, 40, 47, 43, 45, 49, 46, 52, 50] },
+        new("Best finish", 3) { Note = "place", Previous = 5, Better = Lumen.Charts.Better.Lower, Since = "last season" },
+        new("Total time", 15120) { Format = Lumen.Charts.ValueFormat.Duration, Previous = 15840, Better = Lumen.Charts.Better.Lower, Since = "last season" },
+        new("Podiums", 2) { Target = 4 },
+        new("Points", 148) { Previous = 131, Better = Lumen.Charts.Better.Higher, ChangeAs = Lumen.Charts.ChangeAs.Both, Since = "last season" },
+        new("Next race", null) { Missing = "No race yet", Href = "#next" }
+    ])
+    {
+        Title = "Season at a glance",
+        Description = "Six invented numbers for one rider's season, each with the change from last season written in words.",
+        Style = style
+    };
+
+    /// <summary>"Round by round": a compact strip of eight invented rounds, each a place and its change on the round before. A null <paramref name="style"/> leaves the style to the brand around the tiles.</summary>
+    public static Lumen.Charts.StatTilesSpec RoundStrip(Lumen.Charts.ChartStyle? style)
+    {
+        int[] places = [7, 5, 6, 4, 4, 3, 5, 3];
+        return new(places.Select((place, i) => new Lumen.Charts.StatTile("Round " + (i + 1), place)
+        {
+            Previous = i == 0 ? null : places[i - 1],
+            Better = Lumen.Charts.Better.Lower
+        }).ToArray())
+        {
+            Title = "Round by round",
+            Description = "Each round's place, with its change on the round before.",
+            Density = Lumen.Charts.TileDensity.Compact,
+            Style = style
+        };
+    }
 }
