@@ -11310,6 +11310,55 @@ Test("0.47.2: a Y2 title on a fixed-pitch column chart stands 60 right of its pl
     Check(refusal is null,refusal??"");
     Check(TitleX472(spec,"Rate")==226,$"Y2 title at {TitleX472(spec,"Rate")}");
 });
+// 0.48.0
+string ChangeText480(double v,double p,Better b,ChangeAs c=ChangeAs.Difference,string? since="last season",ValueFormat f=ValueFormat.Number,string? unit=null,ChartStyle? s=null)=>ChangeWords.Of(v,p,b,c,since,f,unit,s??ChartStyle.Light).Text;
+Test("0.48.0: change words follow the value's direction and the judgement Better gives it",()=>{
+    Check(ChangeText480(12,10,Better.Higher)=="▲ 2 · better than last season",ChangeText480(12,10,Better.Higher));
+    Check(ChangeText480(72,114,Better.Lower,f:ValueFormat.Duration)=="▼ 0:42 · better than last season",ChangeText480(72,114,Better.Lower,f:ValueFormat.Duration));
+    Check(ChangeText480(112,100,Better.Neither,ChangeAs.Both,"last week")=="▲ 12 (12%) · up from last week",ChangeText480(112,100,Better.Neither,ChangeAs.Both,"last week"));
+    Check(ChangeText480(10,10,Better.Higher)=="= same as last season");
+    Check(ChangeText480(10,10,Better.Higher,since:null)=="= same");
+    Check(ChangeText480(13,10,Better.Lower,since:"last race")=="▲ 3 · worse than last race",ChangeText480(13,10,Better.Lower,since:"last race"));
+    Check(ChangeText480(5,10,Better.Neither,since:"last week")=="▼ 5 · down from last week",ChangeText480(5,10,Better.Neither,since:"last week"));
+    Check(ChangeText480(12,10,Better.Higher,since:null)=="▲ 2 · better",ChangeText480(12,10,Better.Higher,since:null));
+    Check(ChangeText480(12,10,Better.Higher,since:"  ")=="▲ 2 · better");
+});
+Test("0.48.0: a percentage is of the previous value's size, one decimal under 10, and falls back to the difference from zero",()=>{
+    Check(ChangeText480(108,100,Better.Neither,ChangeAs.Percent,null).Contains("8%")&&!ChangeText480(108,100,Better.Neither,ChangeAs.Percent,null).Contains("8.0"),ChangeText480(108,100,Better.Neither,ChangeAs.Percent,null));
+    Check(ChangeText480(112,100,Better.Neither,ChangeAs.Percent,null)=="▲ 12% · up");
+    Check(ChangeText480(103.3,100,Better.Neither,ChangeAs.Percent,null)=="▲ 3.3% · up",ChangeText480(103.3,100,Better.Neither,ChangeAs.Percent,null));
+    Check(ChangeText480(-90,-100,Better.Neither,ChangeAs.Percent,null)=="▲ 10% · up",ChangeText480(-90,-100,Better.Neither,ChangeAs.Percent,null));
+    Check(ChangeText480(5,0,Better.Neither,ChangeAs.Percent,null)=="▲ 5 · up",ChangeText480(5,0,Better.Neither,ChangeAs.Percent,null));
+    Check(ChangeText480(5,0,Better.Neither,ChangeAs.Both,null)=="▲ 5 · up",ChangeText480(5,0,Better.Neither,ChangeAs.Both,null));
+});
+Test("0.48.0: colours: Rising for better, Falling for worse, muted for up, down and same, each only where it clears 4.5:1",()=>{
+    var light=ChartStyle.Light;
+    string Expect(string c)=>Lumen.Charts.Contrast.Ratio(c,light.Background)>=4.5?c:light.Text;
+    Check(ChangeWords.Of(12,10,Better.Higher,ChangeAs.Difference,null,ValueFormat.Number,null,light).Colour==Expect(light.Rising),"better colour");
+    Check(ChangeWords.Of(8,10,Better.Higher,ChangeAs.Difference,null,ValueFormat.Number,null,light).Colour==Expect(light.Falling),"worse colour");
+    Check(ChangeWords.Of(12,10,Better.Neither,ChangeAs.Difference,null,ValueFormat.Number,null,light).Colour==Expect(light.Muted),"up colour");
+    Check(ChangeWords.Of(8,10,Better.Neither,ChangeAs.Difference,null,ValueFormat.Number,null,light).Colour==Expect(light.Muted),"down colour");
+    Check(ChangeWords.Of(10,10,Better.Higher,ChangeAs.Difference,null,ValueFormat.Number,null,light).Colour==Expect(light.Muted),"same colour");
+    var dark=ChartStyle.Dark;
+    Check(ChangeWords.Of(12,10,Better.Higher,ChangeAs.Difference,null,ValueFormat.Number,null,dark).Colour==(Lumen.Charts.Contrast.Ratio(dark.Rising,dark.Background)>=4.5?dark.Rising:dark.Text),"dark better colour");
+    var white=new ChartStyle{Rising="#FFFFFF",Background="#FFFFFF"};
+    var (text,colour)=ChangeWords.Of(12,10,Better.Higher,ChangeAs.Difference,null,ValueFormat.Number,null,white);
+    Check(colour==white.Text,colour);
+    Check(text=="▲ 2 · better",text);
+});
+Test("0.48.0: links: only http, https, mailto and relative addresses",()=>{
+    foreach(var ok in new[]{"https://x.test/a","HTTP://x.test","mailto:a@x.test","/riders/7","riders/7","?page=2","#top"})
+        Check(LumenHtml.SafeLink(ok),"should pass: "+ok);
+    foreach(var bad in new[]{"javascript:alert(1)","JavaScript:alert(1)","  javascript:x","data:text/html,x","vbscript:x","ftp://x"})
+        Check(!LumenHtml.SafeLink(bad),"should refuse: "+bad);
+});
+Test("0.48.0: the root style carries the style's colours and font as custom properties",()=>{
+    var s=LumenHtml.RootStyle(ChartStyle.Dark);
+    Check(s.Contains("--lumen-bg:#171E2E")&&s.Contains("--lumen-text:#E8ECF6"),s);
+    foreach(var p in new[]{"--lumen-muted:","--lumen-grid:","--lumen-rising:","--lumen-falling:","--lumen-accent:","--lumen-font:"})Check(s.Contains(p),p);
+    Check(LumenHtml.E(null)==""&&LumenHtml.E("<b>\"")=="&lt;b&gt;&quot;","escape");
+    Check(LumenHtml.HiddenRule.Contains(".lumen-sr")&&LumenHtml.HiddenRule.Contains("clip:rect(0 0 0 0)"),"hidden rule");
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
