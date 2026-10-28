@@ -25,7 +25,7 @@ Design, 28 October 2026. The owner approved shipping this before 0.48.0 ("Approv
 - `stroke='none'`, so `.lumen-datum:focus`'s inherited stroke rings the hairline as it does today, not the hit area;
 - invisible at rest, on hover (the brightness filter has nothing to darken) and on focus.
 
-The value label `0` above the hairline already has `pointer-events='none'`, so a tap on it reaches the hit area. The bar's name, its `<title>` and its keyboard behaviour are unchanged. The same applies on a column track (`BarTrack`), where the hit area also stands on the baseline.
+The value label `0` above the hairline did not have `pointer-events='none'`, so a tap on it would have been taken by the label. 0.47.2 gives a hairline zero's `0` label on plain columns `pointer-events='none'`, so a tap on it reaches the hit area. The label of a zero on a column track stands above the track, clear of the hit area, and needs nothing. The bar's name, its `<title>` and its keyboard behaviour are unchanged. The same applies on a column track (`BarTrack`), where the hit area also stands on the baseline.
 
 Why 24: the WCAG 2.2 minimum target size (2.5.8) is 24 CSS pixels. A counts chart with a `CellWidth` is drawn one unit to one pixel. The width stays the bar's own (72% of the pitch) so that neighbouring days' targets never overlap. At pitch 30 a target is about 21.6 by 24. Narrow pitches keep narrow targets, which WCAG's spacing exception covers while the targets do not overlap.
 
@@ -35,7 +35,7 @@ Why 24: the WCAG 2.2 minimum target size (2.5.8) is 24 CSS pixels. A counts char
 
 **Today:** the main Y title on the right (`YTitle`, `ChartSvg.cs` 1375–1379) and a pane's Y2 title (`ChartSvg.cs` 804) stand at `s.Width − 16`. Where a column chart with `CellWidth` is narrower than the 320 floor, the plot ends at `left + days × CellWidth`, the tick labels stand at the plot's right + 12, and the title stays at the drawing's edge, apart from them.
 
-**Change:** on a column chart with `CellWidth`, both titles stand at the **plot's right edge + 60**. That chart's right-hand margin beside a right-hand axis is 76, so where the floor does not apply `right + 60` equals `s.Width − 16` and nothing moves; under the floor, the title follows its ticks. Every other chart keeps `s.Width − 16` exactly, so renderers whose right margin is not 76 cannot move. The builder adds a baseline row for each title (the main Y on the right, and Y2 if a fixed-pitch column chart can have a secondary axis; if validation refuses that pairing, one row is enough). No existing row is expected to move. If one does, the builder reports it rather than accepting it.
+**Change:** on a column chart with `CellWidth`, both titles stand at the **plot's right edge + 60**. That chart's right-hand margin beside a right-hand axis is 76, so where the floor does not apply `right + 60` equals `s.Width − 16` and nothing moves; under the floor, the title follows its ticks. Every other chart keeps `s.Width − 16` exactly, so renderers whose right margin is not 76 cannot move. The builder adds a baseline row for each title (the main Y on the right, and Y2 if a fixed-pitch column chart can have a secondary axis; if validation refuses that pairing, one row is enough). On a column chart the Y2 title is the spec-level `Y2Label`, since panes are refused there. No existing row is expected to move. If one does, the builder reports it rather than accepting it.
 
 ### 2.4 One margin rule
 
