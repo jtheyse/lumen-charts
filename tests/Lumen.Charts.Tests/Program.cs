@@ -11247,12 +11247,39 @@ Test("0.47.2: with every value 0 or below, the baseline is at the plot's top and
     var baseline=Attr(hair,"y")+1;
     Check(Attr(hit,"height")==24,"24 high");
     Check(Math.Abs(Attr(hit,"y")-baseline)<1e-6,$"top {Attr(hit,"y")} is the baseline {baseline}");
-    Check(Attr(hit,"y")+Attr(hit,"height")<double.Parse(((string)doc.Root!.Attribute("viewBox")!).Split(' ')[3],CultureInfo.InvariantCulture),"inside the drawing");
+    var plotBottom=PaneSpan(PaneClips(doc)[0]).Bottom;
+    Check(Attr(hit,"y")+Attr(hit,"height")<=plotBottom+1e-6,$"the area ends at {Attr(hit,"y")+Attr(hit,"height")}, inside the plot, which ends at {plotBottom}");
 });
 Test("0.47.2: a zero on a bar track also gets the hit area",()=>{
     var track=new ChartSpec{Kind=ChartKind.Column,Title="Zero on a track",YMax=100,BarTrack=true,Series=[new("Score",[new(0,82,"A"),new(1,0,"B"),new(2,64,"C")]){MarkZero=true}]};
     var rects=Marks(track)[1].Elements(ns+"rect").ToList();
     Check(rects.Count==2&&Attr(rects[1],"height")==24&&(string?)rects[1].Attribute("stroke")=="none","hit area after the hairline");
+});
+// A zero column on a continuous X gets the same hit area, and stays inside its own pane (0.47.2).
+Test("0.47.2: a zero column on a continuous X holds its hairline and then a hit area of the hairline's x and width, and its 0 label lets a tap through",()=>{
+    var spec=Spec() with{Series=[new("Counts",[new(0,0),new(10,5),new(20,0),new(30,8)]){Kind=ChartKind.Column,MarkZero=true,ValueLabels=true}]};
+    var doc=Svg(spec);
+    var zeros=Marks(spec).Where(g=>g.Elements(ns+"rect").Count()==2).ToList();
+    Check(zeros.Count==2,$"{zeros.Count} marks with a hit area");
+    foreach(var zero in zeros)
+    {
+        var rects=zero.Elements(ns+"rect").ToList();
+        var (hair,hit)=(rects[0],rects[1]);
+        Check(Attr(hair,"height")==1,"the hairline is 1 high");
+        Check((string?)hit.Attribute("fill")=="transparent"&&(string?)hit.Attribute("stroke")=="none","fill transparent, stroke none");
+        Check(Attr(hit,"x")==Attr(hair,"x")&&Attr(hit,"width")==Attr(hair,"width"),"the hairline's x and width");
+        Check(Attr(hit,"height")==24,$"height {Attr(hit,"height")}");
+    }
+    var labels=doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("aria-hidden")=="true"&&t.Value=="0").ToList();
+    Check(labels.Count==2&&labels.All(t=>(string?)t.Attribute("pointer-events")=="none"),"each 0 passes pointers through");
+});
+Test("0.47.2: a zero column in the lower of two panes keeps its hit area inside that pane",()=>{
+    var spec=Stacked() with{Panes=[new(){Label="Low",Weight=.5}],Series=[new("Top",[new(0,100),new(5,200),new(10,150)]),new("Low",[new(0,0),new(5,20),new(10,0)]){Pane=1,Kind=ChartKind.Column,MarkZero=true}]};
+    var doc=Svg(spec);
+    var spans=PaneClips(doc).Select(PaneSpan).ToArray();
+    var hits=Marks(spec).Where(g=>g.Elements(ns+"rect").Count()==2).Select(g=>g.Elements(ns+"rect").Last()).ToList();
+    Check(hits.Count==2,$"{hits.Count} hit areas");
+    foreach(var hit in hits) Check(Attr(hit,"y")>=spans[1].Top-1e-6&&Attr(hit,"y")+Attr(hit,"height")<=spans[1].Bottom+1e-6,$"{Attr(hit,"y")} to {Attr(hit,"y")+Attr(hit,"height")} outside {spans[1]}");
 });
 // A right-hand axis title stands beside its ticks under the 320 floor on a fixed-pitch column chart, and at Width - 16 elsewhere (0.47.2).
 ChartSpec RightTitle472(int days)=>new ChartSpec{Title="Counts",Kind=ChartKind.Column,CellWidth=30,YAxisSide=AxisSide.Right,YLabel="Count",Series=[new("S",Enumerable.Range(0,days).Select(i=>new ChartPoint(i,i+1,$"D{i}")).ToArray())]};
@@ -11280,7 +11307,7 @@ Test("0.47.2: a Y2 title on a fixed-pitch column chart stands 60 right of its pl
     var spec=RightTitle472(3) with{YAxisSide=AxisSide.Left,Series=[new("S",[new(0,1,"A"),new(1,2,"B"),new(2,3,"C")]),new("T",[new(0,100,"A"),new(1,200,"B"),new(2,300,"C")]){Secondary=true}],Y2Label="Rate"};
     string? refusal=null;
     try{ChartSvg.Render(spec);}catch(ArgumentException e){refusal=e.Message;}
-    if(refusal is not null){Console.WriteLine("  Y2 refused: "+refusal);return;}
+    Check(refusal is null,refusal??"");
     Check(TitleX472(spec,"Rate")==226,$"Y2 title at {TitleX472(spec,"Rate")}");
 });
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.

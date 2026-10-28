@@ -1390,10 +1390,10 @@ public static partial class ChartSvg
         w.Text(from, y, axis.Format(axis.Min), "text-anchor='start' class='lumen-muted'");
         w.Text(to, y, axis.Format(axis.Max), "text-anchor='end' class='lumen-muted'");
     }
-    /// <summary>A main Y axis title, read upwards on the left or downwards on the right.</summary>
     /// <summary>Where a right-hand axis title stands: 16 in from the drawing's edge, or, on a column chart with a cell width, 60 right of its
     /// plot, beside its ticks where the 320 floor leaves room over (0.47.2).</summary>
     private static double RightTitleX(ChartSpec s, double right) => s.Kind == ChartKind.Column && s.CellWidth is not null ? right + 60 : s.Width - 16;
+    /// <summary>A main Y axis title, read upwards on the left or downwards on the right.</summary>
     private static void YTitle(SvgWriter w, ChartSpec s, string label, double top, double bottom, double right)
     {
         var x = s.YAxisSide == AxisSide.Right ? RightTitleX(s, right) : 20;
@@ -3203,12 +3203,12 @@ public static partial class ChartSvg
     /// right or no labels up the left; 30 on the right, or 76 beside a right-hand axis, or as wide as its end labels need, their room capped
     /// by <paramref name="endingWidth"/>. <see cref="Framed"/> passes the spec's Width; <see cref="DrawnWidth"/> passes <see cref="MaxWidth"/>,
     /// since a chart with a cell width ignores its Width, and the cap never bites (a label and its note are at most 24 + 24 characters) (0.47.0).</summary>
-    private static (double Left, double Right) Margins(ChartSpec s, double endingWidth)
+    private static (double Left, double Right) Margins(ChartSpec s, int endingWidth)
     {
         var flipped = s.YAxisSide == AxisSide.Right;
         var secondary = s.Series.Any(series => series.Secondary);
         var left = flipped || Unlabelled(s) ? 30d : 76d;
-        return (left, secondary || flipped ? 76d : Math.Max(30d, Ending(s with { Width = (int)endingWidth }, left)));
+        return (left, secondary || flipped ? 76d : Math.Max(30d, Ending(endingWidth == s.Width ? s : s with { Width = endingWidth }, left)));
     }
 
     /// <summary>The width a chart is drawn at: a heatmap or, from 0.47.0, a column chart with a <see cref="ChartSpec.CellWidth"/> as wide as
