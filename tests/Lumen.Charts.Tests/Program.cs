@@ -11976,6 +11976,100 @@ Test("0.49.0: a bar column's footer is its number as text, with no bar",()=>{
     Check(foot.Value=="5"&&!Els(foot,"span").Any(),"footer: "+foot);
     Check(Els(Els(XElement.Parse(TableHtml.Render(spec)),"tbody").Single(),"span").Any(s=>s.Attribute("class")?.Value=="lumen-datatable-bar"),"body bars remain");
 });
+// 0.49.0: the component
+string OperateTable(TableSpec spec,Func<LumenTable,Task> act,ChartStyle? cascaded=null,bool export=false)
+{
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try {
+        LumenTable? table=null;
+        RenderFragment content=b=>{b.OpenComponent<LumenTable>(0);b.AddAttribute(1,"Spec",spec);if(export)b.AddAttribute(2,"ShowExport",true);b.AddComponentReferenceCapture(3,c=>table=(LumenTable)c);b.CloseComponent();};
+        return renderer.Dispatcher.InvokeAsync(async()=>{
+            var root=await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",cascaded},{"ChildContent",content}}));
+            await act(table!);
+            await root.QuiescenceTask;
+            return root.ToHtmlString();
+        }).GetAwaiter().GetResult();
+    } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
+}
+string TableFragment(string html)=>html.Substring(html.IndexOf("<div class='lumen-datatable "),html.LastIndexOf("</div>")-html.IndexOf("<div class='lumen-datatable "));
+string TableHeads(string html)=>string.Join(",",Els(Els(XElement.Parse(TableFragment(html)),"thead").Single(),"th").Select(h=>h.Attribute("aria-sort")?.Value??"-"));
+Test("0.49.0: LumenTable prerenders the renderer's fragment for the default state, with controls, and the cascading style applies",()=>{
+    var spec=Riders();
+    RenderFragment Table(TableSpec s,bool export=false)=>b=>{b.OpenComponent<LumenTable>(0);b.AddAttribute(1,"Spec",s);if(export)b.AddAttribute(2,"ShowExport",true);b.CloseComponent();};
+    var html=Prerender(Table(spec));
+    Check(html.Contains(TableHtml.Render(spec with{Style=ChartStyle.Light},null,null,false,true)),"the fragment with controls is not in the markup");
+    Check(html.Contains("class=\"lumen-datatable-host\"")&&html.Contains("data-lumen-sort='0'"),"host wrapper and sort buttons");
+    Check(html.Contains("<span class=\"lumen-status\" role=\"status\"></span>")&&!html.Contains("Export CSV"),"status or export");
+    var dark=ChartStyle.Light with{Background="#101010",Text="#F5F5F5"};
+    var styled=Prerender(Table(spec),dark);
+    Check(styled.Contains(TableHtml.Render(spec with{Style=dark},null,null,false,true))&&styled!=html,"the cascaded style does not apply");
+    Check(Prerender(Table(spec with{Style=ChartStyle.Light}),dark)==html,"the spec's own style does not win");
+    Check(Prerender(Table(spec,true)).Contains(">Export CSV</button>"),"export button");
+});
+Test("0.49.0: LumenTable sorts in the column's natural direction, reverses, and says so in the exact words",()=>{
+    var spec=Riders();
+    var fast=OperateTable(spec,async table=>await table.Sort(2));
+    Check(TableHeads(fast)=="-,-,ascending,-,-"&&BodyHeads(TableFragment(fast)).SequenceEqual(["2","1"]),"fastest first: "+TableHeads(fast)+string.Join("/",BodyHeads(TableFragment(fast))));
+    Check(fast.Contains(">Sorted by Time, fastest first</span>"),"status fastest");
+    var slow=OperateTable(spec,async table=>{await table.Sort(2);await table.Sort(2);});
+    Check(TableHeads(slow)=="-,-,descending,-,-"&&slow.Contains(">Sorted by Time, slowest first</span>"),"slowest");
+    var place=OperateTable(spec,async table=>await table.Sort(0));
+    Check(place.Contains(">Sorted by Place, lowest first</span>")&&TableHeads(place)=="ascending,-,-,-,-","place");
+    var text=OperateTable(spec,async table=>await table.Sort(1));
+    Check(text.Contains(">Sorted by Name, A to Z</span>")&&TableHeads(text)=="-,ascending,-,-,-","text");
+    var back=OperateTable(spec,async table=>{await table.Sort(1);await table.Sort(1);});
+    Check(back.Contains(">Sorted by Name, Z to A</span>"),"Z to A");
+    TableSpec One(TableColumn column,params TableCell[] cells)=>spec with{Columns=[column],Rows=cells.Select(c=>TRow(c)).ToArray()};
+    var highest=OperateTable(One(new TableColumn("Score"){Kind=ColumnKind.Number,Better=Better.Higher},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>await table.Sort(0));
+    Check(highest.Contains(">Sorted by Score, highest first</span>")&&TableHeads(highest)=="descending","highest first");
+    var lowest=OperateTable(One(new TableColumn("Score"){Kind=ColumnKind.Number,Better=Better.Higher},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>{await table.Sort(0);await table.Sort(0);});
+    Check(lowest.Contains(">Sorted by Score, lowest first</span>"),"lowest first");
+    var best=OperateTable(One(new TableColumn("Score"){Kind=ColumnKind.Number,Better=Better.Lower},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>await table.Sort(0));
+    Check(best.Contains(">Sorted by Score, best first</span>"),"best first");
+    var worst=OperateTable(One(new TableColumn("Score"){Kind=ColumnKind.Number,Better=Better.Lower},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>{await table.Sort(0);await table.Sort(0);});
+    Check(worst.Contains(">Sorted by Score, worst first</span>"),"worst first");
+    var days=One(new TableColumn("Day"){Kind=ColumnKind.Date},TableCell.Of((DateOnly?)new DateOnly(2026,1,2)),TableCell.Of((DateOnly?)new DateOnly(2026,1,1)));
+    Check(OperateTable(days,async table=>await table.Sort(0)).Contains(">Sorted by Day, oldest first</span>")&&OperateTable(days,async table=>{await table.Sort(0);await table.Sort(0);}).Contains(">Sorted by Day, newest first</span>"),"dates");
+    var plain=OperateTable(One(new TableColumn("N"){Kind=ColumnKind.Number},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>await table.Sort(0));
+    Check(plain.Contains(">Sorted by N, lowest first</span>"),"plain number");
+    var dead=OperateTable(spec,async table=>{await table.Sort(4);await table.Sort(9);await table.Sort(-1);});
+    Check(TableHeads(dead)=="-,-,-,-,-"&&dead.Contains("<span class=\"lumen-status\" role=\"status\"></span>"),"a sparkline or unknown column is ignored: "+TableHeads(dead));
+});
+Test("0.49.0: LumenTable pages, ignores a dead page, returns a sort to the page the table opens on, and StartAtEnd opens on rows 376-400",()=>{
+    var log=new TableSpec([new TableColumn("N"){Kind=ColumnKind.Number}],Enumerable.Range(0,400).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()){Caption="Log",PageSize=25,StartAtEnd=true};
+    var first=OperateTable(log,_=>Task.CompletedTask);
+    Check(first.Contains("Rows 376–400 of 400")&&first.Contains("<span class=\"lumen-status\" role=\"status\"></span>"),"opens on the last page, status not set by the first render");
+    var paged=OperateTable(log,async table=>await table.Page(1));
+    Check(paged.Contains("role=\"status\">Rows 26&#x2013;50 of 400</span>"),"page 1: "+paged.Substring(paged.LastIndexOf("lumen-status")));
+    var ignored=OperateTable(log,async table=>{await table.Page(15);await table.Page(16);await table.Page(-1);});
+    Check(ignored.Contains("Rows 376–400 of 400")&&ignored.Contains("<span class=\"lumen-status\" role=\"status\"></span>"),"the current page and a page outside change nothing");
+    var sorted=OperateTable(log,async table=>{await table.Page(2);await table.Sort(0);});
+    Check(sorted.Contains("Rows 376–400 of 400")&&sorted.Contains("role=\"status\">Sorted by N, "),"a sort returns StartAtEnd to its last page");
+    var front=OperateTable(log with{StartAtEnd=false},async table=>{await table.Page(3);await table.Sort(0);});
+    Check(front.Contains("Rows 1–25 of 400"),"a sort returns to the first page");
+    var empty=OperateTable(new TableSpec([new TableColumn("N"){Kind=ColumnKind.Number}],[]){Caption="Empty",PageSize=25},_=>Task.CompletedTask);
+    Check(empty.Contains("No rows")&&!empty.Contains("Rows 1–0"),"empty");
+});
+Test("0.49.0: LumenTable starts again from a new Spec instance",()=>{
+    var spec=Riders();
+    var other=Riders() with{Caption="Round 2 results"};
+    var html=OperateTable(spec,async table=>{
+        await table.Sort(1);
+        await table.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",other}}));
+    });
+    Check(html.Contains("Round 2 results")&&TableHeads(html)=="-,-,-,-,-","a new spec resets the sort: "+TableHeads(html));
+    var same=OperateTable(spec,async table=>{
+        await table.Sort(1);
+        await table.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",spec}}));
+    });
+    Check(TableHeads(same)=="-,ascending,-,-,-","the same spec keeps the reader's sort");
+});
+Test("0.49.0: LumenTable and TableRequest are documented",()=>{
+    var blazor=File.ReadAllText(Path.ChangeExtension(typeof(LumenTable).Assembly.Location,".xml"));
+    Check(blazor.Contains("T:Lumen.Charts.Blazor.LumenTable")&&blazor.Contains("M:Lumen.Charts.Blazor.LumenTable.Sort(System.Int32)")&&blazor.Contains("M:Lumen.Charts.Blazor.LumenTable.Page(System.Int32)"),"component docs");
+    Check(File.ReadAllText(Path.ChangeExtension(typeof(TableHtml).Assembly.Location,".xml")).Contains("T:Lumen.Charts.TableRequest"),"request docs");
+});
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();

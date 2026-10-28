@@ -10,7 +10,7 @@ public static class ChartEndpoints
     /// <summary>
     /// Maps the chart API under <paramref name="prefix"/>: <c>GET types</c> lists the chart kinds; <c>POST svg</c> and
     /// <c>POST csv</c> take a <see cref="ChartSpec"/> as JSON and answer with its SVG or its data; <c>POST graph/svg</c>,
-    /// <c>graph/layout</c> and <c>graph/routes</c> take a <see cref="GraphSpec"/>; <c>POST planner/svg</c> takes a <see cref="PlannerRequest"/>. A spec that breaks a rule is answered with
+    /// <c>graph/layout</c> and <c>graph/routes</c> take a <see cref="GraphSpec"/>; <c>POST planner/svg</c> takes a <see cref="PlannerRequest"/>; <c>POST stats/html</c> takes a <see cref="StatTilesSpec"/>; <c>POST table/html</c> takes a <see cref="TableRequest"/> and <c>POST table/csv</c> a <see cref="TableSpec"/>. A spec that breaks a rule is answered with
     /// 400 and the rule's message. Returns the group, so the host can add authorization or rate limiting to it.
     /// </summary>
     public static RouteGroupBuilder MapLumenCharts(this IEndpointRouteBuilder endpoints, string prefix = "/api/charts")
@@ -24,6 +24,8 @@ public static class ChartEndpoints
         group.MapPost("/graph/routes",(GraphSpec spec)=>Json(()=>GraphEngine.Routes(spec)));
         group.MapPost("/planner/svg",(PlannerRequest request)=>Render(()=>PlannerSvg.Render(request.Spec,request.View??PlannerView.WholePeriod,request.Layout),"image/svg+xml"));
         group.MapPost("/stats/html",(StatTilesSpec spec)=>Render(()=>StatTilesHtml.Render(spec),"text/html","Invalid stat tiles"));
+        group.MapPost("/table/html",(TableRequest request)=>Render(()=>TableHtml.Render(request.Spec,request.Page),"text/html","Invalid table"));
+        group.MapPost("/table/csv",(TableSpec spec)=>Render(()=>TableExport.Csv(spec),"text/csv","Invalid table"));
         return group;
     }
     private static IResult Json<T>(Func<T> value)

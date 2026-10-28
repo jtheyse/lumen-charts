@@ -1,0 +1,122 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+<div class="lumen-datatable-host" @ref="root">@((MarkupString)html)</div>
+@if (ShowExport)
+{
+    <button type="button" @onclick="Export">Export CSV</button>
+}
+<span class="lumen-status" role="status">@status</span>
+@code {
+    /// <summary>The table to draw: its columns, rows, sort and paging; see <see cref="TableSpec"/>. A new instance returns the
+    /// table to the spec's own sort and opening page; the same instance keeps the reader's sort and page. A style set on it wins over a cascaded one.</summary>
+    [Parameter, EditorRequired] public TableSpec Spec { get; set; } = new([], []) { Caption = "Table" };
+    /// <summary>Shows an Export CSV button under the table. It saves <see cref="TableExport.Csv"/> of the spec, in the spec's own
+    /// row order and not the reader's current sort, as the <c>POST table/csv</c> endpoint writes it. False by default.</summary>
+    [Parameter] public bool ShowExport { get; set; }
+    /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style in <see cref="Spec"/> wins; without either, <see cref="ChartStyle.Light"/> is used.</summary>
+    [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }
+
+    private TableSpec? source;
+    private int? sortBy;
+    private bool descending;
+    private int page;
+    private string html = "", status = "";
+    // The control the reader pressed, which takes focus back after the fragment is rewritten; null on the first render.
+    private string? refocus;
+    private ElementReference root;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<LumenTable>? reference;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(Spec, source))
+        {
+            source = Spec;
+            sortBy = Spec.SortBy;
+            descending = Spec.SortDescending;
+            page = TableView.Of(Spec, sortBy, descending).DefaultPage;
+            status = "";
+        }
+        Draw();
+    }
+
+    private void Draw() =>
+        html = TableHtml.Render(Spec with { Style = Spec.Style ?? CascadingStyle ?? ChartStyle.Light }, page, sortBy, descending, true);
+
+    private static string Words(TableColumn column, bool descending) => column.Kind switch
+    {
+        ColumnKind.Text => descending ? "Z to A" : "A to Z",
+        ColumnKind.Date => descending ? "newest first" : "oldest first",
+        _ when column.Better == Better.Higher => descending ? "highest first" : "lowest first",
+        _ when column.Better == Better.Lower && column.Format == ValueFormat.Duration => descending ? "slowest first" : "fastest first",
+        _ when column.Better == Better.Lower => descending ? "worst first" : "best first",
+        _ => descending ? "highest first" : "lowest first",
+    };
+
+    /// <summary>Called by the component's script when the reader presses a column header. A column that is not the sort column
+    /// sorts in its natural direction (largest first when a higher value is better), and the sort column reverses. The table
+    /// returns to the page it opens on and the status line names the order. A column that is out of range, not sortable or a
+    /// sparkline does nothing.</summary>
+    [JSInvokable] public Task Sort(int column) => InvokeAsync(() =>
+    {
+        if (column < 0 || column >= Spec.Columns.Count) return;
+        var def = Spec.Columns[column];
+        if (!def.Sortable || def.Kind == ColumnKind.Sparkline) return;
+        descending = sortBy == column ? !descending : TableView.NaturalDescending(def);
+        sortBy = column;
+        page = TableView.Of(Spec, sortBy, descending).DefaultPage;
+        status = $"Sorted by {def.Header}, {Words(def, descending)}";
+        refocus = $"[data-lumen-sort=\"{column}\"]";
+        Draw();
+        StateHasChanged();
+    });
+
+    /// <summary>Called by the component's script when the reader presses a paging button. A page that is the current page or
+    /// lies outside the table does nothing. The status line gives the rows now shown.</summary>
+    [JSInvokable] public Task Page(int page) => InvokeAsync(() =>
+    {
+        var view = TableView.Of(Spec, sortBy, descending);
+        if (page == this.page || page < 0 || page >= view.Pages) return;
+        this.page = page;
+        var (first, last) = view.RowsOn(page);
+        status = view.Order.Count == 0 ? "No rows"
+            : $"Rows {(first + 1).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)}–{(last + 1).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} of {view.Order.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)}";
+        refocus = $"[data-lumen-page=\"{page}\"]";
+        Draw();
+        StateHasChanged();
+    });
+
+    private async Task Export()
+    {
+        if (module is null) return;
+        try
+        {
+            await module.InvokeVoidAsync("download", TableExport.Csv(Spec), "table.csv", "text/csv");
+            status = "Exported table.csv";
+        }
+        catch (JSException error) { status = $"Export failed: {error.Message}"; }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Lumen.Charts.Blazor/lumen.js");
+            reference = DotNetObjectReference.Create(this);
+            await module.InvokeVoidAsync("attachTable", root, reference);
+        }
+        if (module is not null && refocus is { } selector)
+        {
+            refocus = null;
+            await module.InvokeVoidAsync("tableFocus", root, selector);
+        }
+    }
+
+    /// <summary>Removes the table's click handler from the page.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        try { if (module is not null) { await module.InvokeVoidAsync("detach", root); await module.DisposeAsync(); } }
+        catch (JSDisconnectedException) { }
+        finally { reference?.Dispose(); }
+    }
+}

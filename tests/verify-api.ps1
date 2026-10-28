@@ -613,4 +613,23 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/stats/html" -Method Post -ContentType 
 Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid stat tiles')) "Forty-nine stat tiles are refused with 400 titled Invalid stat tiles ($($r.StatusCode))"
 $r=Invoke-WebRequest "$BaseUrl/api/charts/stats/html" -Method Post -ContentType application/json -Body '{"tiles":[{"label":"Races","value":12,"href":"JavaScript:alert(1)"}]}' -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid stat tiles')) "A javascript: link on a stat tile is refused with 400 titled Invalid stat tiles ($($r.StatusCode))"
+$table='{"caption":"Results","columns":[{"header":"Name"},{"header":"Time","kind":"Number","format":"Duration","better":"Lower"}],"rows":[{"cells":[{"text":"Al"},{"number":60}]},{"cells":[{"text":"Bo"},{"number":65}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/table/html" -Method Post -ContentType application/json -Body ('{"spec":'+$table+'}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Headers['Content-Type'] -like 'text/html*' -and $r.Content.Contains('lumen-datatable')) 'A table answers 200 as text/html with the lumen-datatable root'
+$rows=(1..30|ForEach-Object{'{"cells":[{"text":"R'+$_+'"}]}'}) -join ','
+$paged='{"caption":"Log","pageSize":10,"columns":[{"header":"Name"}],"rows":['+$rows+']}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/table/html" -Method Post -ContentType application/json -Body ('{"spec":'+$paged+',"page":1}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('Rows 11') -and $r.Content.Contains('of 30') -and $r.Content.Contains('>R11<') -and -not $r.Content.Contains('>R1<')) 'The page parameter of a table selects rows 11 to 20'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/table/html" -Method Post -ContentType application/json -Body ('{"spec":'+$paged+',"page":9}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid table')) "A page past the end of a table is refused with 400 titled Invalid table ($($r.StatusCode))"
+$r=Invoke-WebRequest "$BaseUrl/api/charts/table/csv" -Method Post -ContentType application/json -Body $table -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Headers['Content-Type'] -like 'text/csv*' -and $r.Content.StartsWith('Name,Time')) 'A table answers /table/csv as text/csv with its header line'
+$wide='{"caption":"Wide","columns":['+((1..33|ForEach-Object{'{"header":"C'+$_+'"}'}) -join ',')+'],"rows":[]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/table/html" -Method Post -ContentType application/json -Body ('{"spec":'+$wide+'}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid table')) "Thirty-three table columns are refused with 400 titled Invalid table ($($r.StatusCode))"
+$r=Invoke-WebRequest "$BaseUrl/api/charts/table/csv" -Method Post -ContentType application/json -Body $wide -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid table')) "Thirty-three columns are refused by /table/csv too ($($r.StatusCode))"
+$bad='{"caption":"Links","columns":[{"header":"Name"}],"rows":[{"cells":[{"text":"Al","href":"javascript:alert(1)"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/table/html" -Method Post -ContentType application/json -Body ('{"spec":'+$bad+'}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid table')) "A javascript: link in a table is refused with 400 titled Invalid table ($($r.StatusCode))"
 Write-Output "$checks HTTP checks passed."

@@ -415,6 +415,33 @@ export function attachGraph(root, dotnet) {
     handlers.set(root, { bindings });
 }
 
+/// Wires the sort and paging buttons of a table drawn by <LumenTable>: one delegated click listener on its root. A button with
+/// aria-disabled="true" does nothing. Before the circuit starts the script has not run, so the buttons do nothing.
+export function attachTable(root, dotnet) {
+    const click = event => {
+        const target = event.target instanceof Element ? event.target : null;
+        const sort = target?.closest('[data-lumen-sort]');
+        const page = target?.closest('[data-lumen-page]');
+        const button = sort && root.contains(sort) ? sort : page && root.contains(page) ? page : null;
+        if (!button || button.getAttribute('aria-disabled') === 'true') return;
+        if (button === sort) dotnet.invokeMethodAsync('Sort', Number(sort.dataset.lumenSort));
+        else dotnet.invokeMethodAsync('Page', Number(page.dataset.lumenPage));
+    };
+    root.addEventListener('click', click);
+    handlers.set(root, { bindings: [['click', click]] });
+}
+
+/// Puts focus back on the control the reader pressed after a table's markup was rewritten. A page button that no longer moves
+/// (Last, on the last page) hands focus to the range text, which is made focusable for the purpose.
+export function tableFocus(root, selector) {
+    const target = root.querySelector(selector);
+    if (target && target.getAttribute('aria-disabled') !== 'true') { target.focus({ preventScroll: true }); return; }
+    const range = root.querySelector('.lumen-datatable-range');
+    if (!range) return;
+    range.tabIndex = -1;
+    range.focus({ preventScroll: true });
+}
+
 /// Makes a planner drawn by <LumenPlanner> one tab stop. Its cells (the days of the year or of a month, the weekends of a
 /// phone's year, the events of a day) share a roving tab stop: the arrow keys, Home and End move it, Enter or Space opens a
 /// cell (a month from the year, a day from a month) or selects an event, and Escape goes back out. A click opens or selects
