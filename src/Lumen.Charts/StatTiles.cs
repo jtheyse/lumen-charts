@@ -156,20 +156,9 @@ public static class StatTilesHtml
 
         if (t.Trend is { } trend)
         {
-            var points = trend.Select((v, i) => new ChartPoint(i, v)).ToArray();
-            var spark = ChartSvg.Render(new ChartSpec
-            {
-                Kind = ChartKind.Line, Sparkline = true, Width = 120, Height = 28, Style = style, Title = t.Label,
-                Series = [new ChartSeries(t.Label, points)]
-            }, includeLegend: false, includeTitles: false);
-            // The drawing is aria-hidden, so its root title, which includeTitles leaves, is no use to a reader and would show as a tooltip.
-            spark = spark.Replace($"<title>{LumenHtml.E(t.Label)}</title>", "");
-            var seen = trend.Where(v => v is not null).Select(v => v!.Value).ToArray();
-            string F(double v) => LumenHtml.E(ChangeWords.Value(v, t.Format, t.Unit));
-            // The drawing is hidden from readers, so none of its marks may take a Tab stop; the words below give its numbers.
-            sb.Append("<div class='lumen-stat-trend' aria-hidden='true'>").Append(spark.Replace(" tabindex='0'", "")).Append("</div>");
-            sb.Append("<span class='lumen-sr'>").Append(seen.Length.ToString(CultureInfo.InvariantCulture)).Append(" values, lowest ")
-              .Append(F(seen.Min())).Append(", highest ").Append(F(seen.Max())).Append(", last ").Append(F(seen[^1])).Append("</span>");
+            var (svg, summary) = LumenHtml.Sparkline(trend, t.Label, t.Format, t.Unit, style, 120, 28);
+            sb.Append("<div class='lumen-stat-trend' aria-hidden='true'>").Append(svg).Append("</div>");
+            sb.Append("<span class='lumen-sr'>").Append(summary).Append("</span>");
         }
 
         if (t.Href is not null) sb.Append("</a>");

@@ -414,3 +414,8 @@ tiles/regular-dark 1C6F32EF2BE4A58D
 tiles/compact-strip E059197B72E078EE
 tiles/missing-and-link 021648D8AB1E37AA
 tiles/fixed-columns 9D205360BBFD8BBE
+table/results-light 1094C61B351707D6
+table/results-dark DC82EDC2C7C5D75A
+table/log-last-page 54C8FECC7BA77783
+table/compact-sorted 9A2A3419B83EDE90
+table/negative-bars DC8D52122C2EEAFC

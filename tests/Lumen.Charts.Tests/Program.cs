@@ -11793,6 +11793,164 @@ Test("0.49.0: a change cell with no number but a previous value sorts last",()=>
     Check(TableView.Of(change,0,false).Order.SequenceEqual([1,2,0]),"ascending");
     Check(TableView.Of(change,0,true).Order.SequenceEqual([2,1,0]),"descending");
 });
+// 0.49.0: the HTML renderer
+TableSpec Riders()=>new([new TableColumn("Place"){Kind=ColumnKind.Number},new TableColumn("Name"),new TableColumn("Time"){Kind=ColumnKind.Number,Format=ValueFormat.Duration,Better=Better.Lower},
+    new TableColumn("Change"){Kind=ColumnKind.Change,Better=Better.Lower,Format=ValueFormat.Duration},new TableColumn("Season"){Kind=ColumnKind.Sparkline}],
+    [TRow(new TableCell{Number=2},new TableCell{Text="Bo"},new TableCell{Number=65},new TableCell{Number=65,Previous=63},new TableCell{Trend=[1,2,3]}),
+     TRow(new TableCell{Number=1},new TableCell{Text="Al"},new TableCell{Number=null},new TableCell{Number=60,Previous=61},new TableCell{Trend=[3,2,1]})]){Caption="Round 1 results",Description="Invented riders"};
+IEnumerable<XElement> Els(XElement e,string name)=>e.Descendants().Where(x=>x.Name.LocalName==name);
+string[] BodyHeads(string html)=>Els(Els(XElement.Parse(html),"tbody").Single(),"th").Select(x=>x.Value).ToArray();
+Test("0.49.0: the table's structure: caption, scopes, aria-sort on the sorted column only, the row header, the footer and the missing words",()=>{
+    var html=TableHtml.Render(Riders() with{SortBy=2,Footer=[TableCell.Of("Total"),new TableCell(),new TableCell{Text="3"},new TableCell(),new TableCell()]});
+    var root=XElement.Parse(html);
+    Check(root.Attribute("class")!.Value=="lumen-datatable lumen-datatable-regular","root class");
+    Check(Els(root,"p").Single().Attribute("class")!.Value=="lumen-datatable-desc","description");
+    var region=Els(root,"div").Single(d=>d.Attribute("role")?.Value=="region");
+    Check(region.Attribute("tabindex")!.Value=="0"&&region.Attribute("aria-label")!.Value=="Round 1 results"&&region.Attribute("class")!.Value=="lumen-datatable-scroll","region");
+    Check(Els(root,"caption").Single().Value=="Round 1 results"&&Els(root,"table").Single().Elements().First().Name.LocalName=="caption","caption first");
+    var heads=Els(Els(root,"thead").Single(),"th").ToArray();
+    Check(heads.Length==5&&heads.All(h=>h.Attribute("scope")!.Value=="col"),"column scopes");
+    Check(heads.Select(h=>h.Attribute("aria-sort")?.Value).SequenceEqual([null,null,"ascending",null,null]),"aria-sort only on the sorted column");
+    Check(heads[0].Attribute("class")!.Value=="lumen-datatable-right"&&heads[1].Attribute("class")!.Value=="lumen-datatable-left","auto alignment");
+    var rows=Els(Els(root,"tbody").Single(),"tr").ToArray();
+    Check(rows.Length==2&&rows[0].Elements().First().Name.LocalName=="th"&&rows[0].Elements().First().Attribute("scope")!.Value=="row"&&rows[0].Elements().Skip(1).All(c=>c.Name.LocalName=="td"),"row header");
+    Check(rows[0].Elements().First().Value=="2"&&rows[1].Elements().First().Value=="1","sorted by time, the missing time last");
+    Check(rows[1].Elements().ElementAt(2).Value=="— none","the missing words: "+rows[1].Elements().ElementAt(2).Value);
+    Check(html.Contains("<span aria-hidden='true'>—</span><span class='lumen-sr'> none</span>"),"missing markup");
+    var foot=Els(root,"tfoot").Single();
+    Check(Els(foot,"tr").Single().Elements().First().Name.LocalName=="th"&&foot.Value.Contains("Total")&&foot.Value.Contains("3"),"footer");
+    Check(!html.Contains(" id=")&&!html.Contains(" id'"),"no id attribute");
+    Check(html.Contains(LumenHtml.HiddenRule(".lumen-datatable")),"hidden rule");
+    Check(html.Contains("thead th{position:sticky;top:0")&&html.Contains("{position:sticky;left:0")&&html.Contains("max-height:var(--lumen-datatable-height,none)")&&html.Contains("2px solid var(--lumen-accent)"),"sticky and focus css");
+});
+Test("0.49.0: every css rule is under .lumen-datatable, and the compact root has its own class",()=>{
+    foreach(var density in new[]{Density.Regular,Density.Compact})
+    {
+        var html=TableHtml.Render(Riders() with{Density=density});
+        var css=html.Substring(html.IndexOf("<style>")+7,html.IndexOf("</style>")-html.IndexOf("<style>")-7);
+        foreach(var rule in css.Split('}',StringSplitOptions.RemoveEmptyEntries)) Check(rule.TrimStart().StartsWith(".lumen-datatable"),"unscoped rule: "+rule);
+        Check(!html.Contains("lumen-table"),"the View data wrapper's class is not used");
+    }
+    Check(TableHtml.Render(Riders() with{Density=Density.Compact}).Contains("class='lumen-datatable lumen-datatable-compact'"),"compact class");
+});
+Test("0.49.0: the controls markup adds sort buttons and page buttons to the static markup, and nothing else",()=>{
+    var spec=Many(60,10);
+    var plain=TableHtml.Render(spec,2);
+    var live=TableHtml.Render(spec,2,null,false,true);
+    Check(!plain.Contains("<button")&&!plain.Contains("data-lumen"),"static markup has no buttons");
+    Check(live.Contains("<th scope='col' class='lumen-datatable-right'><button type='button' class='lumen-datatable-sort' data-lumen-sort='0'>N</button></th>"),"sort button");
+    var stripped=Regex.Replace(Regex.Replace(live,"<div class='lumen-datatable-pages'>.*?<span","<div class='lumen-datatable-pages'><span"),"</span><button.*?</div>","</span></div>");
+    stripped=Regex.Replace(stripped,"<th scope='col' class='lumen-datatable-right'><button[^>]*>N</button></th>","<th scope='col' class='lumen-datatable-right'>N</th>");
+    Check(stripped==plain,"removing the buttons gives the static markup");
+    Check(live.Contains("<div class='lumen-datatable-pages'><button type='button' data-lumen-page='0'>First</button><button type='button' data-lumen-page='1'>Previous</button><span class='lumen-datatable-range'>Rows 21–30 of 60</span><button type='button' data-lumen-page='3'>Next</button><button type='button' data-lumen-page='5'>Last</button></div>"),"paging line");
+    var first=TableHtml.Render(spec,0,null,false,true);
+    Check(first.Contains("data-lumen-page='0' disabled>First")&&first.Contains("disabled>Previous")&&!first.Contains("disabled>Next"),"first page: first and previous disabled");
+    var last=TableHtml.Render(spec,5,null,false,true);
+    Check(last.Contains("disabled>Next")&&last.Contains("disabled>Last")&&!last.Contains("disabled>First"),"last page");
+    var sorted=TableHtml.Render(Riders(),null,2,true,true);
+    Check(sorted.Contains("data-lumen-sort='1'")&&!sorted.Contains("data-lumen-sort='4'")&&sorted.Contains("aria-sort='descending'"),"a sparkline header is plain text; the chosen sort shows");
+    var unsortable=Riders() with{Columns=[Riders().Columns[0],Riders().Columns[1] with{Sortable=false},..Riders().Columns.Skip(2)]};
+    Check(!TableHtml.Render(unsortable,null,null,false,true).Contains("data-lumen-sort='1'"),"an unsortable header is plain text");
+});
+Test("0.49.0: a bar column [-5, 10] puts its zero line at a third of the track and writes -5 and 10 as text",()=>{
+    var spec=TSpec([new TableColumn("Points"){Kind=ColumnKind.Bar}],[TRow(new TableCell{Number=-5}),TRow(new TableCell{Number=10})]);
+    var html=TableHtml.Render(spec);
+    var root=XElement.Parse(html);
+    Check(html.Contains("class='lumen-datatable-zero' style='left:33.33%'"),"zero line at one third");
+    var values=Els(root,"span").Where(s=>s.Attribute("class")?.Value=="lumen-datatable-value").Select(s=>s.Value).ToArray();
+    Check(values.SequenceEqual(["-5","10"]),"signed words: "+string.Join(" ",values));
+    Check(html.Contains("class='lumen-datatable-fill' style='left:0%;width:33.33%'"),"the negative bar runs from the left end to the zero line");
+    Check(html.Contains("class='lumen-datatable-fill' style='left:33.33%;width:66.67%'"),"the positive bar runs from the zero line");
+    Check(Els(root,"span").Where(s=>s.Attribute("class")?.Value=="lumen-datatable-bar").All(s=>s.Attribute("aria-hidden")?.Value=="true"),"bars are hidden from readers");
+    var positive=TableHtml.Render(TSpec([new TableColumn("P"){Kind=ColumnKind.Bar,BarMax=20}],[TRow(new TableCell{Number=5}),TRow(new TableCell{Number=30})]));
+    Check(!positive.Contains("lumen-datatable-zero'")&&positive.Contains("left:0%;width:25%")&&positive.Contains("left:0%;width:100%"),"BarMax is the scale end and a larger value is clamped");
+});
+Test("0.49.0: a bar's scale is the whole column, not the page",()=>{
+    var spec=Many(30,10) with{Columns=[new TableColumn("N"){Kind=ColumnKind.Bar}]};
+    Check(TableHtml.Render(spec,0).Contains("left:0%;width:3.45%")&&TableHtml.Render(spec,2).Contains("left:0%;width:100%"),"scale 0 to 29 on every page");
+});
+Test("0.49.0: a change cell writes the arrow and size, hides the verdict, and takes the Readable colour",()=>{
+    var style=ChartStyle.Light;
+    var spec=TSpec([new TableColumn("Pts"){Kind=ColumnKind.Change,Better=Better.Higher}],[TRow(new TableCell{Number=12,Previous=10}),TRow(new TableCell{Number=5,Previous=5}),TRow(new TableCell{Number=4,Previous=9}),TRow(new TableCell{Number=4})]);
+    var html=TableHtml.Render(spec);
+    var want=ChangeWords.Of(12,10,Better.Higher,ChangeAs.Difference,null,ValueFormat.Number,null,style).Colour;
+    Check(html.Contains($"<span class='lumen-datatable-change' style='color:{want}'>▲ 2<span class='lumen-sr'> &#183; better</span></span>"),"better rise");
+    Check(html.Contains(">▼ 5<span class='lumen-sr'> &#183; worse</span>"),"worse fall");
+    Check(html.Contains(">= same</span>"),"same is written whole");
+    Check(Lumen.Charts.Contrast.Ratio(want,style.Background)>=4.5,"readable");
+    var dark=TableHtml.Render(spec with{Style=ChartStyle.Dark});
+    var darkWant=ChangeWords.Of(12,10,Better.Higher,ChangeAs.Difference,null,ValueFormat.Number,null,ChartStyle.Dark).Colour;
+    Check(dark.Contains($"style='color:{darkWant}'>▲ 2"),"dark colour");
+    Check(html.EndsWith("<span aria-hidden='true'>—</span><span class='lumen-sr'> none</span></th></tr></tbody></table></div></div>"),"a change without a previous value is missing");
+});
+Test("0.49.0: a sparkline cell is 96 by 24 with no title and no tab stop, hidden, and followed by its summary words",()=>{
+    var spec=TSpec([new TableColumn("Season"){Kind=ColumnKind.Sparkline,Format=ValueFormat.Number}],[TRow(new TableCell{Trend=[3,null,9,6]})]);
+    var html=TableHtml.Render(spec);
+    var svg=Els(XElement.Parse(html),"svg").First();
+    var size=string.Join(" ",svg.Attributes().Where(a=>a.Name.LocalName is "width" or "height" or "viewBox").Select(a=>a.Name.LocalName+"="+a.Value));
+    Check(size.Contains("width=96")&&size.Contains("height=24")||size.Contains("viewBox=0 0 96 24"),"96 by 24: "+size);
+    Check(!Els(svg,"title").Any(),"no title");
+    Check(svg.DescendantsAndSelf().All(e=>e.Attribute("tabindex")==null),"no tab stop");
+    Check(html.Contains("<span class='lumen-datatable-trend' aria-hidden='true'><svg")&&html.Contains("</svg></span><span class='lumen-sr'>3 values, lowest 3, highest 9, last 6</span>"),"hidden drawing then the summary");
+});
+Test("0.49.0: the shared sparkline helper writes the summary and strips the title and tab stops",()=>{
+    var (svg,summary)=LumenHtml.Sparkline([1,2,null,4],"Rides",ValueFormat.Number," km",ChartStyle.Light,120,28);
+    Check(summary=="3 values, lowest 1 km, highest 4 km, last 4 km"&&!svg.Contains("<title>Rides</title>")&&!svg.Contains("tabindex='0'"),summary);
+});
+Test("0.49.0: the paging text reads Rows 376–400 of 400 from the default page with StartAtEnd",()=>{
+    var spec=Many(400,25) with{StartAtEnd=true};
+    var html=TableHtml.Render(spec);
+    Check(html.Contains("<span class='lumen-datatable-range'>Rows 376–400 of 400</span>"),"default page");
+    Check(TableHtml.Render(spec,0).Contains("Rows 1–25 of 400")&&BodyHeads(html).Length==25&&BodyHeads(html)[0]=="375","page 0 and 25 rows");
+    Check(TableHtml.Render(Many(4000,50),79).Contains("Rows 3,951–4,000 of 4,000"),"thousands");
+    Check(!TableHtml.Render(Many(5,null)).Contains("<div class='lumen-datatable-pages'"),"no paging line without a PageSize");
+    Reject(()=>TableHtml.Render(spec,16));
+    Reject(()=>TableHtml.Render(spec,-1));
+});
+Test("0.49.0: a page shows the sorted rows, not a slice of the spec's own order",()=>{
+    // 30 rows whose numbers run 29..0 in the spec; sorted ascending, page 1 must hold 10..19.
+    var spec=TSpec([new TableColumn("N"){Kind=ColumnKind.Number}],Enumerable.Range(0,30).Select(i=>TRow(TableCell.Of((double?)(29-i)))).ToArray()) with{PageSize=10,SortBy=0};
+    Check(BodyHeads(TableHtml.Render(spec,1)).SequenceEqual(Enumerable.Range(10,10).Select(i=>i.ToString())),"page 1 holds the sorted rows 11 to 20: "+string.Join(",",BodyHeads(TableHtml.Render(spec,1))));
+    Check(BodyHeads(TableHtml.Render(spec,2)).SequenceEqual(Enumerable.Range(20,10).Select(i=>i.ToString())),"page 2");
+    var down=spec with{SortDescending=true};
+    Check(BodyHeads(TableHtml.Render(down,0))[0]=="29"&&BodyHeads(TableHtml.Render(down,1))[0]=="19","descending pages");
+    var scrambled=TSpec([new TableColumn("N"){Kind=ColumnKind.Number}],new[]{7,3,25,12,0,19,28,5,14,22,1,9,16,27,2,11,24,8,20,4,13,26,6,17,10,23,15,29,18,21}.Select(i=>TRow(TableCell.Of((double?)i))).ToArray()) with{PageSize=10,SortBy=0};
+    Check(BodyHeads(TableHtml.Render(scrambled,1)).SequenceEqual(Enumerable.Range(10,10).Select(i=>i.ToString())),"scrambled data, page 1");
+    Check(BodyHeads(TableHtml.Render(scrambled,1,0,true,false))[0]=="19","an explicit sort overrides the spec's");
+    Check(BodyHeads(TableHtml.Render(scrambled with{SortBy=null},1)).SequenceEqual(["1","9","16","27","2","11","24","8","20","4"]),"with no sort the spec's order is kept");
+});
+Test("0.49.0: an empty table writes No rows in place of a range, and an unpaged one writes no paging line",()=>{
+    var empty=Many(0,25);
+    var html=TableHtml.Render(empty);
+    Check(html.Contains("<span class='lumen-datatable-range'>No rows</span>")&&!html.Contains("Rows 1–0")&&!html.Contains("of 0"),"no rows text");
+    var live=TableHtml.Render(empty with{StartAtEnd=true},null,null,false,true);
+    Check(live.Contains("No rows")&&live.Contains("data-lumen-page='0' disabled>First")&&live.Contains("disabled>Previous")&&live.Contains("disabled>Last")&&live.Contains("disabled>Next"),"all four buttons disabled");
+    var unpaged=TableHtml.Render(Many(0,null));
+    Check(!unpaged.Contains("<div class='lumen-datatable-pages'")&&!unpaged.Contains("No rows")&&XElement.Parse(unpaged)!=null,"an unpaged empty table is a header only");
+});
+Test("0.49.0: dates, links, notes and numbers are written in their format",()=>{
+    var spec=TSpec([new TableColumn("Day"){Kind=ColumnKind.Date},new TableColumn("When"){Kind=ColumnKind.Date,DateFormat="yyyy-MM-dd"},new TableColumn("Time"){Kind=ColumnKind.Number,Format=ValueFormat.Duration},new TableColumn("Km"){Kind=ColumnKind.Number,Unit=" km"}],
+        [TRow(new TableCell{Date=new DateOnly(2026,3,4),Href="/rides/1",Note="Wet"},new TableCell{Date=new DateOnly(2026,3,4)},new TableCell{Number=65},new TableCell{Number=12.5,Href="mailto:a@b.test"}),TRow(new TableCell(),new TableCell(),new TableCell{Href="/x"},new TableCell())]);
+    var html=TableHtml.Render(spec);
+    Check(html.Contains("<th scope='row' class='lumen-datatable-left'><a href='/rides/1'>4 Mar 2026</a><span class='lumen-datatable-note'>Wet</span></th>"),"link wraps the main text, note under it");
+    Check(html.Contains("2026-03-04")&&html.Contains("1:05")&&html.Contains("12.5 km"),"formats");
+    Check(html.Contains("<td class='lumen-datatable-right'><span aria-hidden='true'>—</span><span class='lumen-sr'> none</span></td>")&&!html.Contains("href='/x'"),"a missing cell has no link");
+    XElement.Parse(html);
+});
+Test("0.49.0: hostile text is escaped everywhere and a bad link is refused",()=>{
+    var evil="<img src=x onerror=alert(1)>'\"&";
+    var spec=new TableSpec([new TableColumn(evil)],[TRow(new TableCell{Text=evil,Note=evil,Href="/a?b=1&c='2'"})]){Caption=evil,Description=evil,Footer=[new TableCell{Text=evil}]};
+    var html=TableHtml.Render(spec);
+    Check(!html.Contains("<img")&&!html.Contains("onerror=alert(1)>")&&!html.Contains("'\"&"),"escaped");
+    XElement.Parse(html);
+    Check(html.Contains("href='/a?b=1&amp;c=&#39;2&#39;'"),"the link is encoded");
+    Reject(()=>TableHtml.Render(TSpec([new TableColumn("T")],[TRow(new TableCell{Text="x",Href="javascript:alert(1)"})])));
+});
+Test("0.49.0: the dark style colours the fragment and every text colour clears 4.5:1",()=>{
+    var html=TableHtml.Render(Riders() with{Style=ChartStyle.Dark});
+    Check(html.Contains("--lumen-bg:"+ChartStyle.Dark.Background),"dark background");
+    foreach(Match m in Regex.Matches(html,@"style='color:(#[0-9a-fA-F]{3,8})'")) Check(Lumen.Charts.Contrast.Ratio(m.Groups[1].Value,ChartStyle.Dark.Background)>=4.5,m.Value);
+});
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();

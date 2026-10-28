@@ -40,4 +40,24 @@ internal static class LumenHtml
     internal static string RootStyle(ChartStyle style) =>
         $"--lumen-bg:{style.Background};--lumen-text:{style.Text};--lumen-muted:{Readable(style.Muted, style)};--lumen-grid:{style.Grid};"
         + $"--lumen-rising:{style.Rising};--lumen-falling:{style.Falling};--lumen-accent:{style.SeriesColor(0)};--lumen-font:{style.FontFamily}";
+
+    /// <summary>A sparkline of <paramref name="values"/> for a component to draw hidden from readers, and the words that say it for them:
+    /// the drawing has no root title and no Tab stop, and the summary names the count, lowest, highest and last value.</summary>
+    internal static (string Svg, string Summary) Sparkline(IReadOnlyList<double?> values, string name, ValueFormat format, string? unit, ChartStyle style, int width, int height)
+    {
+        var points = values.Select((v, i) => new ChartPoint(i, v)).ToArray();
+        var spark = ChartSvg.Render(new ChartSpec
+        {
+            Kind = ChartKind.Line, Sparkline = true, Width = width, Height = height, Style = style, Title = name,
+            Series = [new ChartSeries(name, points)]
+        }, includeLegend: false, includeTitles: false);
+        // The drawing is aria-hidden, so its root title, which includeTitles leaves, is no use to a reader and would show as a tooltip.
+        spark = spark.Replace($"<title>{E(name)}</title>", "");
+        var seen = values.Where(v => v is not null).Select(v => v!.Value).ToArray();
+        string F(double v) => E(ChangeWords.Value(v, format, unit));
+        var summary = seen.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + " values, lowest " + F(seen.Min())
+            + ", highest " + F(seen.Max()) + ", last " + F(seen[^1]);
+        // The drawing is hidden from readers, so none of its marks may take a Tab stop; the words give its numbers.
+        return (spark.Replace(" tabindex='0'", ""), summary);
+    }
 }

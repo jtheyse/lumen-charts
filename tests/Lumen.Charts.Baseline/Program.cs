@@ -918,6 +918,43 @@ lines.Add($"tiles/regular-dark {Hash(Tiles(new(Season()) { Title = "Season at a 
 lines.Add($"tiles/compact-strip {Hash(Tiles(new(Enumerable.Range(1, 8).Select(i => new StatTile($"Round {i}", i * 10 + (i % 3) * 5) { Format = ValueFormat.Number, Previous = i == 1 ? null : i * 10 - 5, Better = Better.Higher }).ToArray()) { Density = Density.Compact, Title = "Rounds", TitleLevel = 3 }))}");
 lines.Add($"tiles/missing-and-link {Hash(Tiles(new([new("Best finish", null), new("Next race", null) { Missing = "No race yet", Note = "Entries open soon" }, new("Riders", 48) { Href = "/riders" }, new("Contact", 1) { Href = "mailto:desk@example.test", ChangeText = "new" }])))}");
 lines.Add($"tiles/fixed-columns {Hash(Tiles(new(Season()[..5]) { Columns = 3, Density = Density.Regular }))}");
+// Data tables (0.49.0): invented data, the HTML fragment hashed whole.
+string Table(TableSpec spec, ChartTheme theme = ChartTheme.Light) => TableHtml.Render(spec with { Style = Finished(spec.Style, theme) });
+TableColumn[] ResultColumns() =>
+[
+    new("Place") { Kind = ColumnKind.Number },
+    new("Name") { RowHeader = true },
+    new("Club"),
+    new("Time") { Kind = ColumnKind.Number, Format = ValueFormat.Duration, Better = Better.Lower },
+    new("Change") { Kind = ColumnKind.Change, Format = ValueFormat.Duration, Better = Better.Lower },
+    new("Points") { Kind = ColumnKind.Bar, Better = Better.Higher },
+    new("Season") { Kind = ColumnKind.Sparkline }
+];
+TableRow[] ResultRows() =>
+    new (string Name, string Club, double Time, double Before, double Points)[]
+    {
+        ("Ayanda Mokoena", "Hillside CC", 3412, 3440, 250), ("Briony Hale", "Kestrel Racing", 3425, 3419, 238), ("Carlos Ibarra", "Hillside CC", 3431, 3480, 226),
+        ("Dineo Sithole", "Ridgeback MTB", 3447, 3447, 214), ("Esme van Wyk", "Kestrel Racing", 3452, 3501, 203), ("Farid Nasser", "Ridgeback MTB", 3466, 3452, 191),
+        ("Greta Lindqvist", "Hillside CC", 3478, 3490, 180), ("Hendrik Botha", "Dust Devils", 3490, 3522, 168), ("Imani Kareem", "Dust Devils", 3503, 3499, 157),
+        ("Jonas Weber", "Kestrel Racing", 3511, 3560, 145), ("Kira Petrov", "Ridgeback MTB", 3530, 3541, 134), ("Lwazi Dube", "Dust Devils", 3548, 3530, 122)
+    }.Select((r, i) => new TableRow([
+        new TableCell { Number = i + 1 }, new TableCell { Text = r.Name, Href = i == 0 ? "/riders/ayanda" : null }, new TableCell { Text = r.Club },
+        new TableCell { Number = r.Time }, new TableCell { Number = r.Time, Previous = r.Before }, new TableCell { Number = r.Points },
+        new TableCell { Trend = [r.Points - 90, r.Points - 60, i % 4 == 3 ? null : r.Points - 35, r.Points - 10, r.Points], Note = null }])).ToArray();
+TableSpec Results() => new(ResultColumns(), ResultRows())
+{
+    Caption = "Round 6 results", Description = "Invented riders, fastest first",
+    Footer = [new TableCell { Text = "Field" }, new TableCell { Text = "12 riders" }, new TableCell(), new TableCell { Number = 3412 }, new TableCell(), new TableCell { Number = 2268 }, new TableCell()]
+};
+TableSpec Log() => new([new TableColumn("Day") { Kind = ColumnKind.Date }, new TableColumn("Distance") { Kind = ColumnKind.Number, Unit = " km" }, new TableColumn("Note")],
+    Enumerable.Range(0, 400).Select(i => new TableRow([new TableCell { Date = new DateOnly(2025, 9, 1).AddDays(i) }, new TableCell { Number = 12 + i % 9 * 3 }, new TableCell { Text = i % 7 == 0 ? "Rest day" : null }])).ToArray())
+{ Caption = "Training log", PageSize = 25, StartAtEnd = true };
+lines.Add($"table/results-light {Hash(Table(Results()))}");
+lines.Add($"table/results-dark {Hash(Table(Results() with { Style = ChartStyle.Dark }, ChartTheme.Dark))}");
+lines.Add($"table/log-last-page {Hash(Table(Log()))}");
+lines.Add($"table/compact-sorted {Hash(Table(Results() with { Density = Density.Compact, SortBy = 3, SortDescending = true }))}");
+lines.Add($"table/negative-bars {Hash(Table(new TableSpec([new TableColumn("Month") { RowHeader = true }, new TableColumn("Net") { Kind = ColumnKind.Bar, Unit = " pts" }],
+    [new TableRow([TableCell.Of("March"), TableCell.Of(-5.0)]), new TableRow([TableCell.Of("April"), TableCell.Of(10.0)]), new TableRow([TableCell.Of("May"), TableCell.Of(-12.5)]), new TableRow([TableCell.Of("June"), new TableCell()])]) { Caption = "Points gained and lost" }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);
