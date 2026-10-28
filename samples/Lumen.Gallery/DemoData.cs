@@ -432,7 +432,7 @@ public static class DemoData
     /// <summary>"Season at a glance": six invented tiles, each showing a different part of <c>StatTile</c>. A null <paramref name="style"/> leaves the style to the brand around the tiles.</summary>
     public static Lumen.Charts.StatTilesSpec SeasonTiles(Lumen.Charts.ChartStyle? style) => new(
     [
-        new("Races", 12) { Previous = 9, Better = Lumen.Charts.Better.Higher, Since = "last season", Note = "Field size each round", Trend = [38, 41, 36, 44, 40, 47, 43, 45, 49, 46, 52, 50] },
+        new("Races", 12) { Previous = 9, Better = Lumen.Charts.Better.Higher, Since = "last season", Note = "Points each round", Trend = [6, 14, 9, 18, 11, 20, 13, 16, 8, 15, 10, 8] },
         new("Best finish", 3) { Note = "place", Previous = 5, Better = Lumen.Charts.Better.Lower, Since = "last season" },
         new("Total time", 15120) { Format = Lumen.Charts.ValueFormat.Duration, Previous = 15840, Better = Lumen.Charts.Better.Lower, Since = "last season" },
         new("Podiums", 2) { Target = 4 },

@@ -2580,9 +2580,10 @@ if (await beyondLink.CountAsync() > 0)
         await tab.CloseAsync();
     });
 
-    await Test("Components page on a 375-pixel phone: the season grid shows two tiles a row and the page does not scroll sideways", async () =>
+    foreach (var phoneWidth in new[] { 360, 375 })
+    await Test($"Components page on a {phoneWidth}-pixel phone: the season grid shows two tiles a row and the page does not scroll sideways", async () =>
     {
-        await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+        await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = phoneWidth, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
         var tab = await ComponentsPage(phone);
         var measured = await tab.EvaluateAsync<double[]>(@"() => { const tops = [...document.querySelectorAll('#season .lumen-stat')].map(t => t.getBoundingClientRect().top);
             return [tops.length, tops[0], tops[1], tops[2], document.documentElement.scrollWidth, document.documentElement.clientWidth]; }");

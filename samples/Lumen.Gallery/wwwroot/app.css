@@ -13,4 +13,4 @@
 #planner table{border-collapse:collapse;font-size:12px}#planner td,#planner th{border:1px solid var(--lumen-control-border,#dce3ee);padding:4px;vertical-align:top}
 #sign-ups .segmented{display:flex;flex-wrap:wrap;gap:3px;padding:12px 24px 0}
 
-.comp-card{padding:18px 24px}@media(max-width:760px){.comp-card{padding:12px}}
+.comp-card{padding:18px 24px}@media(max-width:760px){.comp-card{padding:0;border:0;border-radius:0;background:none;box-shadow:none}}
