@@ -425,21 +425,16 @@ export function attachTable(root, dotnet) {
         const button = sort && root.contains(sort) ? sort : page && root.contains(page) ? page : null;
         if (!button || button.getAttribute('aria-disabled') === 'true') return;
         if (button === sort) dotnet.invokeMethodAsync('Sort', Number(sort.dataset.lumenSort));
-        else dotnet.invokeMethodAsync('Page', Number(page.dataset.lumenPage));
+        else dotnet.invokeMethodAsync('Page', Number(page.dataset.lumenPage), page.getAttribute('aria-label'));
     };
     root.addEventListener('click', click);
     handlers.set(root, { bindings: [['click', click]] });
 }
 
-/// Puts focus back on the control the reader pressed after a table's markup was rewritten. A page button that no longer moves
-/// (Last, on the last page) hands focus to the range text, which is made focusable for the purpose.
+/// Puts focus back on the control the reader pressed after a table's markup was rewritten. A paging button that no longer moves
+/// is aria-disabled, not disabled, so it can still take focus.
 export function tableFocus(root, selector) {
-    const target = root.querySelector(selector);
-    if (target && target.getAttribute('aria-disabled') !== 'true') { target.focus({ preventScroll: true }); return; }
-    const range = root.querySelector('.lumen-datatable-range');
-    if (!range) return;
-    range.tabIndex = -1;
-    range.focus({ preventScroll: true });
+    root.querySelector(selector)?.focus({ preventScroll: true });
 }
 
 /// Makes a planner drawn by <LumenPlanner> one tab stop. Its cells (the days of the year or of a month, the weekends of a

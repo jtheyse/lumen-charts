@@ -11752,7 +11752,8 @@ Test("0.49.0: the CSV quotes a field holding a comma, a quote or a line break, k
     Reject(()=>TableExport.Csv(Many(5001,null)));
 });
 Test("0.49.0: a column's natural first sort is descending only where higher is better",()=>{
-    Check(TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher}),"higher");
+    Check(TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=ColumnKind.Number})&&TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=ColumnKind.Bar})&&TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=ColumnKind.Change}),"higher");
+    Check(!TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher})&&!TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=ColumnKind.Date}),"text and date start ascending");
     Check(!TableView.NaturalDescending(new TableColumn("A"){Better=Better.Lower}),"lower");
     Check(!TableView.NaturalDescending(new TableColumn("A")),"neither");
 });
@@ -12013,7 +12014,9 @@ Test("0.49.0: LumenTable sorts in the column's natural direction, reverses, and 
     Check(TableHeads(fast)=="-,-,ascending,-,-"&&BodyHeads(TableFragment(fast)).SequenceEqual(["2","1"]),"fastest first: "+TableHeads(fast)+string.Join("/",BodyHeads(TableFragment(fast))));
     Check(fast.Contains(">Sorted by Time, fastest first</span>"),"status fastest");
     var slow=OperateTable(spec,async table=>{await table.Sort(2);await table.Sort(2);});
-    Check(TableHeads(slow)=="-,-,descending,-,-"&&slow.Contains(">Sorted by Time, slowest first</span>"),"slowest");
+    Check(TableHeads(slow)=="-,-,descending,-,-"&&slow.Contains(">Sorted by Time, slowest first</span>")&&BodyHeads(TableFragment(slow)).SequenceEqual(["2","1"]),"slowest, missing last");
+    var both=spec with{Rows=[spec.Rows[0],TRow(new TableCell{Number=1},new TableCell{Text="Al"},new TableCell{Number=60},new TableCell{Number=60,Previous=61},new TableCell{Trend=[3,2,1]})]};
+    Check(BodyHeads(TableFragment(OperateTable(both,async table=>await table.Sort(2)))).SequenceEqual(["1","2"])&&BodyHeads(TableFragment(OperateTable(both,async table=>{await table.Sort(2);await table.Sort(2);}))).SequenceEqual(["2","1"]),"the second press reverses the row order");
     var place=OperateTable(spec,async table=>await table.Sort(0));
     Check(place.Contains(">Sorted by Place, lowest first</span>")&&TableHeads(place)=="ascending,-,-,-,-","place");
     var text=OperateTable(spec,async table=>await table.Sort(1));
@@ -12040,16 +12043,30 @@ Test("0.49.0: LumenTable pages, ignores a dead page, returns a sort to the page 
     var log=new TableSpec([new TableColumn("N"){Kind=ColumnKind.Number}],Enumerable.Range(0,400).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()){Caption="Log",PageSize=25,StartAtEnd=true};
     var first=OperateTable(log,_=>Task.CompletedTask);
     Check(first.Contains("Rows 376–400 of 400")&&first.Contains("<span class=\"lumen-status\" role=\"status\"></span>"),"opens on the last page, status not set by the first render");
-    var paged=OperateTable(log,async table=>await table.Page(1));
+    var paged=OperateTable(log,async table=>await table.Page(1,"Next page"));
     Check(paged.Contains("role=\"status\">Rows 26&#x2013;50 of 400</span>"),"page 1: "+paged.Substring(paged.LastIndexOf("lumen-status")));
-    var ignored=OperateTable(log,async table=>{await table.Page(15);await table.Page(16);await table.Page(-1);});
+    var ignored=OperateTable(log,async table=>{await table.Page(15,"Last page");await table.Page(16,"Next page");await table.Page(-1,"Previous page");});
     Check(ignored.Contains("Rows 376–400 of 400")&&ignored.Contains("<span class=\"lumen-status\" role=\"status\"></span>"),"the current page and a page outside change nothing");
-    var sorted=OperateTable(log,async table=>{await table.Page(2);await table.Sort(0);});
+    var sorted=OperateTable(log,async table=>{await table.Page(2,"Next page");await table.Sort(0);});
     Check(sorted.Contains("Rows 376–400 of 400")&&sorted.Contains("role=\"status\">Sorted by N, "),"a sort returns StartAtEnd to its last page");
-    var front=OperateTable(log with{StartAtEnd=false},async table=>{await table.Page(3);await table.Sort(0);});
+    var front=OperateTable(log with{StartAtEnd=false},async table=>{await table.Page(3,"Next page");await table.Sort(0);});
     Check(front.Contains("Rows 1–25 of 400"),"a sort returns to the first page");
     var empty=OperateTable(new TableSpec([new TableColumn("N"){Kind=ColumnKind.Number}],[]){Caption="Empty",PageSize=25},_=>Task.CompletedTask);
     Check(empty.Contains("No rows")&&!empty.Contains("Rows 1–0"),"empty");
+});
+Test("0.49.0: LumenTable records the pressed control for the focus it restores",()=>{
+    var log=new TableSpec([new TableColumn("N"){Kind=ColumnKind.Number}],Enumerable.Range(0,100).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()){Caption="Log",PageSize=25};
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    string? Pressed(LumenTable t)=>(string?)typeof(LumenTable).GetField("refocus",flags)!.GetValue(t);
+    var seen=new List<string?>();
+    OperateTable(log,async table=>{
+        seen.Add(Pressed(table));
+        await table.Page(1,"Next page");seen.Add(Pressed(table));
+        await table.Page(3,"Last page");seen.Add(Pressed(table));
+        await table.Page(3,"Last page");seen.Add(Pressed(table));
+        await table.Sort(0);seen.Add(Pressed(table));
+    });
+    Check(seen.SequenceEqual([null,"[data-lumen-page][aria-label=\"Next page\"]","[data-lumen-page][aria-label=\"Last page\"]","[data-lumen-page][aria-label=\"Last page\"]","[data-lumen-sort=\"0\"]"]),string.Join(" | ",seen));
 });
 Test("0.49.0: LumenTable starts again from a new Spec instance",()=>{
     var spec=Riders();
@@ -12067,7 +12084,7 @@ Test("0.49.0: LumenTable starts again from a new Spec instance",()=>{
 });
 Test("0.49.0: LumenTable and TableRequest are documented",()=>{
     var blazor=File.ReadAllText(Path.ChangeExtension(typeof(LumenTable).Assembly.Location,".xml"));
-    Check(blazor.Contains("T:Lumen.Charts.Blazor.LumenTable")&&blazor.Contains("M:Lumen.Charts.Blazor.LumenTable.Sort(System.Int32)")&&blazor.Contains("M:Lumen.Charts.Blazor.LumenTable.Page(System.Int32)"),"component docs");
+    Check(blazor.Contains("T:Lumen.Charts.Blazor.LumenTable")&&blazor.Contains("M:Lumen.Charts.Blazor.LumenTable.Sort(System.Int32)")&&blazor.Contains("M:Lumen.Charts.Blazor.LumenTable.Page(System.Int32,System.String)"),"component docs");
     Check(File.ReadAllText(Path.ChangeExtension(typeof(TableHtml).Assembly.Location,".xml")).Contains("T:Lumen.Charts.TableRequest"),"request docs");
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)

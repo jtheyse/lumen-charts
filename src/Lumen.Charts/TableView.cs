@@ -22,8 +22,8 @@ internal sealed class TableView
     /// <summary>The page the table opens on: the last with <see cref="TableSpec.StartAtEnd"/>, else the first.</summary>
     internal int DefaultPage { get; }
 
-    /// <summary>Whether a column's first sort runs from the largest down: when a higher value is better.</summary>
-    internal static bool NaturalDescending(TableColumn c) => c.Better == Better.Higher;
+    /// <summary>Whether a column's first sort runs from the largest down: when a higher value is better in a number, bar or change column. Text and date columns start ascending.</summary>
+    internal static bool NaturalDescending(TableColumn c) => c.Better == Better.Higher && c.Kind is ColumnKind.Number or ColumnKind.Bar or ColumnKind.Change;
 
     /// <summary>Validates the spec, then sorts by <paramref name="sortBy"/> and <paramref name="descending"/>; with no <paramref name="sortBy"/>
     /// the spec's own <see cref="TableSpec.SortBy"/> and <see cref="TableSpec.SortDescending"/> apply, and with neither the spec's row order is kept.</summary>
