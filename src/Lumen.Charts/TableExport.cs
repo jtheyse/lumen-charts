@@ -20,6 +20,15 @@ public static class TableExport
         return result.ToString();
     }
 
+    /// <summary>The file name a table's CSV is saved under: the caption in lower case, every run of characters outside a to z and 0 to 9
+    /// (accented letters too) made one hyphen, hyphens trimmed from both ends, and <c>table</c> when nothing is left. "Training log" is
+    /// <c>training-log.csv</c>.</summary>
+    internal static string FileName(string caption)
+    {
+        var slug = System.Text.RegularExpressions.Regex.Replace(caption.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+        return (slug.Length == 0 ? "table" : slug) + ".csv";
+    }
+
     private static void Line(StringBuilder result, IEnumerable<string> fields) =>
         result.Append(string.Join(",", fields.Select(Quote))).Append("\r\n");
 
@@ -28,9 +37,9 @@ public static class TableExport
         if (cell.Text is not null) return Guard(cell.Text);
         return column.Kind switch
         {
-            ColumnKind.Number or ColumnKind.Bar or ColumnKind.Change => Number(cell.Number),
-            ColumnKind.Date => cell.Date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "",
-            ColumnKind.Sparkline => cell.Trend is { } trend ? string.Join(";", trend.Select(Number)) : "",
+            TableColumnKind.Number or TableColumnKind.Bar or TableColumnKind.Change => Number(cell.Number),
+            TableColumnKind.Date => cell.Date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "",
+            TableColumnKind.Sparkline => cell.Trend is { } trend ? string.Join(";", trend.Select(Number)) : "",
             _ => ""
         };
     }

@@ -11607,9 +11607,9 @@ Test("0.48.0: a compact set and a regular set on one page keep their own sizes, 
 // 0.49.0: the table model, sorting, paging and CSV
 TableSpec TSpec(IReadOnlyList<TableColumn> columns,IReadOnlyList<TableRow> rows)=>new(columns,rows){Caption="Results"};
 TableRow TRow(params TableCell[] cells)=>new(cells);
-TableSpec Numbers(params double?[] values)=>TSpec([new TableColumn("N"){Kind=ColumnKind.Number}],values.Select(v=>TRow(TableCell.Of(v))).ToArray());
+TableSpec Numbers(params double?[] values)=>TSpec([new TableColumn("N"){Kind=TableColumnKind.Number}],values.Select(v=>TRow(TableCell.Of(v))).ToArray());
 TableSpec Texts(params string[] values)=>TSpec([new TableColumn("T")],values.Select(v=>TRow(TableCell.Of(v))).ToArray());
-TableSpec Many(int rows,int? pageSize)=>TSpec([new TableColumn("N"){Kind=ColumnKind.Number}],Enumerable.Range(0,rows).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()) with{PageSize=pageSize};
+TableSpec Many(int rows,int? pageSize)=>TSpec([new TableColumn("N"){Kind=TableColumnKind.Number}],Enumerable.Range(0,rows).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()) with{PageSize=pageSize};
 string RejectMessage(Action action){try{action();}catch(ArgumentException e){return e.Message;}throw new Exception("Expected ArgumentException");}
 Test("0.49.0: a table takes 1 to 32 columns and a caption of 1 to 120 characters, and each header is 1 to 60",()=>{
     TableValidation.Spec(TSpec(Enumerable.Range(0,32).Select(i=>new TableColumn("C"+i)).ToArray(),[]));
@@ -11654,16 +11654,16 @@ Test("0.49.0: text is at most 200 characters, a note 80, and a link must be safe
 });
 Test("0.49.0: numbers and Previous are finite, BarMax is finite and above 0",()=>{
     Reject(()=>TableValidation.Spec(Numbers(double.NaN))); Reject(()=>TableValidation.Spec(Numbers(double.PositiveInfinity)));
-    var change=new[]{new TableColumn("C"){Kind=ColumnKind.Change}};
+    var change=new[]{new TableColumn("C"){Kind=TableColumnKind.Change}};
     TableValidation.Spec(TSpec(change,[TRow(new TableCell{Number=2,Previous=1})]));
     Reject(()=>TableValidation.Spec(TSpec(change,[TRow(new TableCell{Number=2,Previous=double.NaN})])));
-    TableColumn Bar(double max)=>new("B"){Kind=ColumnKind.Bar,BarMax=max};
+    TableColumn Bar(double max)=>new("B"){Kind=TableColumnKind.Bar,BarMax=max};
     TableValidation.Spec(TSpec([Bar(0.5)],[]));
     Reject(()=>TableValidation.Spec(TSpec([Bar(0)],[]))); Reject(()=>TableValidation.Spec(TSpec([Bar(-1)],[])));
     Reject(()=>TableValidation.Spec(TSpec([Bar(double.NaN)],[])));
 });
 Test("0.49.0: a trend holds at most 400 values, at least 2 of them not null, all finite",()=>{
-    TableSpec Trend(IReadOnlyList<double?> t)=>TSpec([new TableColumn("S"){Kind=ColumnKind.Sparkline}],[TRow(new TableCell{Trend=t})]);
+    TableSpec Trend(IReadOnlyList<double?> t)=>TSpec([new TableColumn("S"){Kind=TableColumnKind.Sparkline}],[TRow(new TableCell{Trend=t})]);
     TableValidation.Spec(Trend(Enumerable.Range(0,400).Select(i=>(double?)i).ToArray()));
     Reject(()=>TableValidation.Spec(Trend(Enumerable.Range(0,401).Select(i=>(double?)i).ToArray())));
     TableValidation.Spec(Trend([1,null,2]));
@@ -11671,13 +11671,13 @@ Test("0.49.0: a trend holds at most 400 values, at least 2 of them not null, all
     Reject(()=>TableValidation.Spec(Trend([1,double.NaN])));
 });
 Test("0.49.0: a date format is at most 40 characters and must format a date without throwing",()=>{
-    TableSpec Format(string f)=>TSpec([new TableColumn("D"){Kind=ColumnKind.Date,DateFormat=f}],[]);
+    TableSpec Format(string f)=>TSpec([new TableColumn("D"){Kind=TableColumnKind.Date,DateFormat=f}],[]);
     TableValidation.Spec(Format("yyyy-MM-dd")); TableValidation.Spec(Format(new string('x',40)));
     Reject(()=>TableValidation.Spec(Format(new string('x',41))));
     Reject(()=>TableValidation.Spec(Format("%")));
 });
 Test("0.49.0: SortBy is a sortable column that is not a sparkline",()=>{
-    var columns=new[]{new TableColumn("A"),new TableColumn("S"){Kind=ColumnKind.Sparkline},new TableColumn("L"){Sortable=false}};
+    var columns=new[]{new TableColumn("A"),new TableColumn("S"){Kind=TableColumnKind.Sparkline},new TableColumn("L"){Sortable=false}};
     TableSpec At(int? i)=>TSpec(columns,[]) with{SortBy=i};
     TableValidation.Spec(At(0)); TableValidation.Spec(At(null));
     Reject(()=>TableValidation.Spec(At(1))); Reject(()=>TableValidation.Spec(At(2)));
@@ -11689,21 +11689,21 @@ Test("0.49.0: at most one column is the row header",()=>{
     Reject(()=>TableValidation.Spec(TSpec([new TableColumn("A"){RowHeader=true},new TableColumn("B"){RowHeader=true}],[])));
 });
 Test("0.49.0: a cell's fields must match its column's kind, and the refusal names the column and the row",()=>{
-    var message=RejectMessage(()=>TableValidation.Spec(TSpec([new TableColumn("A"),new TableColumn("Points"){Kind=ColumnKind.Number}],[TRow(TableCell.Of("x"),TableCell.Of("x"))])));
+    var message=RejectMessage(()=>TableValidation.Spec(TSpec([new TableColumn("A"),new TableColumn("Points"){Kind=TableColumnKind.Number}],[TRow(TableCell.Of("x"),TableCell.Of("x"))])));
     Check(message.Contains("Row 1")&&message.Contains("Points")&&message.Contains("Text"),message);
-    TableSpec One(ColumnKind kind,TableCell cell)=>TSpec([new TableColumn("K"){Kind=kind}],[TRow(cell)]);
-    Reject(()=>TableValidation.Spec(One(ColumnKind.Text,new TableCell{Number=1})));
-    Reject(()=>TableValidation.Spec(One(ColumnKind.Number,new TableCell{Date=new DateOnly(2026,1,1)})));
-    Reject(()=>TableValidation.Spec(One(ColumnKind.Number,new TableCell{Previous=1})));
-    Reject(()=>TableValidation.Spec(One(ColumnKind.Date,new TableCell{Number=1})));
-    Reject(()=>TableValidation.Spec(One(ColumnKind.Bar,new TableCell{Text="a"})));
-    Reject(()=>TableValidation.Spec(One(ColumnKind.Sparkline,new TableCell{Number=1})));
-    Reject(()=>TableValidation.Spec(One(ColumnKind.Change,new TableCell{Trend=[1,2]})));
+    TableSpec One(TableColumnKind kind,TableCell cell)=>TSpec([new TableColumn("K"){Kind=kind}],[TRow(cell)]);
+    Reject(()=>TableValidation.Spec(One(TableColumnKind.Text,new TableCell{Number=1})));
+    Reject(()=>TableValidation.Spec(One(TableColumnKind.Number,new TableCell{Date=new DateOnly(2026,1,1)})));
+    Reject(()=>TableValidation.Spec(One(TableColumnKind.Number,new TableCell{Previous=1})));
+    Reject(()=>TableValidation.Spec(One(TableColumnKind.Date,new TableCell{Number=1})));
+    Reject(()=>TableValidation.Spec(One(TableColumnKind.Bar,new TableCell{Text="a"})));
+    Reject(()=>TableValidation.Spec(One(TableColumnKind.Sparkline,new TableCell{Number=1})));
+    Reject(()=>TableValidation.Spec(One(TableColumnKind.Change,new TableCell{Trend=[1,2]})));
     // A missing value is a cell whose own field is null, and any cell may carry a note and a link.
-    TableValidation.Spec(One(ColumnKind.Number,new TableCell{Note="n",Href="/x"}));
-    TableValidation.Spec(One(ColumnKind.Change,new TableCell{Number=1}));
+    TableValidation.Spec(One(TableColumnKind.Number,new TableCell{Note="n",Href="/x"}));
+    TableValidation.Spec(One(TableColumnKind.Change,new TableCell{Number=1}));
     // A footer cell may be text in any column, but not another kind's field.
-    var columns=new[]{new TableColumn("A"),new TableColumn("N"){Kind=ColumnKind.Number}};
+    var columns=new[]{new TableColumn("A"),new TableColumn("N"){Kind=TableColumnKind.Number}};
     TableValidation.Spec(TSpec(columns,[]) with{Footer=[TableCell.Of("Total"),TableCell.Of("40 pts")]});
     TableValidation.Spec(TSpec(columns,[]) with{Footer=[TableCell.Of("Total"),TableCell.Of((double?)40)]});
     Reject(()=>TableValidation.Spec(TSpec(columns,[]) with{Footer=[TableCell.Of("Total"),new TableCell{Date=new DateOnly(2026,1,1)}]}));
@@ -11718,10 +11718,10 @@ Test("0.49.0: sorting puts missing values last in both directions and keeps equa
 });
 Test("0.49.0: text sorts ignoring case, dates by value, and a change by its difference",()=>{
     Check(TableView.Of(Texts("banana","Apple","cherry","apple"),0,false).Order.SequenceEqual([1,3,0,2]),"text ignores case and ties keep order");
-    var dates=TSpec([new TableColumn("D"){Kind=ColumnKind.Date}],[TRow(TableCell.Of((DateOnly?)new DateOnly(2026,3,1))),TRow(TableCell.Of((DateOnly?)null)),TRow(TableCell.Of((DateOnly?)new DateOnly(2025,12,31)))]);
+    var dates=TSpec([new TableColumn("D"){Kind=TableColumnKind.Date}],[TRow(TableCell.Of((DateOnly?)new DateOnly(2026,3,1))),TRow(TableCell.Of((DateOnly?)null)),TRow(TableCell.Of((DateOnly?)new DateOnly(2025,12,31)))]);
     Check(TableView.Of(dates,0,false).Order.SequenceEqual([2,0,1]),"dates ascending, missing last");
     Check(TableView.Of(dates,0,true).Order.SequenceEqual([0,2,1]),"dates descending, missing last");
-    var change=TSpec([new TableColumn("C"){Kind=ColumnKind.Change}],[
+    var change=TSpec([new TableColumn("C"){Kind=TableColumnKind.Change}],[
         TRow(new TableCell{Number=100,Previous=95}),TRow(new TableCell{Number=10,Previous=20}),TRow(new TableCell{Number=5}),TRow(new TableCell{Number=7,Previous=2})]);
     Check(TableView.Of(change,0,false).Order.SequenceEqual([1,0,3,2]),"change ascending by difference, a missing previous last");
     Check(TableView.Of(change,0,true).Order.SequenceEqual([0,3,1,2]),"change descending by difference, the two 5s keep their order");
@@ -11737,7 +11737,7 @@ Test("0.49.0: 400 rows at 25 a page open on the last page, rows 376 to 400, and 
 });
 Test("0.49.0: the CSV writes headers, rows in the sort order and the footer, one column of each kind",()=>{
     var spec=new TableSpec(
-        [new TableColumn("Name"),new TableColumn("Pts"){Kind=ColumnKind.Number},new TableColumn("Day"){Kind=ColumnKind.Date},new TableColumn("Vs"){Kind=ColumnKind.Change},new TableColumn("Bar"){Kind=ColumnKind.Bar},new TableColumn("Season"){Kind=ColumnKind.Sparkline}],
+        [new TableColumn("Name"),new TableColumn("Pts"){Kind=TableColumnKind.Number},new TableColumn("Day"){Kind=TableColumnKind.Date},new TableColumn("Vs"){Kind=TableColumnKind.Change},new TableColumn("Bar"){Kind=TableColumnKind.Bar},new TableColumn("Season"){Kind=TableColumnKind.Sparkline}],
         [TRow(TableCell.Of("Ana"),TableCell.Of((double?)10),TableCell.Of((DateOnly?)new DateOnly(2026,1,5)),new TableCell{Number=12,Previous=10},TableCell.Of((double?)4),new TableCell{Trend=[1,null,3]}),
          TRow(TableCell.Of("Bo, \"B\""),new TableCell(),new TableCell(),new TableCell(),new TableCell(),new TableCell()),
          TRow(TableCell.Of("Cy"),TableCell.Of((double?)30),TableCell.Of((DateOnly?)new DateOnly(2026,2,1)),new TableCell{Number=5,Previous=9},TableCell.Of((double?)2.5),new TableCell{Trend=[2,4]})])
@@ -11752,13 +11752,13 @@ Test("0.49.0: the CSV quotes a field holding a comma, a quote or a line break, k
     Reject(()=>TableExport.Csv(Many(5001,null)));
 });
 Test("0.49.0: a column's natural first sort is descending only where higher is better",()=>{
-    Check(TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=ColumnKind.Number})&&TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=ColumnKind.Bar})&&TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=ColumnKind.Change}),"higher");
-    Check(!TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher})&&!TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=ColumnKind.Date}),"text and date start ascending");
+    Check(TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=TableColumnKind.Number})&&TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=TableColumnKind.Bar})&&TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=TableColumnKind.Change}),"higher");
+    Check(!TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher})&&!TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher,Kind=TableColumnKind.Date}),"text and date start ascending");
     Check(!TableView.NaturalDescending(new TableColumn("A"){Better=Better.Lower}),"lower");
     Check(!TableView.NaturalDescending(new TableColumn("A")),"neither");
 });
 Test("0.49.0: the CSV prefixes text that a spreadsheet would run, in cells, headers and footer, and leaves numbers bare",()=>{
-    var spec=new TableSpec([new TableColumn("=Name"),new TableColumn("N"){Kind=ColumnKind.Number}],
+    var spec=new TableSpec([new TableColumn("=Name"),new TableColumn("N"){Kind=TableColumnKind.Number}],
         [TRow(TableCell.Of("=1+1"),TableCell.Of((double?)-3)),TRow(TableCell.Of("@x"),TableCell.Of((double?)1)),TRow(TableCell.Of("  -x"),TableCell.Of((double?)2)),TRow(TableCell.Of("safe"),TableCell.Of((double?)3))])
         {Caption="C",Footer=[TableCell.Of("+total"),TableCell.Of((double?)-4)]};
     var csv=TableExport.Csv(spec);
@@ -11790,13 +11790,13 @@ Test("0.49.0: an empty table has one page and opens on it, even from the end",()
     Check(view.Pages==1&&view.DefaultPage==0&&view.RowsOn(0)==(0,-1),$"{view.Pages} {view.DefaultPage} {view.RowsOn(0)}");
 });
 Test("0.49.0: a change cell with no number but a previous value sorts last",()=>{
-    var change=TSpec([new TableColumn("C"){Kind=ColumnKind.Change}],[TRow(new TableCell{Previous=3}),TRow(new TableCell{Number=2,Previous=1}),TRow(new TableCell{Number=9,Previous=1})]);
+    var change=TSpec([new TableColumn("C"){Kind=TableColumnKind.Change}],[TRow(new TableCell{Previous=3}),TRow(new TableCell{Number=2,Previous=1}),TRow(new TableCell{Number=9,Previous=1})]);
     Check(TableView.Of(change,0,false).Order.SequenceEqual([1,2,0]),"ascending");
     Check(TableView.Of(change,0,true).Order.SequenceEqual([2,1,0]),"descending");
 });
 // 0.49.0: the HTML renderer
-TableSpec Riders()=>new([new TableColumn("Place"){Kind=ColumnKind.Number},new TableColumn("Name"),new TableColumn("Time"){Kind=ColumnKind.Number,Format=ValueFormat.Duration,Better=Better.Lower},
-    new TableColumn("Change"){Kind=ColumnKind.Change,Better=Better.Lower,Format=ValueFormat.Duration},new TableColumn("Season"){Kind=ColumnKind.Sparkline}],
+TableSpec Riders()=>new([new TableColumn("Place"){Kind=TableColumnKind.Number},new TableColumn("Name"),new TableColumn("Time"){Kind=TableColumnKind.Number,Format=ValueFormat.Duration,Better=Better.Lower},
+    new TableColumn("Change"){Kind=TableColumnKind.Change,Better=Better.Lower,Format=ValueFormat.Duration},new TableColumn("Season"){Kind=TableColumnKind.Sparkline}],
     [TRow(new TableCell{Number=2},new TableCell{Text="Bo"},new TableCell{Number=65},new TableCell{Number=65,Previous=63},new TableCell{Trend=[1,2,3]}),
      TRow(new TableCell{Number=1},new TableCell{Text="Al"},new TableCell{Number=null},new TableCell{Number=60,Previous=61},new TableCell{Trend=[3,2,1]})]){Caption="Round 1 results",Description="Invented riders"};
 IEnumerable<XElement> Els(XElement e,string name)=>e.Descendants().Where(x=>x.Name.LocalName==name);
@@ -11854,7 +11854,7 @@ Test("0.49.0: the controls markup adds sort buttons and page buttons to the stat
     Check(!TableHtml.Render(unsortable,null,null,false,true).Contains("data-lumen-sort='1'"),"an unsortable header is plain text");
 });
 Test("0.49.0: a bar column [-5, 10] puts its zero line at a third of the track and writes -5 and 10 as text",()=>{
-    var spec=TSpec([new TableColumn("Points"){Kind=ColumnKind.Bar}],[TRow(new TableCell{Number=-5}),TRow(new TableCell{Number=10})]);
+    var spec=TSpec([new TableColumn("Points"){Kind=TableColumnKind.Bar}],[TRow(new TableCell{Number=-5}),TRow(new TableCell{Number=10})]);
     var html=TableHtml.Render(spec);
     var root=XElement.Parse(html);
     Check(html.Contains("class='lumen-datatable-zero' style='left:33.33%'"),"zero line at one third");
@@ -11863,16 +11863,16 @@ Test("0.49.0: a bar column [-5, 10] puts its zero line at a third of the track a
     Check(html.Contains("class='lumen-datatable-fill' style='left:0%;width:33.33%'"),"the negative bar runs from the left end to the zero line");
     Check(html.Contains("class='lumen-datatable-fill' style='left:33.33%;width:66.67%'"),"the positive bar runs from the zero line");
     Check(Els(root,"span").Where(s=>s.Attribute("class")?.Value=="lumen-datatable-bar").All(s=>s.Attribute("aria-hidden")?.Value=="true"),"bars are hidden from readers");
-    var positive=TableHtml.Render(TSpec([new TableColumn("P"){Kind=ColumnKind.Bar,BarMax=20}],[TRow(new TableCell{Number=5}),TRow(new TableCell{Number=30})]));
+    var positive=TableHtml.Render(TSpec([new TableColumn("P"){Kind=TableColumnKind.Bar,BarMax=20}],[TRow(new TableCell{Number=5}),TRow(new TableCell{Number=30})]));
     Check(!positive.Contains("lumen-datatable-zero'")&&positive.Contains("left:0%;width:25%")&&positive.Contains("left:0%;width:100%"),"BarMax is the scale end and a larger value is clamped");
 });
 Test("0.49.0: a bar's scale is the whole column, not the page",()=>{
-    var spec=Many(30,10) with{Columns=[new TableColumn("N"){Kind=ColumnKind.Bar}]};
+    var spec=Many(30,10) with{Columns=[new TableColumn("N"){Kind=TableColumnKind.Bar}]};
     Check(TableHtml.Render(spec,0).Contains("left:0%;width:3.45%")&&TableHtml.Render(spec,2).Contains("left:0%;width:100%"),"scale 0 to 29 on every page");
 });
 Test("0.49.0: a change cell writes the arrow and size, hides the verdict, and takes the Readable colour",()=>{
     var style=ChartStyle.Light;
-    var spec=TSpec([new TableColumn("Pts"){Kind=ColumnKind.Change,Better=Better.Higher}],[TRow(new TableCell{Number=12,Previous=10}),TRow(new TableCell{Number=5,Previous=5}),TRow(new TableCell{Number=4,Previous=9}),TRow(new TableCell{Number=4})]);
+    var spec=TSpec([new TableColumn("Pts"){Kind=TableColumnKind.Change,Better=Better.Higher}],[TRow(new TableCell{Number=12,Previous=10}),TRow(new TableCell{Number=5,Previous=5}),TRow(new TableCell{Number=4,Previous=9}),TRow(new TableCell{Number=4})]);
     var html=TableHtml.Render(spec);
     var want=ChangeWords.Of(12,10,Better.Higher,ChangeAs.Difference,null,ValueFormat.Number,null,style).Colour;
     Check(html.Contains($"<span class='lumen-datatable-change' style='color:{want}'>▲ 2<span class='lumen-sr'> &#183; better</span></span>"),"better rise");
@@ -11885,7 +11885,7 @@ Test("0.49.0: a change cell writes the arrow and size, hides the verdict, and ta
     Check(html.EndsWith("<span aria-hidden='true'>—</span><span class='lumen-sr'> none</span></th></tr></tbody></table></div></div>"),"a change without a previous value is missing");
 });
 Test("0.49.0: a sparkline cell is 96 by 24 with no title and no tab stop, hidden, and followed by its summary words",()=>{
-    var spec=TSpec([new TableColumn("Season"){Kind=ColumnKind.Sparkline,Format=ValueFormat.Number}],[TRow(new TableCell{Trend=[3,null,9,6]})]);
+    var spec=TSpec([new TableColumn("Season"){Kind=TableColumnKind.Sparkline,Format=ValueFormat.Number}],[TRow(new TableCell{Trend=[3,null,9,6]})]);
     var html=TableHtml.Render(spec);
     var svg=Els(XElement.Parse(html),"svg").First();
     var size=string.Join(" ",svg.Attributes().Where(a=>a.Name.LocalName is "width" or "height" or "viewBox").Select(a=>a.Name.LocalName+"="+a.Value));
@@ -11910,12 +11910,12 @@ Test("0.49.0: the paging text reads Rows 376–400 of 400 from the default page 
 });
 Test("0.49.0: a page shows the sorted rows, not a slice of the spec's own order",()=>{
     // 30 rows whose numbers run 29..0 in the spec; sorted ascending, page 1 must hold 10..19.
-    var spec=TSpec([new TableColumn("N"){Kind=ColumnKind.Number}],Enumerable.Range(0,30).Select(i=>TRow(TableCell.Of((double?)(29-i)))).ToArray()) with{PageSize=10,SortBy=0};
+    var spec=TSpec([new TableColumn("N"){Kind=TableColumnKind.Number}],Enumerable.Range(0,30).Select(i=>TRow(TableCell.Of((double?)(29-i)))).ToArray()) with{PageSize=10,SortBy=0};
     Check(BodyHeads(TableHtml.Render(spec,1)).SequenceEqual(Enumerable.Range(10,10).Select(i=>i.ToString())),"page 1 holds the sorted rows 11 to 20: "+string.Join(",",BodyHeads(TableHtml.Render(spec,1))));
     Check(BodyHeads(TableHtml.Render(spec,2)).SequenceEqual(Enumerable.Range(20,10).Select(i=>i.ToString())),"page 2");
     var down=spec with{SortDescending=true};
     Check(BodyHeads(TableHtml.Render(down,0))[0]=="29"&&BodyHeads(TableHtml.Render(down,1))[0]=="19","descending pages");
-    var scrambled=TSpec([new TableColumn("N"){Kind=ColumnKind.Number}],new[]{7,3,25,12,0,19,28,5,14,22,1,9,16,27,2,11,24,8,20,4,13,26,6,17,10,23,15,29,18,21}.Select(i=>TRow(TableCell.Of((double?)i))).ToArray()) with{PageSize=10,SortBy=0};
+    var scrambled=TSpec([new TableColumn("N"){Kind=TableColumnKind.Number}],new[]{7,3,25,12,0,19,28,5,14,22,1,9,16,27,2,11,24,8,20,4,13,26,6,17,10,23,15,29,18,21}.Select(i=>TRow(TableCell.Of((double?)i))).ToArray()) with{PageSize=10,SortBy=0};
     Check(BodyHeads(TableHtml.Render(scrambled,1)).SequenceEqual(Enumerable.Range(10,10).Select(i=>i.ToString())),"scrambled data, page 1");
     Check(BodyHeads(TableHtml.Render(scrambled,1,0,true,false))[0]=="19","an explicit sort overrides the spec's");
     Check(BodyHeads(TableHtml.Render(scrambled with{SortBy=null},1)).SequenceEqual(["1","9","16","27","2","11","24","8","20","4"]),"with no sort the spec's order is kept");
@@ -11930,7 +11930,7 @@ Test("0.49.0: an empty table writes No rows in place of a range, and an unpaged 
     Check(!unpaged.Contains("<div class='lumen-datatable-pages'")&&!unpaged.Contains("No rows")&&XElement.Parse(unpaged)!=null,"an unpaged empty table is a header only");
 });
 Test("0.49.0: dates, links, notes and numbers are written in their format",()=>{
-    var spec=TSpec([new TableColumn("Day"){Kind=ColumnKind.Date},new TableColumn("When"){Kind=ColumnKind.Date,DateFormat="yyyy-MM-dd"},new TableColumn("Time"){Kind=ColumnKind.Number,Format=ValueFormat.Duration},new TableColumn("Km"){Kind=ColumnKind.Number,Unit=" km"}],
+    var spec=TSpec([new TableColumn("Day"){Kind=TableColumnKind.Date},new TableColumn("When"){Kind=TableColumnKind.Date,DateFormat="yyyy-MM-dd"},new TableColumn("Time"){Kind=TableColumnKind.Number,Format=ValueFormat.Duration},new TableColumn("Km"){Kind=TableColumnKind.Number,Unit=" km"}],
         [TRow(new TableCell{Date=new DateOnly(2026,3,4),Href="/rides/1",Note="Wet"},new TableCell{Date=new DateOnly(2026,3,4)},new TableCell{Number=65},new TableCell{Number=12.5,Href="mailto:a@b.test"}),TRow(new TableCell(),new TableCell(),new TableCell{Href="/x"},new TableCell())]);
     var html=TableHtml.Render(spec);
     Check(html.Contains("<th scope='row' class='lumen-datatable-left'><a href='/rides/1'>4 Mar 2026</a><span class='lumen-datatable-note'>Wet</span></th>"),"link wraps the main text, note under it");
@@ -11972,7 +11972,7 @@ Test("0.49.0: the caption is visible, the paging group is named by it, and aria-
     Check(html.Contains("button[aria-disabled='true']{color:var(--lumen-muted);cursor:default}")&&html.Contains("--lumen-muted:"),"muted via the Readable custom property");
 });
 Test("0.49.0: a bar column's footer is its number as text, with no bar",()=>{
-    var spec=TSpec([new TableColumn("Pts"){Kind=ColumnKind.Bar}],[TRow(new TableCell{Number=-5}),TRow(new TableCell{Number=10})]) with{Footer=[new TableCell{Number=5}]};
+    var spec=TSpec([new TableColumn("Pts"){Kind=TableColumnKind.Bar}],[TRow(new TableCell{Number=-5}),TRow(new TableCell{Number=10})]) with{Footer=[new TableCell{Number=5}]};
     var foot=Els(XElement.Parse(TableHtml.Render(spec)),"tfoot").Single();
     Check(foot.Value=="5"&&!Els(foot,"span").Any(),"footer: "+foot);
     Check(Els(Els(XElement.Parse(TableHtml.Render(spec)),"tbody").Single(),"span").Any(s=>s.Attribute("class")?.Value=="lumen-datatable-bar"),"body bars remain");
@@ -12024,23 +12024,23 @@ Test("0.49.0: LumenTable sorts in the column's natural direction, reverses, and 
     var back=OperateTable(spec,async table=>{await table.Sort(1);await table.Sort(1);});
     Check(back.Contains(">Sorted by Name, Z to A</span>"),"Z to A");
     TableSpec One(TableColumn column,params TableCell[] cells)=>spec with{Columns=[column],Rows=cells.Select(c=>TRow(c)).ToArray()};
-    var highest=OperateTable(One(new TableColumn("Score"){Kind=ColumnKind.Number,Better=Better.Higher},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>await table.Sort(0));
+    var highest=OperateTable(One(new TableColumn("Score"){Kind=TableColumnKind.Number,Better=Better.Higher},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>await table.Sort(0));
     Check(highest.Contains(">Sorted by Score, highest first</span>")&&TableHeads(highest)=="descending","highest first");
-    var lowest=OperateTable(One(new TableColumn("Score"){Kind=ColumnKind.Number,Better=Better.Higher},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>{await table.Sort(0);await table.Sort(0);});
+    var lowest=OperateTable(One(new TableColumn("Score"){Kind=TableColumnKind.Number,Better=Better.Higher},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>{await table.Sort(0);await table.Sort(0);});
     Check(lowest.Contains(">Sorted by Score, lowest first</span>"),"lowest first");
-    var best=OperateTable(One(new TableColumn("Score"){Kind=ColumnKind.Number,Better=Better.Lower},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>await table.Sort(0));
+    var best=OperateTable(One(new TableColumn("Score"){Kind=TableColumnKind.Number,Better=Better.Lower},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>await table.Sort(0));
     Check(best.Contains(">Sorted by Score, best first</span>"),"best first");
-    var worst=OperateTable(One(new TableColumn("Score"){Kind=ColumnKind.Number,Better=Better.Lower},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>{await table.Sort(0);await table.Sort(0);});
+    var worst=OperateTable(One(new TableColumn("Score"){Kind=TableColumnKind.Number,Better=Better.Lower},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>{await table.Sort(0);await table.Sort(0);});
     Check(worst.Contains(">Sorted by Score, worst first</span>"),"worst first");
-    var days=One(new TableColumn("Day"){Kind=ColumnKind.Date},TableCell.Of((DateOnly?)new DateOnly(2026,1,2)),TableCell.Of((DateOnly?)new DateOnly(2026,1,1)));
+    var days=One(new TableColumn("Day"){Kind=TableColumnKind.Date},TableCell.Of((DateOnly?)new DateOnly(2026,1,2)),TableCell.Of((DateOnly?)new DateOnly(2026,1,1)));
     Check(OperateTable(days,async table=>await table.Sort(0)).Contains(">Sorted by Day, oldest first</span>")&&OperateTable(days,async table=>{await table.Sort(0);await table.Sort(0);}).Contains(">Sorted by Day, newest first</span>"),"dates");
-    var plain=OperateTable(One(new TableColumn("N"){Kind=ColumnKind.Number},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>await table.Sort(0));
+    var plain=OperateTable(One(new TableColumn("N"){Kind=TableColumnKind.Number},TableCell.Of(2.0),TableCell.Of(1.0)),async table=>await table.Sort(0));
     Check(plain.Contains(">Sorted by N, lowest first</span>"),"plain number");
     var dead=OperateTable(spec,async table=>{await table.Sort(4);await table.Sort(9);await table.Sort(-1);});
     Check(TableHeads(dead)=="-,-,-,-,-"&&dead.Contains("<span class=\"lumen-status\" role=\"status\"></span>"),"a sparkline or unknown column is ignored: "+TableHeads(dead));
 });
 Test("0.49.0: LumenTable pages, ignores a dead page, returns a sort to the page the table opens on, and StartAtEnd opens on rows 376-400",()=>{
-    var log=new TableSpec([new TableColumn("N"){Kind=ColumnKind.Number}],Enumerable.Range(0,400).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()){Caption="Log",PageSize=25,StartAtEnd=true};
+    var log=new TableSpec([new TableColumn("N"){Kind=TableColumnKind.Number}],Enumerable.Range(0,400).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()){Caption="Log",PageSize=25,StartAtEnd=true};
     var first=OperateTable(log,_=>Task.CompletedTask);
     Check(first.Contains("Rows 376–400 of 400")&&first.Contains("<span class=\"lumen-status\" role=\"status\"></span>"),"opens on the last page, status not set by the first render");
     var paged=OperateTable(log,async table=>await table.Page(1,"Next page"));
@@ -12051,11 +12051,11 @@ Test("0.49.0: LumenTable pages, ignores a dead page, returns a sort to the page 
     Check(sorted.Contains("Rows 376–400 of 400")&&sorted.Contains("role=\"status\">Sorted by N, "),"a sort returns StartAtEnd to its last page");
     var front=OperateTable(log with{StartAtEnd=false},async table=>{await table.Page(3,"Next page");await table.Sort(0);});
     Check(front.Contains("Rows 1–25 of 400"),"a sort returns to the first page");
-    var empty=OperateTable(new TableSpec([new TableColumn("N"){Kind=ColumnKind.Number}],[]){Caption="Empty",PageSize=25},_=>Task.CompletedTask);
+    var empty=OperateTable(new TableSpec([new TableColumn("N"){Kind=TableColumnKind.Number}],[]){Caption="Empty",PageSize=25},_=>Task.CompletedTask);
     Check(empty.Contains("No rows")&&!empty.Contains("Rows 1–0"),"empty");
 });
 Test("0.49.0: LumenTable records the pressed control for the focus it restores",()=>{
-    var log=new TableSpec([new TableColumn("N"){Kind=ColumnKind.Number}],Enumerable.Range(0,100).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()){Caption="Log",PageSize=25};
+    var log=new TableSpec([new TableColumn("N"){Kind=TableColumnKind.Number}],Enumerable.Range(0,100).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()){Caption="Log",PageSize=25};
     var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
     string? Pressed(LumenTable t)=>(string?)typeof(LumenTable).GetField("refocus",flags)!.GetValue(t);
     var seen=new List<string?>();
@@ -12086,6 +12086,59 @@ Test("0.49.0: LumenTable and TableRequest are documented",()=>{
     var blazor=File.ReadAllText(Path.ChangeExtension(typeof(LumenTable).Assembly.Location,".xml"));
     Check(blazor.Contains("T:Lumen.Charts.Blazor.LumenTable")&&blazor.Contains("M:Lumen.Charts.Blazor.LumenTable.Sort(System.Int32)")&&blazor.Contains("M:Lumen.Charts.Blazor.LumenTable.Page(System.Int32,System.String)"),"component docs");
     Check(File.ReadAllText(Path.ChangeExtension(typeof(TableHtml).Assembly.Location,".xml")).Contains("T:Lumen.Charts.TableRequest"),"request docs");
+});
+Test("0.49.0: a page change reuses the built view: it reads only the rows it writes, and the output is the same",()=>{
+    var counted=new CountingRows(Enumerable.Range(0,4000).Select(i=>TRow(TableCell.Of((double?)i))).ToArray());
+    var spec=TSpec([new TableColumn("N"){Kind=TableColumnKind.Number}],counted) with{PageSize=50};
+    var view=TableView.Of(spec,null,false);
+    var built=counted.Reads;
+    Check(built>=4000,$"building the view read {built} rows, not all 4000");
+    counted.Reads=0;
+    var htmlA=TableHtml.Render(spec,view,7,true);
+    var htmlB=TableHtml.Render(spec,view,8,true);
+    Check(counted.Reads<=2*50+2,$"two page changes read {counted.Reads} rows; they should read only the 100 they write");
+    counted.Reads=0;
+    TableHtml.Render(spec,7);
+    Check(counted.Reads>=4000,$"the public Render read only {counted.Reads} rows: it must still validate and sort");
+    var plain=TSpec([new TableColumn("N"){Kind=TableColumnKind.Number}],counted.Rows) with{PageSize=50};
+    Check(htmlA==TableHtml.Render(plain,7,null,false,true)&&htmlB==TableHtml.Render(plain,8,null,false,true),"the view overload writes different markup");
+    Reject(()=>TableHtml.Render(spec,view,80,true));
+});
+Test("0.49.0: LumenTable builds its view once for a Spec instance and once for each sort, never for a page or a re-render",()=>{
+    var log=new TableSpec([new TableColumn("N"){Kind=TableColumnKind.Number}],Enumerable.Range(0,100).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()){Caption="Log",PageSize=25};
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    object? View(LumenTable t)=>typeof(LumenTable).GetField("view",flags)!.GetValue(t);
+    var views=new List<object?>();
+    OperateTable(log,async table=>{
+        views.Add(View(table));
+        await table.Page(1,"Next page");views.Add(View(table));
+        await table.Page(2,"Next page");views.Add(View(table));
+        await table.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",log}}));views.Add(View(table));
+        await table.Sort(0);views.Add(View(table));
+        await table.Page(1,"Next page");views.Add(View(table));
+    });
+    Check(views[0] is not null&&ReferenceEquals(views[0],views[1])&&ReferenceEquals(views[0],views[2])&&ReferenceEquals(views[0],views[3]),"a page click or a re-render with the same Spec built a new view");
+    Check(!ReferenceEquals(views[3],views[4])&&ReferenceEquals(views[4],views[5]),"a sort should build one new view and the page after it none");
+});
+Test("0.49.0: the paging control must be one of the four labels, and any other text gives no refocus and no failure",()=>{
+    foreach(var label in new[]{"First page","Previous page","Next page","Last page"})
+        Check(TableHtml.PagingSelector(label)==$"[data-lumen-page][aria-label=\"{label}\"]",label);
+    foreach(var bad in new[]{"x\"] , body","Next page\"]","next page","",null,"First page "})
+        Check(TableHtml.PagingSelector(bad) is null,"accepted "+bad);
+    var log=new TableSpec([new TableColumn("N"){Kind=TableColumnKind.Number}],Enumerable.Range(0,100).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()){Caption="Log",PageSize=25};
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    string? Pressed(LumenTable t)=>(string?)typeof(LumenTable).GetField("refocus",flags)!.GetValue(t);
+    string? pressed=null;
+    var html=OperateTable(log,async table=>{await table.Page(2,"Next page\"] , [x");pressed=Pressed(table);});
+    Check(pressed is null,"a quote in the control reached the selector");
+    Check(html.Contains("Rows 51&#x2013;75 of 100"),"the page change still applies with a bad control");
+});
+Test("0.49.0: the CSV file is named for the caption: lower case, runs of other characters one hyphen, table when nothing is left",()=>{
+    Check(TableExport.FileName("Results")=="results.csv","Results");
+    Check(TableExport.FileName("Training log")=="training-log.csv","two words");
+    Check(TableExport.FileName("  Rider's  points: 2026 (final)!  ")=="rider-s-points-2026-final.csv","punctuation: "+TableExport.FileName("  Rider's  points: 2026 (final)!  "));
+    Check(TableExport.FileName("Café")=="caf.csv","an accented letter is dropped: "+TableExport.FileName("Café"));
+    Check(TableExport.FileName("★ — ★")=="table.csv"&&TableExport.FileName("???")=="table.csv","all symbols");
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
@@ -12128,4 +12181,13 @@ sealed class NoJs:IJSRuntime
 {
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier,object?[]? args)=>throw new InvalidOperationException("Prerender must not invoke JS.");
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier,CancellationToken token,object?[]? args)=>InvokeAsync<TValue>(identifier,args);
+}
+sealed class CountingRows(IReadOnlyList<TableRow> inner):IReadOnlyList<TableRow>
+{
+    public IReadOnlyList<TableRow> Rows=>inner;
+    public int Reads;
+    public int Count=>inner.Count;
+    public TableRow this[int index]{get{Reads++;return inner[index];}}
+    public IEnumerator<TableRow> GetEnumerator(){foreach(var row in inner){Reads++;yield return row;}}
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()=>GetEnumerator();
 }

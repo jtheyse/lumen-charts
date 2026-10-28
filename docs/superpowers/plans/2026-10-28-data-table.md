@@ -49,7 +49,7 @@
 ### Task 1: The table model, validation, sorting, paging and CSV
 
 **Files:**
-- Create: `src/Lumen.Charts/Table.cs`, holding the public `ColumnKind`, `ColumnAlign`, `TableColumn`, `TableCell`, `TableRow` and `TableSpec`.
+- Create: `src/Lumen.Charts/Table.cs`, holding the public `TableColumnKind`, `TableColumnAlign`, `TableColumn`, `TableCell`, `TableRow` and `TableSpec`.
 - Create: `src/Lumen.Charts/TableValidation.cs`, holding `internal static class TableValidation`.
 - Create: `src/Lumen.Charts/TableView.cs`, holding `internal sealed class TableView`.
 - Create: `src/Lumen.Charts/TableExport.cs`, holding the public `TableExport.Csv`.
@@ -57,12 +57,12 @@
 
 **Interfaces:**
 - Produces:
-  - `public enum ColumnKind { Text, Number, Date, Change, Bar, Sparkline }`.
-  - `public enum ColumnAlign { Auto, Left, Right, Center }`. `Auto` means right for `Number`, `Change` and `Bar`, and left for the rest.
+  - `public enum TableColumnKind { Text, Number, Date, Change, Bar, Sparkline }`.
+  - `public enum TableColumnAlign { Auto, Left, Right, Center }`. `Auto` means right for `Number`, `Change` and `Bar`, and left for the rest.
   - `public sealed record TableColumn(string Header)`, with `init` properties:
-    - `ColumnKind Kind` (default `Text`);
+    - `TableColumnKind Kind` (default `Text`);
     - `ValueFormat Format` (default `Number`), `string? Unit` and `string? DateFormat`;
-    - `ColumnAlign Align`;
+    - `TableColumnAlign Align`;
     - `bool Sortable = true`;
     - `Better Better` (default `Neither`);
     - `double? BarMax`;

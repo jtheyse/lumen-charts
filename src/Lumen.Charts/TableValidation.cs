@@ -45,7 +45,7 @@ internal static class TableValidation
         if (sortBy is not { } index) return;
         if (index < 0 || index >= spec.Columns.Count) throw new ArgumentException($"SortBy {index} is not a column; the columns are 0 to {spec.Columns.Count - 1}.");
         var column = spec.Columns[index];
-        if (!column.Sortable || column.Kind == ColumnKind.Sparkline)
+        if (!column.Sortable || column.Kind == TableColumnKind.Sparkline)
             throw new ArgumentException($"Column {index + 1} ({column.Header}) cannot be sorted: it is not sortable or is a sparkline.");
     }
 
@@ -81,13 +81,13 @@ internal static class TableValidation
     {
         if (cell is null) throw new ArgumentException(at + "a cell cannot be null; use an empty cell for a missing value.");
         var kind = column.Kind;
-        var text = kind == ColumnKind.Text || footer;
-        var number = kind is ColumnKind.Number or ColumnKind.Bar or ColumnKind.Change;
+        var text = kind == TableColumnKind.Text || footer;
+        var number = kind is TableColumnKind.Number or TableColumnKind.Bar or TableColumnKind.Change;
         if (cell.Text is not null && !text) throw new ArgumentException(at + $"a {kind} column does not take Text.");
         if (cell.Number is not null && !number) throw new ArgumentException(at + $"a {kind} column does not take Number.");
-        if (cell.Previous is not null && kind != ColumnKind.Change) throw new ArgumentException(at + $"a {kind} column does not take Previous.");
-        if (cell.Date is not null && kind != ColumnKind.Date) throw new ArgumentException(at + $"a {kind} column does not take Date.");
-        if (cell.Trend is not null && kind != ColumnKind.Sparkline) throw new ArgumentException(at + $"a {kind} column does not take Trend.");
+        if (cell.Previous is not null && kind != TableColumnKind.Change) throw new ArgumentException(at + $"a {kind} column does not take Previous.");
+        if (cell.Date is not null && kind != TableColumnKind.Date) throw new ArgumentException(at + $"a {kind} column does not take Date.");
+        if (cell.Trend is not null && kind != TableColumnKind.Sparkline) throw new ArgumentException(at + $"a {kind} column does not take Trend.");
 
         if (cell.Text is { Length: > 200 }) throw new ArgumentException(at + "text may be at most 200 characters.");
         if (cell.Note is { Length: > 80 }) throw new ArgumentException(at + "a note may be at most 80 characters.");

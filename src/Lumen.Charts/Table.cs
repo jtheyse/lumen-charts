@@ -1,7 +1,7 @@
 namespace Lumen.Charts;
 
 /// <summary>What a table column holds, which decides which field of each cell is read and how it is written and sorted.</summary>
-public enum ColumnKind
+public enum TableColumnKind
 {
     /// <summary>Words, read from <see cref="TableCell.Text"/>. This is the default.</summary>
     Text,
@@ -18,9 +18,9 @@ public enum ColumnKind
 }
 
 /// <summary>How a column's cells line up.</summary>
-public enum ColumnAlign
+public enum TableColumnAlign
 {
-    /// <summary>Right for <see cref="ColumnKind.Number"/>, <see cref="ColumnKind.Change"/> and <see cref="ColumnKind.Bar"/>, left for the rest. This is the default.</summary>
+    /// <summary>Right for <see cref="TableColumnKind.Number"/>, <see cref="TableColumnKind.Change"/> and <see cref="TableColumnKind.Bar"/>, left for the rest. This is the default.</summary>
     Auto,
     /// <summary>Against the left edge.</summary>
     Left,
@@ -35,15 +35,15 @@ public enum ColumnAlign
 public sealed record TableColumn(string Header)
 {
     /// <summary>What the column holds. The default is text.</summary>
-    public ColumnKind Kind { get; init; } = ColumnKind.Text;
+    public TableColumnKind Kind { get; init; } = TableColumnKind.Text;
     /// <summary>How numbers, and the two ends of a change, are written. The default is plain numbers.</summary>
     public ValueFormat Format { get; init; } = ValueFormat.Number;
     /// <summary>A unit written after each number, as an axis writes it.</summary>
     public string? Unit { get; init; }
-    /// <summary>A .NET date format for a <see cref="ColumnKind.Date"/> column, at most 40 characters. The default is <c>d MMM yyyy</c>.</summary>
+    /// <summary>A .NET date format for a <see cref="TableColumnKind.Date"/> column, at most 40 characters. The default is <c>d MMM yyyy</c>.</summary>
     public string? DateFormat { get; init; }
     /// <summary>How the cells line up. The default is automatic.</summary>
-    public ColumnAlign Align { get; init; }
+    public TableColumnAlign Align { get; init; }
     /// <summary>Whether the reader may sort by this column. The default is true; a sparkline column is never sorted.</summary>
     public bool Sortable { get; init; } = true;
     /// <summary>Which direction of change is an improvement; it also decides which way a first sort of the column runs.</summary>
@@ -91,7 +91,7 @@ public sealed record TableSpec(IReadOnlyList<TableColumn> Columns, IReadOnlyList
 {
     /// <summary>What the table is, 1 to 120 characters. It names the table and its scrolling region.</summary>
     public required string Caption { get; init; }
-    /// <summary>A longer description for readers of assistive technology, at most 300 characters.</summary>
+    /// <summary>A paragraph shown above the table, at most 300 characters.</summary>
     public string? Description { get; init; }
     /// <summary>The index of the column the table opens sorted by; the spec's row order is kept when it is null.</summary>
     public int? SortBy { get; init; }
@@ -108,3 +108,8 @@ public sealed record TableSpec(IReadOnlyList<TableColumn> Columns, IReadOnlyList
     /// <summary>The look of the table; the chart default when null.</summary>
     public ChartStyle? Style { get; init; }
 }
+
+/// <summary>The body of <c>POST table/html</c>: a table and the page to write (the page it opens on when null).</summary>
+/// <param name="Spec">The table.</param>
+/// <param name="Page">The zero-based page; null for the page the table opens on.</param>
+public sealed record TableRequest(TableSpec Spec, int? Page = null);

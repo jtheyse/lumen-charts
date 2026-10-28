@@ -974,13 +974,13 @@ var resultsTableRows = resultsEntries.Select((entry, i) => new TableRow(
 ])).ToArray();
 var resultsTable = new TableSpec(
 [
-    new("Place") { Kind = ColumnKind.Number },
+    new("Place") { Kind = TableColumnKind.Number },
     new("Rider") { RowHeader = true },
     new("Club"),
-    new("Time") { Kind = ColumnKind.Number, Format = ValueFormat.Duration, Better = Better.Lower },   // 1:24:00; lower is better, so a first sort runs fastest first
-    new("Change") { Kind = ColumnKind.Change, Better = Better.Lower },                               // ▲ 2 · better, the verdict also said to a screen reader
-    new("Points") { Kind = ColumnKind.Bar, Better = Better.Higher },                                 // the number in words and a bar; a first sort runs highest first
-    new("Rounds") { Kind = ColumnKind.Sparkline }                                                    // 96 by 24 with a summary in words; never sorted
+    new("Time") { Kind = TableColumnKind.Number, Format = ValueFormat.Duration, Better = Better.Lower },   // 1:24:00; lower is better, so a first sort runs fastest first
+    new("Change") { Kind = TableColumnKind.Change, Better = Better.Lower },                               // ▼ 2 · better, the verdict also said to a screen reader
+    new("Points") { Kind = TableColumnKind.Bar, Better = Better.Higher },                                 // the number in words and a bar; a first sort runs highest first
+    new("Rounds") { Kind = TableColumnKind.Sparkline }                                                    // 96 by 24 with a summary in words; never sorted
 ], resultsTableRows)
 {
     Caption = "Results",
@@ -999,9 +999,9 @@ var trainingLogRows = Enumerable.Range(0, 120).Select(i => new TableRow(
 ])).ToArray();
 var trainingLogTable = new TableSpec(
 [
-    new("Date") { Kind = ColumnKind.Date, RowHeader = true },                                        // d MMM yyyy unless DateFormat says otherwise
+    new("Date") { Kind = TableColumnKind.Date, RowHeader = true },                                        // d MMM yyyy unless DateFormat says otherwise
     new("Session"),
-    new("Distance") { Kind = ColumnKind.Number, Unit = "km" }
+    new("Distance") { Kind = TableColumnKind.Number, Unit = "km" }
 ], trainingLogRows)
 {
     Caption = "Training log",

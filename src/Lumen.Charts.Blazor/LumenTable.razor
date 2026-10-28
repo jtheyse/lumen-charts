@@ -10,8 +10,8 @@
     /// <summary>The table to draw: its columns, rows, sort and paging; see <see cref="TableSpec"/>. A new instance returns the
     /// table to the spec's own sort and opening page; the same instance keeps the reader's sort and page. A style set on it wins over a cascaded one.</summary>
     [Parameter, EditorRequired] public TableSpec Spec { get; set; } = new([], []) { Caption = "Table" };
-    /// <summary>Shows an Export CSV button under the table. It saves, in a file named for the caption (Results is results.csv), <see cref="TableExport.Csv"/> of the spec, in the spec's own
-    /// row order and not the reader's current sort, as the <c>POST table/csv</c> endpoint writes it. False by default.</summary>
+    /// <summary>Shows an Export CSV button under the table. It saves, in a file named for the caption (Results is results.csv; every run of characters outside a to z and 0 to 9, accented letters too, becomes one hyphen, and an empty result is table), <see cref="TableExport.Csv"/> of the spec, in the spec's own
+    /// sort (<see cref="TableSpec.SortBy"/> and <see cref="TableSpec.SortDescending"/>) and not the reader's current one, as the <c>POST table/csv</c> endpoint writes it. False by default.</summary>
     [Parameter] public bool ShowExport { get; set; }
     /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style in <see cref="Spec"/> wins; without either, <see cref="ChartStyle.Light"/> is used.</summary>
     [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }
@@ -43,13 +43,14 @@
         Draw();
     }
 
+    // Writes the current page from the view built when the spec arrived or the sort changed; nothing is validated or sorted here.
     private void Draw() =>
-        html = TableHtml.Render(Spec with { Style = Spec.Style ?? CascadingStyle ?? ChartStyle.Light }, page, sortBy, descending, true);
+        html = TableHtml.Render(Spec with { Style = Spec.Style ?? CascadingStyle ?? ChartStyle.Light }, view, page, true);
 
     private static string Words(TableColumn column, bool descending) => column.Kind switch
     {
-        ColumnKind.Text => descending ? "Z to A" : "A to Z",
-        ColumnKind.Date => descending ? "newest first" : "oldest first",
+        TableColumnKind.Text => descending ? "Z to A" : "A to Z",
+        TableColumnKind.Date => descending ? "newest first" : "oldest first",
         _ when column.Better == Better.Higher => descending ? "highest first" : "lowest first",
         _ when column.Better == Better.Lower && column.Format == ValueFormat.Duration => descending ? "slowest first" : "fastest first",
         _ when column.Better == Better.Lower => descending ? "worst first" : "best first",
@@ -64,7 +65,7 @@
     {
         if (column < 0 || column >= Spec.Columns.Count) return;
         var def = Spec.Columns[column];
-        if (!def.Sortable || def.Kind == ColumnKind.Sparkline) return;
+        if (!def.Sortable || def.Kind == TableColumnKind.Sparkline) return;
         descending = sortBy == column ? !descending : TableView.NaturalDescending(def);
         sortBy = column;
         view = TableView.Of(Spec, sortBy, descending);
@@ -77,31 +78,25 @@
 
     /// <summary>Called by the component's script when the reader presses a paging button. A page that is the current page or
     /// lies outside the table does nothing. The status line gives the rows now shown. <paramref name="control"/> is the pressed
-    /// button's <c>aria-label</c> (First page, Previous page, Next page or Last page), which keeps keyboard focus after the redraw.</summary>
+    /// button's <c>aria-label</c>, which keeps keyboard focus after the redraw; only First page, Previous page, Next page and Last page are
+    /// accepted, and any other text gives no refocus.</summary>
     [JSInvokable] public Task Page(int page, string control) => InvokeAsync(() =>
     {
         if (page == this.page || page < 0 || page >= view.Pages) return;
         this.page = page;
         var (first, last) = view.RowsOn(page);
         status = $"Rows {(first + 1).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)}–{(last + 1).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} of {view.Order.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)}";
-        refocus = $"[data-lumen-page][aria-label=\"{control}\"]";
+        refocus = TableHtml.PagingSelector(control);
         Draw();
         StateHasChanged();
     });
-
-    // The caption in lower case with its runs of other characters made one hyphen: "Training log" is training-log.csv.
-    private static string FileName(string caption)
-    {
-        var slug = System.Text.RegularExpressions.Regex.Replace(caption.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
-        return (slug.Length == 0 ? "table" : slug) + ".csv";
-    }
 
     private async Task Export()
     {
         if (module is null) return;
         try
         {
-            var file = FileName(Spec.Caption);
+            var file = TableExport.FileName(Spec.Caption);
             await module.InvokeVoidAsync("download", TableExport.Csv(Spec), file, "text/csv");
             status = "Exported " + file;
         }

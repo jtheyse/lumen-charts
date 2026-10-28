@@ -497,13 +497,13 @@ public static class DemoData
         }).ToArray();
         return new(
         [
-            new("Place") { Kind = Lumen.Charts.ColumnKind.Number },
+            new("Place") { Kind = Lumen.Charts.TableColumnKind.Number },
             new("Name") { RowHeader = true },
             new("Club"),
-            new("Time") { Kind = Lumen.Charts.ColumnKind.Number, Format = Lumen.Charts.ValueFormat.Duration, Better = Lumen.Charts.Better.Lower },
-            new("Change") { Kind = Lumen.Charts.ColumnKind.Change, Better = Lumen.Charts.Better.Lower },
-            new("Points") { Kind = Lumen.Charts.ColumnKind.Bar },
-            new("Season") { Kind = Lumen.Charts.ColumnKind.Sparkline }
+            new("Time") { Kind = Lumen.Charts.TableColumnKind.Number, Format = Lumen.Charts.ValueFormat.Duration, Better = Lumen.Charts.Better.Lower },
+            new("Change") { Kind = Lumen.Charts.TableColumnKind.Change, Better = Lumen.Charts.Better.Lower },
+            new("Points") { Kind = Lumen.Charts.TableColumnKind.Bar },
+            new("Season") { Kind = Lumen.Charts.TableColumnKind.Sparkline }
         ], rows)
         {
             Caption = "Results",
@@ -530,11 +530,11 @@ public static class DemoData
         double Total(int cell) => rows.Sum(r => r.Cells[cell].Number ?? 0);
         return new(
         [
-            new("Date") { Kind = Lumen.Charts.ColumnKind.Date, RowHeader = true },
+            new("Date") { Kind = Lumen.Charts.TableColumnKind.Date, RowHeader = true },
             new("Session"),
-            new("Distance") { Kind = Lumen.Charts.ColumnKind.Number, Unit = "km" },
-            new("Time") { Kind = Lumen.Charts.ColumnKind.Number, Format = Lumen.Charts.ValueFormat.Duration },
-            new("Load") { Kind = Lumen.Charts.ColumnKind.Bar }
+            new("Distance") { Kind = Lumen.Charts.TableColumnKind.Number, Unit = "km" },
+            new("Time") { Kind = Lumen.Charts.TableColumnKind.Number, Format = Lumen.Charts.ValueFormat.Duration },
+            new("Load") { Kind = Lumen.Charts.TableColumnKind.Bar }
         ], rows)
         {
             Caption = "Training log",

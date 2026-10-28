@@ -633,4 +633,9 @@ Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).C
 $bad='{"caption":"Links","columns":[{"header":"Name"}],"rows":[{"cells":[{"text":"Al","href":"javascript:alert(1)"}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/table/html" -Method Post -ContentType application/json -Body ('{"spec":'+$bad+'}') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid table')) "A javascript: link in a table is refused with 400 titled Invalid table ($($r.StatusCode))"
+$r=Invoke-WebRequest "$BaseUrl/api/charts/table/html" -Method Post -ContentType application/json -Body '{"spec":null}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) "A table request with a null spec is refused with 400 ($($r.StatusCode))"
+$nocaption='{"columns":[{"header":"Name"}],"rows":[{"cells":[{"text":"Al"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/table/html" -Method Post -ContentType application/json -Body ('{"spec":'+$nocaption+'}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) "A table with no caption is refused with 400 ($($r.StatusCode))"
 Write-Output "$checks HTTP checks passed."

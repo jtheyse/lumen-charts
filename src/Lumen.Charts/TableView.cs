@@ -6,15 +6,21 @@ internal sealed class TableView
     private readonly int _rows;
     private readonly int? _pageSize;
 
-    private TableView(IReadOnlyList<int> order, int? pageSize, bool startAtEnd)
+    private TableView(IReadOnlyList<int> order, int? pageSize, bool startAtEnd, int? sortBy, bool descending)
     {
         Order = order;
+        SortBy = sortBy;
+        Descending = descending;
         _rows = order.Count;
         _pageSize = pageSize;
         Pages = pageSize is { } size ? Math.Max(1, (_rows + size - 1) / size) : 1;
         DefaultPage = startAtEnd ? Pages - 1 : 0;
     }
 
+    /// <summary>The column the rows are sorted by; null when the spec's row order is kept.</summary>
+    internal int? SortBy { get; }
+    /// <summary>Whether the sort runs from the largest down.</summary>
+    internal bool Descending { get; }
     /// <summary>Row indexes in sorted order.</summary>
     internal IReadOnlyList<int> Order { get; }
     /// <summary>The number of pages; 1 without a page size.</summary>
@@ -23,7 +29,7 @@ internal sealed class TableView
     internal int DefaultPage { get; }
 
     /// <summary>Whether a column's first sort runs from the largest down: when a higher value is better in a number, bar or change column. Text and date columns start ascending.</summary>
-    internal static bool NaturalDescending(TableColumn c) => c.Better == Better.Higher && c.Kind is ColumnKind.Number or ColumnKind.Bar or ColumnKind.Change;
+    internal static bool NaturalDescending(TableColumn c) => c.Better == Better.Higher && c.Kind is TableColumnKind.Number or TableColumnKind.Bar or TableColumnKind.Change;
 
     /// <summary>Validates the spec, then sorts by <paramref name="sortBy"/> and <paramref name="descending"/>; with no <paramref name="sortBy"/>
     /// the spec's own <see cref="TableSpec.SortBy"/> and <see cref="TableSpec.SortDescending"/> apply, and with neither the spec's row order is kept.</summary>
@@ -48,7 +54,7 @@ internal sealed class TableView
                 return compare != 0 ? compare : a.CompareTo(b);
             });
         }
-        return new TableView(order, spec.PageSize, spec.StartAtEnd);
+        return new TableView(order, spec.PageSize, spec.StartAtEnd, sortBy, descending);
     }
 
     /// <summary>The first and last position of a page in <see cref="Order"/>, zero-based and inclusive.</summary>
@@ -59,12 +65,12 @@ internal sealed class TableView
         return (page * size, Math.Min(_rows, (page + 1) * size) - 1);
     }
 
-    private static IComparable? Key(TableCell cell, ColumnKind kind) => kind switch
+    private static IComparable? Key(TableCell cell, TableColumnKind kind) => kind switch
     {
-        ColumnKind.Text => cell.Text,
-        ColumnKind.Number or ColumnKind.Bar => cell.Number,
-        ColumnKind.Date => cell.Date,
-        ColumnKind.Change => cell.Number is { } n && cell.Previous is { } p ? n - p : null,
+        TableColumnKind.Text => cell.Text,
+        TableColumnKind.Number or TableColumnKind.Bar => cell.Number,
+        TableColumnKind.Date => cell.Date,
+        TableColumnKind.Change => cell.Number is { } n && cell.Previous is { } p ? n - p : null,
         _ => null
     };
 

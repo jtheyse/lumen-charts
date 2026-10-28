@@ -113,12 +113,14 @@ A row or grid of headline numbers: "Races 12", "Best finish 3rd ▲ 2 places · 
 
 A read-only table of rows with typed columns, sorting, paging, sticky headers and in-cell bars and sparklines: results, standings, a club's riders, a training log.
 
+*Naming note: 0.49.0 renamed the enums `ColumnKind` and `ColumnAlign` to `TableColumnKind` and `TableColumnAlign` before release, to keep them apart from other column types; the names below are the released ones.*
+
 **Core API.**
 
 - `TableColumn(string Header)`, with:
-  - `Kind`: `Text`, `Number`, `Date`, `Change`, `Bar` or `Sparkline`. Durations and places are `Number` with a format.
+  - `Kind` (the enum `TableColumnKind`): `Text`, `Number`, `Date`, `Change`, `Bar` or `Sparkline`. Durations and places are `Number` with a format.
   - `Format`, `Unit` and `DateFormat`.
-  - `Align` (automatic: numbers, changes and bars to the right, the rest to the left).
+  - `Align` (the enum `TableColumnAlign`; automatic: numbers, changes and bars to the right, the rest to the left).
   - `Sortable` (default true, false for sparklines).
   - `Better`, for `Change` columns and for sorting a column "best first".
   - `BarMax` (the bar column's scale end; default the largest value in the column).

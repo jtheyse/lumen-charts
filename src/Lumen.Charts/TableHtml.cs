@@ -19,8 +19,16 @@ public static class TableHtml
     internal static string Render(TableSpec spec, int? page, int? sortBy, bool descending, bool controls)
     {
         var view = TableView.Of(spec, sortBy, descending);
-        if (sortBy is null) { sortBy = spec.SortBy; descending = spec.SortDescending; }
-        var current = page ?? view.DefaultPage;
+        return Render(spec, view, page ?? view.DefaultPage, controls);
+    }
+
+    /// <summary>The fragment for one page of a table whose <paramref name="view"/> is already built and validated from <paramref name="spec"/>;
+    /// nothing is validated or sorted again, so a page click costs only the rows it writes.</summary>
+    internal static string Render(TableSpec spec, TableView view, int page, bool controls)
+    {
+        var sortBy = view.SortBy;
+        var descending = view.Descending;
+        var current = page;
         var (first, last) = view.RowsOn(current);
 
         var style = spec.Style ?? ChartStyle.Light;
@@ -37,7 +45,7 @@ public static class TableHtml
         for (var c = 0; c < spec.Columns.Count; c++) Header(sb, spec.Columns[c], c, sortBy, descending, controls, c == rowHeader);
         sb.Append("</tr></thead><tbody>");
 
-        var bars = spec.Columns.Select((col, c) => col.Kind == ColumnKind.Bar ? BarScale(spec, col, c) : default).ToArray();
+        var bars = spec.Columns.Select((col, c) => col.Kind == TableColumnKind.Bar ? BarScale(spec, col, c) : default).ToArray();
         // The rows of a page are the rows at its positions in the sorted order, never a slice of the spec's own order.
         for (var p = first; p <= last; p++)
         {
@@ -58,6 +66,13 @@ public static class TableHtml
         return sb.Append("</div>").ToString();
     }
 
+    private static readonly string[] PagingLabels = ["First page", "Previous page", "Next page", "Last page"];
+
+    /// <summary>The selector of the paging button the reader pressed, from its <c>aria-label</c>; null for anything but the four labels the
+    /// fragment writes, so a label from the page never reaches a selector.</summary>
+    internal static string? PagingSelector(string? control) =>
+        control is not null && Array.IndexOf(PagingLabels, control) >= 0 ? $"[data-lumen-page][aria-label=\"{control}\"]" : null;
+
     private static int RowHeaderColumn(TableSpec spec)
     {
         for (var c = 0; c < spec.Columns.Count; c++) if (spec.Columns[c].RowHeader) return c;
@@ -66,10 +81,10 @@ public static class TableHtml
 
     private static string Align(TableColumn column) => column.Align switch
     {
-        ColumnAlign.Left => "left",
-        ColumnAlign.Right => "right",
-        ColumnAlign.Center => "center",
-        _ => column.Kind is ColumnKind.Number or ColumnKind.Change or ColumnKind.Bar ? "right" : "left"
+        TableColumnAlign.Left => "left",
+        TableColumnAlign.Right => "right",
+        TableColumnAlign.Center => "center",
+        _ => column.Kind is TableColumnKind.Number or TableColumnKind.Change or TableColumnKind.Bar ? "right" : "left"
     };
 
     private static void Header(StringBuilder sb, TableColumn column, int index, int? sortBy, bool descending, bool controls, bool corner)
@@ -78,7 +93,7 @@ public static class TableHtml
         sb.Append("<th scope='col' class='lumen-datatable-").Append(Align(column)).Append(corner ? " lumen-datatable-corner" : "").Append('\'');
         if (sortBy == index) sb.Append(" aria-sort='").Append(descending ? "descending" : "ascending").Append('\'');
         sb.Append('>');
-        if (controls && column.Sortable && column.Kind != ColumnKind.Sparkline)
+        if (controls && column.Sortable && column.Kind != TableColumnKind.Sparkline)
             sb.Append("<button type='button' class='lumen-datatable-sort' data-lumen-sort='").Append(index.ToString(CultureInfo.InvariantCulture)).Append("'>")
               .Append(LumenHtml.E(column.Header)).Append("</button>");
         else sb.Append(LumenHtml.E(column.Header));
@@ -137,20 +152,20 @@ public static class TableHtml
         if (footer && cell.Text is not null) main.Append(LumenHtml.E(cell.Text));
         else switch (column.Kind)
         {
-            case ColumnKind.Text:
+            case TableColumnKind.Text:
                 main.Append(cell.Text is null ? MissingMarkup : LumenHtml.E(cell.Text));
                 break;
-            case ColumnKind.Number:
+            case TableColumnKind.Number:
                 main.Append(cell.Number is { } n ? LumenHtml.E(ChangeWords.Value(n, column.Format, column.Unit)) : MissingMarkup);
                 break;
-            case ColumnKind.Date:
+            case TableColumnKind.Date:
                 main.Append(cell.Date is { } d ? LumenHtml.E(d.ToString(column.DateFormat ?? "d MMM yyyy", CultureInfo.InvariantCulture)) : MissingMarkup);
                 break;
-            case ColumnKind.Change:
+            case TableColumnKind.Change:
                 if (cell.Number is { } now && cell.Previous is { } before) Change(main, column, now, before, style);
                 else main.Append(MissingMarkup);
                 break;
-            case ColumnKind.Bar:
+            case TableColumnKind.Bar:
                 if (cell.Number is { } v)
                 {
                     // A footer total is a number in words, with no bar drawn against the column's scale.
@@ -159,7 +174,7 @@ public static class TableHtml
                 }
                 else main.Append(MissingMarkup);
                 break;
-            case ColumnKind.Sparkline:
+            case TableColumnKind.Sparkline:
                 if (cell.Trend is { } trend)
                 {
                     var (svg, summary) = LumenHtml.Sparkline(trend, column.Header, column.Format, column.Unit, style, 96, 24);

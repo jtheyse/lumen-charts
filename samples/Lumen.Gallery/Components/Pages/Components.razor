@@ -36,14 +36,14 @@
         </section>
         <section class="sports-intro">
             <div class="eyebrow"><span></span> DATA TABLE</div>
-            <h1>Rows to read. <em>Columns to sort.</em></h1>
+            <h2>Rows to read. <em>Columns to sort.</em></h2>
             <p><code>LumenTable</code> writes a real HTML table: press a header to sort, page through long lists, and scroll sideways on a phone while the header row and the first column stay in view. Every arrow, bar and trend line is also written in words, and <code>ShowExport</code> adds a CSV of the rows.</p>
         </section>
         <section id="results" class="sports-section">
-            <div class="chart-card comp-card comp-table">@Branded(@<LumenTable Spec="DemoData.ResultsTable(Style)" ShowExport="true"/>)</div>
+            <div class="chart-card comp-card comp-results">@Branded(@<LumenTable Spec="DemoData.ResultsTable(Style)" ShowExport="true"/>)</div>
         </section>
         <section id="log" class="sports-section">
-            <div class="chart-card comp-card comp-table">@Branded(@<LumenTable Spec="DemoData.TrainingLog(Style)"/>)</div>
+            <div class="chart-card comp-card">@Branded(@<LumenTable Spec="DemoData.TrainingLog(Style)"/>)</div>
         </section>
         <footer><span class="brand">lumen.</span><span>Charts that help you see.</span><span>Invented data · Built with Blazor</span></footer>
     </main>

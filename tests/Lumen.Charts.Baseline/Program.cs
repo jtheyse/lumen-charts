@@ -922,13 +922,13 @@ lines.Add($"tiles/fixed-columns {Hash(Tiles(new(Season()[..5]) { Columns = 3, De
 string Table(TableSpec spec, ChartTheme theme = ChartTheme.Light) => TableHtml.Render(spec with { Style = Finished(spec.Style, theme) });
 TableColumn[] ResultColumns() =>
 [
-    new("Place") { Kind = ColumnKind.Number },
+    new("Place") { Kind = TableColumnKind.Number },
     new("Name") { RowHeader = true },
     new("Club"),
-    new("Time") { Kind = ColumnKind.Number, Format = ValueFormat.Duration, Better = Better.Lower },
-    new("Change") { Kind = ColumnKind.Change, Format = ValueFormat.Duration, Better = Better.Lower },
-    new("Points") { Kind = ColumnKind.Bar, Better = Better.Higher },
-    new("Season") { Kind = ColumnKind.Sparkline }
+    new("Time") { Kind = TableColumnKind.Number, Format = ValueFormat.Duration, Better = Better.Lower },
+    new("Change") { Kind = TableColumnKind.Change, Format = ValueFormat.Duration, Better = Better.Lower },
+    new("Points") { Kind = TableColumnKind.Bar, Better = Better.Higher },
+    new("Season") { Kind = TableColumnKind.Sparkline }
 ];
 TableRow[] ResultRows() =>
     new (string Name, string Club, double Time, double Before, double Points)[]
@@ -946,14 +946,14 @@ TableSpec Results() => new(ResultColumns(), ResultRows())
     Caption = "Round 6 results", Description = "Invented riders, fastest first",
     Footer = [new TableCell { Text = "Field" }, new TableCell { Text = "12 riders" }, new TableCell(), new TableCell { Number = 3412 }, new TableCell(), new TableCell { Number = 2268 }, new TableCell()]
 };
-TableSpec Log() => new([new TableColumn("Day") { Kind = ColumnKind.Date }, new TableColumn("Distance") { Kind = ColumnKind.Number, Unit = " km" }, new TableColumn("Note")],
+TableSpec Log() => new([new TableColumn("Day") { Kind = TableColumnKind.Date }, new TableColumn("Distance") { Kind = TableColumnKind.Number, Unit = " km" }, new TableColumn("Note")],
     Enumerable.Range(0, 400).Select(i => new TableRow([new TableCell { Date = new DateOnly(2025, 9, 1).AddDays(i) }, new TableCell { Number = 12 + i % 9 * 3 }, new TableCell { Text = i % 7 == 0 ? "Rest day" : null }])).ToArray())
 { Caption = "Training log", PageSize = 25, StartAtEnd = true };
 lines.Add($"table/results-light {Hash(Table(Results()))}");
 lines.Add($"table/results-dark {Hash(Table(Results() with { Style = ChartStyle.Dark }, ChartTheme.Dark))}");
 lines.Add($"table/log-last-page {Hash(Table(Log()))}");
 lines.Add($"table/compact-sorted {Hash(Table(Results() with { Density = Density.Compact, SortBy = 3, SortDescending = true }))}");
-lines.Add($"table/negative-bars {Hash(Table(new TableSpec([new TableColumn("Month") { RowHeader = true }, new TableColumn("Net") { Kind = ColumnKind.Bar, Unit = " pts" }],
+lines.Add($"table/negative-bars {Hash(Table(new TableSpec([new TableColumn("Month") { RowHeader = true }, new TableColumn("Net") { Kind = TableColumnKind.Bar, Unit = " pts" }],
     [new TableRow([TableCell.Of("March"), TableCell.Of(-5.0)]), new TableRow([TableCell.Of("April"), TableCell.Of(10.0)]), new TableRow([TableCell.Of("May"), TableCell.Of(-12.5)]), new TableRow([TableCell.Of("June"), new TableCell()])]) { Caption = "Points gained and lost" }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {

@@ -133,11 +133,6 @@ public readonly record struct PlannerView(PlannerZoom Zoom, DateOnly Date)
 /// <param name="Layout">Wide or narrow.</param>
 public sealed record PlannerRequest(PlannerSpec Spec, PlannerView? View = null, PlannerLayout Layout = PlannerLayout.Wide);
 
-/// <summary>The body of <c>POST table/html</c>: a table and the page to write (the page it opens on when null).</summary>
-/// <param name="Spec">The table.</param>
-/// <param name="Page">The zero-based page; null for the page the table opens on.</param>
-public sealed record TableRequest(TableSpec Spec, int? Page = null);
-
 /// <summary>A planner: a period of days with weekends, holidays and events by region, drawn by <see cref="PlannerSvg.Render"/>.</summary>
 public sealed record PlannerSpec
 {

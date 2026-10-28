@@ -2666,6 +2666,11 @@ if (await beyondLink.CountAsync() > 0)
         var range = (await tab.Locator("#log .lumen-datatable-range").TextContentAsync())!.Trim();
         Check(range == "Rows 376–400 of 400", $"the range reads {range}");
         Check(await tab.Locator("#log tbody tr").CountAsync() == 25, "the last page does not hold 25 rows");
+        // StartAtEnd: the newest day (row 400) must be in view without scrolling the region, so the log's region has no height cap.
+        var last = await tab.EvaluateAsync<double[]>(@"() => { const region = document.querySelector('#log .lumen-datatable-scroll'), rows = region.querySelectorAll('tbody tr'),
+            box = region.getBoundingClientRect(), row = rows[rows.length - 1].getBoundingClientRect(); return [row.bottom, box.bottom, region.scrollHeight, region.clientHeight]; }");
+        Check(last[0] <= last[1] + 1, $"the log's last row ends at {last[0]}, below its region's bottom at {last[1]}");
+        Check(last[2] <= last[3] + 1, $"the log's region scrolls: {last[2]} tall in {last[3]}");
         await tab.CloseAsync();
     });
 
