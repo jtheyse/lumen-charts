@@ -11604,6 +11604,158 @@ Test("0.48.0: a compact set and a regular set on one page keep their own sizes, 
     Check(compact.Contains(".lumen-stats.lumen-stats-compact .lumen-stats-grid")&&!compact.Contains(".lumen-stats.lumen-stats-regular"),"the compact rules are scoped to the compact root");
     Check(three.Contains("<ul class='lumen-stats-grid' role='list' style='grid-template-columns:repeat(3,minmax(0,1fr))'>")&&three.Split("repeat(3,").Length==2,"the column count is written once, on the list");
 });
+// 0.49.0: the table model, sorting, paging and CSV
+TableSpec TSpec(IReadOnlyList<TableColumn> columns,IReadOnlyList<TableRow> rows)=>new(columns,rows){Caption="Results"};
+TableRow TRow(params TableCell[] cells)=>new(cells);
+TableSpec Numbers(params double?[] values)=>TSpec([new TableColumn("N"){Kind=ColumnKind.Number}],values.Select(v=>TRow(TableCell.Of(v))).ToArray());
+TableSpec Texts(params string[] values)=>TSpec([new TableColumn("T")],values.Select(v=>TRow(TableCell.Of(v))).ToArray());
+TableSpec Many(int rows,int? pageSize)=>TSpec([new TableColumn("N"){Kind=ColumnKind.Number}],Enumerable.Range(0,rows).Select(i=>TRow(TableCell.Of((double?)i))).ToArray()) with{PageSize=pageSize};
+string RejectMessage(Action action){try{action();}catch(ArgumentException e){return e.Message;}throw new Exception("Expected ArgumentException");}
+Test("0.49.0: a table takes 1 to 32 columns and a caption of 1 to 120 characters, and each header is 1 to 60",()=>{
+    TableValidation.Spec(TSpec(Enumerable.Range(0,32).Select(i=>new TableColumn("C"+i)).ToArray(),[]));
+    Reject(()=>TableValidation.Spec(TSpec([],[])));
+    Reject(()=>TableValidation.Spec(TSpec(Enumerable.Range(0,33).Select(i=>new TableColumn("C"+i)).ToArray(),[])));
+    TableValidation.Spec(Numbers(1) with{Caption=new string('c',120)});
+    Reject(()=>TableValidation.Spec(Numbers(1) with{Caption=new string('c',121)}));
+    Reject(()=>TableValidation.Spec(Numbers(1) with{Caption="  "}));
+    TableValidation.Spec(Numbers(1) with{Description=new string('d',300)});
+    Reject(()=>TableValidation.Spec(Numbers(1) with{Description=new string('d',301)}));
+    TableValidation.Spec(TSpec([new TableColumn(new string('h',60))],[]));
+    Reject(()=>TableValidation.Spec(TSpec([new TableColumn(new string('h',61))],[])));
+    Reject(()=>TableValidation.Spec(TSpec([new TableColumn(" ")],[])));
+});
+Test("0.49.0: a table without PageSize takes 5,000 rows and refuses 5,001 naming PageSize; with PageSize it takes 100,000 and refuses 100,001",()=>{
+    TableValidation.Spec(Many(5000,null));
+    var message=RejectMessage(()=>TableValidation.Spec(Many(5001,null)));
+    Check(message=="A table without PageSize writes every row, so it takes at most 5,000; set PageSize (10 to 500) to page a longer one.",message);
+    TableValidation.Spec(Many(100000,500));
+    Reject(()=>TableValidation.Spec(Many(100001,500)));
+});
+Test("0.49.0: PageSize is 10 to 500",()=>{
+    TableValidation.Spec(Many(20,10)); TableValidation.Spec(Many(20,500));
+    Reject(()=>TableValidation.Spec(Many(20,9))); Reject(()=>TableValidation.Spec(Many(20,501)));
+});
+Test("0.49.0: every row and the footer have exactly one cell for each column",()=>{
+    var columns=new[]{new TableColumn("A"),new TableColumn("B")};
+    TableValidation.Spec(TSpec(columns,[TRow(TableCell.Of("a"),TableCell.Of("b"))]));
+    Reject(()=>TableValidation.Spec(TSpec(columns,[TRow(TableCell.Of("a"))])));
+    Reject(()=>TableValidation.Spec(TSpec(columns,[TRow(TableCell.Of("a"),TableCell.Of("b"),TableCell.Of("c"))])));
+    TableValidation.Spec(TSpec(columns,[]) with{Footer=[TableCell.Of("a"),TableCell.Of("b")]});
+    Reject(()=>TableValidation.Spec(TSpec(columns,[]) with{Footer=[TableCell.Of("a")]}));
+});
+Test("0.49.0: text is at most 200 characters, a note 80, and a link must be safe",()=>{
+    var one=new[]{new TableColumn("A")};
+    TableValidation.Spec(TSpec(one,[TRow(TableCell.Of(new string('t',200)))]));
+    Reject(()=>TableValidation.Spec(TSpec(one,[TRow(TableCell.Of(new string('t',201)))])));
+    TableValidation.Spec(TSpec(one,[TRow(new TableCell{Text="a",Note=new string('n',80)})]));
+    Reject(()=>TableValidation.Spec(TSpec(one,[TRow(new TableCell{Text="a",Note=new string('n',81)})])));
+    TableValidation.Spec(TSpec(one,[TRow(new TableCell{Text="a",Href="/rider/1"})]));
+    Reject(()=>TableValidation.Spec(TSpec(one,[TRow(new TableCell{Text="a",Href="javascript:alert(1)"})])));
+});
+Test("0.49.0: numbers and Previous are finite, BarMax is finite and above 0",()=>{
+    Reject(()=>TableValidation.Spec(Numbers(double.NaN))); Reject(()=>TableValidation.Spec(Numbers(double.PositiveInfinity)));
+    var change=new[]{new TableColumn("C"){Kind=ColumnKind.Change}};
+    TableValidation.Spec(TSpec(change,[TRow(new TableCell{Number=2,Previous=1})]));
+    Reject(()=>TableValidation.Spec(TSpec(change,[TRow(new TableCell{Number=2,Previous=double.NaN})])));
+    TableColumn Bar(double max)=>new("B"){Kind=ColumnKind.Bar,BarMax=max};
+    TableValidation.Spec(TSpec([Bar(0.5)],[]));
+    Reject(()=>TableValidation.Spec(TSpec([Bar(0)],[]))); Reject(()=>TableValidation.Spec(TSpec([Bar(-1)],[])));
+    Reject(()=>TableValidation.Spec(TSpec([Bar(double.NaN)],[])));
+});
+Test("0.49.0: a trend holds at most 400 values, at least 2 of them not null, all finite",()=>{
+    TableSpec Trend(IReadOnlyList<double?> t)=>TSpec([new TableColumn("S"){Kind=ColumnKind.Sparkline}],[TRow(new TableCell{Trend=t})]);
+    TableValidation.Spec(Trend(Enumerable.Range(0,400).Select(i=>(double?)i).ToArray()));
+    Reject(()=>TableValidation.Spec(Trend(Enumerable.Range(0,401).Select(i=>(double?)i).ToArray())));
+    TableValidation.Spec(Trend([1,null,2]));
+    Reject(()=>TableValidation.Spec(Trend([1,null,null])));
+    Reject(()=>TableValidation.Spec(Trend([1,double.NaN])));
+});
+Test("0.49.0: a date format is at most 40 characters and must format a date without throwing",()=>{
+    TableSpec Format(string f)=>TSpec([new TableColumn("D"){Kind=ColumnKind.Date,DateFormat=f}],[]);
+    TableValidation.Spec(Format("yyyy-MM-dd")); TableValidation.Spec(Format(new string('x',40)));
+    Reject(()=>TableValidation.Spec(Format(new string('x',41))));
+    Reject(()=>TableValidation.Spec(Format("%")));
+});
+Test("0.49.0: SortBy is a sortable column that is not a sparkline",()=>{
+    var columns=new[]{new TableColumn("A"),new TableColumn("S"){Kind=ColumnKind.Sparkline},new TableColumn("L"){Sortable=false}};
+    TableSpec At(int? i)=>TSpec(columns,[]) with{SortBy=i};
+    TableValidation.Spec(At(0)); TableValidation.Spec(At(null));
+    Reject(()=>TableValidation.Spec(At(1))); Reject(()=>TableValidation.Spec(At(2)));
+    Reject(()=>TableValidation.Spec(At(3))); Reject(()=>TableValidation.Spec(At(-1)));
+    Reject(()=>TableView.Of(At(null),1,false));
+});
+Test("0.49.0: at most one column is the row header",()=>{
+    TableValidation.Spec(TSpec([new TableColumn("A"),new TableColumn("B"){RowHeader=true}],[]));
+    Reject(()=>TableValidation.Spec(TSpec([new TableColumn("A"){RowHeader=true},new TableColumn("B"){RowHeader=true}],[])));
+});
+Test("0.49.0: a cell's fields must match its column's kind, and the refusal names the column and the row",()=>{
+    var message=RejectMessage(()=>TableValidation.Spec(TSpec([new TableColumn("A"),new TableColumn("Points"){Kind=ColumnKind.Number}],[TRow(TableCell.Of("x"),TableCell.Of("x"))])));
+    Check(message.Contains("Row 1")&&message.Contains("Points")&&message.Contains("Text"),message);
+    TableSpec One(ColumnKind kind,TableCell cell)=>TSpec([new TableColumn("K"){Kind=kind}],[TRow(cell)]);
+    Reject(()=>TableValidation.Spec(One(ColumnKind.Text,new TableCell{Number=1})));
+    Reject(()=>TableValidation.Spec(One(ColumnKind.Number,new TableCell{Date=new DateOnly(2026,1,1)})));
+    Reject(()=>TableValidation.Spec(One(ColumnKind.Number,new TableCell{Previous=1})));
+    Reject(()=>TableValidation.Spec(One(ColumnKind.Date,new TableCell{Number=1})));
+    Reject(()=>TableValidation.Spec(One(ColumnKind.Bar,new TableCell{Text="a"})));
+    Reject(()=>TableValidation.Spec(One(ColumnKind.Sparkline,new TableCell{Number=1})));
+    Reject(()=>TableValidation.Spec(One(ColumnKind.Change,new TableCell{Trend=[1,2]})));
+    // A missing value is a cell whose own field is null, and any cell may carry a note and a link.
+    TableValidation.Spec(One(ColumnKind.Number,new TableCell{Note="n",Href="/x"}));
+    TableValidation.Spec(One(ColumnKind.Change,new TableCell{Number=1}));
+    // A footer cell may be text in any column, but not another kind's field.
+    var columns=new[]{new TableColumn("A"),new TableColumn("N"){Kind=ColumnKind.Number}};
+    TableValidation.Spec(TSpec(columns,[]) with{Footer=[TableCell.Of("Total"),TableCell.Of("40 pts")]});
+    TableValidation.Spec(TSpec(columns,[]) with{Footer=[TableCell.Of("Total"),TableCell.Of((double?)40)]});
+    Reject(()=>TableValidation.Spec(TSpec(columns,[]) with{Footer=[TableCell.Of("Total"),new TableCell{Date=new DateOnly(2026,1,1)}]}));
+});
+Test("0.49.0: sorting puts missing values last in both directions and keeps equal keys in the spec's order",()=>{
+    var spec=Numbers(3,null,1,3,2);
+    Check(TableView.Of(spec,0,false).Order.SequenceEqual([2,4,0,3,1]),"ascending: "+string.Join(",",TableView.Of(spec,0,false).Order));
+    Check(TableView.Of(spec,0,true).Order.SequenceEqual([0,3,4,2,1]),"descending: "+string.Join(",",TableView.Of(spec,0,true).Order));
+    Check(TableView.Of(spec,null,false).Order.SequenceEqual([0,1,2,3,4]),"no sort keeps the spec's order");
+    Check(TableView.Of(spec with{SortBy=0,SortDescending=true},null,false).Order.SequenceEqual([0,3,4,2,1]),"the spec's own sort applies without arguments");
+    Check(TableView.Of(spec with{SortBy=0,SortDescending=true},0,false).Order.SequenceEqual([2,4,0,3,1]),"arguments win over the spec's sort");
+});
+Test("0.49.0: text sorts ignoring case, dates by value, and a change by its difference",()=>{
+    Check(TableView.Of(Texts("banana","Apple","cherry","apple"),0,false).Order.SequenceEqual([1,3,0,2]),"text ignores case and ties keep order");
+    var dates=TSpec([new TableColumn("D"){Kind=ColumnKind.Date}],[TRow(TableCell.Of((DateOnly?)new DateOnly(2026,3,1))),TRow(TableCell.Of((DateOnly?)null)),TRow(TableCell.Of((DateOnly?)new DateOnly(2025,12,31)))]);
+    Check(TableView.Of(dates,0,false).Order.SequenceEqual([2,0,1]),"dates ascending, missing last");
+    Check(TableView.Of(dates,0,true).Order.SequenceEqual([0,2,1]),"dates descending, missing last");
+    var change=TSpec([new TableColumn("C"){Kind=ColumnKind.Change}],[
+        TRow(new TableCell{Number=100,Previous=95}),TRow(new TableCell{Number=10,Previous=20}),TRow(new TableCell{Number=5}),TRow(new TableCell{Number=7,Previous=2})]);
+    Check(TableView.Of(change,0,false).Order.SequenceEqual([1,0,3,2]),"change ascending by difference, a missing previous last");
+    Check(TableView.Of(change,0,true).Order.SequenceEqual([0,3,1,2]),"change descending by difference, the two 5s keep their order");
+});
+Test("0.49.0: 400 rows at 25 a page open on the last page, rows 376 to 400, and a page past the end is refused",()=>{
+    var view=TableView.Of(Many(400,25) with{StartAtEnd=true},null,false);
+    Check(view.Pages==16,"pages "+view.Pages); Check(view.DefaultPage==15,"default "+view.DefaultPage);
+    Check(view.RowsOn(15)==(375,399),"last page "+view.RowsOn(15)); Check(view.RowsOn(0)==(0,24),"first page");
+    Reject(()=>view.RowsOn(16)); Reject(()=>view.RowsOn(-1));
+    var forward=TableView.Of(Many(400,25),null,false); Check(forward.DefaultPage==0,"without StartAtEnd the table opens on the first page");
+    var shorter=TableView.Of(Many(30,25),null,false); Check(shorter.Pages==2&&shorter.RowsOn(1)==(25,29),"a short last page");
+    var all=TableView.Of(Many(30,null),null,false); Check(all.Pages==1&&all.DefaultPage==0&&all.RowsOn(0)==(0,29),"without PageSize there is one page");
+});
+Test("0.49.0: the CSV writes headers, rows in the sort order and the footer, one column of each kind",()=>{
+    var spec=new TableSpec(
+        [new TableColumn("Name"),new TableColumn("Pts"){Kind=ColumnKind.Number},new TableColumn("Day"){Kind=ColumnKind.Date},new TableColumn("Vs"){Kind=ColumnKind.Change},new TableColumn("Bar"){Kind=ColumnKind.Bar},new TableColumn("Season"){Kind=ColumnKind.Sparkline}],
+        [TRow(TableCell.Of("Ana"),TableCell.Of((double?)10),TableCell.Of((DateOnly?)new DateOnly(2026,1,5)),new TableCell{Number=12,Previous=10},TableCell.Of((double?)4),new TableCell{Trend=[1,null,3]}),
+         TRow(TableCell.Of("Bo, \"B\""),new TableCell(),new TableCell(),new TableCell(),new TableCell(),new TableCell()),
+         TRow(TableCell.Of("Cy"),TableCell.Of((double?)30),TableCell.Of((DateOnly?)new DateOnly(2026,2,1)),new TableCell{Number=5,Previous=9},TableCell.Of((double?)2.5),new TableCell{Trend=[2,4]})])
+        {Caption="Results",SortBy=1,SortDescending=true,Footer=[TableCell.Of("Total"),TableCell.Of((double?)40),new TableCell(),TableCell.Of((double?)3),TableCell.Of((double?)6.5),new TableCell()]};
+    var expected="Name,Pts,Day,Vs,Bar,Season\r\nCy,30,2026-02-01,5,2.5,2;4\r\nAna,10,2026-01-05,12,4,1;;3\r\n\"Bo, \"\"B\"\"\",,,,,\r\nTotal,40,,3,6.5,\r\n";
+    var csv=TableExport.Csv(spec);
+    Check(csv==expected,csv.Replace("\r","\\r").Replace("\n","\\n\n"));
+});
+Test("0.49.0: the CSV quotes a field holding a comma, a quote or a line break, keeps the rows of an unsorted table in order and refuses an invalid spec",()=>{
+    var csv=TableExport.Csv(Texts("a,b","say \"hi\"","line\nbreak","cr\rhere","plain"));
+    Check(csv=="T\r\n\"a,b\"\r\n\"say \"\"hi\"\"\"\r\n\"line\nbreak\"\r\n\"cr\rhere\"\r\nplain\r\n",csv);
+    Reject(()=>TableExport.Csv(Many(5001,null)));
+});
+Test("0.49.0: a column's natural first sort is descending only where higher is better",()=>{
+    Check(TableView.NaturalDescending(new TableColumn("A"){Better=Better.Higher}),"higher");
+    Check(!TableView.NaturalDescending(new TableColumn("A"){Better=Better.Lower}),"lower");
+    Check(!TableView.NaturalDescending(new TableColumn("A")),"neither");
+});
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
