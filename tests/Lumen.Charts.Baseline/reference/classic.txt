@@ -402,8 +402,8 @@ heatmap-cells/keeps-value 0CE8360C50CFCEB9
 heatmap-cells/both-dark 9E2CA840E9634FFF
 columns/cell-width BDD7321B5A989EFB
 columns/axis-labels C451C38D60D86D86
-columns/mark-zero 619AE9EEEC6788F3
+columns/mark-zero 96CDAD5F019D7F86
 point-name/line 465AE981448498BC
-daily-counts/month D038956CDAA74CF5
-daily-counts/year 9C516D414DCA15B3
-columns/track-mark-zero E365D4EBF0B81404
+daily-counts/month 2AF199037C4957C7
+daily-counts/year F32173FD46B97D94
+columns/track-mark-zero 050204042DFDDCC1

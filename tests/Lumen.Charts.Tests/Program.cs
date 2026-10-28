@@ -11212,6 +11212,48 @@ Test("0.47.2: with ScrollToEnd each series shows its own last 500, and a series 
     Check(a.SequenceEqual(Enumerable.Range(101,500).Select(n=>$"A{n}")),$"A shows {a.Count} rows, {a.FirstOrDefault()} to {a.LastOrDefault()}, not A101 to A600");
     Check(b.SequenceEqual(Enumerable.Range(1,50).Select(n=>$"B{n}")),$"B shows {b.Count} rows, {b.FirstOrDefault()} to {b.LastOrDefault()}, not B1 to B50");
 });
+// A zero day's hairline is 1 unit high, so a transparent, unstroked area 24 high on the baseline takes the tap (0.47.2).
+ChartSpec Zeros472(params double[] values)=>new ChartSpec{Title="Zeros",Kind=ChartKind.Column,Series=[new("S",values.Select((v,i)=>new ChartPoint(i,v,$"D{i}")).ToArray()){MarkZero=true}]};
+Test("0.47.2: a zero's mark holds its hairline and then a transparent, unstroked hit area 24 high on the baseline, as wide as the hairline",()=>{
+    var rects=Marks(Zeros472(0,5,0,0,8))[0].Elements(ns+"rect").ToList();
+    Check(rects.Count==2,$"{rects.Count} rects");
+    var (hair,hit)=(rects[0],rects[1]);
+    Check(Attr(hair,"height")==1,"the hairline is 1 high");
+    Check((string?)hit.Attribute("fill")=="transparent"&&(string?)hit.Attribute("stroke")=="none","fill transparent, stroke none");
+    Check(Attr(hit,"x")==Attr(hair,"x")&&Attr(hit,"width")==Attr(hair,"width"),"the hairline's x and width");
+    Check(Attr(hit,"height")==24,$"height {Attr(hit,"height")}");
+    Check(Math.Abs(Attr(hit,"y")+Attr(hit,"height")-(Attr(hair,"y")+1))<1e-6,"it ends on the baseline");
+});
+Test("0.47.2: a zero day's value label lets a tap through to the hit area under it, and another bar's label does not",()=>{
+    var doc=Svg(Zeros472(0,5,0,0,8) with{Series=[Zeros472(0).Series[0] with{Points=Zeros472(0,5,0,0,8).Series[0].Points,ValueLabels=true}]});
+    var labels=doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("aria-hidden")=="true"&&new[]{"0","5","8"}.Contains(t.Value)).ToList();
+    Check(labels.Where(t=>t.Value=="0").Count()==3&&labels.Where(t=>t.Value=="0").All(t=>(string?)t.Attribute("pointer-events")=="none"),"each 0 passes pointers through");
+    Check(labels.Where(t=>t.Value!="0").All(t=>t.Attribute("pointer-events")==null),"the other labels are as before");
+});
+Test("0.47.2: a bar that is not zero has no hit area",()=>{
+    var group=Marks(Zeros472(0,5,0,0,8))[1];
+    Check(group.Elements(ns+"rect").Count()+group.Elements(ns+"path").Count()==1,"one shape");
+});
+Test("0.47.2: two zero days side by side have hit areas that do not overlap",()=>{
+    var marks=Marks(Zeros472(0,5,0,0,8));
+    var (a,b)=(marks[2].Elements(ns+"rect").Last(),marks[3].Elements(ns+"rect").Last());
+    Check(Attr(a,"x")+Attr(a,"width")<=Attr(b,"x")+1e-6,$"{Attr(a,"x")}+{Attr(a,"width")} meets {Attr(b,"x")}");
+});
+Test("0.47.2: with every value 0 or below, the baseline is at the plot's top and the hit area runs down from it inside the plot",()=>{
+    var spec=Zeros472(0,-5,0) with{YMax=0};
+    var doc=Svg(spec);
+    var rects=Marks(spec)[0].Elements(ns+"rect").ToList();
+    var (hair,hit)=(rects[0],rects[1]);
+    var baseline=Attr(hair,"y")+1;
+    Check(Attr(hit,"height")==24,"24 high");
+    Check(Math.Abs(Attr(hit,"y")-baseline)<1e-6,$"top {Attr(hit,"y")} is the baseline {baseline}");
+    Check(Attr(hit,"y")+Attr(hit,"height")<double.Parse(((string)doc.Root!.Attribute("viewBox")!).Split(' ')[3],CultureInfo.InvariantCulture),"inside the drawing");
+});
+Test("0.47.2: a zero on a bar track also gets the hit area",()=>{
+    var track=new ChartSpec{Kind=ChartKind.Column,Title="Zero on a track",YMax=100,BarTrack=true,Series=[new("Score",[new(0,82,"A"),new(1,0,"B"),new(2,64,"C")]){MarkZero=true}]};
+    var rects=Marks(track)[1].Elements(ns+"rect").ToList();
+    Check(rects.Count==2&&Attr(rects[1],"height")==24&&(string?)rects[1].Attribute("stroke")=="none","hit area after the hairline");
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

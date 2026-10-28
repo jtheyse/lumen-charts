@@ -1772,6 +1772,31 @@ if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
         Check(names.Count(n => Regex.IsMatch(n, @"^\w{3} \d{1,2} \w{3} 2026: 0 sign-ups, [\d,]+ so far$")) >= 3, string.Join(" | ", names.Where(n => n.Contains(": 0 "))));
         await ZeroLabelsClear(tab, "#FFFFFF");
     });
+    // 0.47.2: a zero day's hairline is 1 unit high, so a transparent area 24 high above it takes the tap; a tap 12 pixels above the hairline's bottom edge names the day.
+    await Test("On a 375-pixel phone a tap 12 pixels above a zero day's hairline on the Sign-ups per day card names that day", async () =>
+    {
+        await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 375, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+        var tab = await Fresh41(phone);
+        var card = tab.Locator("#sign-ups .lumen-chart");
+        await card.ScrollIntoViewIfNeededAsync();
+        await card.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 60_000 });
+        await tab.WaitForFunctionAsync("() => { const v = document.querySelector('#sign-ups .lumen-viewport'); return v.scrollWidth > v.clientWidth && v.scrollLeft + v.clientWidth >= v.scrollWidth - 1; }", null, new() { Timeout = 60_000 });
+        // Scroll the last zero day to the middle of the box, then read its name and where its hairline stands.
+        var found = await card.EvaluateAsync<System.Text.Json.JsonElement>(@"c => { const v = c.querySelector(':scope > .lumen-viewport'),
+            g = [...v.querySelectorAll('svg g.lumen-datum[data-point]')].filter(g => /: 0 sign-ups, /.test(g.getAttribute('aria-label'))).at(-1), hair = g.querySelector('rect');
+            const at = hair.getBoundingClientRect(), box = v.getBoundingClientRect();
+            v.scrollLeft += at.left + at.width / 2 - (box.left + box.width / 2);
+            return [g.getAttribute('aria-label'), g.querySelectorAll('rect').length]; }");
+        var name = found[0].GetString()!;
+        Check(found[1].GetInt32() == 2, $"the zero day {name} holds {found[1]} rects, not a hairline and a hit area");
+        await tab.WaitForTimeoutAsync(300);
+        var spot = await card.EvaluateAsync<double[]>(@"(c, label) => { const g = [...c.querySelectorAll('svg g.lumen-datum[data-point]')].find(g => g.getAttribute('aria-label') === label), r = g.querySelector('rect').getBoundingClientRect();
+            return [r.left + r.width / 2, r.bottom - 12, r.height]; }", name);
+        Check(spot[1] > 0 && spot[1] < 812 && spot[0] > 0 && spot[0] < 375, $"the tap point {spot[0]:0.#}, {spot[1]:0.#} is on screen");
+        var day = name.Split(':')[0];
+        await tab.Touchscreen.TapAsync((float)spot[0], (float)spot[1]);
+        await tab.WaitForFunctionAsync("([c, day]) => (c.querySelector('.lumen-status')?.textContent || '').includes(day) || (!c.querySelector('.lumen-tooltip').hidden && c.querySelector('.lumen-tooltip').textContent.includes(day))", new object[] { await card.ElementHandleAsync(), day }, new() { Timeout = 5_000 });
+    });
     // A card hidden when its chart's script takes the drawing, as in a closed tab, a closed <details> or a collapsed panel, has a viewport with no
     // size, which cannot scroll, so ScrollToEnd waits and lands at the latest day the first time the card is shown. The card is hidden by a style
     // the page gets before Blazor starts, kept until the chart is interactive, its script has taken its drawing (one mark left a tab stop, the rest

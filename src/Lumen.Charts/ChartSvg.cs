@@ -556,6 +556,16 @@ public static partial class ChartSvg
         : spec.Series.Any(s => s.Summary is not null || s.Points.Any(p => p.Y.HasValue || p.NotRated is not null || p.Low.HasValue && Mark(spec, s) == ChartKind.Range
             || p.GapLabel is not null && Mark(spec, s) == ChartKind.Heatmap));
     private static string N(double n) => SvgWriter.N(n);
+
+    // A zero day's hairline is 1 unit high, too thin to tap: a transparent, unstroked area 24 high on the baseline answers the tap (0.47.2).
+    private const double ZeroReach = 24;
+    private static string ZeroTarget(double x, double width, double baseline, double top, double bottom)
+    {
+        var height = Math.Min(ZeroReach, bottom - top);
+        var y = Math.Max(top, baseline - ZeroReach);
+        if (y + height > bottom) y = bottom - height;
+        return $"<rect x='{N(x)}' y='{N(y)}' width='{N(width)}' height='{N(height)}' fill='transparent' stroke='none'/>";
+    }
     /// <summary>Counts are grouped invariantly, so a host's culture cannot change what the chart reads.</summary>
     private static string Count(int value) => value.ToString("N0", CultureInfo.InvariantCulture);
 
@@ -834,19 +844,19 @@ public static partial class ChartSvg
             // A value's note follows it at normal weight in the muted colour.
             string Noted(string text, string? note) => SvgWriter.E(text) + (note is null ? "" : $"<tspan class='lumen-muted' font-weight='400'>{SvgWriter.E(note)}</tspan>");
             // A label may be written in a colour of its own, as a marked zero's is (0.47.0).
-            void Name(double x, double y, string text, string anchor, string? note, string? fill = null)
+            void Name(double x, double y, string text, string anchor, string? note, string? fill = null, bool through = false)
             {
                 var width = Wide(text + note);
                 var x1 = anchor == "middle" ? x - width / 2 : anchor == "end" ? x - width : x;
                 written.Add((x1, x1 + width, y - 9, y + 3));
-                named.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='{anchor}' font-size='11'{(fill is null ? "" : $" fill='{fill}'")} aria-hidden='true'>{Noted(text, note)}</text>");
+                named.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='{anchor}' font-size='11'{(fill is null ? "" : $" fill='{fill}'")}{(through ? " pointer-events='none'" : "")} aria-hidden='true'>{Noted(text, note)}</text>");
             }
             // A column's label fits across the column, so it never runs into its neighbours'; at a fixed pitch with one series of columns it
             // may take the category's width less 2 (0.47.0).
-            void Above(double x, double width, double far, bool up, string text, string? note, double? room = null, string? fill = null)
+            void Above(double x, double width, double far, bool up, string text, string? note, double? room = null, string? fill = null, bool through = false)
             {
                 if (Wide(text + note) > (room ?? width) || x + width / 2 < left || x + width / 2 > right || far < top - .5 || far > bottom + .5) return;
-                Name(x + width / 2, up ? far - 5 : far + 12, text, "middle", note, fill);
+                Name(x + width / 2, up ? far - 5 : far + 12, text, "middle", note, fill, through);
             }
             void Beside(double far, double y, double height, bool up, string text, string? note)
             {
@@ -1118,7 +1128,7 @@ public static partial class ChartSvg
                         var over = given > y ? $", above the scale, drawn at {scale.Format(y)}" : "";
                         // A zero drawn as a hairline: a bar 1 unit high on the baseline, in the muted colour, focusable and named as any (0.47.0).
                         var hairline = series.MarkZero && !horizontal && y == 0;
-                        var shape = hairline ? $"<rect x='{N(rx)}' y='{N(At(0) - 1)}' width='{N(rw)}' height='1' fill='{w.Style.Muted}'/>" : Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost);
+                        var shape = hairline ? $"<rect x='{N(rx)}' y='{N(At(0) - 1)}' width='{N(rw)}' height='1' fill='{w.Style.Muted}'/>{ZeroTarget(rx, rw, At(0), top, bottom)}" : Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost);
                         Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + Of(series, p) + over, shape);
                         if (series.ValueLabels)
                         {
@@ -1126,7 +1136,7 @@ public static partial class ChartSvg
                             if (s.BarTrack && horizontal) Name(right + TrackGap, ry + rh / 2 + 4, scale.Format(given), "start", p.ValueNote);
                             else if (s.BarTrack) Above(rx, rw, At(scale.Max), true, scale.Format(given), p.ValueNote, fill: hairline && Contrast.Ratio(w.Style.Muted, w.Style.Background) >= 4.5 ? w.Style.Muted : null);
                             else if (horizontal) Beside(y >= 0 ? rx + rw : rx, ry, rh, y >= 0, scale.Format(y), p.ValueNote);
-                            else Above(rx, rw, At(y), y >= 0, scale.Format(y), p.ValueNote, s.CellWidth is { } pitch && columns.Length == 1 ? pitch - 2 : null, fill: hairline && Contrast.Ratio(w.Style.Muted, w.Style.Background) >= 4.5 ? w.Style.Muted : null);
+                            else Above(rx, rw, At(y), y >= 0, scale.Format(y), p.ValueNote, s.CellWidth is { } pitch && columns.Length == 1 ? pitch - 2 : null, fill: hairline && Contrast.Ratio(w.Style.Muted, w.Style.Background) >= 4.5 ? w.Style.Muted : null, through: hairline);
                         }
                     }
                     else if (place >= 0)
@@ -1136,9 +1146,9 @@ public static partial class ChartSvg
                         var x = X(p.X) - slot / 2 + place * width;
                         var hairline = series.MarkZero && y == 0;
                         Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + Of(series, p),
-                            hairline ? $"<rect x='{N(x)}' y='{N(At(0) - 1)}' width='{N(width)}' height='1' fill='{w.Style.Muted}'/>"
+                            hairline ? $"<rect x='{N(x)}' y='{N(At(0) - 1)}' width='{N(width)}' height='1' fill='{w.Style.Muted}'/>{ZeroTarget(x, width, At(0), top, bottom)}"
                                 : Bar(w, x, Math.Min(At(0), At(y)), width, Math.Abs(At(y) - At(0)), y >= 0 ? End.Top : End.Bottom, Ink(p), series.Fill));
-                        if (series.ValueLabels) Above(x, width, At(y), y >= 0, scale.Format(y), p.ValueNote, fill: hairline && Contrast.Ratio(w.Style.Muted, w.Style.Background) >= 4.5 ? w.Style.Muted : null);
+                        if (series.ValueLabels) Above(x, width, At(y), y >= 0, scale.Format(y), p.ValueNote, fill: hairline && Contrast.Ratio(w.Style.Muted, w.Style.Background) >= 4.5 ? w.Style.Muted : null, through: hairline);
                     }
                     else
                     {
