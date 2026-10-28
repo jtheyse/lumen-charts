@@ -948,6 +948,94 @@ Over HTTP, `POST /api/charts/stats/html` takes the spec as JSON and answers `tex
 - **A target** draws a thin meter and writes `33% of target 3`; the meter is hidden from readers and the words are not. A **trend** is the sparkline the charts draw, 120 by 28, hidden from readers and followed by words (`5 values, lowest 0, highest 20, last 20`); its marks take no Tab stop.
 - **Limits.** 1 to 48 tiles; a label of 1 to 40 characters; a note of at most 60; `Since` and `ChangeText` at most 40; `Missing` 1 to 24 characters; a trend of at most 400 values with at least 2 that are not null; `Columns` null (as many as fit: two a row wherever the grid is at least 312 px wide, as on a 360 px phone with little page padding) or 1 to 6. `Columns` is written on the list itself, so host CSS cannot override it. A link may be http, https, mailto or relative, and is always HTML-encoded; `javascript:` is refused with a message.
 
+## Results table
+
+A race's results as a table, and a training log as a paged one, as HTML and not a chart: typed columns and rows, a change written in words, a bar and a sparkline that are also written, a totals row, and a sort and a page for the reader (0.49.0). Every name and number here is invented; a real page fills the rows from its own results.
+
+```csharp
+// A race's results, invented: a place, the rider, a club, a finishing time in seconds, the place before the race, points and the last four rounds' points.
+(string Rider, string Club, double Seconds, int Before, double Points, double?[] Rounds)[] resultsEntries =
+[
+    ("Ingrid Foss", "Harbour Wheelers", 5040, 3, 196, [180, 190, 175, 196]),
+    ("Caleb Ironside", "Ridge CC", 5072, 2, 192, [170, 160, 188, 192]),
+    ("Zadie Wren", "Northgate Velo", 5101, 6, 188, [150, 171, null, 188]),
+    ("Hollis Crane", "Fenland RT", 5130, 4, 184, [190, 185, 180, 184]),
+    ("Mirela Costin", "Kestrel Cycling", 5149, 5, 180, [160, 165, 172, 180])
+];
+var resultsTableRows = resultsEntries.Select((entry, i) => new TableRow(
+[
+    new() { Number = i + 1 },
+    new() { Text = entry.Rider, Href = i == 0 ? "/riders/ingrid-foss" : null },      // the rider's name is the row's header and may be a link
+    new() { Text = entry.Club },
+    new() { Number = entry.Seconds },
+    new() { Number = i + 1, Previous = entry.Before },                               // a change: from the place before to this one
+    new() { Number = entry.Points },
+    new() { Trend = entry.Rounds }                                                   // a sparkline; a null is a gap
+])).ToArray();
+var resultsTable = new TableSpec(
+[
+    new("Place") { Kind = ColumnKind.Number },
+    new("Rider") { RowHeader = true },
+    new("Club"),
+    new("Time") { Kind = ColumnKind.Number, Format = ValueFormat.Duration, Better = Better.Lower },   // 1:24:00; lower is better, so a first sort runs fastest first
+    new("Change") { Kind = ColumnKind.Change, Better = Better.Lower },                               // ▲ 2 · better, the verdict also said to a screen reader
+    new("Points") { Kind = ColumnKind.Bar, Better = Better.Higher },                                 // the number in words and a bar; a first sort runs highest first
+    new("Rounds") { Kind = ColumnKind.Sparkline }                                                    // 96 by 24 with a summary in words; never sorted
+], resultsTableRows)
+{
+    Caption = "Results",
+    Description = "Five invented riders, each one's change on the place before the race and their points over four rounds.",
+    SortBy = 0,                                                                                      // opens sorted by place
+    Style = raceFace
+};
+
+// A training log: 120 invented days ending 28 October 2026, 25 to a page, opening on the last page where the newest days are.
+var trainingLogEnd = new DateOnly(2026, 10, 28);
+var trainingLogRows = Enumerable.Range(0, 120).Select(i => new TableRow(
+[
+    new() { Date = trainingLogEnd.AddDays(i - 119) },
+    new() { Text = i % 7 == 6 ? "Rest" : "Ride" },
+    new() { Number = i % 7 == 6 ? null : 30 + i % 5 * 8 }                                            // null is a missing value, never a zero
+])).ToArray();
+var trainingLogTable = new TableSpec(
+[
+    new("Date") { Kind = ColumnKind.Date, RowHeader = true },                                        // d MMM yyyy unless DateFormat says otherwise
+    new("Session"),
+    new("Distance") { Kind = ColumnKind.Number, Unit = "km" }
+], trainingLogRows)
+{
+    Caption = "Training log",
+    PageSize = 25,
+    StartAtEnd = true,                                                                               // rows 101 to 120 first
+    Footer = [new() { Text = "Totals" }, new() { Text = "120 days" }, new() { Number = trainingLogRows.Sum(row => row.Cells[2].Number ?? 0) }],
+    Style = raceFace
+};
+string resultsTableHtml = TableHtml.Render(resultsTable);                // a fragment, with its own style block: write it into a page as it is
+string trainingLogHtml = TableHtml.Render(trainingLogTable);             // the page it opens on, rows 101 to 120
+string trainingLogFirstPageHtml = TableHtml.Render(trainingLogTable, 0); // a page of your choosing, from 0; one past the end throws ArgumentException
+string resultsTableCsv = TableExport.Csv(resultsTable);                  // every row in the spec's own sort, the header first, the footer last
+```
+
+In a Blazor page (a razor block, not compiled by the recipe check). `<LumenTable>` writes the same fragment and adds the reader's sort, the paging and an Export CSV button, which need an interactive render mode; a prerender shows the opening state with buttons that do nothing yet:
+
+```razor
+<LumenTable Spec="resultsTable" ShowExport="true" />
+<LumenTable Spec="trainingLogTable" />
+```
+
+Over HTTP, `POST /api/charts/table/html` takes `{"spec":{…},"page":0}` and answers `text/html` (the fragment has no sort or paging buttons), and `POST /api/charts/table/csv` takes the `TableSpec` and answers `text/csv`. A host that registers `JsonStringEnumConverter`, as the gallery does, writes enums by name (`"kind":"Number"`, `"better":"Lower"`); without it they are numbers. A `DateOnly` is `yyyy-MM-dd`:
+
+```json
+{"spec":{"caption":"Results","columns":[{"header":"Rider","rowHeader":true},{"header":"Time","kind":"Number","format":"Duration","better":"Lower"}],"rows":[{"cells":[{"text":"Ingrid Foss"},{"number":5040}]},{"cells":[{"text":"Caleb Ironside"},{"number":5072}]}],"sortBy":1},"page":0}
+```
+
+- **Sorting.** A first press on a header sorts in the column's natural direction: a Text or Date column ascending, and a Number, Bar or Change column descending only with `Better.Higher`. A second press reverses. Missing values go last in both directions, equal rows keep the spec's order, and the status line says `Sorted by Time, fastest first`.
+- **Paging.** `PageSize` is 10 to 500. `Rows 101–120 of 120` names the page, and `No rows` an empty table. First, Previous, Next and Last stay focusable when they would not move (`aria-disabled`), and the control the reader pressed keeps keyboard focus after a sort or a page change.
+- **Not colour.** A change is an arrow and a size with its verdict said in words; a bar and a sparkline are hidden from assistive technology and followed by their numbers. On the Race Face card the change words take `Rising` and `Falling`, which clear 4.5:1 on `#161618`; on the Light preset they do not, so there the words carry the meaning alone.
+- **Sticky.** The header row, the row-header column and their corner cell stay in view while the region scrolls, on a 360 px phone too, and the page does not scroll sideways. A host caps the region's height with `--lumen-datatable-height`; there is no default.
+- **CSV.** Header, text and footer fields starting with `=`, `+`, `-` or `@` are written with a `'` in front, as chart CSV does; numbers stay bare. Export CSV saves the spec's own sort, not the reader's, in a file named after the caption (`training-log.csv`).
+- **Limits.** 1 to 32 columns; at most 100,000 rows and, without a `PageSize`, 5,000; a caption of 1 to 120 characters; text of at most 200, a note of at most 80; a trend of at most 400 values with at least 2 not null. A table is read-only: no filtering, search, selection or editing. A new `Spec` instance resets the reader's sort and page, so a theme or brand switch does too.
+
 ## Rendering notes
 
 - **Static:** `ChartSvg.Render(spec)` at `Width = 340` (or the card's own width) is the whole chart: labels, colours, tooltips and names, with no script. Write it into the page, or rasterise it on the server with an SVG library of your choice; Lumen ships no PNG or PDF renderer. Each line's value label stands on a copy of itself stroked in the background colour, not on SVG 2's `paint-order`, so rasterisers without it draw it the same.
