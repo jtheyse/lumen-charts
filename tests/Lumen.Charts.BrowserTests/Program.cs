@@ -1913,6 +1913,22 @@ if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
         await Opens("All 75 days", 2356, 75);
         Check(await Pressed() == "false/true", $"after picking All 75 days, Last 30 days / All 75 days read aria-pressed {await Pressed()}, not false/true");
     });
+    // 0.47.2: a chart that opens at its end lists the last 500 observations of each series in View data, so the table ends where the card opens, at
+    // its latest day. The card's 75 days are all of them, and its last row is its last day, 2 Nov 2026.
+    await Test("With ScrollToEnd the Sign-ups per day card's View data says it shows the last 500 observations and its last row is its latest day, Mon 2 Nov 2026", async () =>
+    {
+        await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 } });
+        var tab = await Fresh41(context);
+        var card = tab.Locator("#sign-ups .lumen-chart");
+        await card.Locator(".lumen-tooltip").WaitForAsync(new() { State = WaitForSelectorState.Attached, Timeout = 60_000 });
+        await card.GetByRole(AriaRole.Button, new() { Name = "View data", Exact = true }).ClickAsync();
+        var table = card.Locator(".lumen-table");
+        await table.Locator("table").WaitForAsync();
+        var note = await table.Locator("p").TextContentAsync() ?? "";
+        Check(note.Contains("the last 500 observations"), $"the table's note reads \"{note}\", not one that says it shows the last 500 observations");
+        var days = await table.Locator("tbody tr td:nth-child(2)").AllTextContentsAsync();
+        Check(days.Count == 75 && days[^1].StartsWith("Mon 2 Nov 2026"), $"{days.Count} rows, the last reading \"{days.LastOrDefault()}\", not 75 ending Mon 2 Nov 2026");
+    });
 }
 else Console.WriteLine("SKIP sign-ups card checks: this host's first page has no Sign-ups per day card");
 var quietHere = page.Locator(".lumen-chart:has(.lumen-quiet)");

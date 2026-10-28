@@ -51,10 +51,11 @@ else
         <thead><tr><th scope="col">Series</th><th scope="col">X / Category</th><th scope="col">Value</th></tr></thead><tbody>
         @foreach(var series in Spec.Series)
         {
-            @foreach(var point in series.Points.Take(500))
+            @* A chart that opens at its end lists each series' last 500, so its table ends where the chart opens (0.47.2). *@
+            @foreach(var point in ScrollToEnd ? series.Points.TakeLast(500) : series.Points.Take(500))
             { <tr><td>@series.Name</td><td>@Category(point)</td><td>@Value(series,point)</td></tr> }
         }
-        </tbody></table><p>Table shows up to 500 observations per series. CSV contains all original observations.</p></div>
+        </tbody></table><p>Table shows @(ScrollToEnd ? "the last" : "up to") 500 observations per series. CSV contains all original observations.</p></div>
     }
 </div>
 }

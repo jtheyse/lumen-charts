@@ -1899,13 +1899,13 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
     Reject(()=>ChartSvg.Render(Spec() with{YFormat=(ValueFormat)9}));
     Reject(()=>ChartSvg.Render(Spec() with{Y2Format=(ValueFormat)(-1)}));
 });
-string Operate(ChartSpec spec,Func<LumenChart,Task> act,bool fit=false)
+string Operate(ChartSpec spec,Func<LumenChart,Task> act,bool fit=false,bool scrollToEnd=false)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
     var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
     try {
         LumenChart? chart=null;
-        RenderFragment content=b=>{b.OpenComponent<LumenChart>(0);b.AddAttribute(1,"Spec",spec);if(fit)b.AddAttribute(2,"FitWidth",true);b.AddComponentReferenceCapture(3,c=>chart=(LumenChart)c);b.CloseComponent();};
+        RenderFragment content=b=>{b.OpenComponent<LumenChart>(0);b.AddAttribute(1,"Spec",spec);if(fit)b.AddAttribute(2,"FitWidth",true);if(scrollToEnd)b.AddAttribute(3,"ScrollToEnd",true);b.AddComponentReferenceCapture(4,c=>chart=(LumenChart)c);b.CloseComponent();};
         return renderer.Dispatcher.InvokeAsync(async()=>{
             var root=await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",ChartStyle.Light},{"ChildContent",content}}));
             await act(chart!);
@@ -11174,6 +11174,43 @@ Test("Gallery polish: the sign-ups card's chart draws no title or description, w
         Check(Drawn(spec with{DrawTitles=true},"Sign-ups per day")&&Drawn(spec with{DrawTitles=true},spec.Description!),$"{days} days: drawn when asked");
     }
     Check(DemoData.SignUps(ChartTheme.Dark)!.DrawTitles==false,"dark too");
+});
+// 0.47.2: with ScrollToEnd, View data lists each series' last 500 observations, so the table ends where the chart opens.
+// Six hundred invented days from 1 Mar 2025, built as the sign-ups card is, so a row's category is the day's full date.
+string Day472(int index)=>new DateOnly(2025,3,1).AddDays(index).ToString("ddd d MMM yyyy",CultureInfo.InvariantCulture);
+ChartSpec Days472()=>DailyCountsChart.Build(Enumerable.Range(0,600).Select(i=>new DayCount(new DateOnly(2025,3,1).AddDays(i),1+i%7)),new(){Singular="sign-up",Plural="sign-ups"})!;
+// The data table opens on a click, which static rendering cannot send, so the test opens it directly, then selects a point to draw it.
+string DataOpen472(ChartSpec spec,bool end)=>Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(chart,true);await chart.SelectPoint(0,0);},scrollToEnd:end);
+// The table's body rows as (series, category), in the order written.
+List<(string Series,string Category)> Rows472(string html)=>Regex.Matches(html,"<tr><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td></tr>").Select(m=>(m.Groups[1].Value,m.Groups[2].Value)).ToList();
+Test("0.47.2: with ScrollToEnd, View data lists each series' last 500 observations and says so",()=>{
+    var html=DataOpen472(Days472(),end:true);
+    var rows=Rows472(html).Select(r=>r.Category).ToList();
+    Check(rows.Count==500,$"{rows.Count} rows, not 500");
+    Check(rows[0]==Day472(100)&&rows[^1]==Day472(599),$"the table runs {rows[0]} to {rows[^1]}, not {Day472(100)} to {Day472(599)}");
+    Check(rows.SequenceEqual(Enumerable.Range(100,500).Select(Day472)),"the rows are days 101 to 600 in order");
+    Check(html.Contains("<p>Table shows the last 500 observations per series. CSV contains all original observations.</p>"),"the note");
+    Check(html.Contains("original data (600 observations)"),"the caption counts every observation");
+});
+Test("0.47.2: without ScrollToEnd, View data keeps the first 500 and the old note",()=>{
+    var html=DataOpen472(Days472(),end:false);
+    var rows=Rows472(html).Select(r=>r.Category).ToList();
+    Check(rows.Count==500&&rows[0]==Day472(0)&&rows[^1]==Day472(499),$"{rows.Count} rows, {rows[0]} to {rows[^1]}, not 500 from {Day472(0)} to {Day472(499)}");
+    Check(rows.SequenceEqual(Enumerable.Range(0,500).Select(Day472)),"the rows are days 1 to 500 in order");
+    Check(html.Contains("<p>Table shows up to 500 observations per series. CSV contains all original observations.</p>")&&!html.Contains("the last 500"),"the note");
+    Check(html.Contains("original data (600 observations)"),"the caption counts every observation");
+});
+Test("0.47.2: with ScrollToEnd each series shows its own last 500, and a series of 50 shows all 50",()=>{
+    // B stands on the same X as A's first 50 points, which A's table leaves out, so a cut by X rather than by series would drop B's rows.
+    var spec=new ChartSpec{Title="Two lengths",Kind=ChartKind.Column,CellWidth=30,Series=[
+        new("A",Enumerable.Range(0,600).Select(i=>new ChartPoint(i,i%5,$"A{i+1}")).ToArray()),
+        new("B",Enumerable.Range(0,50).Select(i=>new ChartPoint(i,i%3,$"B{i+1}")).ToArray())]};
+    ChartValidation.Validate(spec);
+    var rows=Rows472(DataOpen472(spec,end:true));
+    var a=rows.Where(r=>r.Series=="A").Select(r=>r.Category).ToList();
+    var b=rows.Where(r=>r.Series=="B").Select(r=>r.Category).ToList();
+    Check(a.SequenceEqual(Enumerable.Range(101,500).Select(n=>$"A{n}")),$"A shows {a.Count} rows, {a.FirstOrDefault()} to {a.LastOrDefault()}, not A101 to A600");
+    Check(b.SequenceEqual(Enumerable.Range(1,50).Select(n=>$"B{n}")),$"B shows {b.Count} rows, {b.FirstOrDefault()} to {b.LastOrDefault()}, not B1 to B50");
 });
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
