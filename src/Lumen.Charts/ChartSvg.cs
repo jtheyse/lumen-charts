@@ -588,7 +588,13 @@ public static partial class ChartSvg
         // A Y axis on the right takes the margin a secondary axis would, and gives the left one back.
         var flipped = s.YAxisSide == AxisSide.Right;
         // A chart that names its plots above them and writes no label up the left keeps only the margin the X axis's first label needs.
-        var left = s.Sparkline ? pad : horizontal ? s.BarTrack ? Tracked(s).Left : 160d : flipped || Unlabelled(s) ? 30d : 76d; var right = s.Width - (s.Sparkline ? pad : horizontal && s.BarTrack ? Tracked(s).Right : secondary || flipped ? 76d : Math.Max(30d, Ending(s, left)));
+        double left, right;
+        if (s.Sparkline || horizontal)
+        {
+            left = s.Sparkline ? pad : s.BarTrack ? Tracked(s).Left : 160d;
+            right = s.Width - (s.Sparkline ? pad : s.BarTrack ? Tracked(s).Right : secondary || flipped ? 76d : Math.Max(30d, Ending(s, left)));
+        }
+        else { var (marginLeft, marginRight) = Margins(s, s.Width); (left, right) = (marginLeft, s.Width - marginRight); }
         var points = s.Series.SelectMany(x => x.Points).ToArray();
         var cats = points.Select(p => p.X).Distinct().Order().ToArray();
         // A column chart with a cell width lays its categories out at exactly that pitch from its left margin; the drawing is at least that
@@ -809,9 +815,12 @@ public static partial class ChartSvg
                     if (header == pane.Label) w.Text(left, top - 8, header, "class='lumen-pane-title'");
                     else w.Add($"<text x='{N(left)}' y='{N(top - 8)}' class='lumen-pane-title' role='img' aria-label='{SvgWriter.E(pane.Label)}'><title>{SvgWriter.E(pane.Label)}</title>{SvgWriter.E(header)}</text>");
             }
-            else YTitle(w, s, horizontal ? s.XLabel : pane.Label, top, bottom);
+            else YTitle(w, s, horizontal ? s.XLabel : pane.Label, top, bottom, right);
             if (paired)
-                w.Text(s.Width - 16, (top + bottom) / 2, pane.Y2Label, $"text-anchor='middle' transform='rotate(90 {N(s.Width - 16)} {N((top + bottom) / 2)})' class='lumen-muted'");
+            {
+                var x2 = RightTitleX(s, right);
+                w.Text(x2, (top + bottom) / 2, pane.Y2Label, $"text-anchor='middle' transform='rotate(90 {N(x2)} {N((top + bottom) / 2)})' class='lumen-muted'");
+            }
         }
         var positive = cats.ToDictionary(x => x, _ => 0d); var negative = cats.ToDictionary(x => x, _ => 0d);
         // A category chart places categories by index, so a projection starting between two is interpolated between them.
@@ -1196,7 +1205,7 @@ public static partial class ChartSvg
     private static string Said(ChartSeries series) => $", labelled {series.EndLabel}{(series.EndNote is { } note ? " · " + note : "")}";
     /// <summary>The right margin end labels ask for: the widest label and note, by the generous estimate for 12 px text, after its lead and
     /// the step a label moved off its point takes, and the room kept from the edge; capped so the plot keeps at least half the drawing's
-    /// width. None where no series has one. <see cref="ColumnMargins"/> calls it with <c>Width = MaxWidth</c> for a column chart with a
+    /// width. None where no series has one. <see cref="Margins"/> calls it with <c>Width = MaxWidth</c> for a column chart with a
     /// fixed pitch, which ignores its <c>Width</c>, so the cap never bites there and that chart's end-label room does not depend on <c>Width</c>.</summary>
     private static double Ending(ChartSpec s, double left)
     {
@@ -1382,9 +1391,12 @@ public static partial class ChartSvg
         w.Text(to, y, axis.Format(axis.Max), "text-anchor='end' class='lumen-muted'");
     }
     /// <summary>A main Y axis title, read upwards on the left or downwards on the right.</summary>
-    private static void YTitle(SvgWriter w, ChartSpec s, string label, double top, double bottom)
+    /// <summary>Where a right-hand axis title stands: 16 in from the drawing's edge, or, on a column chart with a cell width, 60 right of its
+    /// plot, beside its ticks where the 320 floor leaves room over (0.47.2).</summary>
+    private static double RightTitleX(ChartSpec s, double right) => s.Kind == ChartKind.Column && s.CellWidth is not null ? right + 60 : s.Width - 16;
+    private static void YTitle(SvgWriter w, ChartSpec s, string label, double top, double bottom, double right)
     {
-        var x = s.YAxisSide == AxisSide.Right ? s.Width - 16 : 20;
+        var x = s.YAxisSide == AxisSide.Right ? RightTitleX(s, right) : 20;
         w.Text(x, (top + bottom) / 2, label, $"text-anchor='middle' transform='rotate({(s.YAxisSide == AxisSide.Right ? "90" : "-90")} {N(x)} {N((top + bottom) / 2)})' class='lumen-muted'");
     }
     /// <summary>A gridline of an X and Y axis in the style's stroke; a hidden grid draws none. A refined one is a hairline that
@@ -2315,7 +2327,7 @@ public static partial class ChartSvg
         for (var i = 0; i < s.Series.Count; i++)
             w.Text(flipped ? right + 12 : left - 12, Middle(i) + 4, names[i], $"text-anchor='{(flipped ? "start" : "end")}' class='lumen-muted'");
         w.Text((left + right) / 2, bottom + 44, s.XLabel, "text-anchor='middle' class='lumen-muted'");
-        YTitle(w, s, s.YLabel, top, bottom);
+        YTitle(w, s, s.YLabel, top, bottom, right);
         const double bleed = 6;
         w.Add($"<svg x='{N(left - bleed)}' y='{N(top - bleed)}' width='{N(right - left + 2 * bleed)}' height='{N(bottom - top + 2 * bleed)}' viewBox='{N(left - bleed)} {N(top - bleed)} {N(right - left + 2 * bleed)} {N(bottom - top + 2 * bleed)}' overflow='hidden'>");
         // Moments marked along X stand behind the spans, as references do behind data.
@@ -2645,7 +2657,7 @@ public static partial class ChartSvg
         }
         YBounds(w, s, s.YTickLabels, ys, left, right, top, bottom);
         w.Text((left + right) / 2, bottom + 44, s.XLabel, "text-anchor='middle' class='lumen-muted'");
-        YTitle(w, s, s.YLabel, top, bottom);
+        YTitle(w, s, s.YLabel, top, bottom, right);
     }
 
     /// <summary>The plot's edges across a chart that derives its X axis, leaving room for the Y axis on its side.</summary>
@@ -3187,17 +3199,16 @@ public static partial class ChartSvg
     /// <summary>How wide a heatmap is whose <paramref name="columns"/> take <paramref name="cellWidth"/> units each: its name column, its
     /// columns and 35 units on the right. Validation holds it within <see cref="MaxWidth"/>.</summary>
     internal static double HeatmapWidth(ChartSpec s, int columns, double cellWidth) => HeatmapLeftOf(s) + 35 + columns * cellWidth;
-    /// <summary>The margins a column chart's frame keeps left and right of its plot, as <see cref="Framed"/> sets them: 76 on the left, or 30
-    /// with the Y axis on the right or no labels up the left; 30 on the right, or 76 beside a right-hand axis, or as wide as its end labels
-    /// need (0.47.0).</summary>
-    private static (double Left, double Right) ColumnMargins(ChartSpec s)
+    /// <summary>The margins an upright chart on X and Y axes keeps left and right of its plot: 76 on the left, or 30 with the Y axis on the
+    /// right or no labels up the left; 30 on the right, or 76 beside a right-hand axis, or as wide as its end labels need, their room capped
+    /// by <paramref name="endingWidth"/>. <see cref="Framed"/> passes the spec's Width; <see cref="DrawnWidth"/> passes <see cref="MaxWidth"/>,
+    /// since a chart with a cell width ignores its Width, and the cap never bites (a label and its note are at most 24 + 24 characters) (0.47.0).</summary>
+    private static (double Left, double Right) Margins(ChartSpec s, double endingWidth)
     {
         var flipped = s.YAxisSide == AxisSide.Right;
         var secondary = s.Series.Any(series => series.Secondary);
         var left = flipped || Unlabelled(s) ? 30d : 76d;
-        // The end labels' room is not capped by the spec's Width, which a chart with a cell width ignores: with the widest chart's Width the cap
-        // never bites, and the margin is the labels' own (a label and its note are at most 24 + 24 characters).
-        return (left, secondary || flipped ? 76d : Math.Max(30d, Ending(s with { Width = MaxWidth }, left)));
+        return (left, secondary || flipped ? 76d : Math.Max(30d, Ending(s with { Width = (int)endingWidth }, left)));
     }
 
     /// <summary>The width a chart is drawn at: a heatmap or, from 0.47.0, a column chart with a <see cref="ChartSpec.CellWidth"/> as wide as
@@ -3208,7 +3219,7 @@ public static partial class ChartSvg
         if (spec.CellWidth is not { } cell || spec.Kind is not (ChartKind.Heatmap or ChartKind.Column)) return spec.Width;
         var columns = spec.Series.SelectMany(s => s.Points).Select(p => p.X).Distinct().Count();
         if (spec.Kind == ChartKind.Heatmap) return Math.Max(MinWidth, (int)Math.Ceiling(HeatmapWidth(spec, columns, cell)));
-        var (left, right) = ColumnMargins(spec);
+        var (left, right) = Margins(spec, MaxWidth);
         return Math.Max(MinWidth, (int)Math.Ceiling(left + columns * cell + right));
     }
 

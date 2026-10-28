@@ -11254,6 +11254,35 @@ Test("0.47.2: a zero on a bar track also gets the hit area",()=>{
     var rects=Marks(track)[1].Elements(ns+"rect").ToList();
     Check(rects.Count==2&&Attr(rects[1],"height")==24&&(string?)rects[1].Attribute("stroke")=="none","hit area after the hairline");
 });
+// A right-hand axis title stands beside its ticks under the 320 floor on a fixed-pitch column chart, and at Width - 16 elsewhere (0.47.2).
+ChartSpec RightTitle472(int days)=>new ChartSpec{Title="Counts",Kind=ChartKind.Column,CellWidth=30,YAxisSide=AxisSide.Right,YLabel="Count",Series=[new("S",Enumerable.Range(0,days).Select(i=>new ChartPoint(i,i+1,$"D{i}")).ToArray())]};
+double DrawnWidth472(ChartSpec spec)=>double.Parse(((string)Svg(spec).Root!.Attribute("viewBox")!).Split(' ')[2],CultureInfo.InvariantCulture);
+double TitleX472(ChartSpec spec,string label)=>Attr(Svg(spec).Descendants(ns+"text").First(t=>t.Value==label),"x");
+Test("0.47.2: under the 320 floor a fixed-pitch column chart's right-hand Y title stands 60 right of its plot, beside its ticks",()=>{
+    var spec=RightTitle472(3);
+    var doc=Svg(spec);
+    Check(DrawnWidth472(spec)==320,$"width {DrawnWidth472(spec)}");
+    Check(TitleX472(spec,"Count")==180,$"title at {TitleX472(spec,"Count")}");
+    var tick=doc.Descendants(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="start"&&Math.Abs(Attr(t,"x")-132)<1e-6).ToList();
+    Check(tick.Count>0,"the Y tick labels start at 132");
+});
+Test("0.47.2: a fixed-pitch column chart wide enough not to meet the floor keeps its right-hand Y title at Width - 16",()=>{
+    var spec=RightTitle472(12);
+    var width=DrawnWidth472(spec);
+    Check(width==466,$"width {width}");
+    Check(TitleX472(spec,"Count")==450,$"title at {TitleX472(spec,"Count")}");
+});
+Test("0.47.2: a column chart without a cell width keeps its right-hand Y title at Width - 16",()=>{
+    var spec=RightTitle472(3) with{CellWidth=null,Width=640};
+    Check(TitleX472(spec,"Count")==624,$"title at {TitleX472(spec,"Count")}");
+});
+Test("0.47.2: a Y2 title on a fixed-pitch column chart stands 60 right of its plot",()=>{
+    var spec=RightTitle472(3) with{YAxisSide=AxisSide.Left,Series=[new("S",[new(0,1,"A"),new(1,2,"B"),new(2,3,"C")]),new("T",[new(0,100,"A"),new(1,200,"B"),new(2,300,"C")]){Secondary=true}],Y2Label="Rate"};
+    string? refusal=null;
+    try{ChartSvg.Render(spec);}catch(ArgumentException e){refusal=e.Message;}
+    if(refusal is not null){Console.WriteLine("  Y2 refused: "+refusal);return;}
+    Check(TitleX472(spec,"Rate")==226,$"Y2 title at {TitleX472(spec,"Rate")}");
+});
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

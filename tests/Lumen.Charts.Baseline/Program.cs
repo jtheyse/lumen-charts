@@ -900,6 +900,8 @@ lines.Add($"daily-counts/month {Hash(Render(DailyCountsChart.Build(Invented(new 
 lines.Add($"daily-counts/year {Hash(Render(DailyCountsChart.Build(Invented(new DateOnly(2026, 12, 24), 12))!))}");
 // 0.47.1: a zero on a column track, muted as a plain column's zero is; its 0 is written in Muted where Muted clears 4.5:1.
 lines.Add($"columns/track-mark-zero {Hash(Render(new ChartSpec { Kind = ChartKind.Column, Title = "Zero on a track", YMax = 100, BarTrack = true, Series = [new("Score", [new(0, 82, "A"), new(1, 0, "B"), new(2, 64, "C")]) { ValueLabels = true, MarkZero = true }] }))}");
+lines.Add($"columns/cell-width-right-title {Hash(Render(new ChartSpec { Kind = ChartKind.Column, Title = "Right title", CellWidth = 30, YAxisSide = AxisSide.Right, YLabel = "Count", Series = [new("Count", [new(0, 4, "A"), new(1, 7, "B"), new(2, 5, "C")])] }))}");
+lines.Add($"columns/cell-width-y2-title {Hash(Render(new ChartSpec { Kind = ChartKind.Column, Title = "Y2 title", CellWidth = 30, YLabel = "Count", Y2Label = "Rate", Series = [new("Count", [new(0, 4, "A"), new(1, 7, "B"), new(2, 5, "C")]), new("Rate", [new(0, 40, "A"), new(1, 70, "B"), new(2, 50, "C")]) { Secondary = true }] }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

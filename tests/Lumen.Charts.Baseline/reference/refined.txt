@@ -407,3 +407,5 @@ point-name/line 16F5EDB73C5853B9
 daily-counts/month B2BA01EC0D163350
 daily-counts/year 47F797E18AE03A88
 columns/track-mark-zero E4DD2D2F7AFEE8A1
+columns/cell-width-right-title CC4CB0AD78713DDA
+columns/cell-width-y2-title CF73E08B40760A17
