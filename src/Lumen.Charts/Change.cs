@@ -35,7 +35,8 @@ internal static class ChangeWords
     internal static (string Text, string Colour) Of(double value, double previous, Better better, ChangeAs changeAs, string? since,
         ValueFormat format, string? unit, ChartStyle style)
     {
-        var hasSince = !string.IsNullOrWhiteSpace(since);
+        since = since?.Trim();
+        var hasSince = !string.IsNullOrEmpty(since);
         if (value == previous)
             return (hasSince ? "= same as " + since : "= same", LumenHtml.Readable(style.Muted, style));
 

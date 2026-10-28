@@ -11316,6 +11316,7 @@ Test("0.48.0: change words follow the value's direction and the judgement Better
     Check(ChangeText480(12,10,Better.Higher)=="▲ 2 · better than last season",ChangeText480(12,10,Better.Higher));
     Check(ChangeText480(72,114,Better.Lower,f:ValueFormat.Duration)=="▼ 0:42 · better than last season",ChangeText480(72,114,Better.Lower,f:ValueFormat.Duration));
     Check(ChangeText480(112,100,Better.Neither,ChangeAs.Both,"last week")=="▲ 12 (12%) · up from last week",ChangeText480(112,100,Better.Neither,ChangeAs.Both,"last week"));
+    Check(ChangeText480(162,150,Better.Neither,ChangeAs.Both,"last week")=="▲ 12 (8%) · up from last week",ChangeText480(162,150,Better.Neither,ChangeAs.Both,"last week"));
     Check(ChangeText480(10,10,Better.Higher)=="= same as last season");
     Check(ChangeText480(10,10,Better.Higher,since:null)=="= same");
     Check(ChangeText480(13,10,Better.Lower,since:"last race")=="▲ 3 · worse than last race",ChangeText480(13,10,Better.Lower,since:"last race"));
@@ -11324,7 +11325,7 @@ Test("0.48.0: change words follow the value's direction and the judgement Better
     Check(ChangeText480(12,10,Better.Higher,since:"  ")=="▲ 2 · better");
 });
 Test("0.48.0: a percentage is of the previous value's size, one decimal under 10, and falls back to the difference from zero",()=>{
-    Check(ChangeText480(108,100,Better.Neither,ChangeAs.Percent,null).Contains("8%")&&!ChangeText480(108,100,Better.Neither,ChangeAs.Percent,null).Contains("8.0"),ChangeText480(108,100,Better.Neither,ChangeAs.Percent,null));
+    Check(ChangeText480(108,100,Better.Neither,ChangeAs.Percent,null)=="▲ 8% · up",ChangeText480(108,100,Better.Neither,ChangeAs.Percent,null));
     Check(ChangeText480(112,100,Better.Neither,ChangeAs.Percent,null)=="▲ 12% · up");
     Check(ChangeText480(103.3,100,Better.Neither,ChangeAs.Percent,null)=="▲ 3.3% · up",ChangeText480(103.3,100,Better.Neither,ChangeAs.Percent,null));
     Check(ChangeText480(-90,-100,Better.Neither,ChangeAs.Percent,null)=="▲ 10% · up",ChangeText480(-90,-100,Better.Neither,ChangeAs.Percent,null));
@@ -11357,7 +11358,188 @@ Test("0.48.0: the root style carries the style's colours and font as custom prop
     Check(s.Contains("--lumen-bg:#171E2E")&&s.Contains("--lumen-text:#E8ECF6"),s);
     foreach(var p in new[]{"--lumen-muted:","--lumen-grid:","--lumen-rising:","--lumen-falling:","--lumen-accent:","--lumen-font:"})Check(s.Contains(p),p);
     Check(LumenHtml.E(null)==""&&LumenHtml.E("<b>\"")=="&lt;b&gt;&quot;","escape");
-    Check(LumenHtml.HiddenRule.Contains(".lumen-sr")&&LumenHtml.HiddenRule.Contains("clip:rect(0 0 0 0)"),"hidden rule");
+});
+Test("0.48.0: HiddenRule takes the root it is scoped under",()=>{
+    Check(LumenHtml.HiddenRule(".lumen-stats").StartsWith(".lumen-stats .lumen-sr{")&&LumenHtml.HiddenRule(".lumen-stats").Contains("clip:rect(0 0 0 0)"),LumenHtml.HiddenRule(".lumen-stats"));
+    Check(LumenHtml.HiddenRule(".lumen-table").StartsWith(".lumen-table .lumen-sr{")&&!LumenHtml.HiddenRule(".lumen-table").Contains("lumen-stats"),LumenHtml.HiddenRule(".lumen-table"));
+});
+Test("0.48.0: SafeLink refuses null and schemes hidden by tabs, control characters and entities, and the tile encodes what it accepts",()=>{
+    Check(!LumenHtml.SafeLink(null),"null");
+    foreach(var bad in new[]{"java\tscript:x","\u0001javascript:x","java&#x09;script:x","java\nscript:x"})
+        Check(!LumenHtml.SafeLink(bad),"should refuse: "+bad.Replace("\t","\\t").Replace("\u0001","\\x01").Replace("\n","\\n"));
+    Check(LumenHtml.SafeLink("javascript&#58;alert(1)"),"no literal colon, so relative");
+    var html=StatTilesHtml.Render(new([new("Races",12){Href="javascript&#58;alert(1)"}]));
+    Check(html.Contains("href='javascript&amp;#58;alert(1)'")&&!html.Contains("javascript&#58;"),html);
+});
+Test("0.48.0: since is trimmed before it is joined",()=>{
+    Check(ChangeText480(12,10,Better.Higher,since:" last week ")=="▲ 2 · better than last week",ChangeText480(12,10,Better.Higher,since:" last week "));
+    Check(ChangeText480(10,10,Better.Higher,since:" last week ")=="= same as last week");
+});
+XElement Stats480(string html)=>XElement.Parse(html);
+string Cls480(XElement e)=>(string?)e.Attribute("class")??"";
+IEnumerable<XElement> Tiles480(XElement root)=>root.Element("ul")!.Elements("li");
+IEnumerable<XElement> Parts480(XElement li)=>(li.Element("a") is {} a?a:li).Elements();
+StatTilesSpec One480(StatTile t)=>new([t]);
+Test("0.48.0: tiles render label, value, change, note, target and trend in reading order, all escaped",()=>{
+    var spec=new StatTilesSpec([
+        new("Best <finish> & more",3){Previous=5,Better=Better.Lower,Since="last season",Note="Round 4 · \"Home\"",Target=4,Trend=[8,6,null,3]},
+        new("Races",12)
+    ]){Title="Season <2026>",Description="Invented & checked"};
+    var html=StatTilesHtml.Render(spec);
+    var root=Stats480(html);
+    Check(Cls480(root)=="lumen-stats lumen-stats-regular"&&(string?)root.Attribute("aria-label")=="Season <2026>");
+    Check(root.Element("h2") is {} h&&Cls480(h)=="lumen-stats-title"&&h.Value=="Season <2026>");
+    Check(root.Elements("p").Single(p=>Cls480(p)=="lumen-stats-desc").Value=="Invented & checked");
+    var li=Tiles480(root).ToArray();
+    Check(li.Length==2);
+    var order=Parts480(li[0]).Select(Cls480).ToArray();
+    Check(string.Join(",",order)=="lumen-stat-label,lumen-stat-value,lumen-stat-change,lumen-stat-note,lumen-stat-meter,lumen-stat-target,lumen-stat-trend,lumen-sr",string.Join(",",order));
+    var parts=Parts480(li[0]).ToArray();
+    Check(parts[0].Value=="Best <finish> & more"&&parts[1].Value=="3");
+    Check(parts[2].Value=="▼ 2 · better than last season",parts[2].Value);
+    Check(parts[3].Value=="Round 4 · \"Home\"");
+    Check(parts[5].Value=="75% of target 4",parts[5].Value);
+    Check(parts[7].Value=="3 values, lowest 3, highest 8, last 3",parts[7].Value);
+    Check(Parts480(li[1]).Select(Cls480).SequenceEqual(["lumen-stat-label","lumen-stat-value"]));
+    Check(html.Contains("Best &lt;finish&gt; &amp; more")&&html.Contains("Season &lt;2026&gt;"),"escaped");
+});
+Test("0.48.0: the title level, the density and the columns are written",()=>{
+    var t=new StatTile("Races",12);
+    var h4=StatTilesHtml.Render(new([t]){Title="T",TitleLevel=4});
+    Check(h4.Contains("<h4 class='lumen-stats-title'>T</h4>"),h4);
+    var named=StatTilesHtml.Render(new([t]){Description="Only a description"});
+    Check(named.Contains("aria-label='Only a description'")&&StatTilesHtml.Render(new([t])).Contains("aria-label='Statistics'"));
+    var compact=StatTilesHtml.Render(new([t]){Density=TileDensity.Compact});
+    Check(compact.Contains("lumen-stats-compact")&&compact.Contains("repeat(auto-fill,minmax(96px,1fr))")&&compact.Contains("font-size:20px"),"compact");
+    var regular=StatTilesHtml.Render(new([t]));
+    Check(regular.Contains("repeat(auto-fill,minmax(150px,1fr))")&&regular.Contains("font-size:26px"),"regular");
+    Check(StatTilesHtml.Render(new([t]){Columns=3}).Contains("repeat(3,minmax(0,1fr))"),"columns");
+    Check(regular.Contains(".lumen-stat-link:focus-visible{outline:2px solid var(--lumen-accent);outline-offset:2px}"),"focus ring");
+});
+Test("0.48.0: every rule is scoped under .lumen-stats and no text is under 11 px",()=>{
+    var html=StatTilesHtml.Render(new([new("Races",12){Href="/r"}]));
+    var css=Regex.Match(html,"<style>(.*?)</style>").Groups[1].Value;
+    var rules=css.Split('}',StringSplitOptions.RemoveEmptyEntries);
+    Check(rules.Length>10);
+    foreach(var rule in rules)
+        foreach(var selector in rule[..rule.IndexOf('{')].Split(','))
+            Check(selector.StartsWith(".lumen-stats"),"unscoped: "+selector);
+    foreach(Match m in Regex.Matches(css,@"font-size:(\d+)px"))Check(int.Parse(m.Groups[1].Value)>=11,m.Value);
+    Check(!css.Contains("@import")&&!css.Contains("url("),"nothing external");
+});
+Test("0.48.0: a missing value writes its words and a hidden 'none'",()=>{
+    var dash=Tiles480(Stats480(StatTilesHtml.Render(One480(new("Best finish",null))))).Single();
+    var value=Parts480(dash).Single(p=>Cls480(p)=="lumen-stat-value");
+    Check(value.Value=="— none"&&value.Element("span") is {} s&&Cls480(s)=="lumen-sr"&&s.Value==" none",value.ToString());
+    var words=Tiles480(Stats480(StatTilesHtml.Render(One480(new("Best finish",null){Missing="No race yet",Previous=3,ChangeText="new",Target=5,Note="n"})))).Single();
+    var v2=Parts480(words).Single(p=>Cls480(p)=="lumen-stat-value");
+    Check(v2.Value=="No race yet"&&!v2.Elements().Any(),v2.ToString());
+    Check(Parts480(words).Select(Cls480).SequenceEqual(["lumen-stat-label","lumen-stat-value","lumen-stat-note"]),"no change, meter or target without a value");
+});
+Test("0.48.0: a fragment has no id, so two on a page cannot collide",()=>{
+    var spec=new StatTilesSpec([new("Races",12){Trend=[1,2,3],Target=20,Href="/r"},new("Wins",null)]){Title="A"};
+    var one=StatTilesHtml.Render(spec);
+    Check(!one.Contains(" id="),"id found");
+    Check(StatTilesHtml.Render(spec)==one,"same spec, same markup");
+    Check(!StatTilesHtml.Render(spec with{Style=ChartStyle.Dark}).Contains(" id="),"dark");
+});
+Test("0.48.0: hostile words are escaped",()=>{
+    var html=StatTilesHtml.Render(new StatTilesSpec([new("<script>x</script>",1){Note="it's \"quoted\" <b>",Missing="<i>",Unit="<u>",ChangeText="<em>",Previous=0}]){Title="<script>t</script>",Description="'\"<img src=x>"});
+    Check(!html.Contains("<script")&&!html.Contains("<b>")&&!html.Contains("<img")&&!html.Contains("<em>")&&!html.Contains("<u>"),html);
+    Check(html.Contains("&lt;script&gt;x&lt;/script&gt;")&&html.Contains("&quot;quoted&quot;")&&html.Contains("&#39;"),"encoded");
+    XElement.Parse(html);
+});
+Test("0.48.0: a tile's link must be http, https, mailto or relative",()=>{
+    foreach(var bad in new[]{"JavaScript:alert(1)"," javascript:alert(1)","data:text/html,x","vbscript:x"})
+        Reject(()=>StatTilesHtml.Render(One480(new("Races",12){Href=bad})));
+    var rel=StatTilesHtml.Render(One480(new("Races",12){Href="/riders/7"}));
+    Check(rel.Contains("<a class='lumen-stat-link' href='/riders/7'>")&&rel.Contains("</a></li>"),rel);
+    foreach(var ok in new[]{"riders/7","https://x.test/a?b=1&c=2","mailto:a@x.test"})Check(StatTilesHtml.Render(One480(new("Races",12){Href=ok})).Contains("<a class='lumen-stat-link'"),ok);
+    Check(StatTilesHtml.Render(One480(new("Races",12){Href="https://x.test/a?b=1&c=2"})).Contains("href='https://x.test/a?b=1&amp;c=2'"),"encoded");
+    Check(!StatTilesHtml.Render(One480(new("Races",12))).Contains("<a "),"no link without Href");
+});
+Test("0.48.0: validation limits",()=>{
+    StatTile T(string label="Races")=>new(label,12);
+    string Str(int n)=>new('x',n);
+    void Ok(StatTilesSpec s)=>StatTilesHtml.Render(s);
+    void No(StatTilesSpec s)=>Reject(()=>StatTilesHtml.Render(s));
+    Ok(new(Enumerable.Range(0,48).Select(i=>T("T"+i)).ToArray()));
+    No(new(Enumerable.Range(0,49).Select(i=>T("T"+i)).ToArray()));
+    No(new(Array.Empty<StatTile>()));
+    Ok(One480(T(Str(40))));No(One480(T(Str(41))));No(One480(T("")));No(One480(T("   ")));
+    foreach(var bad in new[]{double.NaN,double.PositiveInfinity,double.NegativeInfinity})
+    {
+        No(One480(new("A",bad)));
+        No(One480(new("A",1){Previous=bad}));
+        No(One480(new("A",1){Trend=[1,bad]}));
+        No(One480(new("A",1){Target=bad}));
+    }
+    No(One480(new("A",1){Target=0}));No(One480(new("A",1){Target=-1}));Ok(One480(new("A",1){Target=0.001}));
+    Ok(One480(new("A",null){Missing=Str(24)}));No(One480(new("A",null){Missing=Str(25)}));No(One480(new("A",null){Missing=""}));
+    Ok(One480(new("A",1){Note=Str(60)}));No(One480(new("A",1){Note=Str(61)}));
+    Ok(One480(new("A",1){Since=Str(40)}));No(One480(new("A",1){Since=Str(41)}));
+    Ok(One480(new("A",1){ChangeText=Str(40)}));No(One480(new("A",1){ChangeText=Str(41)}));
+    Ok(One480(new("A",1){Trend=Enumerable.Range(0,400).Select(i=>(double?)i).ToArray()}));
+    No(One480(new("A",1){Trend=Enumerable.Range(0,401).Select(i=>(double?)i).ToArray()}));
+    Ok(One480(new("A",1){Trend=[null,1,null,2]}));
+    No(One480(new("A",1){Trend=[null,1,null]}));No(One480(new("A",1){Trend=[null,null]}));No(One480(new("A",1){Trend=[]}));
+    No(One480(new("A",1){Href="javascript:x"}));
+    Ok(new StatTilesSpec([T()]){Title=Str(120)});No(new StatTilesSpec([T()]){Title=Str(121)});
+    Ok(new StatTilesSpec([T()]){Description=Str(300)});No(new StatTilesSpec([T()]){Description=Str(301)});
+    Ok(new StatTilesSpec([T()]){TitleLevel=2});Ok(new StatTilesSpec([T()]){TitleLevel=6});
+    No(new StatTilesSpec([T()]){TitleLevel=1});No(new StatTilesSpec([T()]){TitleLevel=7});
+    Ok(new StatTilesSpec([T()]){Columns=1});Ok(new StatTilesSpec([T()]){Columns=6});
+    No(new StatTilesSpec([T()]){Columns=0});No(new StatTilesSpec([T()]){Columns=7});
+    No(new StatTilesSpec([T()]){Style=ChartStyle.Light with{Background="nope"}});
+    Ok(new StatTilesSpec([T()]){Style=ChartStyle.Dark});
+    try{Ok(One480(T(Str(41))));Check(false,"no throw");}catch(ArgumentException e){Check(e.Message.Contains("40"),e.Message);}
+});
+Test("0.48.0: the change takes Readable colours and ChangeText wins",()=>{
+    var light=ChartStyle.Light;
+    string Colour(XElement root)=>Regex.Match((string)Parts480(Tiles480(root).Single()).Single(p=>Cls480(p)=="lumen-stat-change").Attribute("style")!,"color:(#[0-9A-Fa-f]{6})").Groups[1].Value;
+    string Want(string c,ChartStyle s)=>Lumen.Charts.Contrast.Ratio(c,s.Background)>=4.5?c:s.Text;
+    var better=Stats480(StatTilesHtml.Render(One480(new("T",8){Previous=10,Better=Better.Lower})));
+    Check(Colour(better)==Want(light.Rising,light),Colour(better));
+    var worse=Stats480(StatTilesHtml.Render(One480(new("T",12){Previous=10,Better=Better.Lower})));
+    Check(Colour(worse)==Want(light.Falling,light),Colour(worse));
+    var neutral=Stats480(StatTilesHtml.Render(One480(new("T",12){Previous=10})));
+    Check(Colour(neutral)==Want(light.Muted,light),Colour(neutral));
+    var wins=Stats480(StatTilesHtml.Render(One480(new("T",12){Previous=10,Better=Better.Higher,ChangeText="new best"})));
+    var line=Parts480(Tiles480(wins).Single()).Single(p=>Cls480(p)=="lumen-stat-change");
+    Check(line.Value=="new best"&&Colour(wins)==Want(light.Muted,light),line.ToString());
+    var textOnly=Stats480(StatTilesHtml.Render(One480(new("T",12){ChangeText="new best"})));
+    Check(Parts480(Tiles480(textOnly).Single()).Any(p=>Cls480(p)=="lumen-stat-change"),"ChangeText alone shows");
+    var weak=new ChartStyle{Rising="#FFFFFF",Background="#FFFFFF"};
+    var white=Stats480(StatTilesHtml.Render(new StatTilesSpec([new("T",12){Previous=10,Better=Better.Higher}]){Style=weak}));
+    var p2=Parts480(Tiles480(white).Single()).Single(p=>Cls480(p)=="lumen-stat-change");
+    Check(Colour(white)==weak.Text&&p2.Value=="▲ 2 · better",p2.ToString());
+    var dark=Stats480(StatTilesHtml.Render(new StatTilesSpec([new("T",8){Previous=10,Better=Better.Lower}]){Style=ChartStyle.Dark}));
+    Check(Colour(dark)==Want(ChartStyle.Dark.Rising,ChartStyle.Dark),Colour(dark));
+});
+Test("0.48.0: the trend is the existing sparkline, hidden, with its words",()=>{
+    var html=StatTilesHtml.Render(One480(new("Wins",41){Trend=[34,null,36,41]}));
+    var li=Tiles480(Stats480(html)).Single();
+    var trend=li.Elements().Single(e=>Cls480(e)=="lumen-stat-trend");
+    Check((string?)trend.Attribute("aria-hidden")=="true");
+    var svg=trend.Elements().Single();
+    Check(svg.Name.LocalName=="svg"&&Cls480(svg).StartsWith("lumen-svg"),Cls480(svg));
+    Check(html.Contains("class='lumen-svg"),"class='lumen-svg");
+    var words=li.Elements().Single(e=>Cls480(e)=="lumen-sr");
+    Check(words.Value=="3 values, lowest 34, highest 41, last 41",words.Value);
+    Check(!html.Contains(" id="),"the sparkline brings no id");
+    var gap=StatTilesHtml.Render(One480(new("Wins",41){Trend=[34,36,null]}));
+    Check(gap.Contains("2 values, lowest 34, highest 36, last 36"),gap);
+    var duration=StatTilesHtml.Render(One480(new("Time",72){Format=ValueFormat.Duration,Trend=[3600,3500]}));
+    Check(duration.Contains("2 values, lowest 58:20, highest 1:00:00, last 58:20"),duration);
+});
+Test("0.48.0: the target meter caps at 100% and says its percentage",()=>{
+    var p41=StatTilesHtml.Render(One480(new("Points",41){Target=50}));
+    Check(p41.Contains("<span style='width:82%'></span>")&&p41.Contains("82% of target 50"),p41);
+    var p60=StatTilesHtml.Render(One480(new("Points",60){Target=50}));
+    Check(p60.Contains("<span style='width:100%'></span>")&&p60.Contains("120% of target 50"),p60);
+    Check(p60.Contains("<div class='lumen-stat-meter' aria-hidden='true'>"),"meter hidden from readers");
+    var neg=StatTilesHtml.Render(One480(new("Points",-5){Target=50}));
+    Check(neg.Contains("<span style='width:0%'></span>")&&neg.Contains("-10% of target 50"),neg);
 });
 // Renders LumenChart with any parameters its markup takes, as a host would write them; the spec is added.
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)

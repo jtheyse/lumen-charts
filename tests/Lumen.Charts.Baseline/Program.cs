@@ -902,6 +902,22 @@ lines.Add($"daily-counts/year {Hash(Render(DailyCountsChart.Build(Invented(new D
 lines.Add($"columns/track-mark-zero {Hash(Render(new ChartSpec { Kind = ChartKind.Column, Title = "Zero on a track", YMax = 100, BarTrack = true, Series = [new("Score", [new(0, 82, "A"), new(1, 0, "B"), new(2, 64, "C")]) { ValueLabels = true, MarkZero = true }] }))}");
 lines.Add($"columns/cell-width-right-title {Hash(Render(new ChartSpec { Kind = ChartKind.Column, Title = "Right title", CellWidth = 30, YAxisSide = AxisSide.Right, YLabel = "Count", Series = [new("Count", [new(0, 4, "A"), new(1, 7, "B"), new(2, 5, "C")])] }))}");
 lines.Add($"columns/cell-width-y2-title {Hash(Render(new ChartSpec { Kind = ChartKind.Column, Title = "Y2 title", CellWidth = 30, YLabel = "Count", Y2Label = "Rate", Series = [new("Count", [new(0, 4, "A"), new(1, 7, "B"), new(2, 5, "C")]), new("Rate", [new(0, 40, "A"), new(1, 70, "B"), new(2, 50, "C")]) { Secondary = true }] }))}");
+// Stat tiles (0.48.0): invented data, the HTML fragment hashed whole.
+string Tiles(StatTilesSpec spec, ChartTheme theme = ChartTheme.Light) => StatTilesHtml.Render(spec with { Style = Finished(spec.Style, theme) });
+StatTile[] Season() =>
+[
+    new("Races", 12) { Previous = 9, Better = Better.Higher, Since = "last season", Trend = [2, 3, null, 5, 4, 7, 9, 12], Target = 15, Note = "Five of them at home" },
+    new("Best finish", 3) { Format = ValueFormat.Number, Previous = 5, Better = Better.Lower, ChangeAs = ChangeAs.Difference, Since = "last season", Note = "Round 4, the dry one" },
+    new("Total time", 51150) { Format = ValueFormat.Duration, Previous = 52170, Better = Better.Lower, ChangeAs = ChangeAs.Both, Since = "last season", Trend = [3900, 3810, 3705, null, 3660, 3584, 3540] },
+    new("Points", 41) { Unit = " pts", Previous = 36, Better = Better.Higher, ChangeAs = ChangeAs.Percent, Target = 50, Trend = [6, 12, 19, 25, 33, 41] },
+    new("Distance", 1250) { Format = ValueFormat.Compact, Unit = " km", ChangeText = "new best", Note = "Across 12 races" },
+    new("Podiums", 0) { Previous = 0, Better = Better.Higher, Since = "last season" }
+];
+lines.Add($"tiles/regular-light {Hash(Tiles(new(Season()) { Title = "Season at a glance", Description = "Invented figures for one rider" }))}");
+lines.Add($"tiles/regular-dark {Hash(Tiles(new(Season()) { Title = "Season at a glance", Description = "Invented figures for one rider", Style = ChartStyle.Dark }, ChartTheme.Dark))}");
+lines.Add($"tiles/compact-strip {Hash(Tiles(new(Enumerable.Range(1, 8).Select(i => new StatTile($"Round {i}", i * 10 + (i % 3) * 5) { Format = ValueFormat.Number, Previous = i == 1 ? null : i * 10 - 5, Better = Better.Higher }).ToArray()) { Density = TileDensity.Compact, Title = "Rounds", TitleLevel = 3 }))}");
+lines.Add($"tiles/missing-and-link {Hash(Tiles(new([new("Best finish", null), new("Next race", null) { Missing = "No race yet", Note = "Entries open soon" }, new("Riders", 48) { Href = "/riders" }, new("Contact", 1) { Href = "mailto:desk@example.test", ChangeText = "new" }])))}");
+lines.Add($"tiles/fixed-columns {Hash(Tiles(new(Season()[..5]) { Columns = 3, Density = TileDensity.Regular }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

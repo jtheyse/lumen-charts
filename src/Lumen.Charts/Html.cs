@@ -5,17 +5,24 @@ namespace Lumen.Charts;
 /// <summary>The small pieces of HTML writing the stat tiles and the components after them share.</summary>
 internal static class LumenHtml
 {
-    /// <summary>The CSS that hides text from the eye and keeps it for screen readers, scoped under the <c>.lumen-stats</c> root.</summary>
-    internal const string HiddenRule = ".lumen-stats .lumen-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}";
+    /// <summary>The CSS that hides text from the eye and keeps it for screen readers, scoped under the given root selector,
+    /// such as <c>.lumen-stats</c>.</summary>
+    internal static string HiddenRule(string root) =>
+        root + " .lumen-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}";
 
     /// <summary>HTML-encoded text; an empty string for null.</summary>
     internal static string E(string? text) => text is null ? "" : WebUtility.HtmlEncode(text);
 
-    /// <summary>True for an http, https or mailto address and for a relative one, whatever the case or the white space round it.</summary>
-    internal static bool SafeLink(string href)
+    /// <summary>True for an http, https or mailto address and for a relative one, whatever the case or the white space round it,
+    /// and false for null. A scheme hidden by a tab, a control character or an entity is read as a scheme and refused. The
+    /// address must still be HTML-encoded on output with <see cref="E"/>: <c>javascript&amp;#58;x</c> has no literal colon and
+    /// is accepted as relative, and only encoding keeps a browser from turning its entity into one.</summary>
+    internal static bool SafeLink(string? href)
     {
+        if (href is null) return false;
         var s = href.Trim();
-        var end = s.IndexOfAny(['/', '?', '#']);
+        if (s.StartsWith('#')) return true;
+        var end = s.IndexOfAny(['/', '?']);
         var head = end < 0 ? s : s[..end];
         var colon = head.IndexOf(':');
         if (colon < 0) return true;
