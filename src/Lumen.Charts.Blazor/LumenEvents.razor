@@ -1,0 +1,85 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+<div class="lumen-events-host" @ref="root">@((MarkupString)html)</div>
+<span class="lumen-status" role="status">@status</span>
+@code {
+    /// <summary>The timeline to draw: its events, Now, grouping and formats; see <see cref="EventTimelineSpec"/>. A new instance returns the
+    /// timeline to its opening window; the same instance keeps the window the reader has opened. A style set on it wins over a cascaded one.</summary>
+    [Parameter, EditorRequired] public EventTimelineSpec Spec { get; set; } = new([]);
+    /// <summary>How many events to open with, and how many more each press of a Show earlier or Show later button adds, from 1 to 200.
+    /// Null, the default, shows every event with no buttons. The window opens on the events nearest the Now marker when there is one.</summary>
+    [Parameter] public int? PageSize { get; set; }
+    /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style in <see cref="Spec"/> wins; without either, <see cref="ChartStyle.Light"/> is used.</summary>
+    [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }
+
+    private EventTimelineSpec? source;
+    private int? sourcePage;
+    private EventView view = null!;
+    private (int First, int Last) window;
+    private string html = "", status = "";
+    // The button the reader pressed, which takes focus back after the fragment is rewritten; null on the first render.
+    private string? refocus;
+    private bool disposed;
+    private ElementReference root;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<LumenEvents>? reference;
+
+    protected override void OnParametersSet()
+    {
+        if (PageSize is < 1 or > 200) throw new ArgumentException("PageSize may be left out, or be from 1 to 200.", nameof(PageSize));
+        var fresh = !ReferenceEquals(Spec, source);
+        if (fresh) view = EventView.Of(Spec);
+        if (fresh || PageSize != sourcePage)
+        {
+            source = Spec;
+            sourcePage = PageSize;
+            window = PageSize is { } n ? view.Window(n) : (0, view.Order.Count - 1);
+            status = "";
+        }
+        Draw();
+    }
+
+    // Writes the current window from the view built when the spec arrived; nothing is validated or sorted here.
+    private void Draw() =>
+        html = EventTimelineHtml.Render(Spec with { Style = Spec.Style ?? CascadingStyle ?? ChartStyle.Light }, view, window, PageSize is not null, PageSize ?? 10);
+
+    /// <summary>Called by the component's script when the reader presses a Show earlier or Show later button. <paramref name="side"/> is
+    /// <c>earlier</c> or <c>later</c>, the start or the end of the list in reading order, and anything else does nothing. The window grows by
+    /// <see cref="PageSize"/> events at that end, and the status line names the events now shown. At the end of the list the window does not
+    /// move, the button stays and keeps focus.</summary>
+    [JSInvokable] public Task More(string side) => InvokeAsync(() =>
+    {
+        if ((side != "earlier" && side != "later") || PageSize is not { } by) return;
+        window = view.Grow(window, side == "earlier", by);
+        status = $"Showing {(window.First + 1).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)}–{(window.Last + 1).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} of {view.Order.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} events";
+        refocus = $"[data-lumen-more='{side}']";
+        Draw();
+        StateHasChanged();
+    });
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var loaded = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Lumen.Charts.Blazor/lumen.js");
+            if (disposed) { await loaded.DisposeAsync(); return; }
+            module = loaded;
+            reference = DotNetObjectReference.Create(this);
+            await module.InvokeVoidAsync("attachEvents", root, reference);
+        }
+        if (module is not null && refocus is { } selector)
+        {
+            refocus = null;
+            await module.InvokeVoidAsync("tableFocus", root, selector);
+        }
+    }
+
+    /// <summary>Removes the timeline's click handler from the page.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        try { if (module is not null) { await module.InvokeVoidAsync("detach", root); await module.DisposeAsync(); } }
+        catch (JSDisconnectedException) { }
+        finally { reference?.Dispose(); }
+    }
+}

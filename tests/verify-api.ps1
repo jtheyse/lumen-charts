@@ -638,4 +638,19 @@ Verify ($r.StatusCode -eq 400) "A table request with a null spec is refused with
 $nocaption='{"columns":[{"header":"Name"}],"rows":[{"cells":[{"text":"Al"}]}]}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/table/html" -Method Post -ContentType application/json -Body ('{"spec":'+$nocaption+'}') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400) "A table with no caption is refused with 400 ($($r.StatusCode))"
+$tl='{"events":[{"when":"2026-10-01T12:00:00+00:00","title":"Alpha"},{"when":"2026-10-02T12:00:00+00:00","title":"Bravo"},{"when":"2026-10-03T12:00:00+00:00","title":"Charlie"}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/timeline/html" -Method Post -ContentType application/json -Body ('{"spec":'+$tl+'}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Headers['Content-Type'] -like 'text/html*' -and $r.Content.Contains('lumen-events') -and $r.Content.Contains('Charlie')) 'A timeline answers 200 as text/html with the lumen-events root'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/timeline/html" -Method Post -ContentType application/json -Body ('{"spec":'+$tl+',"shown":1}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('Showing') -and $r.Content.Contains('of 3 events') -and -not ($r.Content.Contains('Alpha') -and $r.Content.Contains('Charlie'))) 'The shown parameter of a timeline limits the events written'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/timeline/html" -Method Post -ContentType application/json -Body ('{"spec":'+$tl+',"shown":0}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid timeline')) "A shown of 0 is refused with 400 titled Invalid timeline ($($r.StatusCode))"
+$many='{"events":['+((1..2001|ForEach-Object{'{"when":"2026-10-01T12:00:00+00:00","title":"E"}'}) -join ',')+']}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/timeline/html" -Method Post -ContentType application/json -Body ('{"spec":'+$many+'}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid timeline')) "2,001 timeline events are refused with 400 titled Invalid timeline ($($r.StatusCode))"
+$bad='{"events":[{"when":"2026-10-01T12:00:00+00:00","title":"Alpha","href":"javascript:alert(1)"}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/timeline/html" -Method Post -ContentType application/json -Body ('{"spec":'+$bad+'}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid timeline')) "A javascript: link in a timeline is refused with 400 titled Invalid timeline ($($r.StatusCode))"
+$r=Invoke-WebRequest "$BaseUrl/api/charts/timeline/html" -Method Post -ContentType application/json -Body '{"spec":null}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400) "A timeline request with a null spec is refused with 400 ($($r.StatusCode))"
 Write-Output "$checks HTTP checks passed."

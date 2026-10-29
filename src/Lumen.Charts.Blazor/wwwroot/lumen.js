@@ -431,7 +431,20 @@ export function attachTable(root, dotnet) {
     handlers.set(root, { bindings: [['click', click]] });
 }
 
-/// Puts focus back on the control the reader pressed after a table's markup was rewritten. A paging button that no longer moves
+/// Wires the Show earlier and Show later buttons of a timeline drawn by <LumenEvents>. A button that has nothing left to show is
+/// aria-disabled and ignored here, so it stays focusable.
+export function attachEvents(root, dotnet) {
+    const click = event => {
+        const target = event.target instanceof Element ? event.target : null;
+        const more = target?.closest('[data-lumen-more]');
+        if (!more || !root.contains(more) || more.getAttribute('aria-disabled') === 'true') return;
+        dotnet.invokeMethodAsync('More', more.dataset.lumenMore);
+    };
+    root.addEventListener('click', click);
+    handlers.set(root, { bindings: [['click', click]] });
+}
+
+/// Puts focus back on the control the reader pressed after a table's or timeline's markup was rewritten. A paging button that no longer moves
 /// is aria-disabled, not disabled, so it can still take focus.
 export function tableFocus(root, selector) {
     root.querySelector(selector)?.focus({ preventScroll: true });

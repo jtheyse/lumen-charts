@@ -12484,6 +12484,80 @@ Test("0.50.0: no id, hostile text is escaped, and every css rule is under the ro
     }
     Check(css.Contains("2px")&&css.Contains("var(--lumen-grid)"),"the rail");
 });
+// 0.50.0: the component
+string OperateEvents(EventTimelineSpec spec,int? pageSize,Func<LumenEvents,Task> act,ChartStyle? cascaded=null)
+{
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try {
+        LumenEvents? events=null;
+        RenderFragment content=b=>{b.OpenComponent<LumenEvents>(0);b.AddAttribute(1,"Spec",spec);if(pageSize is{}n)b.AddAttribute(2,"PageSize",(int?)n);b.AddComponentReferenceCapture(3,c=>events=(LumenEvents)c);b.CloseComponent();};
+        return renderer.Dispatcher.InvokeAsync(async()=>{
+            var root=await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",cascaded},{"ChildContent",content}}));
+            await act(events!);
+            await root.QuiescenceTask;
+            return root.ToHtmlString();
+        }).GetAwaiter().GetResult();
+    } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
+}
+EventTimelineSpec Thirty()=>ESpec(Enumerable.Range(1,30).Select(d=>Ev(d,"Day "+d)).ToArray()) with{Now=EDay(15,13)};
+Test("0.50.0: LumenEvents prerenders the renderer's fragment for the default window, and the cascading style applies",()=>{
+    var spec=Thirty();
+    RenderFragment Events(int? size,EventTimelineSpec? s=null)=>b=>{b.OpenComponent<LumenEvents>(0);b.AddAttribute(1,"Spec",s??spec);if(size is{}n)b.AddAttribute(2,"PageSize",(int?)n);b.CloseComponent();};
+    var view=EventView.Of(spec);
+    var html=Prerender(Events(10));
+    Check(html.Contains(EventTimelineHtml.Render(spec with{Style=ChartStyle.Light},view,view.Window(10),true,10)),"the fragment with controls is not in the markup");
+    Check(html.Contains("class=\"lumen-events-host\"")&&html.Contains("data-lumen-more='earlier'")&&html.Contains("<span class=\"lumen-status\" role=\"status\"></span>"),"host, buttons, status");
+    var all=Prerender(Events(null));
+    Check(all.Contains(EventTimelineHtml.Render(spec with{Style=ChartStyle.Light}))&&!all.Contains("data-lumen-more"),"without PageSize: everything, no buttons");
+    var dark=ChartStyle.Light with{Background="#101010",Text="#F5F5F5"};
+    var styled=Prerender(Events(10),dark);
+    Check(styled.Contains(EventTimelineHtml.Render(spec with{Style=dark},view,view.Window(10),true,10))&&styled!=html,"the cascaded style does not apply");
+    Check(Prerender(Events(10,spec with{Style=ChartStyle.Light}),dark)==html,"the spec's own style does not win");
+});
+Test("0.50.0: LumenEvents grows the window by PageSize, says so, ignores an unknown side, and keeps focus on the pressed side",()=>{
+    var spec=Thirty();
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    string? Pressed(LumenEvents t)=>(string?)typeof(LumenEvents).GetField("refocus",flags)!.GetValue(t);
+    var view=EventView.Of(spec);
+    var (first,last)=view.Window(10);
+    string? pressed=null;
+    var html=OperateEvents(spec,10,async e=>{await e.More("earlier");pressed=Pressed(e);});
+    var grown=view.Grow((first,last),true,10);
+    Check(html.Contains($"Showing {grown.First+1}&#x2013;{grown.Last+1} of 30 events")&&pressed=="[data-lumen-more='earlier']",$"earlier: {pressed}");
+    Check(html.Contains(EventTimelineHtml.Render(spec with{Style=ChartStyle.Light},view,grown,true,10)),"the grown window is drawn");
+    var before=OperateEvents(spec,10,_=>Task.CompletedTask);
+    string? bad=null;
+    var ignored=OperateEvents(spec,10,async e=>{await e.More("sideways");await e.More("");await e.More(null!);await e.More("later\"] , body");bad=Pressed(e);});
+    Check(ignored==before&&bad is null,"an unknown side changed something");
+    var later=OperateEvents(spec,10,async e=>{await e.More("later");await e.More("later");await e.More("later");await e.More("later");});
+    Check(later.Contains("Showing "+(first+1)+"&#x2013;30 of 30 events")&&later.Contains("data-lumen-more='later' aria-disabled='true'>No later events"),"the end of the list: the button stays");
+    var none=OperateEvents(spec,null,async e=>await e.More("earlier"));
+    Check(!none.Contains("Showing"),"no PageSize, no growing");
+});
+Test("0.50.0: LumenEvents builds its view once for a Spec instance, never for a press or a re-render, and a new Spec starts again",()=>{
+    var spec=Thirty();
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    object? View(LumenEvents t)=>typeof(LumenEvents).GetField("view",flags)!.GetValue(t);
+    var views=new List<object?>();
+    var html=OperateEvents(spec,10,async e=>{
+        views.Add(View(e));
+        await e.More("earlier");views.Add(View(e));
+        await e.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",spec},{"PageSize",(int?)10}}));views.Add(View(e));
+        await e.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",Thirty()},{"PageSize",(int?)10}}));views.Add(View(e));
+    });
+    Check(views[0] is not null&&ReferenceEquals(views[0],views[1])&&ReferenceEquals(views[0],views[2]),"a press or a same-Spec re-render built a new view");
+    Check(!ReferenceEquals(views[2],views[3])&&!html.Contains("Showing"),"a new Spec instance starts again");
+    var kept=OperateEvents(spec,10,async e=>{await e.More("earlier");await e.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",spec},{"PageSize",(int?)10}}));});
+    Check(kept.Contains("Showing"),"the same Spec keeps the opened window");
+});
+Test("0.50.0: LumenEvents refuses a PageSize outside 1 to 200, and is documented",()=>{
+    foreach(var bad in new[]{0,-1,201})
+        Check(Throws<ArgumentException>(()=>OperateEvents(Thirty(),bad,_=>Task.CompletedTask)),"accepted "+bad);
+    foreach(var ok in new[]{1,200})OperateEvents(Thirty(),ok,_=>Task.CompletedTask);
+    var blazor=File.ReadAllText(Path.ChangeExtension(typeof(LumenEvents).Assembly.Location,".xml"));
+    Check(blazor.Contains("T:Lumen.Charts.Blazor.LumenEvents")&&blazor.Contains("M:Lumen.Charts.Blazor.LumenEvents.More(System.String)"),"component docs");
+});
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
