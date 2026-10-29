@@ -2735,6 +2735,118 @@ if (await beyondLink.CountAsync() > 0)
         await tab.CloseAsync();
     });
 
+    // 0.50.0: the event timeline. Season 2026 is sixteen events by month with Now at 29 October; it opens on six events round Now, and the two
+    // buttons add six at a time.
+    var themeToggle = new Regex("theme", RegexOptions.IgnoreCase);
+    const string moreEarlier = "#timeline [data-lumen-more='earlier']";
+    const string onEarlier = "() => document.activeElement?.matches(\"#timeline [data-lumen-more='earlier']\") === true";
+    async Task<string> TimelineStatus(IPage tab) => (await tab.Locator("#timeline .lumen-status").TextContentAsync())!.Trim();
+    async Task TabTo(IPage tab, string selector)
+    {
+        var reached = false;
+        for (var i = 0; i < 300 && !reached; i++)
+        {
+            await tab.Keyboard.PressAsync("Tab");
+            reached = await tab.EvaluateAsync<bool>($"() => document.activeElement?.matches(\"{selector}\") === true");
+        }
+        Check(reached, $"Tab never reached {selector}");
+    }
+
+    await Test("Components page: the event timeline passes axe in Light, Dark and Midnight", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        Check(await tab.Locator("#timeline .lumen-events").CountAsync() == 1, "the page does not show the timeline");
+        Check(await tab.Locator("#timeline .lumen-event").CountAsync() == 6, $"the timeline opens on {await tab.Locator("#timeline .lumen-event").CountAsync()} events, not 6");
+        await SweepOf(tab);
+        await ClickUntil(tab, tab.GetByRole(AriaRole.Button, new() { NameRegex = themeToggle }), "() => !!document.querySelector('.app.dark') && document.querySelector('#timeline .lumen-events').getAttribute('style').includes('#171E2E')");
+        await SweepOf(tab);
+        await ClickUntil(tab, tab.GetByRole(AriaRole.Button, new() { Name = "Midnight", Exact = true }), "() => document.querySelector('#timeline .lumen-events').getAttribute('style').includes('#0B0E14')");
+        await SweepOf(tab);
+        await tab.CloseAsync();
+    });
+
+    await Test("Components page: Tab to Show earlier and Enter adds events, says so and keeps focus, until it reads No earlier events and still keeps focus", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        await ClickUntil(tab, tab.GetByRole(AriaRole.Button, new() { NameRegex = themeToggle }), "() => !!document.querySelector('.app.dark')");
+        await TabTo(tab, moreEarlier);
+        var before = await tab.Locator("#timeline .lumen-event").CountAsync();
+        var label = (await tab.Locator(moreEarlier).TextContentAsync())!.Trim();
+        Check(Regex.IsMatch(label, @"^Show \d+ earlier$"), $"the button reads {label}");
+        await tab.Keyboard.PressAsync("Enter");
+        await tab.WaitForFunctionAsync("n => document.querySelectorAll('#timeline .lumen-event').length > n", before);
+        var after = await tab.Locator("#timeline .lumen-event").CountAsync();
+        Check(after == before + 6, $"{before} events became {after}, not {before + 6}");
+        var said = await TimelineStatus(tab);
+        Check(Regex.IsMatch(said, @"^Showing \d+–\d+ of 16 events$"), $"status: {said}");
+        await tab.WaitForFunctionAsync(onEarlier);
+        // Press until the start of the list: the button goes aria-disabled, reads No earlier events and keeps focus.
+        for (var press = 0; press < 5 && await tab.Locator(moreEarlier).GetAttributeAsync("aria-disabled") != "true"; press++)
+        {
+            var count = await tab.Locator("#timeline .lumen-event").CountAsync();
+            await tab.Keyboard.PressAsync("Enter");
+            await tab.WaitForFunctionAsync("n => document.querySelectorAll('#timeline .lumen-event').length > n", count);
+            await tab.WaitForFunctionAsync(onEarlier);
+        }
+        Check((await tab.Locator(moreEarlier).TextContentAsync())!.Trim() == "No earlier events", $"the button reads {await tab.Locator(moreEarlier).TextContentAsync()}");
+        Check(await tab.Locator(moreEarlier).GetAttributeAsync("aria-disabled") == "true", "the button is not aria-disabled");
+        var atStart = await TimelineStatus(tab);
+        Check(atStart.StartsWith("Showing 1–") && atStart.EndsWith("of 16 events"), $"status at the start: {atStart}");
+        // A press on it moves nothing and leaves focus where it was.
+        var shown = await tab.Locator("#timeline .lumen-event").CountAsync();
+        await tab.Keyboard.PressAsync("Enter");
+        await tab.WaitForTimeoutAsync(600);
+        Check(await tab.Locator("#timeline .lumen-event").CountAsync() == shown && await TimelineStatus(tab) == atStart, "a press on No earlier events changed the list");
+        Check(await tab.EvaluateAsync<bool>(onEarlier), "focus left No earlier events");
+        await tab.CloseAsync();
+    });
+
+    await Test("Components page: the Now marker is visible and sits between the last done race and the current race", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        var now = tab.Locator("#timeline li.lumen-events-now");
+        Check(await now.CountAsync() == 1 && await now.IsVisibleAsync(), "the Now marker is not shown");
+        var text = (await now.TextContentAsync())!.Trim();
+        Check(text == "Now · Thu 29 Oct 2026", $"the marker reads {text}");
+        var around = await tab.EvaluateAsync<string[]>(@"() => { const all = [...document.querySelectorAll('#timeline li.lumen-event, #timeline li.lumen-events-now')], i = all.findIndex(li => li.classList.contains('lumen-events-now'));
+            const top = li => li.getBoundingClientRect().top;
+            return [all[i - 1].className, all[i + 1].className, String(top(all[i - 1]) < top(all[i]) && top(all[i]) < top(all[i + 1]))]; }");
+        Check(around[0].Contains("lumen-event-done"), $"the event before Now is {around[0]}");
+        Check(around[1].Contains("lumen-event-current"), $"the event after Now is {around[1]}");
+        Check(around[2] == "true", "the marker is not drawn between them");
+        await tab.CloseAsync();
+    });
+
+    foreach (var phoneWidth in new[] { 360, 375 })
+    await Test($"Components page on a {phoneWidth}-pixel phone: the timeline fits its card and the page does not scroll sideways", async () =>
+    {
+        await using var phone = await browser.NewContextAsync(new() { ViewportSize = new() { Width = phoneWidth, Height = 812 }, IsMobile = true, HasTouch = true, DeviceScaleFactor = 2 });
+        var tab = await ComponentsPage(phone);
+        var fits = await tab.EvaluateAsync<double[]>(@"() => { const root = document.querySelector('#timeline .lumen-events'), box = root.getBoundingClientRect();
+            const outside = [...root.querySelectorAll('*')].filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > box.right + 1 || r.left < box.left - 1); }).length;
+            return [document.documentElement.scrollWidth, document.documentElement.clientWidth, box.left, box.right, window.innerWidth, outside, root.scrollWidth, root.clientWidth]; }");
+        Check(fits[0] <= fits[1], $"the page is {fits[0]} wide in a {fits[1]} window");
+        Check(fits[2] >= 0 && fits[3] <= fits[4], $"the timeline runs from {fits[2]} to {fits[3]} in a {fits[4]} window");
+        Check(fits[5] == 0, $"{fits[5]} parts of the timeline run outside it");
+        Check(fits[6] <= fits[7], $"the timeline is {fits[6]} wide in {fits[7]}");
+        await tab.CloseAsync();
+    });
+
+    await Test("Components page: the prerendered timeline equals the interactive one", async () =>
+    {
+        var tab = await ComponentsPage(plain);
+        var toggle = tab.GetByRole(AriaRole.Button, new() { NameRegex = themeToggle });
+        await ClickUntil(tab, toggle, "() => !!document.querySelector('.app.dark')");
+        await ClickUntil(tab, toggle, "() => !document.querySelector('.app.dark') && document.querySelector('#timeline .lumen-events').getAttribute('style').includes('#FFFFFF')");
+        var both = await tab.EvaluateAsync<string[]>(@"async () => { const doc = new DOMParser().parseFromString(await (await fetch(location.href)).text(), 'text/html');
+            return [doc.querySelector('#timeline').outerHTML, document.querySelector('#timeline').outerHTML]; }");
+        // Blazor's own markers are not timeline markup: its comments, and the _bl_ attribute it puts on an element a component holds with @ref.
+        string Bare(string html) => Regex.Replace(Regex.Replace(html, "<!--.*?-->", ""), @" _bl_[0-9a-f-]+=""""", "");
+        Check(Bare(both[0]).Contains("Season 2026") && Bare(both[0]).Contains("lumen-events-now"), "the section does not hold the timeline");
+        Check(Bare(both[0]) == Bare(both[1]), "the timeline differs between the first response and the circuit");
+        await tab.CloseAsync();
+    });
+
     await plain.CloseAsync();
 }
 else Console.WriteLine("SKIP Components page checks: this host has no Beyond charts page");

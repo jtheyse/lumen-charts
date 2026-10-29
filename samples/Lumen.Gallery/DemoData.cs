@@ -513,6 +513,41 @@ public static class DemoData
         };
     }
 
+    /// <summary>"Season": one invented rider's 2026 season of sixteen events, grouped by month, with Now at noon on 29 October in Johannesburg. Eleven races are done, one was called off, the next is current and three are still to come. A null <paramref name="style"/> leaves the style to the brand around the timeline.</summary>
+    public static Lumen.Charts.EventTimelineSpec RiderSeason(Lumen.Charts.ChartStyle? style)
+    {
+        static DateTimeOffset At(int month, int day, int hour = 9) => new(2026, month, day, hour, 0, 0, TimeSpan.FromHours(2));
+        const Lumen.Charts.EventStatus Done = Lumen.Charts.EventStatus.Done;
+        Lumen.Charts.TimelineEvent[] events =
+        [
+            new(At(2, 14), "Coastal Road Classic") { Status = Done, Value = "7th · 2:41:10", Category = "Road" },
+            new(At(3, 8), "Harbour Cup") { Status = Done, Value = "3rd · 1:12:05", Category = "XCO" },
+            new(At(3, 22, 7), "Ridgeback Marathon") { Status = Done, Value = "5th · 3:58:44", Category = "Marathon", Href = "#race-ridgeback" },
+            new(At(4, 12), "Valley Criterium") { Status = Done, Value = "11th · 1:02:31", Category = "Road" },
+            new(At(5, 3), "Pinewood Cup") { Status = Done, Value = "2nd · 1:18:50", Category = "XCO" },
+            new(At(5, 31, 7), "Fenland Gran Fondo") { Status = Done, Value = "9th · 4:20:12", Category = "Marathon" },
+            new(At(6, 21), "Highveld Hill Climb") { Status = Lumen.Charts.EventStatus.Cancelled, Category = "Road", Note = "Called off for weather" },
+            new(At(7, 12), "Quarry Cup") { Status = Done, Value = "4th · 1:15:22", Category = "XCO" },
+            new(At(8, 9), "Kestrel Classic") { Status = Done, Value = "6th · 2:33:09", Category = "Road", Href = "#race-kestrel" },
+            new(At(9, 6, 7), "Moorside Marathon") { Status = Done, Value = "3rd · 3:49:30", Category = "Marathon" },
+            new(At(10, 3, 0), "Dunes Stage Race") { AllDay = true, End = At(10, 4, 0), Status = Done, Value = "5th overall · 9:12:40", Category = "Marathon" },
+            new(At(10, 18), "Lakeside Cup") { Status = Done, Value = "1st · 1:09:58", Category = "XCO" },
+            new(At(11, 1, 8), "Northgate Marathon") { Status = Lumen.Charts.EventStatus.Current, Category = "Marathon", Note = "Entry confirmed" },
+            new(At(11, 22), "Ridge Road Race") { Status = Lumen.Charts.EventStatus.Upcoming, Category = "Road" },
+            new(At(12, 6), "Season Finale Cup") { Status = Lumen.Charts.EventStatus.Upcoming, Category = "XCO", Href = "#race-finale" },
+            new(At(12, 19, 7), "Year-End Marathon") { Status = Lumen.Charts.EventStatus.Upcoming, Category = "Marathon" }
+        ];
+        return new(events)
+        {
+            Title = "Season 2026",
+            Description = "One invented rider's season: races done, the next one, and what is still to come.",
+            GroupBy = Lumen.Charts.EventGrouping.Month,
+            Now = At(10, 29, 12),
+            TimeZone = "Africa/Johannesburg",
+            Style = style
+        };
+    }
+
     /// <summary>"Training log": four hundred invented days ending 28 October 2026, 25 to a page, opening on the last page, with a footer of totals. A null <paramref name="style"/> leaves the style to the brand around the table.</summary>
     public static Lumen.Charts.TableSpec TrainingLog(Lumen.Charts.ChartStyle? style)
     {

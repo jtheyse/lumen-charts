@@ -9,12 +9,13 @@
         <a class="nav-item" href="/#network"><span>⌘</span> Network graphs <b>2</b></a>
         <a class="nav-item" href="/#integration"><span>⌁</span> Developer API</a>
         <a class="nav-item" href="sports"><span>∿</span> Sports &amp; performance <b>33</b></a>
-        <a class="nav-item active" href="components" aria-current="page"><span>▤</span> Beyond charts <b>4</b></a>
+        <a class="nav-item active" href="components" aria-current="page"><span>▤</span> Beyond charts <b>5</b></a>
         <div class="nav-label">ON THIS PAGE</div>
         <a class="purpose" href="components#season">Season at a glance<span>↓</span></a>
         <a class="purpose" href="components#rounds">Round by round<span>↓</span></a>
         <a class="purpose" href="components#results">Results<span>↓</span></a>
         <a class="purpose" href="components#log">Training log<span>↓</span></a>
+        <a class="purpose" href="components#timeline">Season timeline<span>↓</span></a>
         <div class="sidebar-bottom"><span class="live-dot"></span> Invented season<p>One rider, twelve rounds.</p><a href="/#integration">Start building →</a></div>
     </aside>
     <main>
@@ -44,6 +45,14 @@
         </section>
         <section id="log" class="sports-section">
             <div class="chart-card comp-card">@Branded(@<LumenTable Spec="DemoData.TrainingLog(Style)"/>)</div>
+        </section>
+        <section class="sports-intro">
+            <div class="eyebrow"><span></span> EVENT TIMELINE</div>
+            <h2>What happened. <em>What is next.</em></h2>
+            <p><code>LumenEvents</code> writes dated events as a vertical list under month headings, with a Now marker between what is done and what is to come. Each status is a word as well as a mark. With <code>PageSize</code> it opens on the events nearest Now, and Show earlier and Show later buttons reveal the rest.</p>
+        </section>
+        <section id="timeline" class="sports-section">
+            <div class="chart-card comp-card">@Branded(@<LumenEvents Spec="DemoData.RiderSeason(Style)" PageSize="6"/>)</div>
         </section>
         <footer><span class="brand">lumen.</span><span>Charts that help you see.</span><span>Invented data · Built with Blazor</span></footer>
     </main>
