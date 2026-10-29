@@ -1036,6 +1036,62 @@ Over HTTP, `POST /api/charts/table/html` takes `{"spec":{…},"page":0}` and ans
 - **CSV.** Header, text and footer fields starting with `=`, `+`, `-` or `@` are written with a `'` in front, as chart CSV does; numbers stay bare. Export CSV saves the spec's own sort, not the reader's, in a file named after the caption (`training-log.csv`).
 - **Limits.** 1 to 32 columns; at most 100,000 rows and, without a `PageSize`, 5,000; a caption of 1 to 120 characters; text of at most 200, a note of at most 80; a trend of at most 400 values with at least 2 not null. A table is read-only: no filtering, search, selection or editing. A new `Spec` instance resets the reader's sort and page, so a theme or brand switch does too.
 
+## Race history
+
+A rider's season as a vertical list of events, as HTML and not a chart: races done with their results, the one under way, those still to come and one called off, gathered by month round a Now marker, with a window that opens on the races nearest Now (0.50.0). Every name and number here is invented; a real page fills the events from its own results and sets `Now` from its clock.
+
+```csharp
+// A season's races, invented, in any order. A status is a word and a glyph, so nothing rests on colour; an event with an End is a span.
+static DateTimeOffset RaceHistoryAt(int month, int day, int hour = 9) => new(2026, month, day, hour, 0, 0, TimeSpan.FromHours(2));
+var raceHistoryEvents = new TimelineEvent[]
+{
+    new(RaceHistoryAt(3, 8), "Harbour Cup") { Status = EventStatus.Done, Value = "3rd · 1:12:05", Category = "XCO", Href = "/races/harbour-cup" },
+    new(RaceHistoryAt(6, 21), "Highveld Hill Climb") { Status = EventStatus.Cancelled, Category = "Road", Note = "Called off for weather" },
+    new(RaceHistoryAt(8, 9), "Kestrel Classic") { Status = EventStatus.Done, Value = "6th · 2:33:09", Category = "Road" },
+    new(RaceHistoryAt(9, 6, 7), "Moorside Marathon") { Status = EventStatus.Done, Value = "3rd · 3:49:30", Category = "Marathon", End = RaceHistoryAt(9, 6, 11) },
+    new(RaceHistoryAt(10, 3, 0), "Dunes Stage Race") { AllDay = true, End = RaceHistoryAt(10, 4, 0), Status = EventStatus.Done, Value = "5th overall", Category = "Marathon" },   // all day: it keeps the dates it was given, in its own offset
+    new(RaceHistoryAt(10, 18), "Lakeside Cup") { Status = EventStatus.Done, Value = "1st · 1:09:58", Category = "XCO" },
+    new(RaceHistoryAt(11, 1, 8), "Northgate Marathon") { Status = EventStatus.Current, Category = "Marathon", Note = "Entry confirmed" },                                   // Current: under way; the Now marker owns the word "Now"
+    new(RaceHistoryAt(11, 22), "Ridge Road Race") { Status = EventStatus.Upcoming, Category = "Road" },
+    new(RaceHistoryAt(12, 6), "Season Finale Cup") { Status = EventStatus.Upcoming, Category = "XCO", Href = "/races/finale" },
+    new(RaceHistoryAt(12, 19, 7), "Year-End Marathon") { Status = EventStatus.Upcoming, Category = "Marathon" }
+};
+var raceHistory = new EventTimelineSpec(raceHistoryEvents)
+{
+    Title = "Race history",
+    Description = "Ten invented races for one rider: done, called off, under way and still to come.",
+    GroupBy = EventGrouping.Month,                                  // headings by month, read in TimeZone
+    Now = RaceHistoryAt(10, 29, 12),                                // the marker stands after the last race reached and before the next
+    TimeZone = "Africa/Johannesburg",                               // null reads UTC; an all-day event is not converted into it
+    Style = raceFace                                                // the card's own colours; null is the Light preset
+};
+var raceHistoryNewest = raceHistory with { NewestFirst = true, GroupBy = EventGrouping.Year, Title = "Latest first", Density = Density.Compact };
+var raceHistoryDates = raceHistory with { GroupBy = EventGrouping.None, DateFormat = "d MMM", Events = [new TimelineEvent(RaceHistoryAt(10, 3, 0), "Dunes Stage Race") { AllDay = true, End = RaceHistoryAt(10, 5, 0) }] };   // 3 Oct – 5 Oct: a format of your own is written in full at both ends
+string raceHistoryHtml = EventTimelineHtml.Render(raceHistory);               // every event, a fragment with its own style block: write it into a page as it is
+string raceHistoryNearNowHtml = EventTimelineHtml.Render(raceHistory, 4);     // the four events nearest Now, with "Showing 5–8 of 10 events" and no buttons
+string raceHistoryNewestHtml = EventTimelineHtml.Render(raceHistoryNewest);   // newest first, the marker before the events it has reached
+string raceHistoryDatesHtml = EventTimelineHtml.Render(raceHistoryDates);     // Dunes Stage Race on "3 Oct – 5 Oct"
+```
+
+In a Blazor page (a razor block, not compiled by the recipe check). `<LumenEvents>` writes the same fragment, with the style a `<LumenBrand>` or a cascaded `ChartStyle` gives it unless the spec sets its own. `PageSize` opens it on that many events round Now, with `Show 6 earlier` and `Show 6 later` buttons in an interactive render mode (a prerender shows the opening window with buttons that do nothing yet):
+
+```razor
+<LumenEvents Spec="raceHistory" PageSize="6" />
+<LumenEvents Spec="raceHistoryNewest" />
+```
+
+Over HTTP, `POST /api/charts/timeline/html` takes `{"spec":{…},"shown":4}` and answers `text/html` (the fragment has no buttons). A host that registers `JsonStringEnumConverter`, as the gallery does, writes enums by name (`"status":"Done"`, `"groupBy":"Month"`); without it they are numbers. A `DateTimeOffset` is an ISO 8601 string with its offset. A `shown` of 0 is a 400 titled `Invalid timeline`, with the message `Shown may be left out, or be at least 1.`:
+
+```json
+{"spec":{"title":"Race history","groupBy":"Month","now":"2026-10-29T12:00:00+02:00","timeZone":"Africa/Johannesburg","events":[{"when":"2026-10-18T09:00:00+02:00","title":"Lakeside Cup","status":"Done","value":"1st · 1:09:58"},{"when":"2026-11-01T08:00:00+02:00","title":"Northgate Marathon","status":"Current"}]},"shown":2}
+```
+
+- **Statuses.** `✓ Done`, `● Current`, `○ Upcoming` and `✕ Cancelled`, each a glyph hidden from readers and a word that is not. The Now marker, `Now · Thu 29 Oct 2026`, is a line of words with a ring for a dot; the rail and the dots are decoration.
+- **The window.** With `PageSize` the timeline opens on the events nearest Now, the larger half before it. `Show 6 earlier` and `Show 6 later` (`newer` and `older` with `NewestFirst`) grow it by `PageSize`; at the end of the list a button reads `No earlier events`, carries `aria-disabled` and stays focusable, so a keyboard reader who keeps pressing keeps their place. At `PageSize` 6 the timeline opens on `Showing 4–9 of 10 events`, and a press of `Show 3 earlier` makes it `Showing 1–9 of 10 events`. A change of `PageSize`, like a new `Spec` instance, reopens the window.
+- **Time zones.** Times and headings are read in `TimeZone` (null is UTC): 23:30 UTC on 31 October reads `Sun 1 Nov 2026 · 01:30` in `Africa/Johannesburg` and sits under November. An all-day event keeps the date it was given, in its own offset, for its text, its `datetime` and its group.
+- **Dates.** A moment is `Mon 5 Oct 2026 · 12:00`; a span in a day `Mon 5 Oct 2026 · 12:00–14:30`; an all-day span `Mon 5 – Wed 7 Oct 2026`, `Sat 31 Oct – Sun 1 Nov 2026` or `Thu 31 Dec 2026 – Fri 1 Jan 2027`. A `DateFormat` of your own is written in full at both ends. An `End` equal to the `When` is one moment; an `End` before it is refused.
+- **Limits.** At most 2,000 events; a title of 1 to 120 characters, a note of at most 200, a value of at most 40, a category of at most 24; `PageSize` 1 to 200; `TitleLevel` 2 to 5; links only http, https, mailto or relative. A timeline is read-only: no selection event, no editing, no live clock. Days and months are English.
+
 ## Rendering notes
 
 - **Static:** `ChartSvg.Render(spec)` at `Width = 340` (or the card's own width) is the whole chart: labels, colours, tooltips and names, with no script. Write it into the page, or rasterise it on the server with an SVG library of your choice; Lumen ships no PNG or PDF renderer. Each line's value label stands on a copy of itself stroked in the background colour, not on SVG 2's `paint-order`, so rasterisers without it draw it the same.
