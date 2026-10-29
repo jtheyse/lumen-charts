@@ -12359,7 +12359,7 @@ Test("0.50.0: the label is the title, else the description, else Events; the hea
     Check(ERoot(EventTimelineHtml.Render(ESpec(Ev(1)) with{Title="T",Density=Density.Compact})).Attribute("class")!.Value=="lumen-events lumen-events-compact","compact");
 });
 Test("0.50.0: each status has a glyph and a word; Current is coloured through Readable and Cancelled is struck through",()=>{
-    foreach(var (status,text,cls) in new[]{(EventStatus.Done,"✓ Done","done"),(EventStatus.Current,"● Now","current"),(EventStatus.Upcoming,"○ Upcoming","upcoming"),(EventStatus.Cancelled,"✕ Cancelled","cancelled")})
+    foreach(var (status,text,cls) in new[]{(EventStatus.Done,"✓ Done","done"),(EventStatus.Current,"● Current","current"),(EventStatus.Upcoming,"○ Upcoming","upcoming"),(EventStatus.Cancelled,"✕ Cancelled","cancelled")})
     {
         var li=EKids(ERoot(EventTimelineHtml.Render(ESpec(Ev(1) with{Status=status}))),"lumen-event").Single();
         var st=EKids(li,"lumen-event-status").Single();
@@ -12557,6 +12557,79 @@ Test("0.50.0: LumenEvents refuses a PageSize outside 1 to 200, and is documented
     foreach(var ok in new[]{1,200})OperateEvents(Thirty(),ok,_=>Task.CompletedTask);
     var blazor=File.ReadAllText(Path.ChangeExtension(typeof(LumenEvents).Assembly.Location,".xml"));
     Check(blazor.Contains("T:Lumen.Charts.Blazor.LumenEvents")&&blazor.Contains("M:Lumen.Charts.Blazor.LumenEvents.More(System.String)"),"component docs");
+});
+Test("0.50.0: the Now marker's dot is a larger ring in the accent colour, not a filled done dot; the words stay",()=>{
+    var css=EventTimelineHtml.Render(ESpec(Ev(1)) with{Now=EDay(1,13)});
+    string Rule(string selector){var m=Regex.Match(css,Regex.Escape(selector)+@"\{([^}]*)\}");Check(m.Success,"no rule "+selector);return m.Groups[1].Value;}
+    var now=Rule(".lumen-events.lumen-events-regular .lumen-events-now .lumen-event-dot");
+    Check(now.Contains("width:16px")&&now.Contains("height:16px")&&now.Contains("border:3px solid var(--lumen-accent)")&&now.Contains("background:var(--lumen-bg)"),"ring: "+now);
+    var done=Regex.Match(css,@"([^{}]*\.lumen-event-done \.lumen-event-dot[^{}]*)\{([^}]*)\}");
+    Check(done.Success&&!done.Groups[1].Value.Contains("lumen-events-now")&&done.Groups[2].Value.Contains("background:var(--lumen-accent)"),"the done dot is filled and the marker does not share it: "+done.Value);
+    Check(ERoot(css).Descendants("li").Single(l=>l.Attribute("class")!.Value=="lumen-events-now").Value=="Now · Thu 1 Oct 2026","the words stay");
+});
+Test("0.50.0: an all-day event keeps the date it was given, in its own offset, and is not converted into the zone (a timed one is)",()=>{
+    var midnight=new DateTimeOffset(2026,11,1,0,0,0,TimeSpan.FromHours(2));
+    var day=new TimelineEvent(midnight,"Open day"){AllDay=true};
+    Check(EWhen(day)=="Sun 1 Nov 2026","text, with no zone: "+EWhen(day));
+    var li=EKids(ERoot(EventTimelineHtml.Render(ESpec(day))),"lumen-event").Single();
+    Check(li.Elements().First(x=>x.Name.LocalName=="time").Attribute("datetime")!.Value=="2026-11-01","datetime");
+    Check(EWhen(day,ESpec() with{TimeZone="America/New_York"})=="Sun 1 Nov 2026","a zone behind does not move it");
+    Check(EWhen(day,ESpec() with{TimeZone="Pacific/Auckland"})=="Sun 1 Nov 2026","a zone ahead does not move it");
+    var timed=new TimelineEvent(midnight,"Timed");
+    Check(EWhen(timed)=="Sat 31 Oct 2026 · 22:00","a timed event is still converted: "+EWhen(timed));
+    foreach(var (by,key,label) in new[]{(EventGrouping.Day,"2026-11-01","Sun 1 Nov 2026"),(EventGrouping.Month,"2026-11","November 2026"),(EventGrouping.Year,"2026","2026")})
+    {
+        var view=EventView.Of(ESpec(day) with{GroupBy=by});
+        Check(view.GroupKey(0)==key&&view.GroupLabel(0)==label,$"{by}: {view.GroupKey(0)} / {view.GroupLabel(0)}");
+    }
+    var heading=EKids(ERoot(EventTimelineHtml.Render(ESpec(day) with{GroupBy=EventGrouping.Day})),"lumen-events-heading").Single().Value;
+    Check(heading=="Sun 1 Nov 2026","the group, not the day before: "+heading);
+    var zoned=EventView.Of(ESpec(day,timed) with{GroupBy=EventGrouping.Day,TimeZone="Africa/Johannesburg"});
+    Check(zoned.GroupKey(0)=="2026-11-01"&&zoned.GroupKey(1)=="2026-11-01","in its own zone both are 1 Nov");
+    var span=new TimelineEvent(midnight,"Camp"){AllDay=true,End=new DateTimeOffset(2026,11,2,0,0,0,TimeSpan.FromHours(2))};
+    Check(EWhen(span)=="Sun 1 – Mon 2 Nov 2026","the end keeps its own date too: "+EWhen(span));
+});
+Test("0.50.0: a LumenEvents PageSize change reopens the window on the same Spec, and the docs say so",()=>{
+    var spec=Thirty();
+    int Shown(string html)=>Regex.Matches(html,"<li class='lumen-event ").Count;
+    var parameters=(int? size)=>ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",spec},{"PageSize",size}});
+    var opened=OperateEvents(spec,null,async e=>await e.SetParametersAsync(parameters(10)));
+    Check(Shown(opened)==10,"null to 10 shows "+Shown(opened));
+    var five=OperateEvents(spec,10,async e=>{await e.More("earlier");await e.SetParametersAsync(parameters(5));});
+    Check(Shown(five)==5&&!five.Contains("Showing"),$"10 to 5 shows {Shown(five)} and clears the status");
+    var grown=OperateEvents(spec,10,async e=>await e.More("earlier"));
+    Check(Shown(grown)==20,"without the change the window stays grown: "+Shown(grown));
+    var xml=System.Xml.Linq.XDocument.Load(Path.ChangeExtension(typeof(LumenEvents).Assembly.Location,".xml"));
+    string Doc(string member)=>xml.Descendants("member").Single(m=>(string?)m.Attribute("name")==member).Value;
+    Check(Doc("P:Lumen.Charts.Blazor.LumenEvents.PageSize").Contains("reopens the window")&&Doc("P:Lumen.Charts.Blazor.LumenEvents.Spec").Contains("reopens the window"),"the docs of Spec and PageSize");
+});
+Test("0.50.0: an unsafe Href that reaches the renderer falls back to a span, never a link",()=>{
+    var safe=ESpec(Ev(1,"Linked") with{Href="/races/1"});
+    var view=EventView.Of(safe);
+    foreach(var href in new[]{"javascript:alert(1)","JaVaScRiPt:alert(1)","data:text/html,x"," javascript:x","vbscript:x"})
+    {
+        var html=EventTimelineHtml.Render(safe with{Events=[Ev(1,"Linked") with{Href=href}]},view,(0,0),false);
+        var title=EKids(ERoot(html),"lumen-event-title").Single();
+        Check(title.Name.LocalName=="span"&&title.Attribute("href") is null&&!html.Contains("<a "),$"{href}: {title.Name.LocalName}");
+    }
+    Check(EKids(ERoot(EventTimelineHtml.Render(safe)),"lumen-event-title").Single().Name.LocalName=="a","a safe link stays a link");
+});
+Test("0.50.0: a DateFormat of the reader's own is written in full at both ends of an all-day span, and an end equal to the start is one moment",()=>{
+    var span=Ev(5) with{AllDay=true,End=EDay(7)};
+    Check(EWhen(span,ESpec() with{DateFormat="d MMM"})=="5 Oct – 7 Oct","d MMM: "+EWhen(span,ESpec() with{DateFormat="d MMM"}));
+    Check(EWhen(span,ESpec() with{DateFormat="yyyy-MM-dd"})=="2026-10-05 – 2026-10-07","ISO");
+    Check(EWhen(Ev(5) with{AllDay=true,End=EDay(5)},ESpec() with{DateFormat="d MMM"})=="5 Oct","one day stays one day");
+    Check(EWhen(Ev(5) with{End=EDay(5)})=="Mon 5 Oct 2026 · 12:00","End equal to When: "+EWhen(Ev(5) with{End=EDay(5)}));
+    Check(EWhen(Ev(5) with{End=EDay(5).AddMinutes(1)})=="Mon 5 Oct 2026 · 12:00–12:01","a minute later is a span");
+});
+Test("0.50.0: a static timeline with no events says No events, with no list, range or buttons",()=>{
+    foreach(var html in new[]{EventTimelineHtml.Render(ESpec()),EventTimelineHtml.Render(ESpec(),3),EventTimelineHtml.Render(ESpec() with{GroupBy=EventGrouping.Month})})
+    {
+        var root=ERoot(html);
+        var empty=EKids(root,"lumen-events-empty").Single();
+        Check(empty.Name.LocalName=="p"&&empty.Value=="No events","the line");
+        Check(!root.Descendants("ol").Any()&&!root.Descendants("button").Any()&&!EKids(root,"lumen-events-range").Any(),"nothing else");
+    }
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

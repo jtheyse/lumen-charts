@@ -194,6 +194,8 @@ A vertical list of dated events: a rider's race history, a race-plan timeline wi
 
 **HTTP.** `POST …/timeline/html`.
 
+0.50.0 writes Current as "Current" (the Now marker owns "Now").
+
 **Gallery.** An invented rider's season: past races done with their results, the next race current, the rest upcoming, one cancelled, grouped by month with a now marker.
 
 ## 8. Constraints

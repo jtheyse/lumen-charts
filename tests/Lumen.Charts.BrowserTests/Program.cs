@@ -2773,12 +2773,14 @@ if (await beyondLink.CountAsync() > 0)
         var before = await tab.Locator("#timeline .lumen-event").CountAsync();
         var label = (await tab.Locator(moreEarlier).TextContentAsync())!.Trim();
         Check(Regex.IsMatch(label, @"^Show \d+ earlier$"), $"the button reads {label}");
+        var saidBefore = await TimelineStatus(tab);
         await tab.Keyboard.PressAsync("Enter");
         await tab.WaitForFunctionAsync("n => document.querySelectorAll('#timeline .lumen-event').length > n", before);
         var after = await tab.Locator("#timeline .lumen-event").CountAsync();
         Check(after == before + 6, $"{before} events became {after}, not {before + 6}");
         var said = await TimelineStatus(tab);
         Check(Regex.IsMatch(said, @"^Showing \d+–\d+ of 16 events$"), $"status: {said}");
+        Check(said != saidBefore, $"the status did not change: before the press it read '{saidBefore}', after it '{said}'");
         await tab.WaitForFunctionAsync(onEarlier);
         // Press until the start of the list: the button goes aria-disabled, reads No earlier events and keeps focus.
         for (var press = 0; press < 5 && await tab.Locator(moreEarlier).GetAttributeAsync("aria-disabled") != "true"; press++)

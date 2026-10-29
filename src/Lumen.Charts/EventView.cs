@@ -58,9 +58,9 @@ internal sealed class EventView
         by < 0 ? throw new ArgumentOutOfRangeException(nameof(by), by, "A window grows by 0 or more.") : earlier ? (Math.Max(0, window.First - by), window.Last) : (window.First, Math.Min(Order.Count - 1, window.Last + by));
 
     /// <summary>The heading key of an event (by spec index) in the timeline's zone; empty without grouping.</summary>
-    internal string GroupKey(int index) => Key(_spec.Events[index].When);
+    internal string GroupKey(int index) => Key(_spec.Events[index].When, _spec.Events[index].AllDay);
     /// <summary>The heading text of an event (by spec index); empty without grouping.</summary>
-    internal string GroupLabel(int index) => Label(_spec.Events[index].When);
+    internal string GroupLabel(int index) => Label(_spec.Events[index].When, _spec.Events[index].AllDay);
     /// <summary>The heading key of the Now marker's group; empty without Now or grouping.</summary>
     internal string NowGroupKey => _spec.Now is { } now ? Key(now) : "";
     /// <summary>The heading text of the Now marker's group; empty without Now or grouping.</summary>
@@ -69,14 +69,19 @@ internal sealed class EventView
     private DateTimeOffset Local(DateTimeOffset moment) =>
         _zone is null ? moment.ToUniversalTime() : TimeZoneInfo.ConvertTime(moment, _zone);
 
-    private string Key(DateTimeOffset moment) => Format(moment, "yyyy-MM-dd", "yyyy-MM", "yyyy");
-    private string Label(DateTimeOffset moment) => Format(moment, "ddd d MMM yyyy", "MMMM yyyy", "yyyy");
+    // An all-day event is grouped on the calendar date it was given, in its own offset, not converted into the zone.
+    private string Key(DateTimeOffset moment, bool allDay = false) => Format(moment, allDay, "yyyy-MM-dd", "yyyy-MM", "yyyy");
+    private string Label(DateTimeOffset moment, bool allDay = false) => Format(moment, allDay, "ddd d MMM yyyy", "MMMM yyyy", "yyyy");
 
-    private string Format(DateTimeOffset moment, string day, string month, string year) => _spec.GroupBy switch
+    private string Format(DateTimeOffset moment, bool allDay, string day, string month, string year)
     {
-        EventGrouping.Day => Local(moment).ToString(day, CultureInfo.InvariantCulture),
-        EventGrouping.Month => Local(moment).ToString(month, CultureInfo.InvariantCulture),
-        EventGrouping.Year => Local(moment).ToString(year, CultureInfo.InvariantCulture),
-        _ => ""
-    };
+        var at = allDay ? moment : Local(moment);
+        return _spec.GroupBy switch
+        {
+            EventGrouping.Day => at.ToString(day, CultureInfo.InvariantCulture),
+            EventGrouping.Month => at.ToString(month, CultureInfo.InvariantCulture),
+            EventGrouping.Year => at.ToString(year, CultureInfo.InvariantCulture),
+            _ => ""
+        };
+    }
 }

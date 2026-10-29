@@ -114,6 +114,9 @@ public static class EventTimelineHtml
 
         private DateTimeOffset Local(DateTimeOffset moment) => zone is null ? moment.ToUniversalTime() : TimeZoneInfo.ConvertTime(moment, zone);
 
+        // A date has no time to convert: an all-day event keeps the calendar date it was given, in its own offset.
+        private DateTimeOffset Own(TimelineEvent e, DateTimeOffset moment) => e.AllDay ? moment : Local(moment);
+
         public void Now(StringBuilder sb) =>
             sb.Append("<li class='lumen-events-now'><span class='lumen-event-dot' aria-hidden='true'></span>Now · ")
               .Append(LumenHtml.E(Local(spec.Now!.Value).ToString(_date, Inv))).Append("</li>");
@@ -122,7 +125,7 @@ public static class EventTimelineHtml
         {
             sb.Append("<li class='lumen-event lumen-event-").Append(Class(e.Status)).Append("'>");
             sb.Append("<span class='lumen-event-dot' aria-hidden='true'></span>");
-            var start = Local(e.When);
+            var start = Own(e, e.When);
             sb.Append("<time datetime='").Append(start.ToString(e.AllDay ? "yyyy-MM-dd" : "yyyy-MM-dd'T'HH:mm:sszzz", Inv)).Append("'>")
               .Append(LumenHtml.E(When(e, start))).Append("</time>");
             if (e.Href is not null && LumenHtml.SafeLink(e.Href))
@@ -140,7 +143,7 @@ public static class EventTimelineHtml
             var (glyph, word) = status switch
             {
                 EventStatus.Done => ("✓", "Done"),
-                EventStatus.Current => ("●", "Now"),
+                EventStatus.Current => ("●", "Current"),
                 EventStatus.Upcoming => ("○", "Upcoming"),
                 EventStatus.Cancelled => ("✕", "Cancelled"),
                 _ => ("", "")
@@ -156,7 +159,7 @@ public static class EventTimelineHtml
             string D(DateTimeOffset d) => d.ToString(_date, Inv);
             string T(DateTimeOffset d) => d.ToString(_time, Inv);
             if (e.End is not { } raw) return e.AllDay ? D(start) : $"{D(start)} · {T(start)}";
-            var end = Local(raw);
+            var end = Own(e, raw);
             if (e.AllDay)
             {
                 if (end.Date == start.Date) return D(start);
@@ -199,10 +202,12 @@ public static class EventTimelineHtml
             + $"{r} .lumen-events-group{{margin:0;padding:0;list-style:none}}"
             + $"{r} .lumen-events-heading{{margin:{(compact ? 8 : 14)}px 0 4px;font-size:14px;font-weight:600}}"
             + $"{r} .lumen-events-list{{position:relative;margin:0;padding:0;list-style:none}}"
-            + $"{r} .lumen-events-list::before{{content:\"\";position:absolute;left:5px;top:0;bottom:0;width:2px;background:var(--lumen-grid)}}"
+            + $"{r} .lumen-events-list::before{{content:\"\";position:absolute;left:7px;top:0;bottom:0;width:2px;background:var(--lumen-grid)}}"
             + $"{r} .lumen-event,{r} .lumen-events-now{{position:relative;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;margin:0;padding:{pad}px 0 {pad}px 24px;list-style:none}}"
-            + $"{r} .lumen-event-dot{{position:absolute;left:0;top:{dotTop}px;width:12px;height:12px;border-radius:50%;border:2px solid var(--lumen-muted);background:var(--lumen-bg)}}"
-            + $"{r} .lumen-event-done .lumen-event-dot,{r} .lumen-events-now .lumen-event-dot{{border-color:var(--lumen-accent);background:var(--lumen-accent)}}"
+            + $"{r} .lumen-event-dot{{position:absolute;left:2px;top:{dotTop}px;width:12px;height:12px;border-radius:50%;border:2px solid var(--lumen-muted);background:var(--lumen-bg)}}"
+            + $"{r} .lumen-event-done .lumen-event-dot{{border-color:var(--lumen-accent);background:var(--lumen-accent)}}"
+            // The Now marker is a larger ring in the accent colour with the page's own colour in the middle, so it never reads as one more done event.
+            + $"{r} .lumen-events-now .lumen-event-dot{{left:0;top:{dotTop - 2}px;width:16px;height:16px;border:3px solid var(--lumen-accent);background:var(--lumen-bg)}}"
             + $"{r} .lumen-event-current .lumen-event-dot{{border-color:var(--lumen-accent);box-shadow:0 0 0 3px var(--lumen-grid)}}"
             + $"{r} .lumen-event-upcoming .lumen-event-dot{{border-color:var(--lumen-accent)}}"
             + $"{r} .lumen-event-cancelled .lumen-event-dot{{background:var(--lumen-grid)}}"

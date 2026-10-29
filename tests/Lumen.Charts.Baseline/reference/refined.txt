@@ -419,8 +419,8 @@ table/results-dark 5D26275553C209D5
 table/log-last-page E4F8C33BDD0D6CCB
 table/compact-sorted 437994CE1CBA656E
 table/negative-bars 16E3D7F9C1B90EC9
-events/season-light B400BB72761BC4A2
-events/season-dark 1C2237D194DD4D55
-events/grouped-day-newest 866C37AE44A5806B
-events/window-now 59AFA803751EA51B
-events/spans-allday ECC10BCC31F66375
+events/season-light 729927B140E9B0DE
+events/season-dark BDB8E86107C2849E
+events/grouped-day-newest 32AD6A55469EEED6
+events/window-now 8B839B673389E32C
+events/spans-allday 85E98D536E971751

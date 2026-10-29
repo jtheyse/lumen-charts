@@ -4,10 +4,11 @@
 <span class="lumen-status" role="status">@status</span>
 @code {
     /// <summary>The timeline to draw: its events, Now, grouping and formats; see <see cref="EventTimelineSpec"/>. A new instance returns the
-    /// timeline to its opening window; the same instance keeps the window the reader has opened. A style set on it wins over a cascaded one.</summary>
+    /// timeline to its opening window, and so does a change of <see cref="PageSize"/> (it reopens the window); the same instance and
+    /// <see cref="PageSize"/> keep the window the reader has opened. A style set on it wins over a cascaded one.</summary>
     [Parameter, EditorRequired] public EventTimelineSpec Spec { get; set; } = new([]);
     /// <summary>How many events to open with, and how many more each press of a Show earlier or Show later button adds, from 1 to 200.
-    /// Null, the default, shows every event with no buttons. The window opens on the events nearest the Now marker when there is one.</summary>
+    /// A change to this value reopens the window, even on the same <see cref="Spec"/>. Null, the default, shows every event with no buttons. The window opens on the events nearest the Now marker when there is one.</summary>
     [Parameter] public int? PageSize { get; set; }
     /// <summary>A host-wide style, usually cascaded by <see cref="LumenBrand"/>. A style in <see cref="Spec"/> wins; without either, <see cref="ChartStyle.Light"/> is used.</summary>
     [CascadingParameter] public ChartStyle? CascadingStyle { get; set; }

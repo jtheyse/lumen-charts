@@ -645,7 +645,7 @@ Verify ($r.StatusCode -eq 200 -and $r.Headers['Content-Type'] -like 'text/html*'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/timeline/html" -Method Post -ContentType application/json -Body ('{"spec":'+$tl+',"shown":1}') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200 -and $r.Content.Contains('Showing') -and $r.Content.Contains('of 3 events') -and -not ($r.Content.Contains('Alpha') -and $r.Content.Contains('Charlie'))) 'The shown parameter of a timeline limits the events written'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/timeline/html" -Method Post -ContentType application/json -Body ('{"spec":'+$tl+',"shown":0}') -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid timeline')) "A shown of 0 is refused with 400 titled Invalid timeline ($($r.StatusCode))"
+Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid timeline') -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Shown may be left out, or be at least 1.')) "A shown of 0 is refused with 400 titled Invalid timeline, in the validator's own words ($($r.StatusCode))"
 $many='{"events":['+((1..2001|ForEach-Object{'{"when":"2026-10-01T12:00:00+00:00","title":"E"}'}) -join ',')+']}'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/timeline/html" -Method Post -ContentType application/json -Body ('{"spec":'+$many+'}') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid timeline')) "2,001 timeline events are refused with 400 titled Invalid timeline ($($r.StatusCode))"
