@@ -12440,7 +12440,8 @@ Test("0.50.0: a static window shows the events nearest Now and a muted range, wi
     Check(ETitles(EventTimelineHtml.Render(spec)).Length==10&&!EKids(ERoot(EventTimelineHtml.Render(spec)),"lumen-events-range").Any(),"null shows every event with no range");
     Check(!EKids(ERoot(EventTimelineHtml.Render(spec,50)),"lumen-events-range").Any(),"a window that holds everything has no range");
     Check(ETitles(EventTimelineHtml.Render(Ten(),3)).SequenceEqual(["Day 1","Day 2","Day 3"]),"no Now: the first events");
-    Check(Throws<ArgumentOutOfRangeException>(()=>EventTimelineHtml.Render(spec,0)),"shown 0");
+    Check(Throws<ArgumentException>(()=>EventTimelineHtml.Render(spec,0)),"shown 0");
+    Check(Throws<ArgumentException>(()=>EventTimelineHtml.Render(spec,-1)),"shown -1");
     Check(Throws<ArgumentException>(()=>EventTimelineHtml.Render(spec with{TitleLevel=1},3)),"validated");
     var nowOutside=EventTimelineHtml.Render(Ten() with{Now=EDay(9,12,30)},3);
     Check(ETitles(nowOutside).SequenceEqual(["Day 8","Day 9","Day 10"])&&EKids(ERoot(nowOutside),"lumen-events-now").Count()==1,"Now near the end");
@@ -12630,6 +12631,29 @@ Test("0.50.0: a static timeline with no events says No events, with no list, ran
         Check(empty.Name.LocalName=="p"&&empty.Value=="No events","the line");
         Check(!root.Descendants("ol").Any()&&!root.Descendants("button").Any()&&!EKids(root,"lumen-events-range").Any(),"nothing else");
     }
+});
+Test("0.50.0: an all-day event sorts and meets Now at its date's midnight, so order and headings agree",()=>{
+    var allDay=new TimelineEvent(new DateTimeOffset(2026,11,1,0,0,0,TimeSpan.FromHours(2)),"all day"){AllDay=true};
+    var timed=new TimelineEvent(new DateTimeOffset(2026,10,31,23,0,0,TimeSpan.Zero),"timed");
+    foreach(var newest in new[]{false,true})
+    {
+        var spec=ESpec(allDay,timed) with{GroupBy=EventGrouping.Month,NewestFirst=newest};
+        var view=EventView.Of(spec);
+        var want=newest?new[]{"all day","timed"}:new[]{"timed","all day"};
+        Check(view.Order.Select(i=>spec.Events[i].Title).SequenceEqual(want),"order "+newest);
+        var heads=EKids(ERoot(EventTimelineHtml.Render(spec)),"lumen-events-heading").Select(h=>h.Value).ToArray();
+        Check(heads.SequenceEqual(newest?new[]{"November 2026","October 2026"}:new[]{"October 2026","November 2026"}),"headings "+newest+": "+string.Join("|",heads));
+    }
+    var withNow=ESpec(allDay,timed) with{Now=new DateTimeOffset(2026,11,1,0,30,0,TimeSpan.Zero)};
+    Check(EventView.Of(withNow).NowAt==2,"Now after midnight UTC of 1 Nov is after the all-day event");
+    Check(EventView.Of(withNow with{Now=new DateTimeOffset(2026,10,31,23,59,0,TimeSpan.Zero)}).NowAt==1,"Now before 1 Nov midnight stands before it");
+    var joburg=ESpec(allDay) with{TimeZone="Africa/Johannesburg",Now=new DateTimeOffset(2026,10,31,22,0,0,TimeSpan.Zero)};
+    Check(EventView.Of(joburg).NowAt==1,"in a zone the all-day event stands at the zone's midnight (22:00Z)");
+    Check(EventView.Of(joburg with{Now=new DateTimeOffset(2026,10,31,21,59,0,TimeSpan.Zero)}).NowAt==0,"a minute earlier it has not been reached");
+});
+Test("0.50.0: an empty timeline with Now writes No events beside the Now marker",()=>{
+    var root=ERoot(EventTimelineHtml.Render(ESpec() with{Now=EDay(5)}));
+    Check(EKids(root,"lumen-events-empty").Single().Value=="No events"&&EKids(root,"lumen-events-now").Count()==1,"words and marker");
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

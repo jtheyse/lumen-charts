@@ -174,7 +174,7 @@ A vertical list of dated events: a rider's race history, a race-plan timeline wi
   - `AllDay` (dates only, no times);
   - `Note`, at most 200 characters;
   - `Value` (a short figure such as "3rd · 1:12:05", at most 40 characters);
-  - `Status`: `None`, `Done`, `Current`, `Upcoming` or `Cancelled`, written as a word with a glyph (✓ Done, ● Now, ○ Upcoming, ✕ Cancelled) and coloured with the accent for `Current`, never colour alone;
+  - `Status`: `None`, `Done`, `Current`, `Upcoming` or `Cancelled`, written as a word with a glyph (✓ Done, ● Current, ○ Upcoming, ✕ Cancelled) and coloured with the accent for `Current`, never colour alone;
   - `Category` (a short chip, at most 24 characters);
   - `Href`.
 - `EventTimelineSpec(IReadOnlyList<TimelineEvent> Events)`, with:
@@ -194,7 +194,6 @@ A vertical list of dated events: a rider's race history, a race-plan timeline wi
 
 **HTTP.** `POST …/timeline/html`.
 
-0.50.0 writes Current as "Current" (the Now marker owns "Now").
 
 **Gallery.** An invented rider's season: past races done with their results, the next race current, the rest upcoming, one cancelled, grouped by month with a now marker.
 

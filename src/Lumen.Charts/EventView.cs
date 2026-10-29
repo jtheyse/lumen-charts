@@ -26,18 +26,31 @@ internal sealed class EventView
     {
         EventTimelineValidation.Spec(spec);
         var events = spec.Events;
+        var view0 = new EventView(spec, Array.Empty<int>(), null);
+        var at = events.Select(view0.Instant).ToArray();
         var indexes = Enumerable.Range(0, events.Count);
         // OrderBy is stable, so equal times keep the spec's order; the descending sort is stable too.
         var order = (spec.NewestFirst
-            ? indexes.OrderByDescending(i => events[i].When.UtcTicks)
-            : indexes.OrderBy(i => events[i].When.UtcTicks)).ToArray();
+            ? indexes.OrderByDescending(i => at[i])
+            : indexes.OrderBy(i => at[i])).ToArray();
         int? nowAt = null;
         if (spec.Now is { } now)
             // An event at Now counts as reached, so the marker stands after it.
             nowAt = spec.NewestFirst
-                ? order.Count(i => events[i].When > now)
-                : order.Count(i => events[i].When <= now);
+                ? order.Count(i => at[i] > now.UtcTicks)
+                : order.Count(i => at[i] <= now.UtcTicks);
         return new EventView(spec, order, nowAt);
+    }
+
+    // A timed event keeps its instant. An all-day event stands at midnight of the calendar date it was given, in the timeline's zone
+    // (UTC without one), so that order and Now agree with the headings, which group it on that date.
+    private long Instant(TimelineEvent e)
+    {
+        if (!e.AllDay) return e.When.UtcTicks;
+        var midnight = DateTime.SpecifyKind(e.When.Date, DateTimeKind.Unspecified);
+        if (_zone is null) return new DateTimeOffset(midnight, TimeSpan.Zero).UtcTicks;
+        if (_zone.IsInvalidTime(midnight)) midnight = midnight.AddHours(1);
+        return new DateTimeOffset(midnight, _zone.GetUtcOffset(midnight)).UtcTicks;
     }
 
     /// <summary>The default window, as first and last reading positions, both included. Without Now it is the first

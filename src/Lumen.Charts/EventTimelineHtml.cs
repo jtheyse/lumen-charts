@@ -14,9 +14,10 @@ public static class EventTimelineHtml
     /// <summary>The fragment for <paramref name="spec"/>. A null <paramref name="shown"/> writes every event; a number writes that many, the ones
     /// nearest the Now marker when there is one, with a line that says which of the events they are. The fragment holds its own style
     /// block, scoped under <c>.lumen-events</c>, and no <c>id</c> attribute. Throws <see cref="ArgumentException"/> for a spec outside its
-    /// limits and <see cref="ArgumentOutOfRangeException"/> for a <paramref name="shown"/> below 1.</summary>
+    /// limits and for a <paramref name="shown"/> below 1.</summary>
     public static string Render(EventTimelineSpec spec, int? shown = null)
     {
+        if (shown is < 1) throw new ArgumentException("Shown may be left out, or be at least 1.");
         var view = EventView.Of(spec);
         var window = shown is { } n ? view.Window(n) : (0, view.Order.Count - 1);
         return Render(spec, view, window, false);
@@ -54,7 +55,9 @@ public static class EventTimelineHtml
         }
         if (view.NowAt == window.Last + 1) items.Add(NowItem(view));
 
-        if (items.Count == 0) sb.Append("<p class='lumen-events-empty'>No events</p>");
+        // With no events at all the words stand beside the Now marker, when there is one.
+        if (count == 0) sb.Append("<p class='lumen-events-empty'>No events</p>");
+        if (items.Count == 0) { }
         else if (spec.GroupBy == EventGrouping.None) List(sb, write, spec, items);
         else
         {

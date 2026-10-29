@@ -423,4 +423,4 @@ events/season-light 729927B140E9B0DE
 events/season-dark BDB8E86107C2849E
 events/grouped-day-newest 32AD6A55469EEED6
 events/window-now 8B839B673389E32C
-events/spans-allday 85E98D536E971751
+events/spans-allday 1B8B06F32A4102EB

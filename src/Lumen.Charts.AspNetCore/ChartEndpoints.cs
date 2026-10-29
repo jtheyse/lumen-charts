@@ -26,7 +26,7 @@ public static class ChartEndpoints
         group.MapPost("/stats/html",(StatTilesSpec spec)=>Render(()=>StatTilesHtml.Render(spec),"text/html","Invalid stat tiles"));
         group.MapPost("/table/html",(TableRequest request)=>Render(()=>TableHtml.Render(request.Spec,request.Page),"text/html","Invalid table"));
         group.MapPost("/table/csv",(TableSpec spec)=>Render(()=>TableExport.Csv(spec),"text/csv","Invalid table"));
-        group.MapPost("/timeline/html",(EventTimelineRequest request)=>Render(()=>{EventTimelineValidation.Request(request);return EventTimelineHtml.Render(request.Spec,request.Shown);},"text/html","Invalid timeline"));
+        group.MapPost("/timeline/html",(EventTimelineRequest request)=>Render(()=>{return EventTimelineHtml.Render(request.Spec,request.Shown);},"text/html","Invalid timeline"));
         return group;
     }
     private static IResult Json<T>(Func<T> value)
