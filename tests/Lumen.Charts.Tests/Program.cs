@@ -12140,6 +12140,172 @@ Test("0.49.0: the CSV file is named for the caption: lower case, runs of other c
     Check(TableExport.FileName("Café")=="caf.csv","an accented letter is dropped: "+TableExport.FileName("Café"));
     Check(TableExport.FileName("★ — ★")=="table.csv"&&TableExport.FileName("???")=="table.csv","all symbols");
 });
+// 0.50.0
+DateTimeOffset EDay(int day,int hour=12,int minute=0)=>new(2026,10,day,hour,minute,0,TimeSpan.Zero);
+TimelineEvent Ev(int day,string title="E",int hour=12)=>new(EDay(day,hour),title);
+EventTimelineSpec ESpec(params TimelineEvent[] events)=>new(events);
+EventTimelineSpec Ten()=>ESpec(Enumerable.Range(1,10).Select(d=>Ev(d,"Day "+d)).ToArray());
+Test("0.50.0: an event timeline takes 0 to 2,000 events and refuses a null one",()=>{
+    EventTimelineValidation.Spec(ESpec());
+    EventTimelineValidation.Spec(ESpec(Enumerable.Range(0,2000).Select(i=>new TimelineEvent(EDay(1).AddMinutes(i),"E")).ToArray()));
+    Reject(()=>EventTimelineValidation.Spec(ESpec(Enumerable.Range(0,2001).Select(i=>new TimelineEvent(EDay(1).AddMinutes(i),"E")).ToArray())));
+    Reject(()=>EventTimelineValidation.Spec(ESpec(Ev(1),null!)));
+    Reject(()=>EventTimelineValidation.Spec(null!));
+    Reject(()=>EventTimelineValidation.Spec(new EventTimelineSpec(null!)));
+});
+Test("0.50.0: an event title is 1 to 120 characters and not blank; note 200, value 40, category 24",()=>{
+    void Ok(TimelineEvent e)=>EventTimelineValidation.Spec(ESpec(e));
+    void No(TimelineEvent e)=>Reject(()=>EventTimelineValidation.Spec(ESpec(e)));
+    Ok(Ev(1,"x")); Ok(Ev(1,new string('t',120)));
+    No(Ev(1,"")); No(Ev(1,"   ")); No(Ev(1,new string('t',121)));
+    Ok(Ev(1) with{Note=new string('n',200)}); No(Ev(1) with{Note=new string('n',201)});
+    Ok(Ev(1) with{Value=new string('v',40)}); No(Ev(1) with{Value=new string('v',41)});
+    Ok(Ev(1) with{Category=new string('c',24)}); No(Ev(1) with{Category=new string('c',25)});
+});
+Test("0.50.0: an event link must be safe, an end may not precede the start, and enums must be defined",()=>{
+    void Ok(TimelineEvent e)=>EventTimelineValidation.Spec(ESpec(e));
+    void No(TimelineEvent e)=>Reject(()=>EventTimelineValidation.Spec(ESpec(e)));
+    Ok(Ev(1) with{Href="https://example.com/a"}); Ok(Ev(1) with{Href="/events/1"}); Ok(Ev(1) with{Href="mailto:a@example.com"});
+    No(Ev(1) with{Href="javascript:alert(1)"}); No(Ev(1) with{Href="java\tscript:alert(1)"});
+    Ok(Ev(1) with{End=EDay(1)}); Ok(Ev(1) with{End=EDay(2)});
+    No(Ev(1) with{End=EDay(1).AddTicks(-1)});
+    Ok(Ev(1) with{Status=EventStatus.Cancelled}); No(Ev(1) with{Status=(EventStatus)99});
+    Reject(()=>EventTimelineValidation.Spec(Ten() with{GroupBy=(EventGrouping)99}));
+    Reject(()=>EventTimelineValidation.Spec(Ten() with{Density=(Density)99}));
+});
+Test("0.50.0: a timeline title is 120, a description 300, a level 2 to 5, formats 40 and valid",()=>{
+    void Ok(EventTimelineSpec s)=>EventTimelineValidation.Spec(s);
+    void No(EventTimelineSpec s)=>Reject(()=>EventTimelineValidation.Spec(s));
+    Ok(Ten() with{Title=new string('t',120)}); No(Ten() with{Title=new string('t',121)});
+    Ok(Ten() with{Description=new string('d',300)}); No(Ten() with{Description=new string('d',301)});
+    foreach(var level in new[]{2,3,4,5}) Ok(Ten() with{TitleLevel=level});
+    foreach(var level in new[]{1,6,0,-1}) No(Ten() with{TitleLevel=level});
+    Ok(Ten() with{DateFormat=new string('d',40)}); No(Ten() with{DateFormat=new string('d',41)});
+    Ok(Ten() with{TimeFormat=new string('H',40)}); No(Ten() with{TimeFormat=new string('H',41)});
+    No(Ten() with{DateFormat="%"}); No(Ten() with{TimeFormat="\\"});
+    Ok(Ten() with{DateFormat="d MMM",TimeFormat="h:mm tt"});
+});
+Test("0.50.0: the time zone must be known; null means UTC, and Africa/Johannesburg resolves",()=>{
+    EventTimelineValidation.Spec(Ten() with{TimeZone=null});
+    EventTimelineValidation.Spec(Ten() with{TimeZone="Africa/Johannesburg"});
+    Reject(()=>EventTimelineValidation.Spec(Ten() with{TimeZone="Mars/Olympus"}));
+});
+Test("0.50.0: a bad style is refused through ChartValidation.Style",()=>{
+    Reject(()=>EventTimelineValidation.Spec(Ten() with{Style=new ChartStyle{FontFamily="x;}body{"}}));
+});
+Test("0.50.0: Shown is left out or at least 1",()=>{
+    EventTimelineValidation.Request(new EventTimelineRequest(Ten()));
+    EventTimelineValidation.Request(new EventTimelineRequest(Ten(),1));
+    Reject(()=>EventTimelineValidation.Request(new EventTimelineRequest(Ten(),0)));
+    Reject(()=>EventTimelineValidation.Request(new EventTimelineRequest(Ten(),-3)));
+    Reject(()=>EventTimelineValidation.Request(new EventTimelineRequest(Ten() with{Title=new string('t',121)},5)));
+});
+Test("0.50.0: EventView.Of validates first",()=>{
+    Reject(()=>EventView.Of(Ten() with{TitleLevel=9}));
+});
+Test("0.50.0: the order is chronological and stable; equal times keep the spec's order",()=>{
+    var spec=ESpec(Ev(3,"c"),Ev(1,"a1"),Ev(2,"b"),Ev(1,"a2"),Ev(1,"a3"));
+    var view=EventView.Of(spec);
+    Check(view.Order.SequenceEqual([1,3,4,2,0]),"order "+string.Join(",",view.Order));
+});
+Test("0.50.0: NewestFirst reverses the chronology but equal times keep the spec's order (Review Focus 1)",()=>{
+    var spec=ESpec(Ev(3,"c"),Ev(1,"a1"),Ev(2,"b"),Ev(1,"a2"),Ev(1,"a3")) with{NewestFirst=true};
+    var view=EventView.Of(spec);
+    Check(view.Order.SequenceEqual([0,2,1,3,4]),"order "+string.Join(",",view.Order));
+    var offsets=ESpec(new TimelineEvent(new DateTimeOffset(2026,10,5,14,0,0,TimeSpan.FromHours(2)),"p"),new TimelineEvent(EDay(5,12),"q")) with{NewestFirst=true};
+    Check(EventView.Of(offsets).Order.SequenceEqual([0,1]),"the same instant in two offsets is a tie");
+});
+Test("0.50.0: Now before every event, after every event, and exactly at an event (Review Focus 2)",()=>{
+    var spec=Ten();
+    Check(EventView.Of(spec).NowAt is null,"no Now");
+    Check(EventView.Of(spec with{Now=EDay(1,11,59)}).NowAt==0,"before all");
+    Check(EventView.Of(spec with{Now=EDay(10,12,1)}).NowAt==10,"after all");
+    Check(EventView.Of(spec with{Now=EDay(5,12)}).NowAt==5,"at event 5 it is reached, so the marker stands after it");
+    Check(EventView.Of(spec with{Now=EDay(5,11,59)}).NowAt==4,"a minute before event 5");
+    Check(EventView.Of(spec with{Now=EDay(1,12)}).NowAt==1,"at the first event");
+    Check(EventView.Of(spec with{Now=EDay(10,12)}).NowAt==10,"at the last event");
+    Check(EventView.Of(ESpec() with{Now=EDay(5)}).NowAt==0,"no events");
+});
+Test("0.50.0: Now in NewestFirst reading order stands before the events that are reached",()=>{
+    var spec=Ten() with{NewestFirst=true};
+    Check(EventView.Of(spec with{Now=EDay(1,11,59)}).NowAt==10,"before all: after the whole list");
+    Check(EventView.Of(spec with{Now=EDay(10,12,1)}).NowAt==0,"after all: first");
+    Check(EventView.Of(spec with{Now=EDay(5,12)}).NowAt==5,"at event 5");
+    var view=EventView.Of(spec with{Now=EDay(5,12)});
+    Check(view.Order[5]==4&&view.Order[4]==5,"event 5 (index 4) is the first read after the marker, event 6 the last read before it");
+    Check(EventView.Of(Ten() with{NewestFirst=true,Now=EDay(5,12,1)}).NowAt==5,"between 5 and 6");
+});
+Test("0.50.0: an event at Now with equal times is reached together",()=>{
+    var spec=ESpec(Ev(2,"x"),Ev(2,"y"),Ev(3,"z")) with{Now=EDay(2)};
+    Check(EventView.Of(spec).NowAt==2,"both events at Now are before the marker");
+    Check(EventView.Of(spec with{NewestFirst=true}).NowAt==1,"newest first: only z is later");
+});
+Test("0.50.0: the default window without Now is the first positions",()=>{
+    var view=EventView.Of(Ten());
+    Check(view.Window(4)==(0,3),"4");
+    Check(view.Window(1)==(0,0),"1");
+    Check(view.Window(10)==(0,9),"all");
+    Check(view.Window(50)==(0,9),"more than there are");
+    Check(EventView.Of(ESpec()).Window(5)==(0,-1),"empty");
+});
+Test("0.50.0: the default window with Now is the positions nearest the marker, larger half before",()=>{
+    var middle=EventView.Of(Ten() with{Now=EDay(5,12,30)});
+    Check(middle.NowAt==5,"marker");
+    Check(middle.Window(4)==(3,6),"even: 2 before, 2 after");
+    Check(middle.Window(5)==(2,6),"odd: 3 before, 2 after");
+    Check(middle.Window(1)==(4,4),"one: the one before");
+    var start=EventView.Of(Ten() with{Now=EDay(1,11)});
+    Check(start.NowAt==0&&start.Window(4)==(0,3),"at the start, topped up after: "+start.Window(4));
+    var near=EventView.Of(Ten() with{Now=EDay(1,12,30)});
+    Check(near.NowAt==1&&near.Window(5)==(0,4),"one before, topped up after: "+near.Window(5));
+    var end=EventView.Of(Ten() with{Now=EDay(11)});
+    Check(end.NowAt==10&&end.Window(4)==(6,9),"at the end, topped up before: "+end.Window(4));
+    var nearEnd=EventView.Of(Ten() with{Now=EDay(9,12,30)});
+    Check(nearEnd.NowAt==9&&nearEnd.Window(4)==(6,9),"one after, topped up before: "+nearEnd.Window(4));
+    Check(middle.Window(10)==(0,9)&&middle.Window(99)==(0,9),"the whole list");
+});
+Test("0.50.0: Grow extends the earlier or later side and clamps at both ends",()=>{
+    var view=EventView.Of(Ten());
+    Check(view.Grow((4,6),true,2)==(2,6),"earlier");
+    Check(view.Grow((4,6),false,2)==(4,8),"later");
+    Check(view.Grow((1,6),true,5)==(0,6),"earlier clamps at the start");
+    Check(view.Grow((0,6),true,3)==(0,6),"already at the start");
+    Check(view.Grow((4,8),false,5)==(4,9),"later clamps at the end");
+    Check(view.Grow((4,9),false,3)==(4,9),"already at the end");
+    Check(view.Grow((0,9),true,1)==(0,9)&&view.Grow((0,9),false,1)==(0,9),"the whole list cannot grow");
+});
+Test("0.50.0: groups are read in the time zone: 23:30 UTC on 31 Oct is 1 Nov in Johannesburg (Review Focus 4)",()=>{
+    var late=new TimelineEvent(new DateTimeOffset(2026,10,31,23,30,0,TimeSpan.Zero),"late");
+    var utc=EventView.Of(ESpec(late) with{GroupBy=EventGrouping.Day});
+    Check(utc.GroupKey(0)=="2026-10-31"&&utc.GroupLabel(0)=="Sat 31 Oct 2026","utc day: "+utc.GroupKey(0)+" / "+utc.GroupLabel(0));
+    var day=EventView.Of(ESpec(late) with{GroupBy=EventGrouping.Day,TimeZone="Africa/Johannesburg"});
+    Check(day.GroupKey(0)=="2026-11-01"&&day.GroupLabel(0)=="Sun 1 Nov 2026","1 Nov 2026 is a Sunday: "+day.GroupLabel(0));
+    var month=EventView.Of(ESpec(late) with{GroupBy=EventGrouping.Month,TimeZone="Africa/Johannesburg"});
+    Check(month.GroupKey(0)=="2026-11"&&month.GroupLabel(0)=="November 2026","month: "+month.GroupKey(0)+" / "+month.GroupLabel(0));
+    var newYear=new TimelineEvent(new DateTimeOffset(2026,12,31,23,30,0,TimeSpan.Zero),"ny");
+    var year=EventView.Of(ESpec(newYear) with{GroupBy=EventGrouping.Year,TimeZone="Africa/Johannesburg"});
+    Check(year.GroupKey(0)=="2027"&&year.GroupLabel(0)=="2027","year: "+year.GroupKey(0));
+    var yearUtc=EventView.Of(ESpec(newYear) with{GroupBy=EventGrouping.Year});
+    Check(yearUtc.GroupKey(0)=="2026","year in UTC");
+    var none=EventView.Of(ESpec(late));
+    Check(none.GroupKey(0)==""&&none.GroupLabel(0)=="","no grouping, no key");
+});
+Test("0.50.0: the Now group comes from Now in the same zone, even when no event falls in it",()=>{
+    var spec=ESpec(Ev(1)) with{GroupBy=EventGrouping.Day,Now=new DateTimeOffset(2026,10,31,23,30,0,TimeSpan.Zero),TimeZone="Africa/Johannesburg"};
+    var view=EventView.Of(spec);
+    Check(view.NowGroupKey=="2026-11-01","now key "+view.NowGroupKey);
+    Check(view.NowGroupLabel=="Sun 1 Nov 2026","now label "+view.NowGroupLabel);
+    Check(view.GroupKey(0)=="2026-10-01","the event is in another group");
+    var month=EventView.Of(spec with{GroupBy=EventGrouping.Month});
+    Check(month.NowGroupKey=="2026-11"&&month.NowGroupLabel=="November 2026","month");
+    Check(EventView.Of(spec with{GroupBy=EventGrouping.Year}).NowGroupKey=="2026","year");
+    Check(EventView.Of(spec with{Now=null}).NowGroupKey==""&&EventView.Of(spec with{Now=null}).NowGroupLabel=="","no Now");
+    Check(EventView.Of(spec with{GroupBy=EventGrouping.None}).NowGroupKey=="","no grouping");
+});
+Test("0.50.0: a daylight-saving zone groups by its local date",()=>{
+    var spec=ESpec(new TimelineEvent(new DateTimeOffset(2026,6,30,23,30,0,TimeSpan.Zero),"summer")) with{GroupBy=EventGrouping.Day,TimeZone="Europe/London"};
+    Check(EventView.Of(spec).GroupKey(0)=="2026-07-01","BST puts 23:30 UTC on 1 July");
+});
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
