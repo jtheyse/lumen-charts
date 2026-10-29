@@ -42,11 +42,11 @@ internal sealed class EventView
 
     /// <summary>The default window, as first and last reading positions, both included. Without Now it is the first
     /// <paramref name="shown"/> positions; with Now it is the <paramref name="shown"/> positions nearest the marker, the larger half before it,
-    /// topped up from the other side when one side runs short. An empty list gives (0, -1).</summary>
+    /// topped up from the other side when one side runs short. An empty list gives (0, -1). Throws <see cref="ArgumentOutOfRangeException"/> when <paramref name="shown"/> is below 1.</summary>
     internal (int First, int Last) Window(int shown)
     {
+        if (shown < 1) throw new ArgumentOutOfRangeException(nameof(shown), shown, "Shown must be at least 1.");
         var count = Order.Count;
-        shown = Math.Max(1, shown);
         if (shown >= count) return (0, count - 1);
         if (NowAt is not { } at) return (0, shown - 1);
         var first = Math.Clamp(at - (shown + 1) / 2, 0, count - shown);
@@ -55,7 +55,7 @@ internal sealed class EventView
 
     /// <summary>Extends the window by <paramref name="by"/> positions at the start of the list (<paramref name="earlier"/>) or at its end, clamped to the list.</summary>
     internal (int First, int Last) Grow((int First, int Last) window, bool earlier, int by) =>
-        earlier ? (Math.Max(0, window.First - by), window.Last) : (window.First, Math.Min(Order.Count - 1, window.Last + by));
+        by < 0 ? throw new ArgumentOutOfRangeException(nameof(by), by, "A window grows by 0 or more.") : earlier ? (Math.Max(0, window.First - by), window.Last) : (window.First, Math.Min(Order.Count - 1, window.Last + by));
 
     /// <summary>The heading key of an event (by spec index) in the timeline's zone; empty without grouping.</summary>
     internal string GroupKey(int index) => Key(_spec.Events[index].When);

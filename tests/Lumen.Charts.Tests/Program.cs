@@ -12141,6 +12141,7 @@ Test("0.49.0: the CSV file is named for the caption: lower case, runs of other c
     Check(TableExport.FileName("★ — ★")=="table.csv"&&TableExport.FileName("???")=="table.csv","all symbols");
 });
 // 0.50.0
+bool Throws<T>(Action action) where T:Exception{try{action();}catch(T){return true;}return false;}
 DateTimeOffset EDay(int day,int hour=12,int minute=0)=>new(2026,10,day,hour,minute,0,TimeSpan.Zero);
 TimelineEvent Ev(int day,string title="E",int hour=12)=>new(EDay(day,hour),title);
 EventTimelineSpec ESpec(params TimelineEvent[] events)=>new(events);
@@ -12212,8 +12213,10 @@ Test("0.50.0: NewestFirst reverses the chronology but equal times keep the spec'
     var spec=ESpec(Ev(3,"c"),Ev(1,"a1"),Ev(2,"b"),Ev(1,"a2"),Ev(1,"a3")) with{NewestFirst=true};
     var view=EventView.Of(spec);
     Check(view.Order.SequenceEqual([0,2,1,3,4]),"order "+string.Join(",",view.Order));
-    var offsets=ESpec(new TimelineEvent(new DateTimeOffset(2026,10,5,14,0,0,TimeSpan.FromHours(2)),"p"),new TimelineEvent(EDay(5,12),"q")) with{NewestFirst=true};
-    Check(EventView.Of(offsets).Order.SequenceEqual([0,1]),"the same instant in two offsets is a tie");
+    // 12:00 UTC twice: the later spec entry has the larger clock time (14:00+02:00), so a sort on the local clock would put it first.
+    var offsets=ESpec(new TimelineEvent(EDay(5,12),"q"),new TimelineEvent(new DateTimeOffset(2026,10,5,14,0,0,TimeSpan.FromHours(2)),"p")) with{NewestFirst=true};
+    Check(EventView.Of(offsets).Order.SequenceEqual([0,1]),"the same instant in two offsets is a tie, newest first");
+    Check(EventView.Of(offsets with{NewestFirst=false}).Order.SequenceEqual([0,1]),"and oldest first");
 });
 Test("0.50.0: Now before every event, after every event, and exactly at an event (Review Focus 2)",()=>{
     var spec=Ten();
@@ -12274,6 +12277,14 @@ Test("0.50.0: Grow extends the earlier or later side and clamps at both ends",()
     Check(view.Grow((4,9),false,3)==(4,9),"already at the end");
     Check(view.Grow((0,9),true,1)==(0,9)&&view.Grow((0,9),false,1)==(0,9),"the whole list cannot grow");
 });
+Test("0.50.0: Window and Grow refuse arguments out of range",()=>{
+    var view=EventView.Of(Ten());
+    Check(Throws<ArgumentOutOfRangeException>(()=>view.Window(0)),"shown 0");
+    Check(Throws<ArgumentOutOfRangeException>(()=>view.Window(-2)),"shown -2");
+    Check(Throws<ArgumentOutOfRangeException>(()=>view.Grow((0,3),true,-1)),"by -1 earlier");
+    Check(Throws<ArgumentOutOfRangeException>(()=>view.Grow((0,3),false,-1)),"by -1 later");
+    Check(view.Grow((2,3),true,0)==(2,3),"by 0 is fine");
+});
 Test("0.50.0: groups are read in the time zone: 23:30 UTC on 31 Oct is 1 Nov in Johannesburg (Review Focus 4)",()=>{
     var late=new TimelineEvent(new DateTimeOffset(2026,10,31,23,30,0,TimeSpan.Zero),"late");
     var utc=EventView.Of(ESpec(late) with{GroupBy=EventGrouping.Day});
@@ -12287,6 +12298,9 @@ Test("0.50.0: groups are read in the time zone: 23:30 UTC on 31 Oct is 1 Nov in 
     Check(year.GroupKey(0)=="2027"&&year.GroupLabel(0)=="2027","year: "+year.GroupKey(0));
     var yearUtc=EventView.Of(ESpec(newYear) with{GroupBy=EventGrouping.Year});
     Check(yearUtc.GroupKey(0)=="2026","year in UTC");
+    var early=new TimelineEvent(new DateTimeOffset(2026,10,5,1,0,0,TimeSpan.FromHours(2)),"early");
+    Check(EventView.Of(ESpec(early) with{GroupBy=EventGrouping.Day}).GroupKey(0)=="2026-10-04","01:00+02:00 with no zone is 23:00 UTC on the 4th");
+    Check(EventView.Of(ESpec(early) with{GroupBy=EventGrouping.Day,TimeZone="Africa/Johannesburg"}).GroupKey(0)=="2026-10-05","and the 5th in Johannesburg");
     var none=EventView.Of(ESpec(late));
     Check(none.GroupKey(0)==""&&none.GroupLabel(0)=="","no grouping, no key");
 });
@@ -12305,6 +12319,170 @@ Test("0.50.0: the Now group comes from Now in the same zone, even when no event 
 Test("0.50.0: a daylight-saving zone groups by its local date",()=>{
     var spec=ESpec(new TimelineEvent(new DateTimeOffset(2026,6,30,23,30,0,TimeSpan.Zero),"summer")) with{GroupBy=EventGrouping.Day,TimeZone="Europe/London"};
     Check(EventView.Of(spec).GroupKey(0)=="2026-07-01","BST puts 23:30 UTC on 1 July");
+});
+// 0.50.0: the event timeline's HTML
+IEnumerable<XElement> EKids(XElement e,string cls)=>e.Descendants().Where(x=>((string?)x.Attribute("class")??"").Split(' ').Contains(cls));
+XElement ERoot(string html)=>XElement.Parse(html);
+string[] ETitles(string html)=>EKids(ERoot(html),"lumen-event").Select(l=>EKids(l,"lumen-event-title").Single().Value).ToArray();
+string EWhen(TimelineEvent e,EventTimelineSpec? spec=null)=>EKids(ERoot(EventTimelineHtml.Render((spec??ESpec()) with{Events=[e]})),"lumen-event").Single().Elements().First(x=>x.Name.LocalName=="time").Value;
+Test("0.50.0: the timeline's structure: section, style, heading, description, list, and each event's parts in order",()=>{
+    var e=Ev(5,"Hilltop XCO") with{Value="3rd",Status=EventStatus.Done,Category="XCO",Note="Dry and fast",Href="https://example.test/r?a=1&b=2"};
+    var html=EventTimelineHtml.Render(ESpec(e) with{Title="Season",Description="Invented events",TitleLevel=3});
+    var root=ERoot(html);
+    Check(root.Name.LocalName=="section"&&root.Attribute("class")!.Value=="lumen-events lumen-events-regular"&&root.Attribute("aria-label")!.Value=="Season","root: "+root.Attribute("class"));
+    Check(root.Attribute("style")!.Value.Contains("--lumen-grid:"),"the root style");
+    Check(root.Elements().Select(x=>x.Name.LocalName).SequenceEqual(["style","h3","p","ol"]),string.Join(",",root.Elements().Select(x=>x.Name.LocalName)));
+    Check(root.Elements().ElementAt(1).Attribute("class")!.Value=="lumen-events-title"&&root.Elements().ElementAt(2).Attribute("class")!.Value=="lumen-events-desc","title and description classes");
+    Check(root.Elements().ElementAt(3).Attribute("class")!.Value=="lumen-events-list","the list");
+    var li=EKids(root,"lumen-event").Single();
+    Check(li.Name.LocalName=="li"&&li.Attribute("class")!.Value=="lumen-event lumen-event-done","li class "+li.Attribute("class"));
+    var kids=li.Elements().ToArray();
+    Check(kids.Select(k=>k.Name.LocalName).SequenceEqual(["span","time","a","span","span","span","p"]),string.Join(",",kids.Select(k=>k.Name.LocalName)));
+    Check(kids[0].Attribute("class")!.Value=="lumen-event-dot"&&kids[0].Attribute("aria-hidden")!.Value=="true"&&kids[0].Value=="","dot");
+    Check(kids[1].Attribute("datetime")!.Value=="2026-10-05T12:00:00+00:00"&&kids[1].Value=="Mon 5 Oct 2026 · 12:00","time: "+kids[1].Attribute("datetime")+" / "+kids[1].Value);
+    Check(kids[2].Attribute("href")!.Value=="https://example.test/r?a=1&b=2"&&kids[2].Attribute("class")!.Value=="lumen-event-title"&&kids[2].Value=="Hilltop XCO","title link");
+    Check(html.Contains("href='https://example.test/r?a=1&amp;b=2'"),"the link is written encoded");
+    Check(kids[3].Attribute("class")!.Value=="lumen-event-value"&&kids[3].Value=="3rd","value");
+    Check(kids[4].Attribute("class")!.Value=="lumen-event-status"&&kids[4].Value=="✓ Done"&&kids[4].Elements().Single().Attribute("aria-hidden")!.Value=="true","status: "+kids[4].Value);
+    Check(kids[5].Attribute("class")!.Value=="lumen-event-category"&&kids[5].Value=="XCO","category");
+    Check(kids[6].Attribute("class")!.Value=="lumen-event-note"&&kids[6].Value=="Dry and fast","note");
+    var plain=EKids(ERoot(EventTimelineHtml.Render(ESpec(Ev(5,"Plain")))),"lumen-event").Single();
+    Check(plain.Attribute("class")!.Value=="lumen-event lumen-event-none"&&plain.Elements().Select(k=>k.Name.LocalName).SequenceEqual(["span","time","span"]),"a bare event has a dot, a time and a title");
+    Check(plain.Elements().Last().Attribute("class")!.Value=="lumen-event-title","a title with no link is a span");
+});
+Test("0.50.0: the label is the title, else the description, else Events; the heading level follows TitleLevel",()=>{
+    Check(ERoot(EventTimelineHtml.Render(ESpec(Ev(1)) with{Title="T",Description="D"})).Attribute("aria-label")!.Value=="T","title");
+    Check(ERoot(EventTimelineHtml.Render(ESpec(Ev(1)) with{Description="D"})).Attribute("aria-label")!.Value=="D","description");
+    var bare=ERoot(EventTimelineHtml.Render(ESpec(Ev(1))));
+    Check(bare.Attribute("aria-label")!.Value=="Events"&&!bare.Elements().Any(x=>x.Name.LocalName is "h2" or "p"),"events, with no heading");
+    Check(ERoot(EventTimelineHtml.Render(ESpec(Ev(1)) with{Title="T",TitleLevel=5})).Elements().Any(x=>x.Name.LocalName=="h5"),"h5");
+    Check(ERoot(EventTimelineHtml.Render(ESpec(Ev(1)) with{Title="T",Density=Density.Compact})).Attribute("class")!.Value=="lumen-events lumen-events-compact","compact");
+});
+Test("0.50.0: each status has a glyph and a word; Current is coloured through Readable and Cancelled is struck through",()=>{
+    foreach(var (status,text,cls) in new[]{(EventStatus.Done,"✓ Done","done"),(EventStatus.Current,"● Now","current"),(EventStatus.Upcoming,"○ Upcoming","upcoming"),(EventStatus.Cancelled,"✕ Cancelled","cancelled")})
+    {
+        var li=EKids(ERoot(EventTimelineHtml.Render(ESpec(Ev(1) with{Status=status}))),"lumen-event").Single();
+        var st=EKids(li,"lumen-event-status").Single();
+        Check(st.Value==text&&li.Attribute("class")!.Value.EndsWith("lumen-event-"+cls),text+" / "+st.Value);
+        Check(st.Elements().Single().Attribute("aria-hidden")!.Value=="true","the glyph is hidden from readers");
+    }
+    foreach(var s in new[]{ChartStyle.Light,ChartStyle.Dark,new ChartStyle{Series=["#FFE08A"]}})
+    {
+        var current=EKids(ERoot(EventTimelineHtml.Render(ESpec(Ev(1) with{Status=EventStatus.Current}) with{Style=s})),"lumen-event-status").Single();
+        var colour=Regex.Match(current.Attribute("style")!.Value,"color:(#[0-9A-Fa-f]{6})").Groups[1].Value;
+        Check(colour==LumenHtml.Readable(s.SeriesColor(0),s),"colour "+colour);
+        Check(Lumen.Charts.Contrast.Ratio(colour,s.Background)>=4.5,"clears 4.5:1: "+colour);
+    }
+    var css=EventTimelineHtml.Render(ESpec(Ev(1) with{Status=EventStatus.Cancelled}));
+    Check(css.Contains("lumen-event-cancelled .lumen-event-title{")&&css.Contains("line-through"),"strike-through");
+});
+Test("0.50.0: the when text, for a moment, an all-day event and every kind of span",()=>{
+    Check(EWhen(Ev(5))=="Mon 5 Oct 2026 · 12:00","moment");
+    Check(EWhen(Ev(5) with{AllDay=true})=="Mon 5 Oct 2026","all day");
+    Check(EKids(ERoot(EventTimelineHtml.Render(ESpec(Ev(5) with{AllDay=true}))),"lumen-event").Single().Elements().First(x=>x.Name.LocalName=="time").Attribute("datetime")!.Value=="2026-10-05","all-day datetime");
+    Check(EWhen(Ev(5) with{End=EDay(5,14,30)})=="Mon 5 Oct 2026 · 12:00–14:30","same-day span");
+    Check(EWhen(Ev(5,hour:9) with{End=EDay(6,11)})=="Mon 5 Oct 2026 · 09:00 – Tue 6 Oct 2026 · 11:00","multi-day timed span");
+    Check(EWhen(Ev(5) with{AllDay=true,End=EDay(5)})=="Mon 5 Oct 2026","an all-day span on one day");
+    Check(EWhen(Ev(5) with{AllDay=true,End=EDay(7)})=="Mon 5 – Wed 7 Oct 2026","all-day span in a month");
+    Check(EWhen(Ev(31) with{AllDay=true,End=new DateTimeOffset(2026,11,1,12,0,0,TimeSpan.Zero)})=="Sat 31 Oct – Sun 1 Nov 2026","all-day span over a month end (Review Focus 5)");
+    Check(EWhen(new TimelineEvent(new DateTimeOffset(2026,12,31,12,0,0,TimeSpan.Zero),"E"){AllDay=true,End=new DateTimeOffset(2027,1,1,12,0,0,TimeSpan.Zero)})=="Thu 31 Dec 2026 – Fri 1 Jan 2027","all-day span over a year end (Review Focus 5)");
+    var late=new TimelineEvent(new DateTimeOffset(2026,10,31,23,30,0,TimeSpan.Zero),"E");
+    Check(EWhen(late,ESpec() with{TimeZone="Africa/Johannesburg"})=="Sun 1 Nov 2026 · 01:30","converted into the zone");
+    var li=EKids(ERoot(EventTimelineHtml.Render(ESpec(late) with{TimeZone="Africa/Johannesburg"})),"lumen-event").Single();
+    Check(li.Elements().First(x=>x.Name.LocalName=="time").Attribute("datetime")!.Value=="2026-11-01T01:30:00+02:00","the offset of the zone");
+    Check(EWhen(Ev(5),ESpec() with{DateFormat="d MMM",TimeFormat="h:mm tt"})=="5 Oct · 12:00 PM","formats, in the invariant culture");
+});
+Test("0.50.0: events read in order, newest first reverses them, and equal times keep the spec's order",()=>{
+    var spec=ESpec(Ev(3,"c"),Ev(1,"a1"),Ev(2,"b"),Ev(1,"a2"));
+    Check(ETitles(EventTimelineHtml.Render(spec)).SequenceEqual(["a1","a2","b","c"]),"oldest first");
+    Check(ETitles(EventTimelineHtml.Render(spec with{NewestFirst=true})).SequenceEqual(["c","b","a1","a2"]),"newest first");
+});
+Test("0.50.0: the Now marker sits at its place in the reading order, before the event it precedes",()=>{
+    string[] Line(EventTimelineSpec s)=>ERoot(EventTimelineHtml.Render(s)).Descendants("li").Where(l=>l.Parent!.Attribute("class")!.Value=="lumen-events-list").Select(l=>l.Attribute("class")!.Value=="lumen-events-now"?"NOW":EKids(l,"lumen-event-title").Single().Value).ToArray();
+    var three=ESpec(Ev(1,"a"),Ev(2,"b"),Ev(3,"c"));
+    Check(Line(three with{Now=EDay(1,11)}).SequenceEqual(["NOW","a","b","c"]),"before all");
+    Check(Line(three with{Now=EDay(2,13)}).SequenceEqual(["a","b","NOW","c"]),"between");
+    Check(Line(three with{Now=EDay(2)}).SequenceEqual(["a","b","NOW","c"]),"at b, it is reached");
+    Check(Line(three with{Now=EDay(9)}).SequenceEqual(["a","b","c","NOW"]),"after all");
+    Check(Line(three with{Now=EDay(2,13),NewestFirst=true}).SequenceEqual(["c","NOW","b","a"]),"newest first");
+    Check(Line(ESpec() with{Now=EDay(2)}).SequenceEqual(["NOW"]),"no events");
+    var now=ERoot(EventTimelineHtml.Render(three with{Now=EDay(2,13)})).Descendants("li").Single(l=>l.Attribute("class")!.Value=="lumen-events-now");
+    Check(now.Value=="Now · Fri 2 Oct 2026","the date in DateFormat: "+now.Value);
+    Check(now.Elements().Single().Attribute("class")!.Value=="lumen-event-dot"&&now.Elements().Single().Attribute("aria-hidden")!.Value=="true"&&now.Nodes().Count()==2,"dot, then words");
+});
+Test("0.50.0: grouping writes headings one level down, and the Now marker sits in Now's group, created when no event falls in it",()=>{
+    var spec=ESpec(Ev(1,"a"),Ev(1,"a2",15),Ev(3,"c")) with{GroupBy=EventGrouping.Day,Title="T"};
+    var root=ERoot(EventTimelineHtml.Render(spec));
+    var groups=EKids(root,"lumen-events-group").ToArray();
+    Check(root.Elements().Any(x=>x.Name.LocalName=="ol"&&x.Attribute("class")!.Value=="lumen-events-groups"),"the groups list");
+    Check(groups.Length==2&&groups.All(g=>g.Name.LocalName=="li"),"two groups");
+    Check(groups[0].Elements().First().Name.LocalName=="h3"&&groups[0].Elements().First().Attribute("class")!.Value=="lumen-events-heading"&&groups[0].Elements().First().Value=="Thu 1 Oct 2026","heading: "+groups[0].Elements().First().Value);
+    Check(EKids(groups[0],"lumen-events-list").Single().Elements().Count()==2&&groups[1].Elements().First().Value=="Sat 3 Oct 2026","events under their headings");
+    var withNow=EKids(ERoot(EventTimelineHtml.Render(spec with{Now=EDay(2,9)})),"lumen-events-group").ToArray();
+    Check(withNow.Length==3&&withNow[1].Elements().First().Value=="Fri 2 Oct 2026"&&EKids(withNow[1],"lumen-events-now").Count()==1&&EKids(withNow[1],"lumen-event").Count()==0,"a group of its own for Now");
+    var inGroup=EKids(ERoot(EventTimelineHtml.Render(spec with{Now=EDay(1,16)})),"lumen-events-group").ToArray();
+    Check(inGroup.Length==2&&EKids(inGroup[0],"lumen-events-now").Count()==1&&EKids(inGroup[1],"lumen-events-now").Count()==0,"Now in the group of the day it falls in, after the events it has reached");
+    var nowFirst=EKids(ERoot(EventTimelineHtml.Render(spec with{Now=EDay(1,9)})),"lumen-events-group").ToArray();
+    Check(nowFirst.Length==2&&EKids(nowFirst[0],"lumen-events-list").Single().Elements().First().Attribute("class")!.Value=="lumen-events-now","Now first in its group");
+    var months=EKids(ERoot(EventTimelineHtml.Render(ESpec(Ev(1),new TimelineEvent(new DateTimeOffset(2026,11,2,12,0,0,TimeSpan.Zero),"n")) with{GroupBy=EventGrouping.Month})),"lumen-events-heading").Select(h=>h.Value).ToArray();
+    Check(months.SequenceEqual(["October 2026","November 2026"]),string.Join("|",months));
+    var zoned=EKids(ERoot(EventTimelineHtml.Render(ESpec(new TimelineEvent(new DateTimeOffset(2026,10,31,23,30,0,TimeSpan.Zero),"late")) with{GroupBy=EventGrouping.Month,TimeZone="Africa/Johannesburg"})),"lumen-events-heading").Single().Value;
+    Check(zoned=="November 2026","a zone changes the month: "+zoned);
+});
+Test("0.50.0: a static window shows the events nearest Now and a muted range, with no buttons",()=>{
+    var spec=Ten() with{Now=EDay(5,12,30)};
+    var html=EventTimelineHtml.Render(spec,4);
+    Check(ETitles(html).SequenceEqual(["Day 4","Day 5","Day 6","Day 7"]),string.Join(",",ETitles(html)));
+    var root=ERoot(html);
+    Check(EKids(root,"lumen-events-range").Single().Value=="Showing 4–7 of 10 events"&&EKids(root,"lumen-events-range").Single().Name.LocalName=="p","range: "+EKids(root,"lumen-events-range").Single().Value);
+    Check(!root.Descendants("button").Any(),"no buttons");
+    Check(EKids(root,"lumen-events-now").Count()==1,"Now is inside the window");
+    Check(ETitles(EventTimelineHtml.Render(spec)).Length==10&&!EKids(ERoot(EventTimelineHtml.Render(spec)),"lumen-events-range").Any(),"null shows every event with no range");
+    Check(!EKids(ERoot(EventTimelineHtml.Render(spec,50)),"lumen-events-range").Any(),"a window that holds everything has no range");
+    Check(ETitles(EventTimelineHtml.Render(Ten(),3)).SequenceEqual(["Day 1","Day 2","Day 3"]),"no Now: the first events");
+    Check(Throws<ArgumentOutOfRangeException>(()=>EventTimelineHtml.Render(spec,0)),"shown 0");
+    Check(Throws<ArgumentException>(()=>EventTimelineHtml.Render(spec with{TitleLevel=1},3)),"validated");
+    var nowOutside=EventTimelineHtml.Render(Ten() with{Now=EDay(9,12,30)},3);
+    Check(ETitles(nowOutside).SequenceEqual(["Day 8","Day 9","Day 10"])&&EKids(ERoot(nowOutside),"lumen-events-now").Count()==1,"Now near the end");
+});
+Test("0.50.0: with controls the list has a button before and after, sized by what remains (Review Focus 3)",()=>{
+    var spec=Ten();
+    string[] Buttons(string html)=>ERoot(html).Descendants("button").Select(b=>b.Attribute("data-lumen-more")!.Value+"|"+b.Value+"|"+(b.Attribute("aria-disabled")?.Value??"")).ToArray();
+    var view=EventView.Of(spec);
+    var middle=EventTimelineHtml.Render(spec,view,(3,6),true);
+    Check(Buttons(middle).SequenceEqual(["earlier|Show 3 earlier|","later|Show 3 later|"]),string.Join(";",Buttons(middle)));
+    var root=ERoot(middle);
+    Check(root.Descendants("button").All(b=>b.Attribute("type")!.Value=="button"&&b.Attribute("class")!.Value=="lumen-events-more"&&b.Attribute("disabled") is null),"type, class and never disabled");
+    Check(root.Elements().First(x=>x.Name.LocalName!="style").Name.LocalName=="button"&&root.Elements().Last().Name.LocalName=="button","one before the list and one after");
+    Check(!EKids(root,"lumen-events-range").Any(),"controls replace the range");
+    Check(Buttons(EventTimelineHtml.Render(spec,view,(1,8),true)).SequenceEqual(["earlier|Show 1 earlier|","later|Show 1 later|"]),"one left");
+    Check(Buttons(EventTimelineHtml.Render(spec,view,(2,8),true,2)).SequenceEqual(["earlier|Show 2 earlier|","later|Show 1 later|"]),"a page size of 2");
+    Check(Buttons(EventTimelineHtml.Render(spec,view,(0,9),true)).SequenceEqual(["earlier|No earlier events|true","later|No later events|true"]),"nothing remains: "+string.Join(";",Buttons(EventTimelineHtml.Render(spec,view,(0,9),true))));
+    Check(Buttons(EventTimelineHtml.Render(spec,view,(0,4),true)).SequenceEqual(["earlier|No earlier events|true","later|Show 5 later|"]),"at the start");
+    var newest=EventView.Of(spec with{NewestFirst=true});
+    Check(Buttons(EventTimelineHtml.Render(spec with{NewestFirst=true},newest,(3,6),true)).SequenceEqual(["earlier|Show 3 newer|","later|Show 3 older|"]),"newest first");
+    Check(Buttons(EventTimelineHtml.Render(spec with{NewestFirst=true},newest,(0,9),true)).SequenceEqual(["earlier|No newer events|true","later|No older events|true"]),"newest first, none left");
+    var empty=EventTimelineHtml.Render(ESpec(),EventView.Of(ESpec()),(0,-1),true);
+    Check(Buttons(empty).SequenceEqual(["earlier|No earlier events|true","later|No later events|true"]),"empty");
+});
+Test("0.50.0: no id, hostile text is escaped, and every css rule is under the root",()=>{
+    var evil="<script>x</script>&\"'";
+    var html=EventTimelineHtml.Render(ESpec(Ev(1,evil) with{Note=evil,Value=evil,Category=evil}) with{Title=evil,Description=evil,GroupBy=EventGrouping.Year});
+    Check(!html.Contains("<script>"),"nothing raw");
+    var root=ERoot(html);
+    Check(root.Attribute("aria-label")!.Value==evil&&EKids(root,"lumen-event-title").Single().Value==evil&&EKids(root,"lumen-event-note").Single().Value==evil&&EKids(root,"lumen-event-value").Single().Value==evil&&EKids(root,"lumen-event-category").Single().Value==evil,"the text survives, encoded");
+    Check(!html.Contains(" id=")&&!html.Contains(" id'"),"no id attribute");
+    var css=root.Descendants("style").Single().Value;
+    Check(css.Contains(LumenHtml.HiddenRule(".lumen-events")),"the hidden rule");
+    foreach(var density in new[]{Density.Regular,Density.Compact})
+    {
+        var c=ERoot(EventTimelineHtml.Render(ESpec(Ev(1)) with{Density=density})).Descendants("style").Single().Value;
+        var scope=".lumen-events.lumen-events-"+(density==Density.Compact?"compact":"regular");
+        foreach(var rule in c.Split('}',StringSplitOptions.RemoveEmptyEntries))
+            foreach(var selector in rule.Split('{')[0].Split(','))
+                Check(selector.Trim().StartsWith(scope)||selector.Trim().StartsWith(".lumen-events .lumen-sr"),"unscoped selector: "+selector);
+    }
+    Check(css.Contains("2px")&&css.Contains("var(--lumen-grid)"),"the rail");
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

@@ -955,6 +955,34 @@ lines.Add($"table/log-last-page {Hash(Table(Log()))}");
 lines.Add($"table/compact-sorted {Hash(Table(Results() with { Density = Density.Compact, SortBy = 3, SortDescending = true }))}");
 lines.Add($"table/negative-bars {Hash(Table(new TableSpec([new TableColumn("Month") { RowHeader = true }, new TableColumn("Net") { Kind = TableColumnKind.Bar, Unit = " pts" }],
     [new TableRow([TableCell.Of("March"), TableCell.Of(-5.0)]), new TableRow([TableCell.Of("April"), TableCell.Of(10.0)]), new TableRow([TableCell.Of("May"), TableCell.Of(-12.5)]), new TableRow([TableCell.Of("June"), new TableCell()])]) { Caption = "Points gained and lost" }))}");
+// Event timelines (0.50.0): invented data, the HTML fragment hashed whole.
+string Timeline(EventTimelineSpec spec, ChartTheme theme = ChartTheme.Light, int? shown = null) => EventTimelineHtml.Render(spec with { Style = Finished(spec.Style, theme) }, shown);
+DateTimeOffset EvAt(int month, int day, int hour = 12, int minute = 0) => new(2026, month, day, hour, minute, 0, TimeSpan.Zero);
+TimelineEvent[] RaceEvents() =>
+[
+    new(EvAt(3, 7, 9), "Opening round") { Status = EventStatus.Done, Value = "4th", Category = "XCO", Note = "Dry and fast" },
+    new(EvAt(3, 21, 9), "Hilltop classic") { Status = EventStatus.Done, Value = "2nd", Category = "XCO", Href = "/races/hilltop" },
+    new(EvAt(4, 11, 8), "Valley marathon") { Status = EventStatus.Done, Value = "7th", Category = "Marathon", End = EvAt(4, 11, 14, 30) },
+    new(EvAt(4, 25, 9), "Night sprint") { Status = EventStatus.Cancelled, Category = "Sprint", Note = "Called off for storms" },
+    new(EvAt(5, 9, 9), "River stage race") { Status = EventStatus.Done, Value = "11th", Category = "Stage", AllDay = true, End = EvAt(5, 11) },
+    new(EvAt(5, 23, 10), "Club time trial") { Status = EventStatus.Done, Value = "1st", Category = "TT" },
+    new(EvAt(6, 6, 9), "Forest enduro") { Status = EventStatus.Done, Value = "5th", Category = "Enduro" },
+    new(EvAt(6, 20, 9), "Lakeside XCO") { Status = EventStatus.Done, Value = "3rd", Category = "XCO" },
+    new(EvAt(7, 4, 9), "Winter series 1") { Status = EventStatus.Done, Value = "6th", Category = "Series" },
+    new(EvAt(7, 18, 9), "Winter series 2") { Status = EventStatus.Current, Category = "Series", Note = "Rolling start at nine" },
+    new(EvAt(8, 1, 9), "Winter series 3") { Status = EventStatus.Upcoming, Category = "Series" },
+    new(EvAt(8, 15, 7), "Mountain marathon") { Status = EventStatus.Upcoming, Category = "Marathon", End = EvAt(8, 15, 15) },
+    new(EvAt(9, 5, 9), "Spring opener") { Status = EventStatus.Upcoming, Category = "XCO" },
+    new(EvAt(9, 19, 9), "Township criterium") { Status = EventStatus.Upcoming, Category = "Road" },
+    new(EvAt(10, 3, 9), "Provincial champs") { Status = EventStatus.Upcoming, Category = "XCO", Href = "https://example.test/champs" },
+    new(EvAt(10, 24, 9), "Season finale") { Category = "Party", Note = "Prizes and a braai" }
+];
+EventTimelineSpec Races() => new(RaceEvents()) { Title = "Season events", Description = "Invented races for one rider", GroupBy = EventGrouping.Month, Now = EvAt(7, 18, 9, 30) };
+lines.Add($"events/season-light {Hash(Timeline(Races()))}");
+lines.Add($"events/season-dark {Hash(Timeline(Races() with { Style = ChartStyle.Dark }, ChartTheme.Dark))}");
+lines.Add($"events/grouped-day-newest {Hash(Timeline(new EventTimelineSpec(RaceEvents()[8..]) { Title = "Latest first", TitleLevel = 3, GroupBy = EventGrouping.Day, NewestFirst = true, Now = EvAt(8, 3), Density = Density.Compact, TimeZone = "Africa/Johannesburg" }))}");
+lines.Add($"events/window-now {Hash(Timeline(Races(), ChartTheme.Light, 6))}");
+lines.Add($"events/spans-allday {Hash(Timeline(new EventTimelineSpec([new(EvAt(10, 31), "Half term") { AllDay = true, End = EvAt(11, 1) }, new(EvAt(12, 31), "Year-end break") { AllDay = true, End = EvAt(12, 31).AddDays(1) }, new(EvAt(10, 5), "Camp") { AllDay = true, End = EvAt(10, 7), Category = "Training" }, new(EvAt(10, 5, 9), "Long ride") { End = EvAt(10, 6, 11) }, new(EvAt(10, 5, 14), "Coffee") { End = EvAt(10, 5, 15) }]) { DateFormat = null }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);
