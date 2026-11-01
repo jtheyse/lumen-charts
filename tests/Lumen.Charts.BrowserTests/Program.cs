@@ -2326,6 +2326,12 @@ if (await sportsLink.CountAsync() > 0)
             Check(total > 200, $"only {total} rows, too few to page twice");
             Check(await card.Locator(".lumen-table tbody tr").CountAsync() == 100, "a page does not hold 100 rows");
             Check(!(await card.Locator(".lumen-table").InnerTextAsync()).Contains("Table shows"), "the old note");
+            // The table's own named region scrolls, at most 320 px tall, and its header stays in view; the plain wrapper around it does not scroll.
+            var scrolling = await card.Locator(".lumen-table").EvaluateAsync<double[]>(@"w => { const r = w.querySelector('.lumen-datatable-scroll'); const before = r.getBoundingClientRect().top;
+                r.scrollTop = 200; const head = r.querySelector('thead th').getBoundingClientRect().top; return [r.scrollHeight, r.clientHeight, w.scrollHeight, w.clientHeight, head - r.getBoundingClientRect().top, r.scrollTop]; }");
+            Check(scrolling[0] > scrolling[1] && scrolling[1] <= 322, $"the region is {scrolling[1]} tall showing {scrolling[0]}");
+            Check(scrolling[2] == scrolling[3], $"the wrapper scrolls: {scrolling[2]} in {scrolling[3]}");
+            Check(scrolling[5] > 0 && Math.Abs(scrolling[4]) <= 1 + 1, $"after scrolling {scrolling[5]} the header stands {scrolling[4]} from the region's top");
             var button = (string name) => card.Locator($".lumen-table [data-lumen-page][aria-label='{name}']");
             await button("Next page").ClickAsync();
             await sports.WaitForFunctionAsync($"() => document.querySelector('#performance .lumen-datatable-range')?.textContent.trim() === 'Rows 101–200 of {total}'");

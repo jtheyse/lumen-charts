@@ -1899,9 +1899,11 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
     Reject(()=>ChartSvg.Render(Spec() with{YFormat=(ValueFormat)9}));
     Reject(()=>ChartSvg.Render(Spec() with{Y2Format=(ValueFormat)(-1)}));
 });
-// View data is a LumenTable since 0.51.0: a row is <tr><td>series</td><th scope=row>category</th><td>value<span note></span></td></tr>. The tests that read
-// a row's words from before, as <tr><td>series</td><td>category</td><td>value</td></tr> in Razor's encoding, read them through this, so each still proves its words;
-// Operate(raw:true) leaves the table's own markup, which the 0.51.0 tests read.
+// A compatibility view for the older word-level tests. View data is a LumenTable since 0.51.0: a row is
+// <tr><td>series</td><th scope=row>category</th><td>value<span note></span></td></tr>. The tests written before it read a row's words as
+// <tr><td>series</td><td>category</td><td>value</td></tr> in Razor's encoding; this flattens the rows to that, so each still proves its words
+// (a note's span is dropped, and a missing value's dash reads as its text). It proves nothing about structure: every check of the table's markup,
+// its regions, wrapper, headers, notes and missing cells, reads Operate(raw:true).
 string LegacyRows(string html)=>System.Text.RegularExpressions.Regex.Replace(html,"<tr><td class='[^']*'>(.*?)</td><th scope='row' class='[^']*'>(.*?)</th><td class='[^']*'>(.*?)</td></tr>",m=>
 {
     string Word(string cell)=>System.Text.Encodings.Web.HtmlEncoder.Default.Encode(System.Net.WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(cell,"</?span[^>]*>","")));
@@ -9966,14 +9968,14 @@ Test("The component's open data table, a heatmap's grid or any other chart's lis
     // The table scrolls inside a box 320 pixels tall, so a keyboard reader needs a tab stop on it, named as the drawing's own scrolling region is.
     // It opens on a click, which static rendering cannot send, so the test opens it directly and reads a point, which draws it.
     const string region="class=\"lumen-table\" tabindex=\"0\" role=\"region\" aria-label=\"Chart data\">";
-    const string wrapper="<div class=\"lumen-table\"><div class=\"lumen-datatable-host\">";
+    const string wrapper="<div class=\"lumen-table lumen-table-data\"><div class=\"lumen-datatable-host\">";
     string Opened(ChartSpec spec,bool raw=false)=>Operate(spec,async c=>{typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.SelectPoint(0,0);},raw:raw);
     var grid=Opened(HeatGrid());var list=Opened(Spec(ChartKind.Column));
     Check(grid.Contains(region+"<table class='lumen-grid-table'>")&&Regex.Matches(grid,"class=\"lumen-table\"").Count==1,"the grid's region");
     // 0.51.0: the list is a LumenTable inside a plain wrapper; the focusable, named region is the table's own, named by its caption.
     var table=Opened(Spec(ChartKind.Column),raw:true);
-    Check(table.Contains(wrapper)&&table.Contains("class='lumen-datatable-scroll' role='region' tabindex='0' aria-label='")&&table.Contains("original data'")&&Regex.Matches(table,"class=\"lumen-table\"").Count==1,"the list's region");
-    Check(!table.Contains("class=\"lumen-table\" tabindex")&&!table.Contains("class=\"lumen-table\" role")&&!table.Contains("aria-label=\"Chart data\""),"the wrapper is plain");
+    Check(table.Contains(wrapper)&&table.Contains("class='lumen-datatable-scroll' role='region' tabindex='0' aria-label='")&&table.Contains("original data'")&&Regex.Matches(table,"class=\"lumen-table lumen-table-data\"").Count==1,"the list's region");
+    Check(!table.Contains("lumen-table-data\" tabindex")&&!table.Contains("lumen-table-data\" role")&&!table.Contains("aria-label=\"Chart data\""),"the wrapper is plain");
     Check(!Prerender(ChartElement(Spec(ChartKind.Column))).Contains("lumen-table"),"a closed table draws no region");
     var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
     const string ring="{outline:2px solid var(--lumen-accent,#5675e7);outline-offset:-2px}";
@@ -9983,7 +9985,7 @@ Test("Heatmap table: the component's data table is the grid for a heatmap, and a
     // The table opens on a click, which static rendering cannot send, so the test opens it directly and reads a point, which draws it.
     var html=Operate(HeatGrid(),async c=>{typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.SelectPoint(0,0);});
     Check(html.Contains("lumen-grid-table")&&html.Contains("<th scope='row'>Sprint</th>"),"grid in View data");
-    Check(html.Contains("<table class='lumen-grid-table'>")&&!html.Contains("original data")&&!html.Contains("<th scope=\"col\">Series</th>"),"the flat table is not written beside it");
+    Check(html.Contains("<table class='lumen-grid-table'>")&&!html.Contains("original data")&&!html.Contains("lumen-datatable")&&!html.Contains("<th scope='col' class='lumen-datatable-")&&!html.Contains("<caption>"+"Example"),"the flat table is not written beside it");
     // Eight columns of 48 are 165 + 384 = 549 wide, which a 340 box cannot hold: the drawing keeps its width and the viewport scrolls.
     var eight=HeatGrid(s=>s with{CellWidth=48,Series=[new("Sprint",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,i+1,$"S{i}")).ToArray()),new("Long distance",Enumerable.Range(0,8).Select(i=>new ChartPoint(i,8-i,$"S{i}")).ToArray())]});
     var fitted=Operate(eight,async c=>{await c.Fit(340);},fit:true);
@@ -12764,10 +12766,12 @@ Test("0.51.0: the component's value and category words are those DataTable write
     void Same(ChartSpec spec,string what)
     {
         var html=Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.SetValue(chart,true);await chart.SelectPoint(0,0);});
-        var table=ChartExport.DataTable(spec);
-        var number=table.Columns[2];
-        var want=table.Rows.Select(r=>r.Cells[0].Text+"|"+r.Cells[1].Text+"|"+(number.Kind==TableColumnKind.Number?new Axis(AxisKind.Linear,1,10){ValueFormat=number.Format,Unit=number.Unit}.Format(r.Cells[2].Number ?? 0)+r.Cells[2].Note:r.Cells[2].Text)).ToArray();
-        var got=Cells(html);
+        // The words are read from ChartData directly, not from DataTable, so the check does not compare the table with itself. A point with no value is skipped:
+        // it is the table's dash (see the value-notes test).
+        var x=ChartData.XAxisOf(spec);
+        var want=spec.Series.SelectMany(series=>series.Points.Where(p=>p.Y is not null||p.Open is not null||p.Low is not null||p.High is not null||p.XEnd is not null)
+            .Select(p=>series.Name+"|"+ChartData.Category(spec,x,p)+"|"+ChartData.Value(spec,x,series,p))).ToArray();
+        var got=Cells(html).Where(c=>!c.EndsWith("|—none")).ToArray();
         Check(got.Length>0&&got.SequenceEqual(want),$"{what}: {string.Join(" ; ",got)} vs {string.Join(" ; ",want)}");
     }
     string[] Pinned(ChartSpec spec)=>Cells(Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.SetValue(chart,true);await chart.SelectPoint(0,0);}));
@@ -12776,6 +12780,8 @@ Test("0.51.0: the component's value and category words are those DataTable write
     Same(Spec() with{YFormat=ValueFormat.Compact,YUnit=" W",Series=[new("Power",[new(0,1500,"A"){ValueNote=" · PB"},new(1,2500,"B")])]},"plain line");
     Same(new ChartSpec{Kind=ChartKind.Candlestick,Series=[new("ACME",[ChartPoint.Candle(0,12,14,11,13,"Mon"),ChartPoint.Candle(1,13,15,12,12.5,"Tue")])]},"candlestick");
     Same(Spec(ChartKind.Column) with{Series=[new("Rides",[new(0,5,"Mon"){SubLabel="152 bpm"},new(1,7,"Tue")])]},"column with sub-label");
+    Same(new ChartSpec{Kind=ChartKind.Range,XAxis=AxisKind.Time,Series=[new("Heart rate",[ChartPoint.Interval(Utc(2026,9,12),74,52,168,"12 Sep"),ChartPoint.Interval(Utc(2026,9,13),null,50,140,"13 Sep")])]},"range");
+    Same(Spec() with{Y2Format=ValueFormat.Duration,Series=[new("Power",[new(0,1500,"A"),new(1,2500,"B")]),new("Time",[new(0,61,"A"),new(1,3700,"B")]){Secondary=true}]},"a secondary axis in another format");
 });
 Test("0.51.0: a log axis in a duration format gives a Text value in the axis's words",()=>{
     var spec=Spec() with{YAxis=AxisKind.Log,YFormat=ValueFormat.Duration,Series=[new("Pace",[new(0,300,"A"),new(1,3700,"B")])]};
@@ -12795,9 +12801,9 @@ Test("0.51.0: a cut never splits a surrogate pair",()=>{
 Test("0.51.0: the component's open View data is a LumenTable inside a plain lumen-table wrapper, and a closed one writes none",()=>{
     var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
     var html=Operate(Spec(ChartKind.Column),async c=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(c,true);await c.SelectPoint(0,0);},raw:true);
-    var at=html.IndexOf("class=\"lumen-table\"",StringComparison.Ordinal);
+    var at=html.IndexOf("class=\"lumen-table lumen-table-data\"",StringComparison.Ordinal);
     Check(at>=0&&html.IndexOf("class='lumen-datatable",at,StringComparison.Ordinal)>at,"a lumen-datatable inside the lumen-table");
-    Check(html.Substring(at,"class=\"lumen-table\">".Length)=="class=\"lumen-table\">","the wrapper has no role, tabindex or label");
+    Check(html.Substring(at,"class=\"lumen-table lumen-table-data\">".Length)=="class=\"lumen-table lumen-table-data\">","the wrapper has no role, tabindex or label");
     Check(!html.Contains("Export CSV</button><button")&&Regex.Matches(html,"Export CSV").Count==1,"the table adds no second Export CSV beside the toolbar's");
     Check(!Operate(Spec(ChartKind.Column),_=>Task.CompletedTask,raw:true).Contains("lumen-datatable"),"closed");
 });
@@ -12811,19 +12817,43 @@ Test("0.51.0: a legend toggle that hides a series leaves its rows in View data",
 });
 Test("0.51.0: the component builds its table once for a spec, and again when the spec, ScrollToEnd or the style changes",()=>{
     var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
-    TableSpec? first=null,again=null,end=null,next=null;
-    var spec=Days472();
-    Operate(spec,async c=>{
-        var get=typeof(LumenChart).GetProperty("DataSpec",flags)!;
-        first=(TableSpec)get.GetValue(c)!;again=(TableSpec)get.GetValue(c)!;
-        await c.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",spec},{"ScrollToEnd",true}}));
-        end=(TableSpec)get.GetValue(c)!;
-        await c.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",spec with{Title="Other"}},{"ScrollToEnd",true}}));
-        next=(TableSpec)get.GetValue(c)!;
-    });
+    TableSpec? first=null,again=null,end=null,next=null,styled=null;
+    var spec=Days472() with{Style=null};
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try
+    {
+        renderer.Dispatcher.InvokeAsync(async()=>
+        {
+            await renderer.RenderComponentAsync<StyleParent>(ParameterView.FromDictionary(new Dictionary<string,object?>()));
+            var parent=StyleParent.Last!;
+            await parent.Change(()=>parent.Spec=spec);
+            var get=typeof(LumenChart).GetProperty("DataSpec",flags)!;
+            first=(TableSpec)get.GetValue(parent.Chart)!;
+            // The parent renders again with the same spec, as it does for any other change, and the table is kept.
+            await parent.Change(()=>{});
+            again=(TableSpec)get.GetValue(parent.Chart)!;
+            await parent.Change(()=>parent.ScrollToEnd=true);
+            end=(TableSpec)get.GetValue(parent.Chart)!;
+            await parent.Change(()=>parent.Spec=spec with{Title="Other"});
+            next=(TableSpec)get.GetValue(parent.Chart)!;
+            // A new cascaded style, the spec and ScrollToEnd the same, builds a new table in that style.
+            await parent.Change(()=>parent.Style=ChartStyle.Dark);
+            styled=(TableSpec)get.GetValue(parent.Chart)!;
+        }).GetAwaiter().GetResult();
+    }
+    finally{renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
     Check(ReferenceEquals(first,again),"rebuilt for the same spec");
     Check(!first!.StartAtEnd&&end!.StartAtEnd&&!ReferenceEquals(first,end),"ScrollToEnd did not rebuild it");
     Check(!ReferenceEquals(end,next)&&next!.Caption.StartsWith("Other"),"a new spec did not rebuild it");
+    Check(!ReferenceEquals(next,styled)&&styled!.Style==ChartStyle.Dark,"a new cascaded style did not rebuild it");
+});
+Test("0.51.0: a missing point with both a gap label and a note writes the dash, the gap label and the note, in that order, as one note",()=>{
+    var spec=Spec() with{Series=[new("S",[new(0,1,"A"),new(1,null,"B"){GapLabel="absent",ValueNote=" · DNS"}])]};
+    var raw=Operate(spec,async c=>{typeof(LumenChart).GetField("showData",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.SetValue(c,true);await c.SelectPoint(0,0);},raw:true);
+    Check(raw.Contains("B</th><td class='lumen-datatable-right'><span aria-hidden='true'>—</span><span class='lumen-sr'> none</span><span class='lumen-datatable-note'>absent &#183; DNS</span></td>"),Regex.Match(raw,"B</th><td.*?</td>").Value);
+    var cell=ChartExport.DataTable(spec).Rows[1].Cells[2];
+    Check(cell.Number is null&&cell.Note=="absent · DNS","the cell: "+cell.Note);
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
@@ -12866,6 +12896,19 @@ sealed class NoJs:IJSRuntime
 {
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier,object?[]? args)=>throw new InvalidOperationException("Prerender must not invoke JS.");
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier,CancellationToken token,object?[]? args)=>InvokeAsync<TValue>(identifier,args);
+}
+// A parent that cascades a style to one chart and can change it, as a host does when its theme switches.
+sealed class StyleParent:ComponentBase
+{
+    public ChartStyle Style=ChartStyle.Light;public ChartSpec Spec=new();public bool ScrollToEnd;public LumenChart? Chart;public static StyleParent? Last;
+    protected override void OnInitialized()=>Last=this;
+    protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder b)
+    {
+        b.OpenComponent<CascadingValue<ChartStyle>>(0);b.AddAttribute(1,"Value",Style);
+        b.AddAttribute(2,"ChildContent",(RenderFragment)(c=>{c.OpenComponent<LumenChart>(0);c.AddAttribute(1,"Spec",Spec);c.AddAttribute(2,"ScrollToEnd",ScrollToEnd);c.AddComponentReferenceCapture(3,r=>Chart=(LumenChart)r);c.CloseComponent();}));
+        b.CloseComponent();
+    }
+    public Task Change(Action change)=>InvokeAsync(()=>{change();StateHasChanged();});
 }
 sealed class CountingRows(IReadOnlyList<TableRow> inner):IReadOnlyList<TableRow>
 {
