@@ -70,7 +70,7 @@ public static class ChartExport
     /// X / Category column that names each row, and a Value column, one row for each point, series by series, points in their order.
     /// The X and Value words are the ones the component's data table and status line write. When every series draws a plain Y (no
     /// candles, OHLC, rings, timeline spans, blocks, ranges or bands) and all read in one value format and unit, Value is a sortable
-    /// Number column in that format and unit, a point's <see cref="ChartPoint.ValueNote"/> is the cell's note, and a missing value
+    /// Number column in that format and unit (a Number value needs linear axes: a log axis gives Text, in the axis's own words), a point's <see cref="ChartPoint.ValueNote"/> is the cell's note, and a missing value
     /// is last in a sort, with its <see cref="ChartPoint.GapLabel"/> as its note; otherwise Value is a Text column that is not sortable.
     /// The caption is the chart's title and <c> — original data</c> (<c>Chart data — original data</c> for an untitled chart), cut with
     /// <c>…</c> to 120 characters, never through a surrogate pair. With more than 100 rows the table pages at 100; <see cref="TableSpec.StartAtEnd"/> is left false for
@@ -91,11 +91,12 @@ public static class ChartExport
         var number=plain&&measures.Length<=1&&axes.All(a=>a.Kind==AxisKind.Linear);
         var (format,unit)=measures.Length==1?measures[0]:(ValueFormat.Number,(string?)null);
         var value=number?new TableColumn("Value"){Kind=TableColumnKind.Number,Format=format,Unit=unit}:new TableColumn("Value"){Sortable=false};
+        var subLabels=ChartData.SubLabels(spec);
         var rows=new List<TableRow>();
         foreach(var s in spec.Series)
             foreach(var p in s.Points)
             {
-                var category=TableCell.Of(Cut(ChartData.Category(spec,x,p),200));
+                var category=TableCell.Of(Cut(ChartData.Category(spec,x,p,subLabels),200));
                 rows.Add(new([TableCell.Of(Cut(s.Name,200)),category,number
                     ?new(){Number=p.Y,Note=(p.Y.HasValue?p.ValueNote:p.GapLabel is {} gap?gap+p.ValueNote:p.ValueNote) is {} note?Cut(note,80):null}
                     :TableCell.Of(Cut(ChartData.Value(spec,x,s,p),200))]));

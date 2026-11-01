@@ -15,8 +15,17 @@ internal static class ChartData
     }
     // A point's category or X as its mark's name says it: its label, and on a category chart its category's sub-label after it, the first
     // any series gives it.
-    public static string Category(ChartSpec spec,Axis x,ChartPoint point)=>(point.Label ?? x.Format(point.X))
-        +(spec.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn&&spec.Series.SelectMany(s=>s.Points).FirstOrDefault(p=>p.X==point.X&&p.SubLabel is not null)?.SubLabel is {} sub?" · "+sub:"");
+    public static string Category(ChartSpec spec,Axis x,ChartPoint point,IReadOnlyDictionary<double,string>? subLabels=null)=>(point.Label ?? x.Format(point.X))
+        +(spec.Kind is ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn
+            &&(subLabels is not null ? subLabels.TryGetValue(point.X,out var cached)?cached:null : spec.Series.SelectMany(s=>s.Points).FirstOrDefault(p=>p.X==point.X&&p.SubLabel is not null)?.SubLabel) is {} sub?" · "+sub:"");
+    // Each X's category sub-label, the first any series gives it, worked out once for a table of every point, or null where the chart has none.
+    public static Dictionary<double,string>? SubLabels(ChartSpec spec)
+    {
+        if(spec.Kind is not (ChartKind.Column or ChartKind.Bar or ChartKind.StackedColumn))return null;
+        var found=new Dictionary<double,string>();
+        foreach(var p in spec.Series.SelectMany(s=>s.Points))if(p.SubLabel is not null)found.TryAdd(p.X,p.SubLabel);
+        return found;
+    }
     public static string Value(ChartSpec spec,Axis x,ChartSeries series,ChartPoint point)
     {
         var y=Measure(spec,series);

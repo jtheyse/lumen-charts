@@ -12788,6 +12788,7 @@ Test("0.51.0: a log axis in a duration format gives a Text value in the axis's w
     var table=ChartExport.DataTable(spec);
     var axis=ChartData.Measure(spec,spec.Series[0]);
     Check(table.Columns[2].Kind==TableColumnKind.Text&&!table.Columns[2].Sortable,"text");
+    Check(table.Rows[0].Cells[2].Text!="5:00"&&table.Rows[1].Cells[2].Text!="1:01:40","the words are the log axis's, not the linear clock's");
     Check(table.Rows[0].Cells[2].Text==axis.Format(300)&&table.Rows[1].Cells[2].Text==axis.Format(3700),string.Join("|",table.Rows.Select(r=>r.Cells[2].Text)));
 });
 Test("0.51.0: a cut never splits a surrogate pair",()=>{
@@ -12854,6 +12855,35 @@ Test("0.51.0: a missing point with both a gap label and a note writes the dash, 
     Check(raw.Contains("B</th><td class='lumen-datatable-right'><span aria-hidden='true'>—</span><span class='lumen-sr'> none</span><span class='lumen-datatable-note'>absent &#183; DNS</span></td>"),Regex.Match(raw,"B</th><td.*?</td>").Value);
     var cell=ChartExport.DataTable(spec).Rows[1].Cells[2];
     Check(cell.Number is null&&cell.Note=="absent · DNS","the cell: "+cell.Note);
+});
+Test("0.51.0: the prerendered View data region is the markup a LumenTable renders on its own for DataTable(spec)",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    var spec=Days472() with{Style=ChartStyle.Light};
+    var chart=Operate(spec,async c=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(c,true);await c.SelectPoint(0,0);},scrollToEnd:true,raw:true);
+    string alone;
+    var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
+    var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
+    try{alone=renderer.Dispatcher.InvokeAsync(async()=>(await renderer.RenderComponentAsync<LumenTable>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",ChartExport.DataTable(spec) with{Style=ChartStyle.Light,StartAtEnd=true}}}))).ToHtmlString()).GetAwaiter().GetResult();}
+    finally{renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
+    var open="<div class=\"lumen-table lumen-table-data\">";
+    var at=chart.IndexOf(open,StringComparison.Ordinal);
+    Check(at>=0&&alone.Contains("lumen-datatable")&&alone.Length>1000,"both rendered");
+    Check(chart.Substring(at+open.Length).StartsWith(alone+"</div>",StringComparison.Ordinal),"the region's inner markup differs from the standalone table's");
+});
+Test("0.51.0: hiding View data lets go of the cached table, and reopening builds it again",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    object? held=null,after=null;
+    Operate(Days472() with{Style=ChartStyle.Light},async c=>{
+        var toggle=typeof(LumenChart).GetMethod("ToggleData",flags)!;
+        toggle.Invoke(c,null);await c.SelectPoint(0,0);
+        _=typeof(LumenChart).GetProperty("DataSpec",flags)!.GetValue(c);
+        held=typeof(LumenChart).GetField("dataSpec",flags)!.GetValue(c);
+        toggle.Invoke(c,null);
+        after=typeof(LumenChart).GetField("dataSpec",flags)!.GetValue(c);
+        toggle.Invoke(c,null);
+        Check(typeof(LumenChart).GetProperty("DataSpec",flags)!.GetValue(c) is TableSpec,"rebuilt on reopening");
+    });
+    Check(held is not null&&after is null,"the table is not held while View data is hidden");
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

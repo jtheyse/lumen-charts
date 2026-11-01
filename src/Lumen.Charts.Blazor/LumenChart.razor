@@ -37,7 +37,7 @@ else
         <button type="button" @onclick='()=>Download("csv")'>Export CSV</button>
         }@if(DataButton)
         {
-        @if(ShowToolbar){@Deeper}<button type="button" @onclick="()=>showData=!showData" aria-expanded="@(showData ? "true" : "false")">@(showData ? "Hide data" : "View data")</button>
+        @if(ShowToolbar){@Deeper}<button type="button" @onclick="ToggleData" aria-expanded="@(showData ? "true" : "false")">@(showData ? "Hide data" : "View data")</button>
         }@Deeper<span class="lumen-status" role="status">@status</span>
     </div>
     @if(showData&&Spec.Kind==ChartKind.Heatmap)
@@ -111,6 +111,8 @@ else
         ? "Arrow keys read the chart: Left and Right move the readout from one X to the next, Up and Down between the series there, Home and End to the first and the last, Page Up and Page Down ten at a time. Enter selects the point; Escape hides the readout."
         : "Arrow keys move between points: Left and Right along a series, Up and Down to the series before or after it, Home and End to its first and last point, Page Up and Page Down ten points at a time. Enter selects the point; Escape hides its tooltip.";
     private bool showData;
+    // Hiding View data lets go of its table, which a long chart's makes large; reopening builds it again.
+    private void ToggleData(){ showData=!showData; if(!showData){ dataSpec=null; dataOf=null; dataStyle=null; } }
     private ElementReference root;
     private IJSObjectReference? module;
     private DotNetObjectReference<LumenChart>? reference;
@@ -142,7 +144,6 @@ else
             return dataSpec;
         }
     }
-    private string Value(ChartSeries series,ChartPoint point)=>ChartData.Value(Spec,xAxis,series,point);
     private string Category(ChartPoint point)=>ChartData.Category(Spec,xAxis,point);
     private Axis Measure(ChartSeries series)=>ChartData.Measure(Spec,series);
     private Axis FullRange=>ChartData.XAxisOf(Spec);
