@@ -32,7 +32,7 @@ public sealed record PlacingsOptions
     /// <summary>The points pane's label, so the legend can say "Pts" (<see cref="PointsName"/>) while the pane says "Points". Null uses <see cref="PointsName"/>; blank is refused.</summary>
     public string? PaneLabel { get; init; }
     /// <summary>The chart's description. Every <c>{best}</c> is replaced by the best place, written in the invariant culture; text without it is used as given, and "" is allowed.
-    /// Null gives "Finishing place out of the field, first at the top, and points. Best: 3." (without ", and points" when no event scored).</summary>
+    /// Null gives "Finishing place out of the field, first at the top, and points. Best: N." (N being the best place; without ", and points" when no event scored).</summary>
     public string? Description { get; init; }
     /// <summary>How a date labels an event, in the invariant culture. Default "d MMM yyyy".</summary>
     public string DateFormat { get; init; } = "d MMM yyyy";

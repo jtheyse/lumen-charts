@@ -826,7 +826,7 @@ public sealed record ChartSpec
     /// title, or 24 where neither is written (<see cref="YTickLabels"/> <see cref="TickLabels.None"/> and no <see cref="YLabel"/>), with
     /// or without tracks, or 36 above a <see cref="Source"/> line, 14 more for a source on two lines; and 22 a row for the legend
     /// <see cref="ChartSvg.Render"/> draws when it includes one. So three meters on tracks without titles, ticks or source are
-    /// 28 + 3 × 36 + 24 = 160 units tall, and one is 88: no 240-unit floor applies. <see cref="Height"/> is still checked, 240 to 2160, and
+    /// 28 + 3 × 36 + 24 = 160 units tall, and one is 88: no 240-unit floor applies. <see cref="Height"/> is still checked, 240 to 2160 (or from 190 with <c>DrawTitles</c> off), and
     /// otherwise not used. The height follows the categories the chart draws, so the component, which draws a hidden series without its
     /// points, draws a chart shorter when the series it hides held a category alone; its <c>FitWidth</c> scaling is unchanged. A heatmap's
     /// rows are as tall as the tallest cell's written words need, 12 units a line and 13 for a value, plus 4, and at least 36 (0.46.2).

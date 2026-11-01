@@ -965,7 +965,7 @@ public static partial class ChartValidation
         if (strip && !sparkline && (width is < ChartSvg.MinWidth or > ChartSvg.MaxWidth || height is < 16 or > 2160)) throw new ArgumentException($"A strip's width must be {ChartSvg.MinWidth}–{ChartSvg.MaxWidth}; it is drawn as tall as its content, and its Height, which it does not use, must lie within 16–2160.");
         if (strip && !sparkline) return;
         if (sparkline && (width is < 60 or > ChartSvg.MaxWidth || height is < 16 or > 2160)) throw new ArgumentException($"A sparkline's dimensions must be 60–{ChartSvg.MaxWidth} by 16–2160.");
-        if (!sparkline && untitled && (width is < ChartSvg.MinWidth or > ChartSvg.MaxWidth || height is < 240 - ChartSvg.Untitled or > 2160)) throw new ArgumentException($"An untitled chart's dimensions must be {ChartSvg.MinWidth}–{ChartSvg.MaxWidth} by {240 - ChartSvg.Untitled}–2160.");
+        if (!sparkline && untitled && (width is < ChartSvg.MinWidth or > ChartSvg.MaxWidth || height is < 240 - ChartSvg.Untitled or > 2160)) throw new ArgumentException($"With DrawTitles off a chart's dimensions must be {ChartSvg.MinWidth}–{ChartSvg.MaxWidth} by {240 - ChartSvg.Untitled}–2160: the 240 floor less the {ChartSvg.Untitled} units the title and description would take.");
         if (!sparkline && !untitled && (width is < ChartSvg.MinWidth or > ChartSvg.MaxWidth || height is < 240 or > 2160)) throw new ArgumentException($"Dimensions must be {ChartSvg.MinWidth}–{ChartSvg.MaxWidth} by 240–2160.");
     }
     internal static void Text(string? text)

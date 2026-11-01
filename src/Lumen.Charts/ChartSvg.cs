@@ -1766,7 +1766,7 @@ public static partial class ChartSvg
     {
         if (s.Kind == ChartKind.Heatmap)
         {
-            // Every row is as tall as the tallest cell's words, at the cells' width as Heatmap draws them, and at least HeatmapRow.
+            // Each row's need is its tallest cell's words, at the cells' width as Heatmap draws them, and at least HeatmapRow; every row takes the largest need, or its own under FitEachRow.
             var needs = HeatmapRowNeeds(s);
             var rowsTall = s.FitEachRow ? needs.Sum() : s.Series.Count * needs.DefaultIfEmpty(HeatmapRow).Max();
             return Math.Max(240, (int)Math.Ceiling(80 + Headroom(s) + rowsTall + HeatmapBelow(s) + 14 * Math.Max(0, Wrap(s.Source, s.Width - 48).Length - 1)));
