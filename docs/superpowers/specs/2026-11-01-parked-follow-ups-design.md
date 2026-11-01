@@ -39,7 +39,7 @@ The places and points chart (0.45.0) has follow-ups that were designed and parke
    - **Fitted reasons keep every word.** With `FitHeight`, a not-rated reason or a gap label wraps as a note does:
      - A word wider than a line takes a line of its own, cut with "…", and the words after it continue on the next line, instead of the reason ending there.
      - The rows grow for the extra lines, since `CellNeed` uses the same lines.
-     - At `CellWidth` 34, "too few starts to rate" reads `too` / `few` / `sta…` / `to rate`, not `too` / `few…`.
+     - At `CellWidth` 34, "too few starts to rate" reads `too` / `few` / `sta…` / `to` / `rate`, not `too` / `few…`.
      - Without `FitHeight`, reasons wrap exactly as today.
    - **A kept value stays in a short row.** For a not-rated cell with `NotRatedKeepsValue`:
      - Things are given up in this order: its note, then its sub-label, then its reason is cut to the lines left under the value, ending "…".
