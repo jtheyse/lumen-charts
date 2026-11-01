@@ -654,4 +654,12 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/timeline/html" -Method Post -ContentTy
 Verify ($r.StatusCode -eq 400 -and [Text.Encoding]::UTF8.GetString($r.Content).Contains('Invalid timeline')) "A javascript: link in a timeline is refused with 400 titled Invalid timeline ($($r.StatusCode))"
 $r=Invoke-WebRequest "$BaseUrl/api/charts/timeline/html" -Method Post -ContentType application/json -Body '{"spec":null}' -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400) "A timeline request with a null spec is refused with 400 ($($r.StatusCode))"
+# 0.52.0: heatmap rows. RowNamesInText writes the names in the text ink; FitEachRow needs FitHeight; both are heatmaps only.
+$rows='{"title":"Rows","kind":"Heatmap","cellWidth":90,"rowNamesInText":true,"fitHeight":true,"fitEachRow":true,"cellText":true,"series":[{"name":"Sprint","points":[{"x":0,"y":2.8,"label":"2025","subLabel":"/12 starts"},{"x":1,"y":3.1,"label":"2026"}]},{"name":"Long distance","points":[{"x":0,"y":1.2,"label":"2025","subLabel":"/4 starts","valueNote":" 8 pts, 3 riders"},{"x":1,"y":0.4,"label":"2026"}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $rows -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200 -and ([regex]::Matches($r.Content,"text-anchor='end'")).Count -eq 2 -and -not ([regex]::IsMatch($r.Content,"text-anchor='end' class='lumen-muted'"))) 'A heatmap posted with "rowNamesInText" and "fitEachRow" draws its row names with no muted class'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $rows.Replace('"fitHeight":true,','') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('FitHeight')) '"fitEachRow" without "fitHeight" is refused with 400 naming FitHeight'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":"Line","kind":"Line","rowNamesInText":true,"series":[{"name":"S","points":[{"x":0,"y":1}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('RowNamesInText')) '"rowNamesInText" on a line chart is refused with 400 naming it'
 Write-Output "$checks HTTP checks passed."

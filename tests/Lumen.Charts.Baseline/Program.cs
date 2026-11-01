@@ -989,6 +989,9 @@ lines.Add($"placings/undated-first {Hash(ChartSvg.Render(PlacingsChart.Build(lea
 // 0.52.0: heatmap cell words. A fitted reason in cells 34 wide keeps every word; a kept value stays in a 40-unit row with one reason line.
 lines.Add($"heatmap-cells/narrow-fit {Hash(Render(table with { CellWidth = 34, FitHeight = true }))}");
 lines.Add($"heatmap-cells/keeps-value-short {Hash(Render(noted with { CellWidth = 90, NotRatedKeepsValue = true }))}");
+// 0.52.0: heatmap rows. Row names in the text ink; each row as tall as its own cells.
+lines.Add($"heatmap-cells/row-ink {Hash(Render(noted with { CellWidth = 90, FitHeight = true, CellNotes = true, RowNamesInText = true }))}");
+lines.Add($"heatmap-cells/each-row {Hash(Render(noted with { CellWidth = 90, FitHeight = true, CellNotes = true, NotRatedKeepsValue = true, FitEachRow = true }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

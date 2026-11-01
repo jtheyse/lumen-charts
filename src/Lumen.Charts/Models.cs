@@ -855,6 +855,17 @@ public sealed record ChartSpec
     /// text only; false by default, and left out of the gradient-ID hash while false.
     /// </summary>
     public bool NotRatedKeepsValue { get; init; }
+    /// <summary>
+    /// On a heatmap, the row names are drawn in <see cref="ChartStyle.Text"/> instead of <see cref="ChartStyle.Muted"/> (0.52.0), in the
+    /// drawing and in the frozen name band, in both finishes. Heatmaps only; false by default, and left out of the gradient-ID hash while false.
+    /// </summary>
+    public bool RowNamesInText { get; init; }
+    /// <summary>
+    /// On a heatmap with <see cref="FitHeight"/>, each row is as tall as its own tallest cell's words need (0.52.0), not as tall as the
+    /// tallest row's; where the drawing is held up to its 240 floor the rows share what the floor adds equally. It needs
+    /// <see cref="FitHeight"/>. Heatmaps only; false by default, and left out of the gradient-ID hash while false.
+    /// </summary>
+    public bool FitEachRow { get; init; }
 }
 
 /// <summary>

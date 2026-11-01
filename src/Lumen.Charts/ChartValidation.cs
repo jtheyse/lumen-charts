@@ -126,6 +126,10 @@ public static partial class ChartValidation
             throw new ArgumentException("A column chart's category is at most 4,096 pixels wide, the widest a chart may be.");
         if ((spec.CellNotes || spec.NotRatedKeepsValue) && (spec.Kind != ChartKind.Heatmap || !spec.CellText))
             throw new ArgumentException("CellNotes and NotRatedKeepsValue write in a heatmap's cells, so they apply to heatmaps with CellText only.");
+        if ((spec.RowNamesInText || spec.FitEachRow) && spec.Kind != ChartKind.Heatmap)
+            throw new ArgumentException("RowNamesInText and FitEachRow set how a heatmap writes and sizes its rows, so they apply to heatmaps only; the other kinds have no rows of cells.");
+        if (spec.FitEachRow && !spec.FitHeight)
+            throw new ArgumentException("FitEachRow makes each of a heatmap's rows as tall as its own cells' words, so it needs FitHeight, which draws the heatmap as tall as its rows.");
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
         foreach (var annotation in spec.Annotations)
         {

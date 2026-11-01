@@ -2105,18 +2105,18 @@ if (await sportsLink.CountAsync() > 0)
             Check(names.Contains("Sprint: 2023 · /12 starts, 2.8 pts · 34 pts, 5 riders") && names.Contains("Junior mixed team relay: 2023 · /0 starts, did not race"), string.Join(" | ", names));
             // The browser draws the fifteen cells' values with their starts (13 rated, the 2 not-rated ones keeping theirs), 29 lines of notes,
             // the two reasons on two lines each and the season nobody raced in one line with its starts, the three thin cells dashed, the long
-            // name whole, each cell at its own width, and the drawing at exactly its viewBox, 442 tall (80 + 4 rows of 77 + 54).
+            // name whole, each cell at its own width, and the drawing at exactly its viewBox, 382 tall (80 + rows of 53, 53, 65 and 77 + 54).
             const string measure = @"c => { const v = c.querySelector(':scope > .lumen-viewport'), s = v.querySelector(':scope > svg');
                 const words = [...s.querySelectorAll(':scope > text[aria-hidden=""true""]')];
                 return [words.filter(t => t.getAttribute('font-size') === '11').length, words.filter(t => t.getAttribute('font-size') === '10' && t.textContent.startsWith('/')).length,
                     words.filter(t => t.getAttribute('font-size') === '10' && !t.textContent.startsWith('/')).length,
                     s.querySelectorAll('g.lumen-datum > rect[stroke-dasharray=""3 2""]').length, s.querySelector('g.lumen-datum > rect').getBoundingClientRect().width,
                     Number(s.getAttribute('viewBox').split(' ')[2]), s.getBoundingClientRect().width, v.clientWidth, v.scrollWidth - v.clientWidth,
-                    [...s.querySelectorAll(':scope > text.lumen-muted')].filter(t => t.textContent === 'Junior mixed team relay').length, Number(s.getAttribute('viewBox').split(' ')[3])]; }";
+                    [...s.querySelectorAll(':scope > text[text-anchor=""end""]')].filter(t => t.textContent === 'Junior mixed team relay').length, Number(s.getAttribute('viewBox').split(' ')[3])]; }";
             var drawn = await card.EvaluateAsync<double[]>(measure);
             // 4 reason lines, "did not race" and 29 lines of notes are the 10 px lines that do not start with a "/".
             Check(drawn[0] == 15 && drawn[1] == 16 && drawn[2] == 34 && drawn[3] == 3, $"{drawn[0]} values, {drawn[1]} starts and {drawn[2]} other lines written, {drawn[3]} dashed cells");
-            Check(drawn[10] == 442, $"drawn {drawn[10]} tall");
+            Check(drawn[10] == 382, $"drawn {drawn[10]} tall");
             Check(drawn[9] == 1, "the long row name was not found whole in the drawing");
             Check(drawn[4] >= 87.5, $"a cell is drawn {drawn[4]:0.#} wide");
             Check(drawn[5] == 580 && Math.Abs(drawn[6] - drawn[5]) < 1, $"drawn {drawn[5]} wide and shown {drawn[6]:0.#}");
@@ -2192,14 +2192,14 @@ if (await sportsLink.CountAsync() > 0)
             var after = await tab.EvaluateAsync<double[]>(places);
             Check(Math.Abs(after[0] - before[0]) < 1, "names held: " + string.Join(",", before) + " -> " + string.Join(",", after));
             Check(before[1] - after[1] > 150, "cells scrolled: " + string.Join(",", before) + " -> " + string.Join(",", after));
-            // The rows are as tall as the tallest cell's words need, 77, and each frozen name stands at its row's middle plus 4, read from the layer's
-            // own drawing and the cells' rectangles, so the names keep to their rows however tall the rows grow.
+            // With FitEachRow each row is as tall as its own cells' words need, 53, 53, 65 and 77, and each frozen name stands at its row's middle
+            // plus 4, read from the layer's own drawing and the cells' rectangles, so the names keep to their rows however tall each grows.
             var rowNames = await tab.EvaluateAsync<double[]>(@"() => { const c = document.querySelector('#category-heatmap'), names = [...c.querySelectorAll('.lumen-freeze svg text')],
                 cells = [...c.querySelectorAll('.lumen-viewport > svg g.lumen-datum > rect')].map(r => ({ y: Number(r.getAttribute('y')), h: Number(r.getAttribute('height')) })),
                 middles = [...new Set(cells.map(r => r.y))].sort((a, b) => a - b).map(y => y + cells.find(r => r.y === y).h / 2);
-                return [names.length, middles.length, Math.max(...names.map((t, i) => Math.abs(Number(t.getAttribute('y')) - (middles[i] + 4)))), Math.min(...middles.slice(1).map((m, i) => m - middles[i]))]; }");
+                return [names.length, middles.length, Math.max(...names.map((t, i) => Math.abs(Number(t.getAttribute('y')) - (middles[i] + 4)))), new Set(cells.map(r => Math.round(r.h))).size]; }");
             Check(rowNames[0] == 4 && rowNames[1] == 4 && rowNames[2] <= .5, $"{rowNames[0]} names for {rowNames[1]} rows, the furthest {rowNames[2]:0.##} from its row's middle plus 4");
-            Check(Math.Abs(rowNames[3] - 77) < .5, $"the rows are {rowNames[3]} apart, not 77");
+            Check(rowNames[3] > 1, $"the rows are {rowNames[3]} different heights, not all equal");
             // The kept values of the two not-rated cells clear 4.5:1 against the card's background as the browser paints them.
             var kept = await tab.EvaluateAsync<double[]>(keptValues);
             Check(kept[0] == 2 && kept[1] >= 4.5 && kept[2] == 1, $"{kept[0]} kept values, the lowest contrast {kept[1]:0.00}:1, all in the muted colour: {kept[2] == 1}");
@@ -2254,6 +2254,44 @@ if (await sportsLink.CountAsync() > 0)
             Check(hovered.Length > 0 && await tip.TextContentAsync() == hovered, $"the tooltip reads \"{await tip.TextContentAsync()}\", the cell \"{hovered}\"");
             await tab.Mouse.ClickAsync((float)cell[0], (float)cell[1]);
             await tab.WaitForFunctionAsync("([c, was]) => { const t = c.querySelector('.lumen-status')?.textContent || ''; return t !== was && t.includes(':'); }", new object[] { await card.ElementHandleAsync(), said });
+        });
+
+        // 0.52.0: with FitEachRow the rows of the Category heatmap are 53, 53, 65 and 77 tall, and each frozen name must stand at its own row's
+        // middle, as seen on the screen, whether the viewport is scrolled or not, at a phone's width and a desktop's, in every theme.
+        await Test("The Category heatmap with FitEachRow keeps its frozen names on their rows while the cells scroll", async () =>
+        {
+            const string levels = @"() => { const c = document.querySelector('#category-heatmap'), names = [...c.querySelectorAll('.lumen-freeze svg text')],
+                rows = [...new Set([...c.querySelectorAll('.lumen-viewport > svg g.lumen-datum > rect')].map(r => r.getAttribute('y')))].map(y => {
+                    const r = c.querySelector('.lumen-viewport > svg g.lumen-datum > rect[y=""' + y + '""]').getBoundingClientRect(); return r.top + r.height / 2; }).sort((a, b) => a - b);
+                return [names.length, rows.length, Math.max(...names.map((t, i) => { const r = t.getBoundingClientRect(); return Math.abs(r.top + r.height / 2 - rows[i]); }))]; }";
+            foreach (var width in new[] { 360, 1280 })
+            {
+                var phone = width < 600;
+                await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = phone ? 812 : 900 }, IsMobile = phone, HasTouch = phone, DeviceScaleFactor = phone ? 2 : 1 });
+                var tab = await context.NewPageAsync();
+                tab.SetDefaultTimeout(15_000);
+                await tab.GotoAsync(sportsUrl.ToString(), new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 120_000 });
+                await tab.WaitForFunctionAsync("() => document.querySelectorAll('.lumen-chart > .lumen-tooltip').length === 33", null, new() { Timeout = 120_000 });
+                await tab.Locator("#category-heatmap .lumen-chart").ScrollIntoViewIfNeededAsync();
+                foreach (var scroll in new[] { 0, 200, 0 })
+                {
+                    await tab.EvaluateAsync("x => { document.querySelector('#category-heatmap .lumen-viewport').scrollLeft = x; }", scroll);
+                    await tab.WaitForTimeoutAsync(300);
+                    var level = await tab.EvaluateAsync<double[]>(levels);
+                    Check(level[0] == 4 && level[1] == 4 && level[2] <= 1, $"{width} wide, scrolled to {scroll}: {level[0]} names for {level[1]} rows, the furthest {level[2]:0.##} from its row's middle");
+                }
+                // The three themes, each redrawn on the server, keep the names on their rows and break no WCAG A or AA rule.
+                await SweepOf(tab);
+                var drawn = await tab.Locator("#category-heatmap .lumen-viewport > svg").GetAttributeAsync("style");
+                await tab.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) }).First.ClickAsync();
+                await tab.WaitForFunctionAsync("before => document.querySelector('#category-heatmap .lumen-viewport > svg')?.getAttribute('style') !== before", drawn, new() { Timeout = 60000 });
+                Check((await tab.EvaluateAsync<double[]>(levels))[2] <= 1, $"{width} wide, Dark: the names keep to their rows");
+                await SweepOf(tab);
+                await tab.GetByRole(AriaRole.Button, new() { Name = "Midnight", Exact = true }).ClickAsync();
+                await tab.WaitForFunctionAsync("() => [...document.querySelectorAll('.lumen-viewport > svg')].every(s => s.getAttribute('style')?.includes('background:#0B0E14'))", null, new() { Timeout = 60000 });
+                Check((await tab.EvaluateAsync<double[]>(levels))[2] <= 1, $"{width} wide, Midnight: the names keep to their rows");
+                await SweepOf(tab);
+            }
         });
 
         // The viewport keeps scroll-padding-left equal to the width of the layer over its names, so a cell reached with a key stops beside

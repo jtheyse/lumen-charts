@@ -104,7 +104,8 @@ public static partial class ChartSvg
     /// is null unless set, and nulls are left out already, as are a heatmap's cell width and a point's not-rated reason, from 0.46.0. A heatmap's
     /// cell text, from 0.46.0, is false by default, so it is left out unless set, as are a heatmap's labels on top, from 0.46.1, false by
     /// default, as are a heatmap's cell notes and kept not-rated values, from 0.46.2. A series' zero hairline, from 0.47.0, is false by default and
-    /// left out unless set; a point's axis label and name are null unless set.</summary>
+    /// left out unless set; a point's axis label and name are null unless set. A heatmap's row names in the text ink and rows fitted one by one, from
+    /// 0.52.0, are false by default and left out unless set.</summary>
     private static void Unfitted(JsonTypeInfo info)
     {
         if (info.Type == typeof(ChartSeries))
@@ -119,6 +120,8 @@ public static partial class ChartSvg
             else if (property.Name == nameof(ChartSpec.ColumnLabelsOnTop)) property.ShouldSerialize = (_, top) => top is true;
             else if (property.Name == nameof(ChartSpec.CellNotes)) property.ShouldSerialize = (_, notes) => notes is true;
             else if (property.Name == nameof(ChartSpec.NotRatedKeepsValue)) property.ShouldSerialize = (_, kept) => kept is true;
+            else if (property.Name == nameof(ChartSpec.RowNamesInText)) property.ShouldSerialize = (_, text) => text is true;
+            else if (property.Name == nameof(ChartSpec.FitEachRow)) property.ShouldSerialize = (_, each) => each is true;
     }
     /// <summary>A chart without bar tracks that draws its title and description, as every chart did before 0.39.0, is serialized for hashing
     /// as 0.38.0, which had neither setting, serialized it, so every chart drawn before them keeps its IDs.</summary>
@@ -1757,16 +1760,16 @@ public static partial class ChartSvg
     /// source under, as <see cref="Floor"/> and a second source line keep them. The legend <see cref="Render"/> may add goes under that. A
     /// heatmap is drawn at the height of its rows, each as tall as its tallest cell's written words need (<see cref="CellNeed"/>, plus 4),
     /// at least <see cref="HeatmapRow"/>, with <see cref="HeatmapBelow"/> under them, and no less than 240 (0.46.1; rows fitted to their
-    /// words from 0.46.2).</summary>
+    /// words from 0.46.2). The rows are all as tall as the tallest one, or with <see cref="ChartSpec.FitEachRow"/> (0.52.0) each as tall as
+    /// its own need, the heights of <see cref="HeatmapRowNeeds"/> added.</summary>
     internal static int FittedHeight(ChartSpec s)
     {
         if (s.Kind == ChartKind.Heatmap)
         {
             // Every row is as tall as the tallest cell's words, at the cells' width as Heatmap draws them, and at least HeatmapRow.
-            var cats = HeatmapColumns(s);
-            var cw = cats.Length == 0 ? 0 : s.CellWidth ?? (s.Width - HeatmapLeftOf(s) - 35) / cats.Length;
-            var row = Math.Max(HeatmapRow, s.Series.SelectMany(series => series.Points).Select(p => CellNeed(s, p, cw) + 4).DefaultIfEmpty(0).Max());
-            return Math.Max(240, (int)Math.Ceiling(80 + Headroom(s) + s.Series.Count * row + HeatmapBelow(s) + 14 * Math.Max(0, Wrap(s.Source, s.Width - 48).Length - 1)));
+            var needs = HeatmapRowNeeds(s);
+            var rowsTall = s.FitEachRow ? needs.Sum() : s.Series.Count * needs.DefaultIfEmpty(HeatmapRow).Max();
+            return Math.Max(240, (int)Math.Ceiling(80 + Headroom(s) + rowsTall + HeatmapBelow(s) + 14 * Math.Max(0, Wrap(s.Source, s.Width - 48).Length - 1)));
         }
         var rows = Math.Max(1, s.Series.SelectMany(series => series.Points).Select(p => p.X).Distinct().Count());
         var pitch = s.Series.Any(series => series.Points.Any(p => p.SubLabel is not null)) ? SubRow : s.BarTrack ? TrackRow : BarRow;
@@ -3227,6 +3230,41 @@ public static partial class ChartSvg
     /// line, 24, which a heatmap fitted to its rows leaves out when it has no source (0.46.1).</summary>
     internal static double HeatmapBelow(ChartSpec s) => 80 - (s.ColumnLabelsOnTop ? 26 : 0) - (s.FitHeight && string.IsNullOrWhiteSpace(s.Source) ? 24 : 0);
 
+    /// <summary>The height each of a heatmap's rows needs for its words: at least <see cref="HeatmapRow"/>, and the tallest of its cells'
+    /// <see cref="CellNeed"/> plus 4, at the cells' width as <see cref="Heatmap"/> draws them (0.52.0). <paramref name="s"/> is the spec with
+    /// its width as drawn. <see cref="FittedHeight"/> and <see cref="HeatmapRows"/> both read it, so the height and the rows agree.</summary>
+    internal static double[] HeatmapRowNeeds(ChartSpec s)
+    {
+        var cats = HeatmapColumns(s);
+        var cw = cats.Length == 0 ? 0 : s.CellWidth ?? (s.Width - HeatmapLeftOf(s) - 35) / cats.Length;
+        return s.Series.Select(series => Math.Max(HeatmapRow, series.Points.Select(p => CellNeed(s, p, cw) + 4).DefaultIfEmpty(0).Max())).ToArray();
+    }
+
+    /// <summary>Where each of a heatmap's rows stands between the grid's <paramref name="top"/> and <paramref name="bottom"/>: its top, its
+    /// middle and its height. <paramref name="s"/> is the spec as drawn. The rows are equal, as they have always been, without
+    /// <see cref="ChartSpec.FitEachRow"/> and where every row's need is the same, with exactly the expressions that drew them before; with
+    /// it, each row is its need and an equal share of what the grid has over (0.52.0). The drawing, the name band and the names all read it.</summary>
+    internal static (double Top, double Middle, double Height)[] HeatmapRows(ChartSpec s, double top, double bottom)
+    {
+        var n = s.Series.Count;
+        var needs = s.FitEachRow ? HeatmapRowNeeds(s) : [];
+        if (!s.FitEachRow || needs.Distinct().Count() <= 1)
+        {
+            var ch = (bottom - top) / n;
+            return Enumerable.Range(0, n).Select(si => (top + si * ch, top + (si + .5) * ch, ch)).ToArray();
+        }
+        var extra = (bottom - top - needs.Sum()) / n;
+        var rows = new (double Top, double Middle, double Height)[n];
+        var at = top;
+        for (var si = 0; si < n; si++)
+        {
+            var height = needs[si] + extra;
+            rows[si] = (at, at + height / 2, height);
+            at += height;
+        }
+        return rows;
+    }
+
     /// <summary>The spec as <see cref="Render"/> draws it: a heatmap or a column chart with a cell width as wide as its columns make it, and then a chart fitted
     /// to its rows as tall as they make it, so a source wrapped across the drawn width is counted in the height (0.46.1).</summary>
     internal static ChartSpec AsDrawn(ChartSpec spec)
@@ -3322,18 +3360,19 @@ public static partial class ChartSvg
         // they would have had below it.
         var left = HeatmapLeftOf(s);
         double top = 80 + w.Head, bottom = s.Height - w.Foot - HeatmapBelow(s);
-        var cw = s.CellWidth ?? (s.Width - left - 35) / cats.Length; var ch = (bottom - top) / s.Series.Count;
-        var names = HeatmapNames(s, w.Refined, left, top, ch).ToArray();
+        var cw = s.CellWidth ?? (s.Width - left - 35) / cats.Length;
+        var rows = HeatmapRows(s, top, bottom);
+        var names = HeatmapNames(s, w.Refined, left, rows).ToArray();
         for (var si = 0; si < s.Series.Count; si++)
         {
             var series = s.Series[si];
             var (nameX, nameY, nameText) = names[si];
-            w.Text(nameX, nameY, nameText, "text-anchor='end' class='lumen-muted'");
+            w.Text(nameX, nameY, nameText, s.RowNamesInText ? "text-anchor='end'" : "text-anchor='end' class='lumen-muted'");
             for (var pi = 0; pi < series.Points.Count; pi++)
             {
                 var p = series.Points[pi]; if (!p.Y.HasValue && p.NotRated is null && p.GapLabel is null) continue;
                 var x = left + Array.IndexOf(cats,p.X)*cw;
-                var y = top+si*ch;
+                var y = rows[si].Top; var ch = rows[si].Height;
                 var name = HeatmapCellName(s, series, p);
                 var box = $"x='{N(x+1)}' y='{N(y+1)}' width='{N(Math.Max(0,cw-2))}' height='{N(Math.Max(0,ch-2))}' rx='3'";
                 string ink;
@@ -3383,10 +3422,11 @@ public static partial class ChartSvg
 
     /// <summary>A heatmap's row names as <see cref="Heatmap"/> draws them, each at the name column's edge less 12, in the middle of its row:
     /// in the refined finish cut by width to <see cref="HeatmapNameRoom"/>, in the classic one at 17 characters. <paramref name="s"/> is the
-    /// spec as drawn, <paramref name="left"/> its name column's width and <paramref name="top"/> and <paramref name="ch"/> where its rows
-    /// start and how tall each is (0.46.1).</summary>
-    private static IEnumerable<(double X, double Y, string Text)> HeatmapNames(ChartSpec s, bool refined, double left, double top, double ch) =>
-        s.Series.Select((series, si) => (left - 12, top + (si + .5) * ch + 4, refined ? Fitted(series.Name, HeatmapNameRoom(left)) : Short(series.Name, 17)));
+    /// spec as drawn, <paramref name="left"/> its name column's width and <paramref name="rows"/> where its rows stand, as
+    /// <see cref="HeatmapRows"/> works them out, so each name is level with its own row's middle, whatever the rows' heights (0.46.1; rows
+    /// of their own heights from 0.52.0).</summary>
+    private static IEnumerable<(double X, double Y, string Text)> HeatmapNames(ChartSpec s, bool refined, double left, (double Top, double Middle, double Height)[] rows) =>
+        s.Series.Select((series, si) => (left - 12, rows[si].Middle + 4, refined ? Fitted(series.Name, HeatmapNameRoom(left)) : Short(series.Name, 17)));
 
     /// <summary>How far past the grid's rows the name band reaches to cover its column labels: 24 units up from the grid's top where the
     /// labels stand on top, which clears the description's descenders at 28, and 24 down from its bottom where they stand under it, which
@@ -3397,7 +3437,7 @@ public static partial class ChartSvg
     /// the name column beside the grid's rows and its column-label row, painted in the chart's background. The component lays it over the
     /// scrolling drawing, held at the left, so the names stay in view as the cells scroll, and the label of a column that has scrolled
     /// under it is covered with the column (0.46.1). The names keep the places the drawing gives them; only the crop reaches further. It
-    /// holds no marks and is hidden from reading, since the drawing beneath says it all. Null for any other chart, and for a heatmap that
+    /// holds no marks and is hidden from reading, since the drawing beneath says it all. Its names are in the muted colour, or in the text colour with <see cref="ChartSpec.RowNamesInText"/> (0.52.0), and stand at the middles of the rows <see cref="HeatmapRows"/> gives them. Null for any other chart, and for a heatmap that
     /// has no data to draw, whose drawing has no names. <c>Top</c> and <c>Height</c> are the crop's, not the grid's.</summary>
     internal static (string Svg, double Left, double Top, double Height)? HeatmapNameBand(ChartSpec spec)
     {
@@ -3407,13 +3447,13 @@ public static partial class ChartSvg
         if (!HasData(s)) return null;
         var style = ResolveStyle(s);
         var (left, top, bottom) = HeatmapFrame(spec);
-        var ch = (bottom - top) / s.Series.Count;
+        var rows = HeatmapRows(s, top, bottom);
         // The crop takes in the column labels' row, above the grid or under it; the rows, and so the names, stay where they are.
         var (cropTop, cropBottom) = s.ColumnLabelsOnTop ? (top - HeatmapLabelRoom, bottom) : (top, bottom + HeatmapLabelRoom);
         var svg = new StringBuilder($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 {N(cropTop)} {N(left)} {N(cropBottom - cropTop)}' width='{N(left)}' height='{N(cropBottom - cropTop)}' aria-hidden='true' focusable='false' font-family='{style.FontFamily}' font-size='12'>");
         svg.Append($"<rect x='0' y='{N(cropTop)}' width='{N(left)}' height='{N(cropBottom - cropTop)}' fill='{style.Background}'/>");
-        foreach (var (x, y, text) in HeatmapNames(s, style.Finish == ChartFinish.Refined, left, top, ch))
-            svg.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='end' fill='{style.Muted}'>{SvgWriter.E(text)}</text>");
+        foreach (var (x, y, text) in HeatmapNames(s, style.Finish == ChartFinish.Refined, left, rows))
+            svg.Append($"<text x='{N(x)}' y='{N(y)}' text-anchor='end' fill='{(s.RowNamesInText ? style.Text : style.Muted)}'>{SvgWriter.E(text)}</text>");
         return (svg.Append("</svg>").ToString(), left, cropTop, cropBottom - cropTop);
     }
 

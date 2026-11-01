@@ -4248,11 +4248,11 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // readout, written last, which is never hashed, and since 0.37.0 the chart's sampling, written after its rendered points, and its pane
     // titles, written after its panes, and since 0.39.0 its bar tracks and drawn titles, and since 0.41.0 its painted background and
     // fitted height, written last, and since 0.46.0 its cell text, written after the week start (its cell width is null until set, so
-    // never written), and since 0.46.1 its labels on top, written after the cell text, and since 0.46.2 its cell notes and kept not-rated values, written after its fitted height, and since 0.47.0 each series' zero hairline, written last in the series.
+    // never written), and since 0.46.1 its labels on top, written after the cell text, and since 0.46.2 its cell notes and kept not-rated values, written after its fitted height, and since 0.47.0 each series' zero hairline, written last in the series, and since 0.52.0 its row names in the text ink and rows fitted one by one, written last.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false,\"CellNotes\":false,\"NotRatedKeepsValue\":false}";
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false,\"CellNotes\":false,\"NotRatedKeepsValue\":false,\"RowNamesInText\":false,\"FitEachRow\":false}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
@@ -7612,7 +7612,7 @@ Test("Sports page: Season arc and Gap to the leader close the Racing section, th
 // 0.46.2 sets both switches on it: its points in every cell, and its thin cells keeping their value.
 Test("Sports page: the Category heatmap closes the Racing section, its cells the points per start of the points and starts behind them, exactly the cells under ten starts not rated and the one with none a gap",()=>{
     var card=sports.Single(c=>c.Id=="category-heatmap");var heat=card.Spec;
-    Check(card.Section=="racing"&&!card.Wide&&sports.Last(c=>c.Section=="racing")==card&&heat is{Kind:ChartKind.Heatmap,CellText:true,CellWidth:90,ColumnLabelsOnTop:true,FitHeight:true,CellNotes:true,NotRatedKeepsValue:true,YUnit:" pts"}&&card is{ShowToolbar:false,ShowDataButton:true},"the card");
+    Check(card.Section=="racing"&&!card.Wide&&sports.Last(c=>c.Section=="racing")==card&&heat is{Kind:ChartKind.Heatmap,CellText:true,CellWidth:90,ColumnLabelsOnTop:true,FitHeight:true,CellNotes:true,NotRatedKeepsValue:true,FitEachRow:true,RowNamesInText:true,YUnit:" pts"}&&card is{ShowToolbar:false,ShowDataButton:true},"the card");
     ChartValidation.Validate(heat);
     Check(heat.Series.Select(s=>s.Name).SequenceEqual(SportsData.CategoryHistory.Select(c=>c.Category))&&heat.Series.All(s=>s.Points.Select(p=>p.Label).SequenceEqual(["2023","2024","2025","2026"])),"rows and seasons");
     foreach(var (row,history) in heat.Series.Zip(SportsData.CategoryHistory))
@@ -7631,11 +7631,17 @@ Test("Sports page: the Category heatmap closes the Racing section, its cells the
     // lines of up to 84 units: fourteen notes are a little wider (86.4) and take two lines, "34 pts," and "5 riders", and "8 pts, 3 riders"
     // (80.2) one, 29 lines in all, none holding the separator that parts the note from the value in the cell's name. The two not-rated cells
     // keep their values, in Light's muted colour, above their starts, their notes and their reasons on two lines, and the season nobody raced
-    // writes "did not race" and its starts. The tallest cell, the relay's 2025 (value, starts, two note lines and two reason lines), needs 4
-    // + 13 + 5 x 12 = 77, so each of the four rows is 77 tall and the drawing is 80 + 4 x 77 + 54 = 442; the seasons stand above the grid, and
-    // the colour scale leaves out the not-rated 1.6 for the rated 1.7.
+    // writes "did not race" and its starts. With FitEachRow (0.52.0) each row is as tall as its own tallest cell needs, 4 + 13 + the lines
+    // x 12: Sprint and Middle distance have a value, their starts and two note lines, 4 lines, so 4 + 13 + 3 x 12 = 53 each; Long distance's
+    // not-rated 2023 has a value, its starts, one note line and two reason lines, 5 lines, so 4 + 13 + 4 x 12 = 65; and the relay's 2025
+    // (value, starts, two note lines and two reason lines, 6 lines) needs 4 + 13 + 5 x 12 = 77. The drawing is 80 + (53 + 53 + 65 + 77) + 54
+    // = 382 (it was 442 with four rows of 77); the seasons stand above the grid, and the colour scale leaves out the not-rated 1.6 for the rated 1.7.
     var drawing=Svg(heat with{Width=337});
-    Check(drawing.Root!.Attribute("viewBox")!.Value=="0 0 580 442",drawing.Root.Attribute("viewBox")!.Value);
+    Check(drawing.Root!.Attribute("viewBox")!.Value=="0 0 580 382",drawing.Root.Attribute("viewBox")!.Value);
+    var cellRows=drawing.Descendants(ns+"rect").Where(r=>(string?)r.Attribute("rx")=="3").Where((_,i)=>i%4==0).Select(r=>Attr(r,"height")+2).ToArray();
+    Check(cellRows.SequenceEqual([53d,53d,65d,77d]),string.Join(",",cellRows));
+    var rowNames=drawing.Root.Elements(ns+"text").Where(t=>(string?)t.Attribute("text-anchor")=="end").ToArray();
+    Check(rowNames.Length==4&&rowNames.All(t=>(string?)t.Attribute("class")!="lumen-muted"),"the row names are in the text ink");
     var written=drawing.Root.Elements(ns+"text").Where(t=>(string?)t.Attribute("aria-hidden")=="true").ToArray();
     var small=written.Where(t=>(string?)t.Attribute("font-size")=="10").ToArray();
     var noteLines=small.Where(t=>!t.Value.StartsWith('/')&&t.Value is not("too few starts" or "to rate" or "did not race")).ToArray();
@@ -13009,6 +13015,108 @@ Test("Heatmap 0.52.0: kept values give way when not one reason line fits",()=>{
     var spec=Six(HeatGrid(s=>s with{CellWidth=90,Height=304,NotRatedKeepsValue=true}));
     var words=WordsAt(ChartSvg.Render(spec),175);
     Check(words.Length==6&&words[0]=="2.8"&&words[1].StartsWith("too few")&&words[1].EndsWith("…")&&!words.Contains("1.2"),string.Join(" | ",words));
+});
+// 0.52.0: heatmap rows
+ChartSpec RowGrid(int rows=4,int seasons=3,Func<ChartSpec,ChartSpec>? change=null)
+{
+    // Every cell has a points note; row 2 opens with a not-rated cell that keeps its value, so its words are the tallest.
+    var spec=new ChartSpec{Title="Points per start",Description="Invented categories by season",Kind=ChartKind.Heatmap,Width=600,Height=320,CellText=true,CellWidth=90,FitHeight=true,CellNotes=true,NotRatedKeepsValue=true,
+        Series=Enumerable.Range(0,rows).Select(r=>new ChartSeries($"Category {r}",Enumerable.Range(0,seasons).Select(c=>
+        {
+            var cell=new ChartPoint(c,Math.Round(1+(r*5+c*3)%9*.4,1),$"{2024+c}"){SubLabel=$"/{10+c} starts",ValueNote=$" · {12+r*7+c*3} pts"};
+            return r==2&&c==0?cell with{NotRated="too few starts to rate"}:cell;
+        }).ToArray())).ToArray()};
+    return change is null?spec:change(spec);
+}
+string RowWhy(ChartSpec s){try{ChartValidation.Validate(s);}catch(ArgumentException e){return e.Message;}return "";}
+(double Top,double Height)[] CellRows(string svg,int seasons)
+{
+    var rects=Regex.Matches(svg,"<rect x='[^']*' y='([^']*)' width='[^']*' height='([^']*)' rx='3'").Select(m=>(Y:double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture)-1,H:double.Parse(m.Groups[2].Value,CultureInfo.InvariantCulture)+2)).ToArray();
+    return rects.Where((_,i)=>i%seasons==0).Select(r=>(r.Y,r.H)).ToArray();
+}
+Test("Heatmap 0.52.0: RowNamesInText writes the names in Text",()=>{
+    var spec=RowGrid();
+    foreach(var style in new ChartStyle?[]{null,ChartStyle.Light with{Finish=ChartFinish.Classic}})
+    {
+        var on=spec with{Style=style,RowNamesInText=true};
+        var svg=ChartSvg.Render(on);
+        Check(RowNames(svg).Length==4,"four names");
+        Check(!Regex.IsMatch(svg,"<text [^>]*text-anchor='end'[^>]*lumen-muted"),"no muted name with the switch");
+        Check(Regex.IsMatch(ChartSvg.Render(spec with{Style=style}),"<text [^>]*text-anchor='end' class='lumen-muted'"),"muted without it");
+        var band=ChartSvg.HeatmapNameBand(on)!.Value.Svg;
+        var text=ChartSvg.ResolveStyle(on).Text;
+        Check(Regex.Matches(band,"<text [^>]*text-anchor='end' fill='"+Regex.Escape(text)+"'").Count==4,"band names in Text: "+band);
+        var off=ChartSvg.HeatmapNameBand(spec with{Style=style})!.Value.Svg;
+        Check(Regex.Matches(off,"<text [^>]*fill='"+Regex.Escape(ChartSvg.ResolveStyle(spec with{Style=style}).Muted)+"'").Count==4,"band muted without it");
+    }
+    Check(ChartSvg.HeatmapNameBand(spec with{RowNamesInText=true})!.Value.Svg.Contains($"fill='{ChartStyle.Light.Text}'"),"Light text");
+    foreach(var style in new[]{ChartStyle.Light,ChartStyle.Dark,ChartStyle.Midnight})
+        Check(Lumen.Charts.Contrast.Ratio(style.Text,style.Background)>=4.5,$"{style.Text} on {style.Background}");
+});
+Test("Heatmap 0.52.0: FitEachRow gives each row its own height",()=>{
+    var spec=RowGrid(4,3,s=>s with{FitEachRow=true});
+    var needs=ChartSvg.HeatmapRowNeeds(ChartSvg.AsDrawn(spec));
+    var svg=ChartSvg.Render(spec);
+    var rows=CellRows(svg,3);
+    Check(rows.Length==4&&needs.Length==4,"four rows");
+    for(var i=0;i<4;i++) Check(Math.Abs(rows[i].Height-needs[i])<.01,$"row {i}: {rows[i].Height} vs {needs[i]}");
+    Check(rows.Select(r=>r.Height).Distinct().Count()>1,"rows are not all equal: "+string.Join(",",needs));
+    var height=double.Parse(Regex.Match(svg,"viewBox='0 0 [^ ]* ([^']*)'").Groups[1].Value,CultureInfo.InvariantCulture);
+    Check(height==Math.Ceiling(80+ChartSvg.Headroom(spec)+needs.Sum()+ChartSvg.HeatmapBelow(spec)),"height "+height);
+    var names=RowNames(svg);
+    for(var i=0;i<4;i++) Check(Math.Abs(double.Parse(names[i].Y,CultureInfo.InvariantCulture)-(rows[i].Top+rows[i].Height/2+4))<.01,$"name {i} at {names[i].Y}");
+    Check(RowNames(ChartSvg.HeatmapNameBand(spec)!.Value.Svg).Select(n=>n.Y).SequenceEqual(names.Select(n=>n.Y)),"band names at the drawing's places");
+});
+Test("Heatmap 0.52.0: under the floor the rows share the extra height",()=>{
+    // Without notes row 0's words are a value and a sub-label (36 with the 4) and row 1's add the not-rated reason's two lines (53).
+    var spec=RowGrid(3,3,s=>s with{FitEachRow=true,CellNotes=false,Series=[s.Series[0],s.Series[2]]});
+    var drawn=ChartSvg.AsDrawn(spec);
+    var needs=ChartSvg.HeatmapRowNeeds(drawn);
+    Check(needs.Length==2&&needs[0]!=needs[1],"unequal needs "+string.Join(",",needs));
+    Check(drawn.Height==240,"floor "+drawn.Height);
+    var rows=CellRows(ChartSvg.Render(spec),3);
+    var extra0=rows[0].Height-needs[0];var extra1=rows[1].Height-needs[1];
+    Check(extra0>0&&Math.Abs(extra0-extra1)<.01,$"extra {extra0} {extra1}");
+    var frame=ChartSvg.HeatmapFrame(spec);
+    Check(Math.Abs(rows.Sum(r=>r.Height)-(frame.Bottom-frame.Top))<.01,"heights add up to the grid");
+});
+Test("Heatmap 0.52.0: equal needs draw FitEachRow exactly as FitHeight alone",()=>{
+    var plain=RowGrid(4,3,s=>s with{Series=s.Series.Select(r=>r with{Points=r.Points.Select(p=>p with{NotRated=null}).ToArray()}).ToArray()});
+    foreach(var style in new ChartStyle?[]{null,ChartStyle.Light with{Finish=ChartFinish.Classic}})
+    {
+        var a=ChartSvg.Render(plain with{Style=style});var b=ChartSvg.Render(plain with{Style=style,FitEachRow=true});
+        var needs=ChartSvg.HeatmapRowNeeds(ChartSvg.AsDrawn(plain with{FitEachRow=true}));
+        Check(needs.Distinct().Count()==1,"equal needs "+string.Join(",",needs));
+        Check(Regex.Matches(a,"<rect [^>]*rx='3'[^>]*>").Select(m=>m.Value).SequenceEqual(Regex.Matches(b,"<rect [^>]*rx='3'[^>]*>").Select(m=>m.Value)),"same rects");
+        Check(RowNames(a).Select(n=>n.Y).SequenceEqual(RowNames(b).Select(n=>n.Y)),"same name ys");
+    }
+});
+Test("Heatmap 0.52.0: the frozen names match the drawing with a two-line source and labels under the grid",()=>{
+    var spec=RowGrid(4,3,s=>s with{FitEachRow=true,ColumnLabelsOnTop=false,Source="An invented source line that is long enough to wrap onto a second line of the drawing, because it keeps going on past the width"});
+    Check(ChartSvg.Wrap(spec.Source,ChartSvg.AsDrawn(spec).Width-48).Length==2,"the source wraps to two lines");
+    var band=ChartSvg.HeatmapNameBand(spec)!.Value;
+    var drawn=RowNames(ChartSvg.Render(spec));
+    var banded=RowNames(band.Svg);
+    Check(banded.Select(n=>n.Y).SequenceEqual(drawn.Select(n=>n.Y)),"band names where the drawing writes them");
+    foreach(var n in banded)
+    {
+        var y=double.Parse(n.Y,CultureInfo.InvariantCulture);
+        Check(y>=band.Top&&y<=band.Top+band.Height,$"{y} inside {band.Top}..{band.Top+band.Height}");
+    }
+});
+Test("Heatmap 0.52.0: the row switches are refused where they cannot apply",()=>{
+    Check(RowWhy(Spec() with{RowNamesInText=true}).Contains("RowNamesInText"),"RowNamesInText on a line chart");
+    Check(RowWhy(Spec() with{FitEachRow=true}).Contains("FitEachRow"),"FitEachRow on a line chart");
+    var why=RowWhy(RowGrid(4,3,s=>s with{FitHeight=false,FitEachRow=true}));
+    Check(why.Contains("FitHeight"),"FitEachRow without FitHeight: "+why);
+    Check(RowWhy(RowGrid(4,3,s=>s with{FitEachRow=true,RowNamesInText=true}))=="","valid");
+});
+Test("Heatmap 0.52.0: neither switch is hashed at its default",()=>{
+    var spec=RowGrid();
+    var id=ChartSvg.IdPrefix(spec);
+    Check(id==ChartSvg.IdPrefix(spec with{RowNamesInText=false,FitEachRow=false}),"false is not hashed");
+    Check(id!=ChartSvg.IdPrefix(spec with{RowNamesInText=true}),"RowNamesInText is hashed");
+    Check(id!=ChartSvg.IdPrefix(spec with{FitEachRow=true}),"FitEachRow is hashed");
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
