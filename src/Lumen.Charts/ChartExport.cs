@@ -65,6 +65,49 @@ public static class ChartExport
         }
         return table.Append("</tbody></table>").ToString();
     }
+    /// <summary>
+    /// A chart's original observations as a <see cref="TableSpec"/>, for <c>LumenTable</c> or <c>POST table/html</c>: a Series column, an
+    /// X / Category column that names each row, and a Value column, one row for each point, series by series, points in their order.
+    /// The X and Value words are the ones the component's data table and status line write. When every series draws a plain Y (no
+    /// candles, OHLC, rings, timeline spans, blocks, ranges or bands) and all read in one value format and unit, Value is a sortable
+    /// Number column in that format and unit, a point's <see cref="ChartPoint.ValueNote"/> is the cell's note, and a missing value
+    /// is last in a sort, with its <see cref="ChartPoint.GapLabel"/> as its note; otherwise Value is a Text column that is not sortable.
+    /// The caption is the chart's title and <c> — original data</c> (<c>Chart data — original data</c> for an untitled chart), cut with
+    /// <c>…</c> to 120 characters. With more than 100 rows the table pages at 100; <see cref="TableSpec.StartAtEnd"/> is left false for
+    /// the caller to set. A cell's words are cut with <c>…</c> to the table's 200 characters, and a note to its 80. The table takes the
+    /// chart's style, or its theme's.
+    /// </summary>
+    /// <exception cref="ArgumentException">The spec is not valid, or is a heatmap, whose data is a grid (see <see cref="HtmlTable"/>).</exception>
+    public static TableSpec DataTable(ChartSpec spec)
+    {
+        ChartValidation.Validate(spec);
+        if(spec.Kind==ChartKind.Heatmap)throw new ArgumentException("A heatmap's data is a grid; use HtmlTable for it.");
+        var x=ChartData.XAxisOf(spec);
+        var plain=spec.Series.All(s=>(s.Kind ?? spec.Kind) is not (ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Ring or ChartKind.Timeline or ChartKind.Blocks or ChartKind.Range)
+            &&s.Points.All(p=>p.Low is null&&p.High is null&&p.Open is null&&p.Close is null&&p.XEnd is null));
+        var measures=spec.Series.Select(s=>ChartData.Measure(spec,s)).Select(a=>(a.ValueFormat,a.Unit)).Distinct().ToArray();
+        var number=plain&&measures.Length<=1;
+        var (format,unit)=measures.Length==1?measures[0]:(ValueFormat.Number,(string?)null);
+        var value=number?new TableColumn("Value"){Kind=TableColumnKind.Number,Format=format,Unit=unit}:new TableColumn("Value"){Sortable=false};
+        var rows=new List<TableRow>();
+        foreach(var s in spec.Series)
+            foreach(var p in s.Points)
+            {
+                var category=TableCell.Of(Cut(ChartData.Category(spec,x,p),200));
+                rows.Add(new([TableCell.Of(Cut(s.Name,200)),category,number
+                    ?new(){Number=p.Y,Note=(p.Y.HasValue?p.ValueNote:p.GapLabel is {} gap?gap+p.ValueNote:p.ValueNote) is {} note?Cut(note,80):null}
+                    :TableCell.Of(Cut(ChartData.Value(spec,x,s,p),200))]));
+            }
+        var caption=(string.IsNullOrWhiteSpace(spec.Title)?"Chart data":spec.Title)+" — original data";
+        return new([new TableColumn("Series"),new TableColumn("X / Category"){RowHeader=true,Sortable=false},value],rows)
+        {
+            Caption=Cut(caption,120),
+            PageSize=rows.Count>100?100:null,
+            Style=ChartSvg.ResolveStyle(spec)
+        };
+    }
+    // Words cut with an ellipsis to a table's limit, as the table would refuse them whole.
+    private static string Cut(string text,int limit)=>text.Length>limit?text[..(limit-1)]+"…":text;
     // A grid cell's words, which are encoded one by one so that the separators between them stay as they are written: the value, or the
     // gap label's word where there is none, then " · " and the sub-label, then the note as written, then ", not rated: " and the reason.
     // The note is written where the cell's name writes it, after a value or a gap label's word, and not after a bare dash. A cell with no

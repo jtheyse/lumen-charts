@@ -12655,6 +12655,106 @@ Test("0.50.0: an empty timeline with Now writes No events beside the Now marker"
     var root=ERoot(EventTimelineHtml.Render(ESpec() with{Now=EDay(5)}));
     Check(EKids(root,"lumen-events-empty").Single().Value=="No events"&&EKids(root,"lumen-events-now").Count()==1,"words and marker");
 });
+// 0.51.0: ChartExport.DataTable, the chart's observations as a TableSpec, in the words the component's data table writes. Every example is invented.
+ChartSpec Series051(int count,Func<int,ChartPoint>? make=null)=>new(){Title="Output",Kind=ChartKind.Line,YFormat=ValueFormat.Compact,YUnit=" W",
+    Series=[new("Power",Enumerable.Range(0,count).Select(i=>make?.Invoke(i) ?? new ChartPoint(i,i%50+1)).ToArray())]};
+Test("0.51.0: DataTable for a 600-point line chart",()=>{
+    var spec=Series051(600,i=>i switch{
+        7=>new(i,null){GapLabel="absent",ValueNote=" · rest"},
+        9=>new(i,2500,"Ninth"){ValueNote=" · PB"},
+        _=>new(i,i%50+1)});
+    var table=ChartExport.DataTable(spec);
+    Check(table.Columns.Select(c=>c.Header).SequenceEqual(new[]{"Series","X / Category","Value"}),"headers");
+    Check(table.Columns.Select(c=>c.Kind).SequenceEqual(new[]{TableColumnKind.Text,TableColumnKind.Text,TableColumnKind.Number}),"kinds");
+    Check(table.Columns.Select(c=>c.RowHeader).SequenceEqual(new[]{false,true,false}),"row header is X");
+    Check(table.Columns.Select(c=>c.Sortable).SequenceEqual(new[]{true,false,true}),"only Series and Value sort");
+    Check(table.Columns[2].Format==ValueFormat.Compact&&table.Columns[2].Unit==" W","format and unit "+table.Columns[2].Format+table.Columns[2].Unit);
+    Check(table.Caption=="Output — original data"&&table.PageSize==100&&!table.StartAtEnd&&table.Rows.Count==600,$"{table.Caption} {table.PageSize} {table.Rows.Count}");
+    Check(table.Style==ChartSvg.ResolveStyle(spec),"style");
+    Check(table.Rows.Select(r=>r.Cells[1].Text).SequenceEqual(Enumerable.Range(0,600).Select(i=>i==9?"Ninth":i.ToString())),"rows keep the chart's order and words");
+    Check(table.Rows.All(r=>r.Cells[0].Text=="Power"),"series name");
+    Check(table.Rows[3].Cells[2].Number==4&&table.Rows[3].Cells[2].Note is null,"plain value");
+    Check(table.Rows[9].Cells[2].Number==2500&&table.Rows[9].Cells[2].Note==" · PB","value note");
+    Check(table.Rows[7].Cells[2].Number is null&&table.Rows[7].Cells[2].Note=="absent · rest","gap label and note on the missing value");
+    var midnight=spec with{Style=null,Theme=ChartTheme.Dark};
+    Check(ChartExport.DataTable(midnight).Style==ChartSvg.ResolveStyle(midnight),"theme preset");
+});
+Test("0.51.0: DataTable lists series in order, and a missing value without a gap label has no note",()=>{
+    var spec=Spec() with{Series=[new("A",[new(0,1,"x"),new(1,null,"y")]),new("B",[new(0,3,"x")])]};
+    var table=ChartExport.DataTable(spec);
+    Check(table.Rows.Select(r=>r.Cells[0].Text+"/"+r.Cells[1].Text).SequenceEqual(new[]{"A/x","A/y","B/x"}),"order");
+    Check(table.Rows[1].Cells[2].Number is null&&table.Rows[1].Cells[2].Note is null&&table.Columns[2].Kind==TableColumnKind.Number,"missing");
+});
+Test("0.51.0: a secondary axis or panes in other formats give a Text value that cannot be sorted",()=>{
+    var run=Spec() with{XFormat=ValueFormat.Duration,YFormat=ValueFormat.Duration,Y2Format=ValueFormat.Compact,
+        Series=[new("Pace",[new(0,301),new(600,295)]),new("Climb",[new(0,1200),new(600,15_400)]){Secondary=true}]};
+    var table=ChartExport.DataTable(run);
+    Check(table.Columns[2].Kind==TableColumnKind.Text&&!table.Columns[2].Sortable,"text, not sortable");
+    Check(table.Rows.Select(r=>r.Cells[2].Text).SequenceEqual(new[]{"5:01","4:55","1.2k","15.4k"}),string.Join("|",table.Rows.Select(r=>r.Cells[2].Text)));
+    Check(table.Rows.Select(r=>r.Cells[1].Text).SequenceEqual(new[]{"0:00","10:00","0:00","10:00"}),"X words");
+    var panes=Spec() with{Panes=[new(){YFormat=ValueFormat.Compact}],Series=[new("Top",[new(0,61),new(5,125)]),new("Bottom",[new(0,1500),new(5,-2500)]){Pane=1}]};
+    var paned=ChartExport.DataTable(panes);
+    Check(paned.Columns[2].Kind==TableColumnKind.Text&&!paned.Columns[2].Sortable&&paned.Rows[2].Cells[2].Text=="1.5k"&&paned.Rows[3].Cells[2].Text=="-2.5k","panes");
+    var same=Spec() with{YFormat=ValueFormat.Compact,Y2Format=ValueFormat.Compact,Series=[new("A",[new(0,1500)]),new("B",[new(0,2500)]){Secondary=true}]};
+    Check(ChartExport.DataTable(same).Columns[2].Kind==TableColumnKind.Number,"one shared format stays a Number");
+});
+Test("0.51.0: DataTable writes candles, ranges, spans, rings, blocks and bands as the component does",()=>{
+    string Word(ChartSpec spec,int row=0)=>ChartExport.DataTable(spec).Rows[row].Cells[2].Text!;
+    var candles=new ChartSpec{Kind=ChartKind.Candlestick,Series=[new("ACME",[ChartPoint.Candle(0,12,14,11,13,"Mon"),ChartPoint.Candle(1,13,15,12,12.5,"Tue")])]};
+    Check(Word(candles)=="O 12 · H 14 · L 11 · C 13"&&ChartExport.DataTable(candles).Columns[2].Kind==TableColumnKind.Text,Word(candles));
+    var range=Ranges(ChartPoint.Interval(0,null,52,168,"Mon"));
+    Check(Word(range)=="52 to 168",Word(range));
+    var spans=new ChartSpec{Kind=ChartKind.Timeline,XFormat=ValueFormat.TimeOfDay,Series=[new("Light",[ChartPoint.Span(82800,84600,"Early")])]};
+    Check(Word(spans)=="to 23:30",Word(spans));
+    var ring=Rings(("Move",84,100));
+    Check(Word(ring)=="84 of 100",Word(ring));
+    var blocks=Spec(ChartKind.Blocks) with{Series=[new("Plan",[ChartPoint.Block(0,2,140,"Warm-up") with{ValueNote=" W"}])]};
+    Check(Word(blocks)=="140 W from 0 to 2",Word(blocks));
+    var banded=Spec() with{Series=[new("Mean",[new ChartPoint(0,5,"a"){Low=3,High=7}])]};
+    Check(ChartExport.DataTable(banded).Columns[2].Kind==TableColumnKind.Text&&Word(banded)=="5 (3 to 7)",Word(banded));
+});
+Test("0.51.0: DataTable pages above 100 rows only, and never throws on long words",()=>{
+    Check(ChartExport.DataTable(Series051(100)).PageSize is null,"100 rows");
+    var over=ChartExport.DataTable(Series051(101));
+    Check(over.PageSize==100&&!over.StartAtEnd&&over.Rows.Count==101,"101 rows");
+    var longTitle=ChartExport.DataTable(Spec() with{Title=new string('T',200)});
+    Check(longTitle.Caption.Length==120&&longTitle.Caption==new string('T',119)+"…","long title "+longTitle.Caption.Length);
+    Check(ChartExport.DataTable(Spec() with{Title=""}).Caption=="Chart data — original data","blank title");
+    Check(ChartExport.DataTable(Spec() with{Title="  "}).Caption=="Chart data — original data","white title");
+    var long200=ChartExport.DataTable(Spec(ChartKind.Column) with{Series=[new(new string('S',300),[new(0,1,new string('L',250)){ValueNote=" · note"}])]});
+    Check(long200.Rows[0].Cells[0].Text==new string('S',199)+"…"&&long200.Rows[0].Cells[1].Text==new string('L',199)+"…","series and category cut to 200");
+    var wide=new ChartSpec{Kind=ChartKind.Candlestick,Series=[new("X",[ChartPoint.Candle(0,1,2,0,1,new string('c',500))])]};
+    Check(ChartExport.DataTable(wide).Rows[0].Cells[1].Text!.Length==200,"label cut");
+    var sub=Spec(ChartKind.Column) with{Series=[new("Rides",[new(0,5,new string('c',195)){SubLabel="152 bpm"}])]};
+    var cut=ChartExport.DataTable(sub).Rows[0].Cells[1].Text!;
+    Check(cut.Length==200&&cut.EndsWith("…"),"label with sub-label cut to 199 plus an ellipsis: "+cut.Length);
+    var shortSub=ChartExport.DataTable(Spec(ChartKind.Column) with{Series=[new("Rides",[new(0,5,"Mon"){SubLabel="152 bpm"}])]}).Rows[0].Cells[1].Text;
+    Check(shortSub=="Mon · 152 bpm","short words are not cut: "+shortSub);
+});
+Test("0.51.0: DataTable refuses a heatmap and an invalid chart",()=>{
+    var heat=new ChartSpec{Kind=ChartKind.Heatmap,Series=[new("Row",[new(0,1,"A"),new(1,2,"B")])]};
+    var message="";
+    try{ChartExport.DataTable(heat);}catch(ArgumentException e){message=e.Message;}
+    Check(message=="A heatmap's data is a grid; use HtmlTable for it.",message);
+    var threw=false;
+    try{ChartExport.DataTable(Spec() with{Width=1});}catch(ArgumentException){threw=true;}
+    Check(threw,"validates first");
+});
+Test("0.51.0: the component's value and category words are those DataTable writes",()=>{
+    string[] Cells(string html)=>System.Text.RegularExpressions.Regex.Matches(html,"<tr><td>([^<]*)</td><td>([^<]*)</td><td>([^<]*)</td></tr>").Select(m=>System.Net.WebUtility.HtmlDecode(m.Groups[1].Value+"|"+m.Groups[2].Value+"|"+m.Groups[3].Value)).ToArray();
+    void Same(ChartSpec spec,string what)
+    {
+        var html=Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.SetValue(chart,true);await chart.SelectPoint(0,0);});
+        var table=ChartExport.DataTable(spec);
+        var number=table.Columns[2];
+        var want=table.Rows.Select(r=>r.Cells[0].Text+"|"+r.Cells[1].Text+"|"+(number.Kind==TableColumnKind.Number?new Axis(AxisKind.Linear,1,10){ValueFormat=number.Format,Unit=number.Unit}.Format(r.Cells[2].Number ?? 0)+r.Cells[2].Note:r.Cells[2].Text)).ToArray();
+        var got=Cells(html);
+        Check(got.Length>0&&got.SequenceEqual(want),$"{what}: {string.Join(" ; ",got)} vs {string.Join(" ; ",want)}");
+    }
+    Same(Spec() with{YFormat=ValueFormat.Compact,YUnit=" W",Series=[new("Power",[new(0,1500,"A"){ValueNote=" · PB"},new(1,2500,"B")])]},"plain line");
+    Same(new ChartSpec{Kind=ChartKind.Candlestick,Series=[new("ACME",[ChartPoint.Candle(0,12,14,11,13,"Mon"),ChartPoint.Candle(1,13,15,12,12.5,"Tue")])]},"candlestick");
+    Same(Spec(ChartKind.Column) with{Series=[new("Rides",[new(0,5,"Mon"){SubLabel="152 bpm"},new(1,7,"Tue")])]},"column with sub-label");
+});
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
