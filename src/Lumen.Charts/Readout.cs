@@ -80,6 +80,7 @@ public static partial class ChartSvg
     public static ChartReadout Readout(ChartSpec spec)
     {
         ChartValidation.Validate(spec);
+        spec = WithText(spec);
         if (spec.Kind is not (ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Band or ChartKind.Range
             or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Blocks) || !HasData(spec)) return ChartReadout.Empty;
         var style = ResolveStyle(spec);
@@ -215,6 +216,7 @@ public static partial class ChartSvg
     public static ChartPlot? Plot(ChartSpec spec)
     {
         ChartValidation.Validate(spec);
+        spec = WithText(spec);
         if (spec.Sparkline || !HasData(spec)) return null;
         var head = Headroom(spec);
         var foot = 14 * Math.Max(0, Wrap(spec.Source, spec.Width - 48).Length - 1);

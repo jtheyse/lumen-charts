@@ -3265,10 +3265,17 @@ public static partial class ChartSvg
         return rows;
     }
 
+    /// <summary>The spec with a null title, source or description read as an empty one, as JSON's <c>null</c> gives them (0.52.0): the same
+    /// instance when none is null. Everything that lays text out, or hashes the spec into its IDs, reads the spec through this.</summary>
+    internal static ChartSpec WithText(ChartSpec spec) =>
+        spec.Title is not null && spec.Description is not null && spec.Source is not null ? spec
+            : spec with { Title = spec.Title ?? "", Description = spec.Description ?? "", Source = spec.Source ?? "" };
+
     /// <summary>The spec as <see cref="Render"/> draws it: a heatmap or a column chart with a cell width as wide as its columns make it, and then a chart fitted
     /// to its rows as tall as they make it, so a source wrapped across the drawn width is counted in the height (0.46.1).</summary>
     internal static ChartSpec AsDrawn(ChartSpec spec)
     {
+        spec = WithText(spec);
         if (spec.CellWidth is not null) spec = spec with { Width = DrawnWidth(spec) };
         if (spec.FitHeight) spec = spec with { Height = FittedHeight(spec) };
         return spec;

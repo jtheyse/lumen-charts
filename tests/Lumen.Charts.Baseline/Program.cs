@@ -992,6 +992,8 @@ lines.Add($"heatmap-cells/keeps-value-short {Hash(Render(noted with { CellWidth 
 // 0.52.0: heatmap rows. Row names in the text ink; each row as tall as its own cells.
 lines.Add($"heatmap-cells/row-ink {Hash(Render(noted with { CellWidth = 90, FitHeight = true, CellNotes = true, RowNamesInText = true }))}");
 lines.Add($"heatmap-cells/each-row {Hash(Render(noted with { CellWidth = 90, FitHeight = true, CellNotes = true, NotRatedKeepsValue = true, FitEachRow = true }))}");
+// 0.52.0: an untitled chart may be 190 tall.
+lines.Add($"titles/undrawn-190 {Hash(Render(line with { Title = "Not drawn", Description = "Named, not written", DrawTitles = false, Height = 190 }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

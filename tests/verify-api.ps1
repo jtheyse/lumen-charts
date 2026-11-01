@@ -535,7 +535,7 @@ foreach($bad in @(@{body=$meters.Replace('"kind":"Bar"','"kind":"Column"');reaso
   @{body=$meters.Replace('"averageOf":"3 races"','"averageOf":"12\ns"');reason='at most 16 characters on one line';name='An AverageOf on two lines'},
   @{body='{"title":"Recovery","kind":"Gauge","series":[{"name":"Recovery","averageOf":"a week","points":[{"x":0,"y":72}]}]}';reason='AverageOf is said after a mark''s one value';name='An AverageOf on a gauge'},
   @{body='{"title":"Zones","kind":"Strip","width":340,"series":[{"name":"Zones","averageOf":"a week","points":[{"x":0,"y":30,"label":"Easy"},{"x":1,"y":70,"label":"Hard"}]}]}';reason='AverageOf is said after a mark''s one value';name='An AverageOf on a strip'},
-  @{body=$meters.Replace('"height":240','"height":100');reason='240';name='A fitted chart''s height outside 240-2160'})){
+  @{body=$meters.Replace('"height":240','"height":100');reason='190';name='A fitted untitled chart''s height outside 190-2160'})){
  $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $bad.body -SkipHttpErrorCheck
  Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains($bad.reason)) "$($bad.name) is rejected"
 }
@@ -662,4 +662,14 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('FitHeight')) '"fitEachRow" without "fitHeight" is refused with 400 naming FitHeight'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":"Line","kind":"Line","rowNamesInText":true,"series":[{"name":"S","points":[{"x":0,"y":1}]}]}' -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('RowNamesInText')) '"rowNamesInText" on a line chart is refused with 400 naming it'
+# 0.52.0: an untitled chart may be 190 tall; a null title, source and description are empty ones.
+$low='{"title":"Low","kind":"Line","drawTitles":false,"height":190,"series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $low -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200) "An untitled line chart 190 tall is drawn with 200 ($($r.StatusCode))"
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $low.Replace('"height":190','"height":189') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('190')) "An untitled line chart 189 tall is refused with 400 naming 190 ($($r.StatusCode))"
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":null,"source":null,"description":null,"kind":"Line","series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200) "A chart posted with a null title, source and description is drawn with 200 ($($r.StatusCode))"
+$r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType application/json -Body '{"title":null,"nodes":[{"id":"a","label":"Start"},{"id":"b","label":"End"}],"edges":[{"source":"a","target":"b"}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200) "A graph posted with a null title is drawn with 200 ($($r.StatusCode))"
 Write-Output "$checks HTTP checks passed."

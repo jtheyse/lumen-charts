@@ -62,7 +62,7 @@ public static class GraphEngine
         var w = new SvgWriter { Style = graph.Style ?? ChartSvg.Preset(graph.Theme), Painted = graph.PaintBackground };
         var down = Down(graph);
         var crossings = graph.Layout == GraphLayout.Circular ? "" : $" · {Crossings(graph)} edge crossings";
-        ChartSvg.Begin(w, graph.Width, graph.Height, graph.Title,
+        ChartSvg.Begin(w, graph.Width, graph.Height, graph.Title ?? "",
             $"{graph.Nodes.Count} nodes · {graph.Edges.Count} directed connections · {graph.Layout} layout{(down ? " top to bottom" : "")}{crossings}", wrap: true);
         // Every node's label box, which edges keep out of and edge labels keep off, as do the labels placed before them.
         var labels = graph.Nodes.ToDictionary(n => n.Id, n => LabelBox(n, layout[n.Id]), StringComparer.Ordinal);

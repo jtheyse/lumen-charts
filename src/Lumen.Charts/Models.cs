@@ -547,16 +547,16 @@ public sealed record ChartSpec
 {
     /// <summary>The heading. With <see cref="Description"/> it is the drawing's accessible name. It stays one line: where the
     /// library's generous estimate of its width runs past the drawing's width less 48, it is cut at a word with <c>…</c>, and the
-    /// whole of it stays in the drawing's <c>&lt;title&gt;</c> and accessible name.</summary>
+    /// whole of it stays in the drawing's <c>&lt;title&gt;</c> and accessible name. A null, as JSON's <c>null</c> gives, is read as <c>""</c> (0.52.0).</summary>
     public string Title { get; init; } = "Untitled chart";
     /// <summary>The line under the title, read after it as part of the accessible name. Where it is wider than the drawing's width
     /// less 48, by the library's generous estimate, it goes on over a second line, broken between its <c> · </c> clauses where both
     /// lines then fit and otherwise between the words that set the two lines most nearly equal, and the plot moves down by that line,
     /// 14 pixels. Past two lines the first takes as many words as fit and the second ends in <c>…</c>, and the whole of it stays in the
-    /// drawing's <c>&lt;desc&gt;</c> and accessible name.</summary>
+    /// drawing's <c>&lt;desc&gt;</c> and accessible name. A null is read as <c>""</c> (0.52.0).</summary>
     public string Description { get; init; } = "";
     /// <summary>A line at the foot of the chart saying where the data came from. It wraps as <see cref="Description"/> does, growing
-    /// upward: a second line moves the bottom of the plot, and the X axis and its title with it, up by 14 pixels.</summary>
+    /// upward: a second line moves the bottom of the plot, and the X axis and its title with it, up by 14 pixels. A null is read as <c>""</c> (0.52.0).</summary>
     public string Source { get; init; } = "";
     /// <summary>Lays out X for every series, and draws each series that names no kind of its own.</summary>
     public ChartKind Kind { get; init; } = ChartKind.Line;
@@ -642,7 +642,7 @@ public sealed record ChartSpec
     /// width of its container, and its text is 12 units high, so a chart shown at the width it is drawn shows its text at 12 pixels.
     /// The Blazor component's <c>FitWidth</c> draws it at the width it is shown.</summary>
     public int Width { get; init; } = 900;
-    /// <summary>The drawing's height in SVG units, from 240 to 2160, or from 16 for a <see cref="Sparkline"/>. The SVG keeps this
+    /// <summary>The drawing's height in SVG units, from 240 to 2160, from 190 where <see cref="DrawTitles"/> is off, or from 16 for a <see cref="Sparkline"/>. The SVG keeps this
     /// proportion to <see cref="Width"/> as it scales.</summary>
     public int Height { get; init; } = 420;
     /// <summary>
@@ -799,7 +799,7 @@ public sealed record ChartSpec
     /// Draws the <see cref="Title"/> and <see cref="Description"/> at the top of the chart, the default. Off, neither is drawn and the body
     /// moves up into their space, 50 units, for a page that writes its own heading over the chart; both stay the drawing's
     /// <c>&lt;title&gt;</c>, <c>&lt;desc&gt;</c> and accessible name. Every chart kind takes it, a strip included, whose drawing is then
-    /// that much shorter. A sparkline draws neither in any case. Network graphs (<see cref="GraphSpec"/>) always draw their title. It is
+    /// that much shorter. With it off <see cref="Height"/> may be as low as 190, the 240 floor less those 50 units (0.52.0). A sparkline draws neither in any case. Network graphs (<see cref="GraphSpec"/>) always draw their title. It is
     /// not what <see cref="ChartSvg.Render"/>'s <c>includeTitles</c> controls: that writes or leaves out the native tooltip, the
     /// <c>&lt;title&gt;</c>, in each mark.
     /// </summary>
@@ -993,7 +993,7 @@ public enum GraphDirection
 /// <see cref="GraphEngine.Render"/>. At most 250 nodes and 2,000 edges.</summary>
 public sealed record GraphSpec
 {
-    /// <summary>The heading and the drawing's accessible name.</summary>
+    /// <summary>The heading and the drawing's accessible name. A null, as JSON's <c>null</c> gives, is read as <c>""</c> (0.52.0).</summary>
     public string Title { get; init; } = "Network";
     /// <summary>The nodes, at most 250.</summary>
     public IReadOnlyList<GraphNode> Nodes { get; init; } = [];

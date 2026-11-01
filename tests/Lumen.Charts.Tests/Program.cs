@@ -13118,6 +13118,103 @@ Test("Heatmap 0.52.0: neither switch is hashed at its default",()=>{
     Check(id!=ChartSvg.IdPrefix(spec with{RowNamesInText=true}),"RowNamesInText is hashed");
     Check(id!=ChartSvg.IdPrefix(spec with{FitEachRow=true}),"FitEachRow is hashed");
 });
+// 0.52.0: the 190 floor and null text. An untitled chart gives back the 50 units its title and description take, so it may be 190 tall;
+// a null title, source or description, as JSON's null gives, reads as an empty one.
+List<string> Outside52(string svg)
+{
+    var doc=XDocument.Parse(svg);
+    var box=doc.Root!.Attribute("viewBox")!.Value.Split(' ').Select(t=>double.Parse(t,CultureInfo.InvariantCulture)).ToArray();
+    double N(XElement e,string a)=>double.Parse((string?)e.Attribute(a)??"0",CultureInfo.InvariantCulture);
+    var found=new List<string>();
+    void At(string what,double x,double y){if(x<box[0]-0.01||x>box[0]+box[2]+0.01||y<box[1]-0.01||y>box[1]+box[3]+0.01)found.Add($"{what} ({x:0.##},{y:0.##}) outside {box[2]}x{box[3]}");}
+    foreach(var e in doc.Descendants())
+    {
+        if(e.AncestorsAndSelf().Any(a=>a.Attribute("transform") is not null||a.Name.LocalName is "defs" or "clipPath" or "pattern" or "linearGradient" or "mask")) continue;
+        switch(e.Name.LocalName)
+        {
+            case "text": At("text '"+e.Value+"'",N(e,"x"),N(e,"y")); break;
+            case "rect": At("rect",N(e,"x"),N(e,"y")); At("rect end",N(e,"x")+N(e,"width"),N(e,"y")+N(e,"height")); break;
+            case "circle": At("circle min",N(e,"cx")-N(e,"r"),N(e,"cy")-N(e,"r")); At("circle max",N(e,"cx")+N(e,"r"),N(e,"cy")+N(e,"r")); break;
+            case "line": At("line",N(e,"x1"),N(e,"y1")); At("line end",N(e,"x2"),N(e,"y2")); break;
+            case "path":
+                foreach(Match m in Regex.Matches(Regex.Replace((string?)e.Attribute("d")??"",@"A-?[\d.]+,-?[\d.]+",""),@"(-?[\d.]+),(-?[\d.]+)"))
+                    At("path",double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),double.Parse(m.Groups[2].Value,CultureInfo.InvariantCulture));
+                break;
+        }
+    }
+    return found;
+}
+Test("Floor 0.52.0: an untitled line chart renders at 190 and 220, an untitled 189 and a titled 239 are refused in their own words",()=>{
+    var bare=Spec() with{DrawTitles=false};
+    Check(ChartSvg.Render(bare with{Height=190}).Contains("viewBox"),"190");
+    Check(ChartSvg.Render(bare with{Height=220}).Length>0,"220");
+    Check(Refused(bare with{Height=189}).Contains("190–2160"),"189 untitled: "+Refused(bare with{Height=189}));
+    Check(Refused(Spec() with{Height=239})==$"Dimensions must be {ChartSvg.MinWidth}–{ChartSvg.MaxWidth} by 240–2160.","239 titled");
+    Check(Refused(Spec() with{Height=190}).Contains("240–2160"),"190 titled");
+});
+Test("Floor 0.52.0: every kind draws inside an untitled 190",()=>{
+    var bad=new List<string>();
+    foreach(var kind in Enum.GetValues<ChartKind>().Where(k=>k!=ChartKind.Strip))
+    {
+        var spec=Sample(kind) with{DrawTitles=false,Width=340,Height=190,FitHeight=false};
+        foreach(var o in Outside52(ChartSvg.Render(spec)).Take(3)) bad.Add($"{kind}: {o}");
+    }
+    Check(bad.Count==0,string.Join("; ",bad));
+});
+Test("Floor 0.52.0: an untitled line chart at 190 with a two-line source and a six-series legend keeps every mark and text inside",()=>{
+    var spec=Spec() with{DrawTitles=false,Width=340,Height=190,
+        Source="Invented source: the club's season records, copied by hand from the results board after each race weekend",
+        Series=Enumerable.Range(0,6).Select(i=>new ChartSeries($"Series number {i}",[new(0,2+i,"A"),new(1,5-i/2.0,"B"),new(2,3+i,"C")])).ToArray()};
+    var svg=ChartSvg.Render(spec);
+    Check(ChartSvg.Wrap(spec.Source,spec.Width-48).Length==2,"the source has two lines");
+    var out52=Outside52(svg);
+    Check(out52.Count==0,string.Join("; ",out52.Take(5)));
+    Check(XDocument.Parse(svg).Descendants(ns+"text").Count(t=>t.Value.StartsWith("Series number"))==6,"six legend rows");
+});
+Test("Null text 0.52.0: every kind draws a null title, source and description as empty ones",()=>{
+    ChartSpec Nulled(ChartSpec s)=>s with{Title=null!,Source=null!,Description=null!};
+    ChartSpec Emptied(ChartSpec s)=>s with{Title="",Source="",Description=""};
+    foreach(var kind in Enum.GetValues<ChartKind>())
+        foreach(var titled in new[]{true,false})
+        {
+            var spec=Sample(kind) with{DrawTitles=titled};
+            Check(ChartSvg.Render(Nulled(spec))==ChartSvg.Render(Emptied(spec)),$"{kind}, titled {titled}");
+        }
+    var cells=Sample(ChartKind.Heatmap) with{CellWidth=60,FitHeight=true};
+    Check(ChartSvg.Render(Nulled(cells))==ChartSvg.Render(Emptied(cells)),"a heatmap with a cell width, fitted");
+    Check(ChartSvg.HeatmapNameBand(Nulled(cells))==ChartSvg.HeatmapNameBand(Emptied(cells)),"the name band");
+    Check(ChartSvg.HeatmapFrame(Nulled(cells))==ChartSvg.HeatmapFrame(Emptied(cells)),"the frame");
+    var line=Sample(ChartKind.Line);
+    Check(ChartSvg.Readout(Nulled(line)).Bottom==ChartSvg.Readout(Emptied(line)).Bottom,"the readout");
+    Check(ChartSvg.Plot(Nulled(line))!.Bottom==ChartSvg.Plot(Emptied(line))!.Bottom,"the plot of a line");
+    var timeline=Sample(ChartKind.Timeline);
+    Check(ChartSvg.Plot(Nulled(timeline))!.Bottom==ChartSvg.Plot(Emptied(timeline))!.Bottom,"the plot of a timeline");
+    var graded=Sample(ChartKind.Column) with{Series=[new("S",[new(0,2,"A"),new(1,5,"B")]){Gradient=[new(0,"#2f6fde"),new(5,"#c2410c")]}]};
+    Check(ChartSvg.Render(Nulled(graded))==ChartSvg.Render(Emptied(graded)),"a gradient's ID");
+});
+Test("Null text 0.52.0: a sparkline with a null title has the name, title and IDs of one with an empty title",()=>{
+    var a=ChartSvg.Render(Spark() with{Title=null!});var b=ChartSvg.Render(Spark() with{Title=""});
+    Check(a==b,"equal");
+});
+Test("Null text 0.52.0: a graph's null title draws as an empty one",()=>{
+    var shapes=new[]{Graph(),Graph() with{Direction=GraphDirection.TopToBottom},Graph() with{Layout=GraphLayout.Circular},new GraphSpec(),
+        Graph() with{Style=ChartStyle.Light with{Finish=ChartFinish.Classic}}};
+    foreach(var g in shapes) Check(GraphEngine.Render(g with{Title=null!})==GraphEngine.Render(g with{Title=""}),"a graph");
+    var moved=new Dictionary<string,GraphPoint>{["a"]=new(60,60)};
+    Check(GraphEngine.Render(Graph() with{Title=null!},moved)==GraphEngine.Render(Graph() with{Title=""},moved),"a dragged graph");
+});
+Test("Null text 0.52.0: JSON null reads as empty",()=>{
+    var options=new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web){Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}};
+    var read=System.Text.Json.JsonSerializer.Deserialize<ChartSpec>("{\"title\":null,\"source\":null,\"description\":null,\"kind\":\"Line\",\"series\":[{\"name\":\"S\",\"points\":[{\"x\":0,\"y\":1},{\"x\":1,\"y\":2}]}]}",options)!;
+    Check(read.Title is null&&read.Source is null&&read.Description is null,"read as null");
+    Check(ChartSvg.Render(read)==ChartSvg.Render(read with{Title="",Source="",Description=""}),"a chart");
+    var graph=System.Text.Json.JsonSerializer.Deserialize<GraphSpec>("{\"title\":null,\"nodes\":[{\"id\":\"a\",\"label\":\"A\"},{\"id\":\"b\",\"label\":\"B\"}],\"edges\":[{\"source\":\"a\",\"target\":\"b\"}]}",options)!;
+    Check(graph.Title is null&&GraphEngine.Render(graph)==GraphEngine.Render(graph with{Title=""}),"a graph");
+});
+Test("Null text 0.52.0: the planner still refuses a null Description",()=>{
+    try{PlannerValidation.Validate(PlannerSpec.ForYear(2027) with{Title="Season",Description=null!});throw new Exception("accepted");}
+    catch(ArgumentException e){Check(e.Message=="A planner's description may be empty but not null.",e.Message);}
+});
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
