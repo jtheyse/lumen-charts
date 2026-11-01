@@ -13129,16 +13129,37 @@ List<string> Outside52(string svg)
     void At(string what,double x,double y){if(x<box[0]-0.01||x>box[0]+box[2]+0.01||y<box[1]-0.01||y>box[1]+box[3]+0.01)found.Add($"{what} ({x:0.##},{y:0.##}) outside {box[2]}x{box[3]}");}
     foreach(var e in doc.Descendants())
     {
-        if(e.AncestorsAndSelf().Any(a=>a.Attribute("transform") is not null||a.Name.LocalName is "defs" or "clipPath" or "pattern" or "linearGradient" or "mask")) continue;
+        if(e.AncestorsAndSelf().Any(a=>a.Name.LocalName is "defs" or "clipPath" or "pattern" or "linearGradient" or "mask")) continue;
+        // translate(tx ty) on the element and its ancestors moves it; a rotate(angle cx cy) on a text turns its extent about that centre.
+        double tx=0,ty=0;
+        foreach(var a in e.AncestorsAndSelf())
+            if(((string?)a.Attribute("transform")) is { } tr&&Regex.Match(tr,@"translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)") is { Success: true } mt)
+            { tx+=double.Parse(mt.Groups[1].Value,CultureInfo.InvariantCulture);ty+=double.Parse(mt.Groups[2].Value,CultureInfo.InvariantCulture); }
+        void P(string what,double x,double y)=>At(what,x+tx,y+ty);
+        var rot=Regex.Match((string?)e.Attribute("transform")??"",@"rotate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)");
         switch(e.Name.LocalName)
         {
-            case "text": At("text '"+e.Value+"'",N(e,"x"),N(e,"y")); break;
-            case "rect": At("rect",N(e,"x"),N(e,"y")); At("rect end",N(e,"x")+N(e,"width"),N(e,"y")+N(e,"height")); break;
-            case "circle": At("circle min",N(e,"cx")-N(e,"r"),N(e,"cy")-N(e,"r")); At("circle max",N(e,"cx")+N(e,"r"),N(e,"cy")+N(e,"r")); break;
-            case "line": At("line",N(e,"x1"),N(e,"y1")); At("line end",N(e,"x2"),N(e,"y2")); break;
+            case "text" when rot.Success:
+            {
+                var size=double.TryParse((string?)e.Attribute("font-size"),NumberStyles.Float,CultureInfo.InvariantCulture,out var fs)?fs:11;
+                var half=ChartSvg.Wide(e.Value)*size/11/2;var angle=double.Parse(rot.Groups[1].Value,CultureInfo.InvariantCulture)*Math.PI/180;
+                var cx=double.Parse(rot.Groups[2].Value,CultureInfo.InvariantCulture);var cy=double.Parse(rot.Groups[3].Value,CultureInfo.InvariantCulture);
+                foreach(var (dx,dy) in new[]{(-half,0d),(half,0d),(0d,-size),(0d,size/4)})
+                    P("rotated text '"+e.Value+"'",cx+dx*Math.Cos(angle)-dy*Math.Sin(angle),cy+dx*Math.Sin(angle)+dy*Math.Cos(angle));
+                break;
+            }
+            case "text": P("text '"+e.Value+"'",N(e,"x"),N(e,"y")); break;
+            case "rect": P("rect",N(e,"x"),N(e,"y")); P("rect end",N(e,"x")+N(e,"width"),N(e,"y")+N(e,"height")); break;
+            case "circle": P("circle min",N(e,"cx")-N(e,"r"),N(e,"cy")-N(e,"r")); P("circle max",N(e,"cx")+N(e,"r"),N(e,"cy")+N(e,"r")); break;
+            case "ellipse": P("ellipse min",N(e,"cx")-N(e,"rx"),N(e,"cy")-N(e,"ry")); P("ellipse max",N(e,"cx")+N(e,"rx"),N(e,"cy")+N(e,"ry")); break;
+            case "line": P("line",N(e,"x1"),N(e,"y1")); P("line end",N(e,"x2"),N(e,"y2")); break;
+            case "polygon" or "polyline":
+                foreach(Match m in Regex.Matches((string?)e.Attribute("points")??"",@"(-?[\d.]+)[ ,]+(-?[\d.]+)"))
+                    P(e.Name.LocalName,double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),double.Parse(m.Groups[2].Value,CultureInfo.InvariantCulture));
+                break;
             case "path":
                 foreach(Match m in Regex.Matches(Regex.Replace((string?)e.Attribute("d")??"",@"A-?[\d.]+,-?[\d.]+",""),@"(-?[\d.]+),(-?[\d.]+)"))
-                    At("path",double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),double.Parse(m.Groups[2].Value,CultureInfo.InvariantCulture));
+                    P("path",double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),double.Parse(m.Groups[2].Value,CultureInfo.InvariantCulture));
                 break;
         }
     }
@@ -13185,10 +13206,12 @@ Test("Null text 0.52.0: every kind draws a null title, source and description as
     Check(ChartSvg.HeatmapNameBand(Nulled(cells))==ChartSvg.HeatmapNameBand(Emptied(cells)),"the name band");
     Check(ChartSvg.HeatmapFrame(Nulled(cells))==ChartSvg.HeatmapFrame(Emptied(cells)),"the frame");
     var line=Sample(ChartKind.Line);
-    Check(ChartSvg.Readout(Nulled(line)).Bottom==ChartSvg.Readout(Emptied(line)).Bottom,"the readout");
-    Check(ChartSvg.Plot(Nulled(line))!.Bottom==ChartSvg.Plot(Emptied(line))!.Bottom,"the plot of a line");
+    var ro=ChartSvg.Readout(Nulled(line));var re=ChartSvg.Readout(Emptied(line));
+    Check(ro.Top==re.Top&&ro.Bottom==re.Bottom&&ro.Left==re.Left&&ro.Right==re.Right&&ro.Columns.Count==re.Columns.Count
+        &&ro.Columns.Zip(re.Columns).All(c=>c.First.X==c.Second.X&&c.First.Position==c.Second.Position&&c.First.Label==c.Second.Label&&c.First.Entries.SequenceEqual(c.Second.Entries)),"the readout");
+    Check(ChartSvg.Plot(Nulled(line))==ChartSvg.Plot(Emptied(line)),"the plot of a line");
     var timeline=Sample(ChartKind.Timeline);
-    Check(ChartSvg.Plot(Nulled(timeline))!.Bottom==ChartSvg.Plot(Emptied(timeline))!.Bottom,"the plot of a timeline");
+    Check(ChartSvg.Plot(Nulled(timeline))==ChartSvg.Plot(Emptied(timeline)),"the plot of a timeline");
     var graded=Sample(ChartKind.Column) with{Series=[new("S",[new(0,2,"A"),new(1,5,"B")]){Gradient=[new(0,"#2f6fde"),new(5,"#c2410c")]}]};
     Check(ChartSvg.Render(Nulled(graded))==ChartSvg.Render(Emptied(graded)),"a gradient's ID");
 });
