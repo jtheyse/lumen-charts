@@ -424,3 +424,10 @@ events/season-dark BDB8E86107C2849E
 events/grouped-day-newest 32AD6A55469EEED6
 events/window-now 8B839B673389E32C
 events/spans-allday 1B8B06F32A4102EB
+placings/two-scoring D172033D7F47ECA2
+placings/undated-first FFEE695ED09099D5
+heatmap-cells/narrow-fit E415EEEBE122970B
+heatmap-cells/keeps-value-short D702ADB67AE3CD34
+heatmap-cells/row-ink 3E122DB44AA83B16
+heatmap-cells/each-row 3DF722794FD15B5B
+titles/undrawn-190 F5FF8B082521B07D

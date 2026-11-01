@@ -67,12 +67,12 @@ Last confirmed production (5 Oct 2026): API and Web c39bfa83 and Perform 894f498
 That session replies with what changed and where the recipes missed real data. Record its findings in the brain and fold them into the next release.
 
 Race Face feedback still open (the brain's "Race Face feedback" tasks hold the detail):
-- **keys (0.36.0)**: an interactive chart has two tab stops, the scrolling viewport and the roving point (the docs say so from 0.37.0); consider dropping the viewport's stop when nothing scrolls. Static `Render` output keeps one stop per mark (363 for a 90-day chart);
+- **keys (0.36.0)**: done in 0.42.0 (marked done in 0.52.0): the viewport is `tabindex=-1` while the drawing fits its box, so the roving point is the only tab stop and the viewport takes a stop of its own only while the drawing scrolls. Static `Render` output keeps one stop per mark (363 for a 90-day chart);
 - **end labels (0.38.0)**: real surnames with a gap note run past the margin at 320 px; since 0.40.0 the note is cut before the name. A second line for the note, or a wider margin when only one or two labels would be cut, is still open;
 - **annotation labels (0.41.0)**: a reference's label ("CP: 255") can sit on markers near the line's end at 340, since annotation labels don't avoid marks;
-- **height floor (0.42.0)**: a small fixed-axis line chart with its titles undrawn (220 tall) is refused by the 240 floor; consider a lower floor for line charts with `DrawTitles = false`;
+- **height floor (0.42.0)**: done in 0.52.0: with `DrawTitles = false` the floor is 190 (titled charts keep 240; sparklines, strips, graphs, the planner and fitted heatmaps are unchanged);
 - **legend**: short entries stack one per row in the static legend (four rows, ~90 px under a 300 px chart at 340); lay short names out in one row. Long series names are truncated ("…MTB Le…"); consider wrapping them;
-- **recipe and doc notes**:
+- **recipe and doc notes**: the first four items and the per-lap, power-curve and team-rider items are done in 0.52.0, each checked against the code and written into `references/recipes-race-face.md` (the host CSS note says the title, description, source and legend carry `font-size`, not every text; a null lap is left out of a column chart, not named `missing`); the 1080×1350 rasteriser item stays open:
   - use the app's own PB flag and bins where it has them;
   - a sparkline's root is `role='group'` named by title and description;
   - Lumen writes single-quoted attributes;
