@@ -1532,6 +1532,12 @@ Getting there required a fix rather than a test. `Lumen.Charts.Blazor` previousl
 
 See [research and architecture](docs/RESEARCH.md), [verification](docs/VERIFICATION.md) and [measured performance](docs/PERFORMANCE.md). This is an original preview implementation, not a claim of feature or performance parity with mature commercial products.
 
+## 0.51.1 additions
+
+The WebAssembly sample host gets a Beyond charts page. `samples/Lumen.Wasm` had no page for `<LumenStats>`, `<LumenTable>` and `<LumenEvents>`, so their browser checks ran only on the server gallery. The host now serves them at `/components`, with a link beside the one back to its charts, and draws the gallery's own cards from the same invented data, with the same theme switch and brands. The browser suite runs those checks on whichever host it is given, and skips only the two that compare a prerender with the interactive page, since the WebAssembly host has no prerender. Nothing under `src/` changes, no chart is drawn differently, and the library's API and the skill are as they were.
+
+All 426 of 0.51.0's baseline rows are identical to it in both finishes, none added. The unit suite stays at 906, the HTTP script at 323, and the gallery's browser suite at 143 (2 checks skipped). The WebAssembly host runs 79 where it ran 64 (18 skipped). The recipe check is unchanged, 18 sports and 30 race-results blocks and 41 charts.
+
 ## 0.51.0 additions
 
 View data as a table. `<LumenChart>`'s "View data" was a hand-written table that listed at most 500 observations per series; it is now a `<LumenTable>`, so every observation is reachable and the cut is gone. It adds one public method, `ChartExport.DataTable(ChartSpec)`, and changes the markup and some words of the table behind "View data"; each part is described where it belongs, under [Blazor integration](#blazor-integration) and [Data tables](#data-tables).

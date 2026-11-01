@@ -2647,8 +2647,9 @@ if (await sportsLink.CountAsync() > 0)
 }
 else Console.WriteLine("SKIP Sports & performance checks: this host has no Sports & performance page");
 
-// 0.48.0: the Beyond charts page belongs to the gallery, so the suite finds it as a visitor does, by the link that names it, and a host
-// without one (the WebAssembly host) says SKIP. A page of its own starts in the light theme and the Lumen brand; the circuit is live once a
+// 0.48.0: the Beyond charts page, found as a visitor does, by the link that names it; a host without one says SKIP. Since 0.51.1 both hosts
+// have one, so these checks run on the server gallery and on the WebAssembly host; only the two prerender checks skip on WebAssembly,
+// whose first response is the empty shell. A page of its own starts in the light theme and the Lumen brand; the circuit is live once a
 // click on a button of the page has taken effect, so the checks click until it has.
 var beyondLink = page.GetByRole(AriaRole.Link, new() { Name = "Beyond charts" });
 if (await beyondLink.CountAsync() > 0)
@@ -2674,6 +2675,8 @@ if (await beyondLink.CountAsync() > 0)
         throw new Exception($"the click never took effect: {condition}");
     }
     var plain = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 } });
+    // A server host writes the tiles into its first response; the WebAssembly host's first response is the shell and draws them in the browser.
+    var prerenders = (await new HttpClient().GetStringAsync(componentsUrl)).Contains("lumen-stats");
 
     await Test("Components page: the tiles pass axe in Light, Dark and Midnight", async () =>
     {
@@ -2715,6 +2718,7 @@ if (await beyondLink.CountAsync() > 0)
         await tab.CloseAsync();
     });
 
+    if (prerenders)
     await Test("Components page: the prerendered tiles equal the interactive ones", async () =>
     {
         var tab = await ComponentsPage(plain);
@@ -2941,6 +2945,7 @@ if (await beyondLink.CountAsync() > 0)
         await tab.CloseAsync();
     });
 
+    if (prerenders)
     await Test("Components page: the prerendered timeline equals the interactive one", async () =>
     {
         var tab = await ComponentsPage(plain);
@@ -2955,6 +2960,7 @@ if (await beyondLink.CountAsync() > 0)
         Check(Bare(both[0]) == Bare(both[1]), "the timeline differs between the first response and the circuit");
         await tab.CloseAsync();
     });
+    if (!prerenders) Console.WriteLine("SKIP Components page prerender checks (tiles and timeline): this host draws in the browser, so its first response holds no markup to compare");
 
     await plain.CloseAsync();
 }

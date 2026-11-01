@@ -10,5 +10,5 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Lumen.Charts.Blazor/Lumen.Charts.Blazor.csproj" />
   </ItemGroup>
-  <ItemGroup><Compile Include="../Lumen.Gallery/PlannerData.cs" Link="PlannerData.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../Lumen.Gallery/PlannerData.cs" Link="PlannerData.cs" /><Compile Include="../Lumen.Gallery/DemoData.cs" Link="DemoData.cs" /><Compile Include="../Lumen.Gallery/SportsData.cs" Link="SportsData.cs" /></ItemGroup>
 </Project>

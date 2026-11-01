@@ -18,6 +18,27 @@
         .kinds button[aria-pressed=true]{border-color:#4B66CA;color:#4B66CA}
         .card{background:#fff;border:1px solid #E8EDF5;border-radius:10px;padding:6px 0}
         .state{font-size:12px}
+        .pages{display:flex;gap:16px;margin:0 0 18px;font-size:13px}.pages a{color:#3B52A8}.pages a[aria-current=page]{font-weight:700}
+        /* The Beyond charts page: the gallery's look, kept small. */
+        .app{--bg:#f7f9fc;--surface:#fff;--text:#27324b;--muted:#626D80;--line:#e4e9f1;--brand-1:#C2410C;--brand-2:#7C3AED;--brand-3:#0F766E;--brand-4:#BE185D;--accent:#4B66CA;--eyebrow:#636D80;background:var(--bg);color:var(--text);margin:-24px;padding:24px;min-height:100vh}
+        .app.dark{--bg:#101726;--surface:#171e2e;--text:#e8ecf6;--muted:#aab8cf;--line:#303b50;--brand-1:#FB923C;--brand-2:#A78BFA;--brand-3:#2DD4BF;--brand-4:#F472B6;--accent:#8295DA;--eyebrow:#9099A9}
+        .app .pages a{color:var(--accent)}
+        .app button{font:inherit;cursor:pointer}
+        .topbar{display:flex;justify-content:flex-end;align-items:center;gap:14px;font-size:12px;color:var(--muted)}
+        .topbar button{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:5px;padding:8px 12px}
+        .intro{padding:30px 0 22px}
+        .intro .eyebrow{font-size:9px;font-weight:650;letter-spacing:1.6px;color:var(--accent)}
+        .eyebrow>span{display:inline-block;width:5px;height:5px;background:var(--accent);border-radius:50%;vertical-align:middle;margin-right:7px}
+        .intro h1,.intro h2{font-size:34px;line-height:1.1;letter-spacing:-1.2px;margin:14px 0 12px;color:var(--text)}
+        .intro h2{font-weight:550}.intro em{font-style:normal;color:var(--accent)}
+        .app p{color:var(--muted)}.intro p{font-size:13px;line-height:1.85;max-width:780px;margin:0}
+        .segmented{display:flex;flex-wrap:wrap;gap:3px;margin-top:20px}
+        .segmented button{border:1px solid transparent;color:var(--muted);background:transparent;border-radius:5px;font-size:11px;padding:9px 15px}
+        .segmented .selected{background:var(--surface);color:var(--accent);border-color:var(--line);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent)}
+        .chart-card{background:var(--surface);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+        .comp-card{padding:18px 24px;min-width:0}.comp-results{--lumen-datatable-height:30rem}
+        body:has(.app.dark){background:#101726}
+        @media(max-width:760px){.comp-card{padding:0;border:0;border-radius:0;background:none}.intro h1,.intro h2{font-size:28px}.intro p{font-size:12px}}
     </style>
 </head>
 <body>
