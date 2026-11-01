@@ -983,6 +983,9 @@ lines.Add($"events/season-dark {Hash(Timeline(Races() with { Style = ChartStyle.
 lines.Add($"events/grouped-day-newest {Hash(Timeline(new EventTimelineSpec(RaceEvents()[8..]) { Title = "Latest first", TitleLevel = 3, GroupBy = EventGrouping.Day, NewestFirst = true, Now = EvAt(8, 3), Density = Density.Compact, TimeZone = "Africa/Johannesburg" }))}");
 lines.Add($"events/window-now {Hash(Timeline(Races(), ChartTheme.Light, 6))}");
 lines.Add($"events/spans-allday {Hash(Timeline(new EventTimelineSpec([new(EvAt(10, 31), "Half term") { AllDay = true, End = EvAt(11, 1) }, new(EvAt(12, 31), "Year-end break") { AllDay = true, End = EvAt(12, 31).AddDays(1) }, new(EvAt(10, 5), "Camp") { AllDay = true, End = EvAt(10, 7), Category = "Training" }, new(EvAt(10, 5, 9), "Long ride") { End = EvAt(10, 6, 11) }, new(EvAt(10, 5, 14), "Coffee") { End = EvAt(10, 5, 15) }]) { DateFormat = null }))}");
+// 0.52.0: places and points. Two scoring series draw two points lines; an undated result is drawn first.
+lines.Add($"placings/two-scoring {Hash(ChartSvg.Render(PlacingsChart.Build(placed.Select(p => p.Series == "Invented Open" ? p with { Points = 12 } : p).Append(new Placing(9) { Field = 20, Points = 15, Date = new(2027, 5, 15), Series = "Invented Open" }), new() { Style = Finished(null, ChartTheme.Light) })!))}");
+lines.Add($"placings/undated-first {Hash(ChartSvg.Render(PlacingsChart.Build(league.Select((p, i) => i == 2 ? p with { Date = null } : p), new() { Style = Finished(null, ChartTheme.Light) })!))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

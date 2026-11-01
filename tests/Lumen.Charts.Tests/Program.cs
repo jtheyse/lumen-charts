@@ -9594,16 +9594,16 @@ Test("Placings: a place is compared only with the previous race of its own serie
     var blank=PlacingsChart.Build([RacedResult(3,9,null,0),RacedResult(4,9,null,1,"Invented Cup")])!;
     Check(blank.Series.Select(s=>s.Name).SequenceEqual(["Place","Place · Invented Cup"]),"a result with no series is the place line alone");
 });
-Test("Placings: races are ordered by date when all have one, else kept as given, and labelled by label, date or number",()=>{
+Test("Placings: races are ordered by date with undated ones first in the order given, and labelled by label, date or number",()=>{
     var sorted=PlacingsChart.Build([RacedResult(3,9,null,2),RacedResult(5,9,null,0),RacedResult(4,9,null,1)])!;
     Check(sorted.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{5,4,3}),"by date");
     var same=PlacingsChart.Build([new Placing(9){Date=new(2027,3,8)},new Placing(4){Date=new(2027,3,1)},new Placing(7){Date=new(2027,3,8)},new Placing(2){Date=new(2027,3,8)}])!;
     Check(same.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{4,9,7,2}),"earlier date first, then same-date order");
     var mixed=PlacingsChart.Build([RacedResult(3,9,null,2),new Placing(5),new Placing(4){Label="Final"}])!;
-    Check(mixed.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{3,5,4}),"an undated race keeps the given order");
-    Check(mixed.Series[0].Points.Select(p=>p.Label).SequenceEqual(["15 Mar 2027","#2","Final"]),string.Join("|",mixed.Series[0].Points.Select(p=>p.Label)));
+    Check(mixed.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{5,4,3}),"undated races come first, in the order given");
+    Check(mixed.Series[0].Points.Select(p=>p.Label).SequenceEqual(["#1","Final","15 Mar 2027"]),string.Join("|",mixed.Series[0].Points.Select(p=>p.Label)));
     var custom=PlacingsChart.Build([RacedResult(3,9,null,0),new Placing(5)],new(){DateFormat="dd-MM-yyyy",Unlabelled="R{0}"})!;
-    Check(custom.Series[0].Points.Select(p=>p.Label).SequenceEqual(["01-03-2027","R2"]),"custom format and number");
+    Check(custom.Series[0].Points.Select(p=>p.Label).SequenceEqual(["R1","01-03-2027"]),"custom format and number");
 });
 // The default palette: the style's series colours except those within 60 of its rising or falling colour.
 static (int R,int G,int B) Rgb(string c)=>(Convert.ToInt32(c.Substring(1,2),16),Convert.ToInt32(c.Substring(3,2),16),Convert.ToInt32(c.Substring(5,2),16));
@@ -9614,7 +9614,7 @@ Test("Placings: colours come from the style without its change colours, or cycle
     var palette=PlacingsPalette(light);
     Check(!palette.Contains(light.Rising,StringComparer.OrdinalIgnoreCase)&&!palette.Contains(light.Falling,StringComparer.OrdinalIgnoreCase)&&palette.Count>=2,"the expected palette leaves out rising and falling: "+string.Join(",",palette));
     var two=PlacingsChart.Build([RacedResult(3,9,1,0,"A"),RacedResult(4,9,2,1,"B")])!;
-    Check(two.Series[0].Color==palette[0]&&two.Series[1].Color==palette[1]&&two.Series[2].Color==palette[2%palette.Count]&&two.Style==light,"defaults");
+    Check(two.Series[0].Color==palette[0]&&two.Series[1].Color==palette[1]&&two.Series[2].Color==palette[0]&&two.Series[3].Color==palette[1]&&two.Style==light,"defaults: each points line takes its places line's colour");
     var one=PlacingsChart.Build([RacedResult(3,9,1,0)])!;
     Check(one.Series[0].Color==palette[0]&&one.Series[1].Color==palette[1],"one series: the line, then the points");
     var five=PlacingsChart.Build(Enumerable.Range(0,5).Select(i=>RacedResult(i+1,9,null,i,$"S{i}")),new(){PlaceColors=["#F5F6F7","#F5B642"],PointsColor="#D7DDE5",Style=ChartStyle.Dark})!;
@@ -9666,7 +9666,7 @@ Test("Placings: more lines than the renderer draws are refused up front, naming 
     Check(msg.Contains("33")&&msg.Contains("32"),"33 series: "+msg);
     msg="";
     try{PlacingsChart.Build(Enumerable.Range(0,32).Select(i=>RacedResult(i+1,9,5,i,$"S{i}")));}catch(ArgumentException e){msg=e.Message;}
-    Check(msg.Contains("33")&&msg.Contains("32"),"32 places lines and a points line: "+msg);
+    Check(msg.Contains("64")&&msg.Contains("32"),"32 scoring series draw 64 lines: "+msg);
     Check(PlacingsChart.Build(Enumerable.Range(0,32).Select(i=>RacedResult(i+1,9,null,i,$"S{i}")))!.Series.Count==32,"32 is fine");
 });
 Test("Placings: refusals say why",()=>{
@@ -9682,7 +9682,7 @@ Test("Placings: refusals say why",()=>{
 Test("Placings: empty style palette is ok when not needed",()=>{
     var emptyPalette=ChartStyle.Dark with{Series=[]};
     var ok=PlacingsChart.Build([RacedResult(1,9,1,0,"A"),RacedResult(2,9,2,1,"B")],new(){PlaceColors=["#AABBCC"],PointsColor="#DDEEFF",Style=emptyPalette})!;
-    Check(ok.Series[0].Color=="#AABBCC"&&ok.Series[2].Color=="#DDEEFF","all colors given");
+    Check(ok.Series[0].Color=="#AABBCC"&&ok.Series[2].Color==ok.Series[0].Color&&ok.Series[3].Color==ok.Series[1].Color,"each points line takes its places line's colour; PointsColor colours nothing with two scoring series");
     Check(PlacingsChart.Build([RacedResult(1,9,null,0,"A")],new(){PlaceColors=["#AABBCC"],Style=emptyPalette}) is not null,"no points, so no points colour needed");
 });
 Test("Placings: empty style palette is refused when needed",()=>{
@@ -12884,6 +12884,69 @@ Test("0.51.0: hiding View data lets go of the cached table, and reopening builds
         Check(typeof(LumenChart).GetProperty("DataSpec",flags)!.GetValue(c) is TableSpec,"rebuilt on reopening");
     });
     Check(held is not null&&after is null,"the table is not held while View data is hidden");
+});
+// 0.52.0: places and points
+Test("Placings 0.52.0: PaneLabel labels the pane and leaves the line's name",()=>{
+    var spec=PlacingsChart.Build([RacedResult(3,9,5,0)],new(){PointsName="Pts",PaneLabel="Points"})!;
+    Check(spec.Panes![0].Label=="Points","pane label: "+spec.Panes[0].Label);
+    Check(spec.Series.Last().Name=="Pts","points series keeps PointsName: "+spec.Series.Last().Name);
+    Check(PlacingsChart.Build([RacedResult(3,9,5,0)],new(){PointsName="Pts"})!.Panes![0].Label=="Pts","null PaneLabel uses PointsName");
+    string msg="";
+    try{PlacingsChart.Build([RacedResult(3,9,5,0)],new(){PaneLabel=" "});}catch(ArgumentException e){msg=e.Message;}
+    Check(msg.Contains("PaneLabel"),"blank PaneLabel refused: "+msg);
+});
+Test("Placings 0.52.0: Description fills {best} and defaults to today's sentence",()=>{
+    var rs=new[]{RacedResult(5,9,10,0),RacedResult(3,9,12,1)};
+    Check(PlacingsChart.Build(rs,new(){Description="Best {best} of the season"})!.Description=="Best 3 of the season","fills");
+    Check(PlacingsChart.Build(rs,new(){Description="{best} and {best}"})!.Description=="3 and 3","every {best}");
+    Check(PlacingsChart.Build(rs,new(){Description="No token"})!.Description=="No token","as given");
+    Check(PlacingsChart.Build(rs,new(){Description=""})!.Description=="","empty is allowed");
+    Check(PlacingsChart.Build(rs)!.Description=="Finishing place out of the field, first at the top, and points. Best: 3.","default with points");
+    Check(PlacingsChart.Build([RacedResult(5,9,null,0),RacedResult(3,9,null,1)])!.Description=="Finishing place out of the field, first at the top. Best: 3.","default without points");
+});
+Test("Placings 0.52.0: undated races come first, then dated by date",()=>{
+    var spec=PlacingsChart.Build([RacedResult(2,9,null,2),new Placing(11){Label="A"},RacedResult(3,9,null,0),new Placing(12){Label="Final"},RacedResult(4,9,null,0)])!;
+    Check(spec.Series[0].Points.Select(p=>p.Y).SequenceEqual(new double?[]{11,12,3,4,2}),string.Join("|",spec.Series[0].Points.Select(p=>p.Y)));
+    var unlabelled=PlacingsChart.Build([RacedResult(2,9,null,2),new Placing(11),new Placing(12){Label="Final"},RacedResult(3,9,null,0),RacedResult(4,9,null,0)])!;
+    Check(unlabelled.Series[0].Points.Select(p=>p.Label).SequenceEqual(["#1","Final","1 Mar 2027","1 Mar 2027","15 Mar 2027"]),string.Join("|",unlabelled.Series[0].Points.Select(p=>p.Label)));
+});
+Test("Placings 0.52.0: two scoring series draw two points lines",()=>{
+    var spec=PlacingsChart.Build([RacedResult(5,9,40,0,"League"),RacedResult(6,9,12,1,"Open"),RacedResult(4,9,52,2,"League"),RacedResult(3,9,null,3,"Open")],new(){PointsColor="#123456"})!;
+    Check(spec.Series.Select(s=>s.Name).SequenceEqual(["Place · League","Place · Open","Points · League","Points · Open"]),string.Join("|",spec.Series.Select(s=>s.Name)));
+    for(var k=0;k<2;k++){
+        Check(spec.Series[2+k].Pane==1,"pane");
+        Check(spec.Series[2+k].Color==spec.Series[k].Color,"colour follows its places line");
+        Check(spec.Series[2+k].Color!="#123456","PointsColor is ignored");
+    }
+    Check(spec.Series[2].Points.Select(p=>p.X).SequenceEqual(new double[]{0,2}),"League X");
+    Check(spec.Series[3].Points.Select(p=>p.X).SequenceEqual(new double[]{1,3}),"Open X");
+    Check(spec.Series[3].Points[1].Y is null,"a race without points is a gap, not 0");
+    var blank=PlacingsChart.Build([RacedResult(5,9,40,0,"League"),RacedResult(6,9,12,1)])!;
+    Check(blank.Series.Select(s=>s.Name).SequenceEqual(["Place · League","Place","Points · League","Points"]),string.Join("|",blank.Series.Select(s=>s.Name)));
+});
+Test("Placings 0.52.0: an undated first race without points still leads its points line",()=>{
+    var spec=PlacingsChart.Build([new Placing(4){Series="Open"},RacedResult(3,9,40,0,"League"),RacedResult(5,9,12,1,"Open"),RacedResult(2,9,50,2,"League")])!;
+    Check(spec.Series[0].Name=="Place · Open"&&spec.Series[0].Points[0].X==0&&spec.Series[0].Points[0].Y==4,"drawn first at X 0");
+    var open=spec.Series.Single(s=>s.Name=="Points · Open");
+    Check(open.Points[0].X==0&&open.Points[0].Y is null&&open.Points[1].X==2&&open.Points[1].Y==12,string.Join("|",open.Points.Select(p=>p.X+":"+p.Y)));
+});
+Test("Placings 0.52.0: one scoring series is byte-identical to 0.51.0",()=>{
+    Placing[] placed=[
+        new(18){Field=40,Points=33,Date=new(2027,3,13),Series="Invented League"},
+        new(6){Field=22,Date=new(2027,4,3),Series="Invented Open"},
+        new(14){Field=42,Points=37,Date=new(2027,4,24),Series="Invented League"},
+        new(16){Field=41,Points=35,Date=new(2027,6,19),Series="Invented League"},
+        new(11){Field=44,Points=40,Date=new(2027,8,14),Series="Invented League"}];
+    var league=placed.Where(p=>p.Series=="Invented League").Select(p=>p with{Series=null}).ToArray();
+    Check(Hash16(ChartSvg.Render(PlacingsChart.Build(league)!))=="3A5A872CA78F9D0F","placings/points");
+    Check(Hash16(ChartSvg.Render(PlacingsChart.Build(league.Select(p=>p with{Points=null}))!))=="F644532B9FDBED34","placings/no-points");
+    Check(Hash16(ChartSvg.Render(PlacingsChart.Build(placed)!))=="5462E4F4895ACDEA","placings/two-series");
+});
+Test("Placings 0.52.0: the 32-line limit counts every points line",()=>{
+    Check(PlacingsChart.Build(Enumerable.Range(0,16).Select(i=>RacedResult(i+1,9,5,i,$"S{i}")))!.Series.Count==32,"16 scoring series is 32 lines");
+    string msg="";
+    try{PlacingsChart.Build(Enumerable.Range(0,17).Select(i=>RacedResult(i+1,9,5,i,$"S{i}")));}catch(ArgumentException e){msg=e.Message;}
+    Check(msg.Contains("34")&&msg.Contains("32"),"17 scoring series: "+msg);
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
