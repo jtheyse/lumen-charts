@@ -12676,8 +12676,8 @@ Test("0.51.0: DataTable for a 600-point line chart",()=>{
     Check(table.Rows[3].Cells[2].Number==4&&table.Rows[3].Cells[2].Note is null,"plain value");
     Check(table.Rows[9].Cells[2].Number==2500&&table.Rows[9].Cells[2].Note==" · PB","value note");
     Check(table.Rows[7].Cells[2].Number is null&&table.Rows[7].Cells[2].Note=="absent · rest","gap label and note on the missing value");
-    var midnight=spec with{Style=null,Theme=ChartTheme.Dark};
-    Check(ChartExport.DataTable(midnight).Style==ChartSvg.ResolveStyle(midnight),"theme preset");
+    var dark=spec with{Style=null,Theme=ChartTheme.Dark};
+    Check(ChartExport.DataTable(dark).Style==ChartSvg.ResolveStyle(dark),"theme preset");
 });
 Test("0.51.0: DataTable lists series in order, and a missing value without a gap label has no note",()=>{
     var spec=Spec() with{Series=[new("A",[new(0,1,"x"),new(1,null,"y")]),new("B",[new(0,3,"x")])]};
@@ -12751,9 +12751,27 @@ Test("0.51.0: the component's value and category words are those DataTable write
         var got=Cells(html);
         Check(got.Length>0&&got.SequenceEqual(want),$"{what}: {string.Join(" ; ",got)} vs {string.Join(" ; ",want)}");
     }
+    string[] Pinned(ChartSpec spec)=>Cells(Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.SetValue(chart,true);await chart.SelectPoint(0,0);}));
+    Check(Pinned(Spec() with{YFormat=ValueFormat.Compact,YUnit=" W",Series=[new("Power",[new(0,1500,"A"){ValueNote=" · PB"},new(1,2500,"B")])]}).SequenceEqual(new[]{"Power|A|1.5k W · PB","Power|B|2.5k W"}),"plain line words");
+    Check(Pinned(new ChartSpec{Kind=ChartKind.Candlestick,Series=[new("ACME",[ChartPoint.Candle(0,12,14,11,13,"Mon")])]}).SequenceEqual(new[]{"ACME|Mon|O 12 · H 14 · L 11 · C 13"}),"candlestick words");
     Same(Spec() with{YFormat=ValueFormat.Compact,YUnit=" W",Series=[new("Power",[new(0,1500,"A"){ValueNote=" · PB"},new(1,2500,"B")])]},"plain line");
     Same(new ChartSpec{Kind=ChartKind.Candlestick,Series=[new("ACME",[ChartPoint.Candle(0,12,14,11,13,"Mon"),ChartPoint.Candle(1,13,15,12,12.5,"Tue")])]},"candlestick");
     Same(Spec(ChartKind.Column) with{Series=[new("Rides",[new(0,5,"Mon"){SubLabel="152 bpm"},new(1,7,"Tue")])]},"column with sub-label");
+});
+Test("0.51.0: a log axis in a duration format gives a Text value in the axis's words",()=>{
+    var spec=Spec() with{YAxis=AxisKind.Log,YFormat=ValueFormat.Duration,Series=[new("Pace",[new(0,300,"A"),new(1,3700,"B")])]};
+    var table=ChartExport.DataTable(spec);
+    var axis=ChartData.Measure(spec,spec.Series[0]);
+    Check(table.Columns[2].Kind==TableColumnKind.Text&&!table.Columns[2].Sortable,"text");
+    Check(table.Rows[0].Cells[2].Text==axis.Format(300)&&table.Rows[1].Cells[2].Text==axis.Format(3700),string.Join("|",table.Rows.Select(r=>r.Cells[2].Text)));
+});
+Test("0.51.0: a cut never splits a surrogate pair",()=>{
+    var emoji="😀";
+    var label=new string('a',198)+emoji+"tail";
+    var cell=ChartExport.DataTable(Spec(ChartKind.Column) with{Series=[new("S",[new(0,1,label)])]}).Rows[0].Cells[1].Text!;
+    Check(cell==new string('a',198)+"…","category "+cell.Length);
+    var title=ChartExport.DataTable(Spec() with{Title=new string('T',100)+new string('b',18)+emoji+"x"}).Caption;
+    Check(title.EndsWith("…")&&!title.Any(char.IsSurrogate)&&title.Length<=120,"caption "+title.Length);
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
