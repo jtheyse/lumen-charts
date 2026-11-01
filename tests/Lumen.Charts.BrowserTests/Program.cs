@@ -344,9 +344,13 @@ await Test("The data table lists observations with scoped headers, is a named re
         Check(await table.Locator("caption").CountAsync() == 1);
         Check(await table.Locator("th[scope=col]").CountAsync() == 3, "table headers are not scoped");
         Check(await table.Locator("tbody tr").CountAsync() > 0);
-        // The table scrolls in a box of its own, so it takes a tab stop and a name, as the drawing's scrolling region does.
-        var region = chart.Locator(".lumen-table");
-        Check(await region.GetAttributeAsync("tabindex") == "0" && await region.GetAttributeAsync("role") == "region" && await region.GetAttributeAsync("aria-label") == "Chart data", "the table is not a named, focusable region");
+        // The table scrolls in a box of its own, so it takes a tab stop and a name, as the drawing's scrolling region does. Since 0.51.0 that
+        // region is the LumenTable's own, named by its caption, inside a plain .lumen-table wrapper.
+        var wrapper = chart.Locator(".lumen-table");
+        Check(await wrapper.GetAttributeAsync("tabindex") == null && await wrapper.GetAttributeAsync("role") == null && await wrapper.GetAttributeAsync("aria-label") == null, "the wrapper is not plain");
+        var region = wrapper.Locator(".lumen-datatable-scroll");
+        var caption = (await table.Locator("caption").TextContentAsync())!.Trim();
+        Check(caption.EndsWith("original data") && await region.GetAttributeAsync("tabindex") == "0" && await region.GetAttributeAsync("role") == "region" && await region.GetAttributeAsync("aria-label") == caption, $"the table is not a focusable region named \"{caption}\"");
         await Sweep();
     }
     // The data is hidden again whatever the checks found, so the tests after it start from a closed table.
@@ -1275,6 +1279,29 @@ async Task ZeroLabelsClear(IPage target, string background)
 
 await Test("axe-core reports no WCAG A or AA violation", async () => { await ZeroLabelsClear(page, "#FFFFFF"); await Sweep(); });
 
+// 0.51.0: a chart's View data is a LumenTable; it passes axe open, in Light and in Dark, and the page goes back to Light for the tests after it.
+await Test("axe-core reports no WCAG A or AA violation with a chart's View data open, in Light and Dark", async () =>
+{
+    var switchTheme = page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) });
+    await Tool("View data").ClickAsync();
+    var scroll = chart.Locator(".lumen-table .lumen-datatable-scroll");
+    try
+    {
+        await scroll.WaitForAsync();
+        await Sweep();
+        if (await switchTheme.CountAsync() == 0) { Console.WriteLine("SKIP Dark with View data open: this host has no theme switch"); return; }
+        await switchTheme.First.ClickAsync();
+        await page.WaitForFunctionAsync("() => document.querySelector('.lumen-chart .lumen-datatable')?.getAttribute('style')?.includes('#171E2E')");
+        try { await Sweep(); }
+        finally
+        {
+            await switchTheme.First.ClickAsync();
+            await page.WaitForFunctionAsync("() => document.querySelector('.lumen-chart .lumen-datatable')?.getAttribute('style')?.includes('#FFFFFF')");
+        }
+    }
+    finally { await Tool("Hide data").ClickAsync(); }
+});
+
 // A theme belongs to the host, not to a component, so there is no component selector for it: the switch is
 // found the way a user finds it, as a button named for the theme.
 var theme = page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("theme", RegexOptions.IgnoreCase) });
@@ -1291,6 +1318,47 @@ if (await theme.CountAsync() > 0)
     });
 }
 else Console.WriteLine("SKIP dark-theme axe sweep: this host has no theme switch");
+
+// 0.51.0: every chart kind the home explorer offers opens its View data, as a LumenTable (a heatmap's grid), without a console or page error.
+// The explorer is the host's own, so a host without one says SKIP. It is put back on the kind it opened on.
+var explorerKinds = page.Locator("#playground .chart-tabs button");
+if (await explorerKinds.CountAsync() > 0)
+{
+    await Test("Every chart kind in the home explorer opens its View data without a console error", async () =>
+    {
+        var errors = new List<string>();
+        void OnConsole(object? sender, IConsoleMessage message) { if (message.Type == "error") errors.Add(message.Text); }
+        void OnError(object? sender, string message) => errors.Add(message);
+        var card = page.Locator("#playground .lumen-chart").First;
+        var kinds = (await explorerKinds.AllTextContentsAsync()).Select(k => k.Trim()).ToList();
+        var original = await explorerKinds.EvaluateAllAsync<int>("tabs => tabs.findIndex(t => t.getAttribute('aria-pressed') === 'true')");
+        page.Console += OnConsole; page.PageError += OnError;
+        try
+        {
+            Check(kinds.Count >= 20, $"the explorer offers {kinds.Count} kinds");
+            for (var i = 0; i < kinds.Count; i++)
+            {
+                await explorerKinds.Nth(i).ClickAsync();
+                await page.WaitForFunctionAsync("index => document.querySelectorAll('#playground .chart-tabs button')[index].getAttribute('aria-pressed') === 'true'", i);
+                var open = card.GetByRole(AriaRole.Button, new() { Name = "View data", Exact = true });
+                await open.ClickAsync();
+                var rows = card.Locator(".lumen-table tbody tr");
+                try { await rows.First.WaitForAsync(); }
+                catch (TimeoutException) { throw new Exception($"{kinds[i]}: View data lists no rows"); }
+                Check(await card.Locator(".lumen-table").CountAsync() == 1, $"{kinds[i]}: {await card.Locator(".lumen-table").CountAsync()} data tables");
+                await card.GetByRole(AriaRole.Button, new() { Name = "Hide data", Exact = true }).ClickAsync();
+                await card.Locator(".lumen-table").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+            }
+        }
+        finally
+        {
+            page.Console -= OnConsole; page.PageError -= OnError;
+            if (original >= 0) { await explorerKinds.Nth(original).ClickAsync(); await page.WaitForFunctionAsync("index => document.querySelectorAll('#playground .chart-tabs button')[index].getAttribute('aria-pressed') === 'true'", original); }
+        }
+        Check(errors.Count == 0, "console errors: " + string.Join(" | ", errors));
+    });
+}
+else Console.WriteLine("SKIP explorer View data check: this host has no chart explorer");
 
 // Midnight is a brand a host chooses to offer, so it too is found by the button that names it.
 var midnight = page.GetByRole(AriaRole.Button, new() { Name = "Midnight", Exact = true });
@@ -1938,9 +2006,10 @@ if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
         await Opens("All 75 days", 2356, 75);
         Check(await Pressed() == "false/true", $"after picking All 75 days, Last 30 days / All 75 days read aria-pressed {await Pressed()}, not false/true");
     });
-    // 0.47.2: a chart that opens at its end lists the last 500 observations of each series in View data, so the table ends where the card opens, at
-    // its latest day. The card's 75 days are all of them, and its last row is its last day, 2 Nov 2026.
-    await Test("With ScrollToEnd the Sign-ups per day card's View data says it shows the last 500 observations and its last row is its latest day, Mon 2 Nov 2026", async () =>
+    // 0.47.2, 0.51.0: View data is a LumenTable, so the card's table lists every one of its 75 days and ends at its latest, 2 Nov 2026, where the
+    // card opens. 75 rows fit a page of 100, so it has no pager and none of the old "Table shows ..." note; a chart of more than 100 opens its
+    // table on its last page with ScrollToEnd, which the unit tests prove and the Sports & performance page's Performance management pages below.
+    await Test("With ScrollToEnd the Sign-ups per day card's View data lists all 75 days, with no note of a cut, and its last row is its latest day, Mon 2 Nov 2026", async () =>
     {
         await using var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 } });
         var tab = await Fresh41(context);
@@ -1949,9 +2018,11 @@ if (await page.Locator("#sign-ups .lumen-chart").CountAsync() > 0)
         await card.GetByRole(AriaRole.Button, new() { Name = "View data", Exact = true }).ClickAsync();
         var table = card.Locator(".lumen-table");
         await table.Locator("table").WaitForAsync();
-        var note = await table.Locator("p").TextContentAsync() ?? "";
-        Check(note.Contains("the last 500 observations"), $"the table's note reads \"{note}\", not one that says it shows the last 500 observations");
-        var days = await table.Locator("tbody tr td:nth-child(2)").AllTextContentsAsync();
+        var words = await table.InnerTextAsync();
+        Check(!words.Contains("Table shows") && !words.Contains("500 observations"), $"the table still says it cuts: \"{words[..Math.Min(words.Length, 120)]}\"");
+        Check((await table.Locator("caption").TextContentAsync())!.Trim().EndsWith("original data"), "the caption");
+        Check(await table.Locator("[data-lumen-page]").CountAsync() == 0, "75 rows have a pager");
+        var days = await table.Locator("tbody tr th").AllTextContentsAsync();
         Check(days.Count == 75 && days[^1].StartsWith("Mon 2 Nov 2026"), $"{days.Count} rows, the last reading \"{days.LastOrDefault()}\", not 75 ending Mon 2 Nov 2026");
     });
 }
@@ -2238,6 +2309,36 @@ if (await sportsLink.CountAsync() > 0)
         });
     }
     else Console.WriteLine("SKIP Category heatmap checks: this host's Sports & performance page has no Category heatmap");
+
+    // 0.51.0: a chart of more than 100 observations pages its View data at 100 rows. The Performance management chart has several series of many days
+    // each, and opens on its first page (it does not set ScrollToEnd); Next and Previous page move through it and Previous keeps focus.
+    if (await sports.Locator("#performance .lumen-chart").CountAsync() > 0)
+    {
+        await Test("Performance management's View data pages at 100 rows, Last page ends on its final row, and Previous page keeps focus", async () =>
+        {
+            var card = sports.Locator("#performance .lumen-chart");
+            await card.GetByRole(AriaRole.Button, new() { Name = "View data", Exact = true }).ClickAsync();
+            var range = card.Locator(".lumen-table .lumen-datatable-range");
+            await range.WaitForAsync();
+            var first = Regex.Match((await range.TextContentAsync())!.Trim(), @"^Rows 1–100 of (\d+)$");
+            Check(first.Success, $"the first page reads \"{await range.TextContentAsync()}\", not Rows 1–100 of N");
+            var total = int.Parse(first.Groups[1].Value, CultureInfo.InvariantCulture);
+            Check(total > 200, $"only {total} rows, too few to page twice");
+            Check(await card.Locator(".lumen-table tbody tr").CountAsync() == 100, "a page does not hold 100 rows");
+            Check(!(await card.Locator(".lumen-table").InnerTextAsync()).Contains("Table shows"), "the old note");
+            var button = (string name) => card.Locator($".lumen-table [data-lumen-page][aria-label='{name}']");
+            await button("Next page").ClickAsync();
+            await sports.WaitForFunctionAsync($"() => document.querySelector('#performance .lumen-datatable-range')?.textContent.trim() === 'Rows 101–200 of {total}'");
+            await button("Next page").ClickAsync();
+            await sports.WaitForFunctionAsync($"() => document.querySelector('#performance .lumen-datatable-range')?.textContent.trim() === 'Rows 201–{Math.Min(300, total)} of {total}'");
+            await button("Previous page").ClickAsync();
+            await sports.WaitForFunctionAsync("() => document.querySelector('#performance .lumen-datatable-range')?.textContent.trim().startsWith('Rows 101–200 of ')");
+            await sports.WaitForFunctionAsync("() => document.activeElement?.matches('#performance [data-lumen-page][aria-label=\"Previous page\"]') === true");
+            await button("Last page").ClickAsync();
+            await sports.WaitForFunctionAsync($"() => document.querySelector('#performance .lumen-datatable-range')?.textContent.trim().endsWith('–{total} of {total}')");
+            await card.GetByRole(AriaRole.Button, new() { Name = "Hide data", Exact = true }).ClickAsync();
+        });
+    }
 
     await Test("Hovering a mark on the Sports & performance page shows its tooltip", async () =>
     {

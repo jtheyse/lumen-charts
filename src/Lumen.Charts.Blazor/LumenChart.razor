@@ -47,15 +47,8 @@ else
     }
     else if(showData)
     {
-        <div class="lumen-table" tabindex="0" role="region" aria-label="Chart data"><table><caption>@Spec.Title — original data (@Spec.Series.Sum(s=>s.Points.Count) observations)</caption>
-        <thead><tr><th scope="col">Series</th><th scope="col">X / Category</th><th scope="col">Value</th></tr></thead><tbody>
-        @foreach(var series in Spec.Series)
-        {
-            @* A chart that opens at its end lists each series' last 500, so its table ends where the chart opens (0.47.2). *@
-            @foreach(var point in ScrollToEnd ? series.Points.TakeLast(500) : series.Points.Take(500))
-            { <tr><td>@series.Name</td><td>@Category(point)</td><td>@Value(series,point)</td></tr> }
-        }
-        </tbody></table><p>Table shows @(ScrollToEnd ? "the last" : "up to") 500 observations per series. CSV contains all original observations.</p></div>
+        @* The chart's observations as a LumenTable, which pages, sorts and keeps its header in view, so every observation is reachable (0.51.0). *@
+        <div class="lumen-table"><LumenTable Spec="@DataSpec"/></div>
     }
 </div>
 }
@@ -137,6 +130,18 @@ else
     private string? DrawnStyle => drawnWidth is { } drawn ? $"--lumen-drawn:{drawn}px" + (band is { } b ? FormattableString.Invariant($";scroll-padding-left:{b.Left}px") : "") : null;
     private int Width => FitWidth && fitted is { } width ? width : Spec.Width;
     private bool CanZoom => Spec.Kind is ChartKind.Line or ChartKind.Area or ChartKind.Scatter or ChartKind.Bubble or ChartKind.Candlestick or ChartKind.Ohlc or ChartKind.Band or ChartKind.Range or ChartKind.Timeline or ChartKind.Blocks;
+    // The table View data shows, built once for a spec, a scroll end and a style, so a re-render does not rebuild a long table.
+    private ChartSpec? dataOf; private bool dataEnd; private ChartStyle? dataStyle; private TableSpec? dataSpec;
+    private TableSpec DataSpec
+    {
+        get
+        {
+            var style=Style;
+            if(dataSpec is null||!ReferenceEquals(dataOf,Spec)||dataEnd!=ScrollToEnd||!Equals(dataStyle,style))
+            { dataSpec=ChartExport.DataTable(Spec) with{Style=style,StartAtEnd=ScrollToEnd}; dataOf=Spec; dataEnd=ScrollToEnd; dataStyle=style; }
+            return dataSpec;
+        }
+    }
     private string Value(ChartSeries series,ChartPoint point)=>ChartData.Value(Spec,xAxis,series,point);
     private string Category(ChartPoint point)=>ChartData.Category(Spec,xAxis,point);
     private Axis Measure(ChartSeries series)=>ChartData.Measure(Spec,series);

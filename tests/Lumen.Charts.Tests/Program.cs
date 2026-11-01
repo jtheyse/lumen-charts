@@ -1899,7 +1899,15 @@ Test("Formats and reversal are refused where they cannot apply",()=>{
     Reject(()=>ChartSvg.Render(Spec() with{YFormat=(ValueFormat)9}));
     Reject(()=>ChartSvg.Render(Spec() with{Y2Format=(ValueFormat)(-1)}));
 });
-string Operate(ChartSpec spec,Func<LumenChart,Task> act,bool fit=false,bool scrollToEnd=false)
+// View data is a LumenTable since 0.51.0: a row is <tr><td>series</td><th scope=row>category</th><td>value<span note></span></td></tr>. The tests that read
+// a row's words from before, as <tr><td>series</td><td>category</td><td>value</td></tr> in Razor's encoding, read them through this, so each still proves its words;
+// Operate(raw:true) leaves the table's own markup, which the 0.51.0 tests read.
+string LegacyRows(string html)=>System.Text.RegularExpressions.Regex.Replace(html,"<tr><td class='[^']*'>(.*?)</td><th scope='row' class='[^']*'>(.*?)</th><td class='[^']*'>(.*?)</td></tr>",m=>
+{
+    string Word(string cell)=>System.Text.Encodings.Web.HtmlEncoder.Default.Encode(System.Net.WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(cell,"</?span[^>]*>","")));
+    return $"<tr><td>{Word(m.Groups[1].Value)}</td><td>{Word(m.Groups[2].Value)}</td><td>{Word(m.Groups[3].Value)}</td></tr>";
+});
+string Operate(ChartSpec spec,Func<LumenChart,Task> act,bool fit=false,bool scrollToEnd=false,bool raw=false)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
     var renderer=new HtmlRenderer(services,services.GetRequiredService<ILoggerFactory>());
@@ -1910,7 +1918,7 @@ string Operate(ChartSpec spec,Func<LumenChart,Task> act,bool fit=false,bool scro
             var root=await renderer.RenderComponentAsync<CascadingValue<ChartStyle>>(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Value",ChartStyle.Light},{"ChildContent",content}}));
             await act(chart!);
             await root.QuiescenceTask;
-            return root.ToHtmlString();
+            return raw ? root.ToHtmlString() : LegacyRows(root.ToHtmlString());
         }).GetAwaiter().GetResult();
     } finally {renderer.DisposeAsync().AsTask().GetAwaiter().GetResult();services.Dispose();}
 }
@@ -6035,8 +6043,9 @@ Test("Value notes reach the label, the tooltip and accessible name, the componen
     Check(ChartExport.Csv(Spec()).StartsWith("Series,X,Y,Label,Size\r\n"),"a chart without notes has a Note column");
     Check(ChartExport.Csv(Spec() with{Series=[new("S",[new(0,1){ValueNote="+1"}])]}).Contains(",\"'+1\"\r\n"),"a note is not protected against spreadsheet formulas");
     var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
-    var html=Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,1);});
-    Check(html.Contains("<tr><td>Position</td><td>16-05-2026</td><td>24/48</td></tr>")&&html.Contains("<tr><td>Position</td><td>04-07-2026</td><td>Missing</td></tr>")&&html.Contains("<tr><td>Position</td><td>08-08-2026</td><td>21</td></tr>"),"the table");
+    var raw=Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,1);},raw:true);var html=LegacyRows(raw);
+    // 0.51.0: a missing value is the table's dash (read aloud as none) with its note after it, where the hand-written table said "Missing" and dropped the note.
+    Check(html.Contains("<tr><td>Position</td><td>16-05-2026</td><td>24/48</td></tr>")&&raw.Contains("04-07-2026</th><td class='lumen-datatable-right'><span aria-hidden='true'>—</span><span class='lumen-sr'> none</span><span class='lumen-datatable-note'>/51</span></td>")&&html.Contains("<tr><td>Position</td><td>08-08-2026</td><td>21</td></tr>"),"the table");
     Check(html.Contains("Position: 16-05-2026 = 24/48"),"the status line");
     // Columns, bars, blocks, donut slices, heatmap cells and radar points carry a note in their names, and a column's or bar's label
     // writes it muted after the value; at its default it changes nothing.
@@ -8408,8 +8417,11 @@ Test("The shared readout reads a gap label's X, even where no series has a value
     Check(status=="Share: Round 3 = absent",status);
     Operate(Season42() with{SharedReadout=true},async chart=>{await chart.SelectPoint(0,2);status=(string)typeof(LumenChart).GetField("status",flags)!.GetValue(chart)!;});
     Check(status=="Round 3 · Share absent",status);
-    var html=Operate(Season42(),async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,2);});
-    Check(html.Contains("<tr><td>Share</td><td>Round 3</td><td>absent</td></tr>")&&Operate(Season42(gap:null),async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,0);}).Contains("<td>Round 3</td><td>Missing</td>"),"the data table");
+    // 0.51.0: a missing value is the table's dash, read aloud as none; its gap label is the cell's note, and without one the cell has no note.
+    var html=Operate(Season42(),async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,2);},raw:true);
+    var plainGap=Operate(Season42(gap:null),async chart=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(chart,true);await chart.SelectPoint(0,0);},raw:true);
+    Check(html.Contains("Round 3</th><td class='lumen-datatable-right'><span aria-hidden='true'>—</span><span class='lumen-sr'> none</span><span class='lumen-datatable-note'>absent</span></td>")
+        &&plainGap.Contains("Round 3</th><td class='lumen-datatable-right'><span aria-hidden='true'>—</span><span class='lumen-sr'> none</span></td>"),"the data table");
 });
 Test("The component's viewport is written as a scrolling region and a tab stop as before, and its script takes both away while the drawing fits and gives them back while it scrolls",()=>{
     var html=Operate(Season42(),_=>Task.CompletedTask,fit:true);
@@ -9954,10 +9966,14 @@ Test("The component's open data table, a heatmap's grid or any other chart's lis
     // The table scrolls inside a box 320 pixels tall, so a keyboard reader needs a tab stop on it, named as the drawing's own scrolling region is.
     // It opens on a click, which static rendering cannot send, so the test opens it directly and reads a point, which draws it.
     const string region="class=\"lumen-table\" tabindex=\"0\" role=\"region\" aria-label=\"Chart data\">";
-    string Opened(ChartSpec spec)=>Operate(spec,async c=>{typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.SelectPoint(0,0);});
+    const string wrapper="<div class=\"lumen-table\"><div class=\"lumen-datatable-host\">";
+    string Opened(ChartSpec spec,bool raw=false)=>Operate(spec,async c=>{typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(c,true);await c.SelectPoint(0,0);},raw:raw);
     var grid=Opened(HeatGrid());var list=Opened(Spec(ChartKind.Column));
     Check(grid.Contains(region+"<table class='lumen-grid-table'>")&&Regex.Matches(grid,"class=\"lumen-table\"").Count==1,"the grid's region");
-    Check(list.Contains(region+"<table><caption>")&&list.Contains("original data")&&Regex.Matches(list,"class=\"lumen-table\"").Count==1,"the list's region");
+    // 0.51.0: the list is a LumenTable inside a plain wrapper; the focusable, named region is the table's own, named by its caption.
+    var table=Opened(Spec(ChartKind.Column),raw:true);
+    Check(table.Contains(wrapper)&&table.Contains("class='lumen-datatable-scroll' role='region' tabindex='0' aria-label='")&&table.Contains("original data'")&&Regex.Matches(table,"class=\"lumen-table\"").Count==1,"the list's region");
+    Check(!table.Contains("class=\"lumen-table\" tabindex")&&!table.Contains("class=\"lumen-table\" role")&&!table.Contains("aria-label=\"Chart data\""),"the wrapper is plain");
     Check(!Prerender(ChartElement(Spec(ChartKind.Column))).Contains("lumen-table"),"a closed table draws no region");
     var css=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"../../../../../src/Lumen.Charts.Blazor/wwwroot/lumen.css"));
     const string ring="{outline:2px solid var(--lumen-accent,#5675e7);outline-offset:-2px}";
@@ -11183,33 +11199,36 @@ ChartSpec Days472()=>DailyCountsChart.Build(Enumerable.Range(0,600).Select(i=>ne
 string DataOpen472(ChartSpec spec,bool end)=>Operate(spec,async chart=>{typeof(LumenChart).GetField("showData",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(chart,true);await chart.SelectPoint(0,0);},scrollToEnd:end);
 // The table's body rows as (series, category), in the order written.
 List<(string Series,string Category)> Rows472(string html)=>Regex.Matches(html,"<tr><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td></tr>").Select(m=>(m.Groups[1].Value,m.Groups[2].Value)).ToList();
-Test("0.47.2: with ScrollToEnd, View data lists each series' last 500 observations and says so",()=>{
+// 0.51.0: View data is a LumenTable that pages at 100 rows, so the 500-observation cut and its note are gone (the three 0.47.2 tests below proved the cut, and now
+// prove its replacement): a chart that opens at its end opens its table on the last page, and every row stays reachable.
+Test("0.47.2 (0.51.0): with ScrollToEnd, a 600-day chart's View data opens on its last page, Rows 501-600 of 600, ending where the chart opens",()=>{
     var html=DataOpen472(Days472(),end:true);
     var rows=Rows472(html).Select(r=>r.Category).ToList();
-    Check(rows.Count==500,$"{rows.Count} rows, not 500");
-    Check(rows[0]==Day472(100)&&rows[^1]==Day472(599),$"the table runs {rows[0]} to {rows[^1]}, not {Day472(100)} to {Day472(599)}");
-    Check(rows.SequenceEqual(Enumerable.Range(100,500).Select(Day472)),"the rows are days 101 to 600 in order");
-    Check(html.Contains("<p>Table shows the last 500 observations per series. CSV contains all original observations.</p>"),"the note");
-    Check(html.Contains("original data (600 observations)"),"the caption counts every observation");
+    Check(html.Contains("Rows 501–600 of 600"),"the page");
+    Check(rows.Count==100,$"{rows.Count} rows, not 100");
+    Check(rows[0]==Day472(500)&&rows[^1]==Day472(599),$"the table runs {rows[0]} to {rows[^1]}, not {Day472(500)} to {Day472(599)}");
+    Check(rows.SequenceEqual(Enumerable.Range(500,100).Select(Day472)),"the rows are days 501 to 600 in order");
+    Check(!html.Contains("Table shows")&&!html.Contains("500 observations"),"the 500 cut and its note are gone");
 });
-Test("0.47.2: without ScrollToEnd, View data keeps the first 500 and the old note",()=>{
+Test("0.47.2 (0.51.0): without ScrollToEnd, a 600-day chart's View data opens on its first page, rows 1 to 100",()=>{
     var html=DataOpen472(Days472(),end:false);
     var rows=Rows472(html).Select(r=>r.Category).ToList();
-    Check(rows.Count==500&&rows[0]==Day472(0)&&rows[^1]==Day472(499),$"{rows.Count} rows, {rows[0]} to {rows[^1]}, not 500 from {Day472(0)} to {Day472(499)}");
-    Check(rows.SequenceEqual(Enumerable.Range(0,500).Select(Day472)),"the rows are days 1 to 500 in order");
-    Check(html.Contains("<p>Table shows up to 500 observations per series. CSV contains all original observations.</p>")&&!html.Contains("the last 500"),"the note");
-    Check(html.Contains("original data (600 observations)"),"the caption counts every observation");
+    Check(html.Contains("Rows 1–100 of 600"),"the page");
+    Check(rows.Count==100&&rows[0]==Day472(0)&&rows[^1]==Day472(99),$"{rows.Count} rows, {rows[0]} to {rows[^1]}, not 100 from {Day472(0)} to {Day472(99)}");
+    Check(rows.SequenceEqual(Enumerable.Range(0,100).Select(Day472))&&!html.Contains("Table shows"),"the rows are days 1 to 100 in order, and the note is gone");
 });
-Test("0.47.2: with ScrollToEnd each series shows its own last 500, and a series of 50 shows all 50",()=>{
-    // B stands on the same X as A's first 50 points, which A's table leaves out, so a cut by X rather than by series would drop B's rows.
+Test("0.47.2 (0.51.0): with ScrollToEnd the last page runs on from one series into the next in the chart's order, and a series of 50 is listed whole",()=>{
+    // B stands on the same X as A's first 50 points, so a table cut by X rather than listed by series would drop or reorder B's rows.
     var spec=new ChartSpec{Title="Two lengths",Kind=ChartKind.Column,CellWidth=30,Series=[
-        new("A",Enumerable.Range(0,600).Select(i=>new ChartPoint(i,i%5,$"A{i+1}")).ToArray()),
+        new("A",Enumerable.Range(0,620).Select(i=>new ChartPoint(i,i%5,$"A{i+1}")).ToArray()),
         new("B",Enumerable.Range(0,50).Select(i=>new ChartPoint(i,i%3,$"B{i+1}")).ToArray())]};
     ChartValidation.Validate(spec);
-    var rows=Rows472(DataOpen472(spec,end:true));
+    var html=DataOpen472(spec,end:true);
+    var rows=Rows472(html);
     var a=rows.Where(r=>r.Series=="A").Select(r=>r.Category).ToList();
     var b=rows.Where(r=>r.Series=="B").Select(r=>r.Category).ToList();
-    Check(a.SequenceEqual(Enumerable.Range(101,500).Select(n=>$"A{n}")),$"A shows {a.Count} rows, {a.FirstOrDefault()} to {a.LastOrDefault()}, not A101 to A600");
+    Check(html.Contains("Rows 601–670 of 670"),"the page");
+    Check(a.SequenceEqual(Enumerable.Range(601,20).Select(n=>$"A{n}")),$"A shows {a.Count} rows, {a.FirstOrDefault()} to {a.LastOrDefault()}, not A601 to A620");
     Check(b.SequenceEqual(Enumerable.Range(1,50).Select(n=>$"B{n}")),$"B shows {b.Count} rows, {b.FirstOrDefault()} to {b.LastOrDefault()}, not B1 to B50");
 });
 // A zero day's hairline is 1 unit high, so a transparent, unstroked area 24 high on the baseline takes the tap (0.47.2).
@@ -12772,6 +12791,39 @@ Test("0.51.0: a cut never splits a surrogate pair",()=>{
     Check(cell==new string('a',198)+"…","category "+cell.Length);
     var title=ChartExport.DataTable(Spec() with{Title=new string('T',100)+new string('b',18)+emoji+"x"}).Caption;
     Check(title.EndsWith("…")&&!title.Any(char.IsSurrogate)&&title.Length<=120,"caption "+title.Length);
+});
+Test("0.51.0: the component's open View data is a LumenTable inside a plain lumen-table wrapper, and a closed one writes none",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    var html=Operate(Spec(ChartKind.Column),async c=>{typeof(LumenChart).GetField("showData",flags)!.SetValue(c,true);await c.SelectPoint(0,0);},raw:true);
+    var at=html.IndexOf("class=\"lumen-table\"",StringComparison.Ordinal);
+    Check(at>=0&&html.IndexOf("class='lumen-datatable",at,StringComparison.Ordinal)>at,"a lumen-datatable inside the lumen-table");
+    Check(html.Substring(at,"class=\"lumen-table\">".Length)=="class=\"lumen-table\">","the wrapper has no role, tabindex or label");
+    Check(!html.Contains("Export CSV</button><button")&&Regex.Matches(html,"Export CSV").Count==1,"the table adds no second Export CSV beside the toolbar's");
+    Check(!Operate(Spec(ChartKind.Column),_=>Task.CompletedTask,raw:true).Contains("lumen-datatable"),"closed");
+});
+Test("0.51.0: a legend toggle that hides a series leaves its rows in View data",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    var spec=Spec() with{Series=[new("Alpha",[new(0,1,"A"),new(1,2,"B")]),new("Beta",[new(0,3,"A"),new(1,4,"B")])]};
+    var html=Operate(spec,async c=>{typeof(LumenChart).GetMethod("Toggle",flags)!.Invoke(c,[1]);typeof(LumenChart).GetField("showData",flags)!.SetValue(c,true);await c.SelectPoint(0,0);});
+    var rows=Regex.Matches(html,"<tr><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td></tr>").Select(m=>m.Groups[1].Value+"|"+m.Groups[2].Value).ToArray();
+    Check(rows.SequenceEqual(new[]{"Alpha|A","Alpha|B","Beta|A","Beta|B"}),string.Join(" ; ",rows));
+    Check(html.Contains("aria-pressed=\"false\""),"Beta is hidden in the legend");
+});
+Test("0.51.0: the component builds its table once for a spec, and again when the spec, ScrollToEnd or the style changes",()=>{
+    var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+    TableSpec? first=null,again=null,end=null,next=null;
+    var spec=Days472();
+    Operate(spec,async c=>{
+        var get=typeof(LumenChart).GetProperty("DataSpec",flags)!;
+        first=(TableSpec)get.GetValue(c)!;again=(TableSpec)get.GetValue(c)!;
+        await c.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",spec},{"ScrollToEnd",true}}));
+        end=(TableSpec)get.GetValue(c)!;
+        await c.SetParametersAsync(ParameterView.FromDictionary(new Dictionary<string,object?>{{"Spec",spec with{Title="Other"}},{"ScrollToEnd",true}}));
+        next=(TableSpec)get.GetValue(c)!;
+    });
+    Check(ReferenceEquals(first,again),"rebuilt for the same spec");
+    Check(!first!.StartAtEnd&&end!.StartAtEnd&&!ReferenceEquals(first,end),"ScrollToEnd did not rebuild it");
+    Check(!ReferenceEquals(end,next)&&next!.Caption.StartsWith("Other"),"a new spec did not rebuild it");
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
