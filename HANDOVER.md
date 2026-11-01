@@ -72,7 +72,7 @@ Race Face feedback still open (the brain's "Race Face feedback" tasks hold the d
 - **annotation labels (0.41.0)**: a reference's label ("CP: 255") can sit on markers near the line's end at 340, since annotation labels don't avoid marks;
 - **height floor (0.42.0)**: done in 0.52.0: with `DrawTitles = false` the floor is 190 (titled charts keep 240; sparklines, strips, graphs, the planner and fitted heatmaps are unchanged);
 - **legend**: short entries stack one per row in the static legend (four rows, ~90 px under a 300 px chart at 340); lay short names out in one row. Long series names are truncated ("…MTB Le…"); consider wrapping them;
-- **recipe and doc notes**: the first four items and the per-lap, power-curve and team-rider items are done in 0.52.0, each checked against the code and written into `references/recipes-race-face.md` (the host CSS note says the title, description, source and legend carry `font-size`, not every text; a null lap is left out of a column chart, not named `missing`); the 1080×1350 rasteriser item stays open:
+- **recipe and doc notes**: the first four items and the per-lap, power-curve and team-rider items are done in 0.52.0, each checked against the code and written into `references/recipes-race-face.md` (the host CSS note lists the texts that carry `font-size` (title, description, source, legend, sub-labels, value, gap, reference and end labels, cell words) and says plain tick labels and axis titles do not; a null lap is left out of a column chart, not named `missing`); the 1080×1350 rasteriser item stays open:
   - use the app's own PB flag and bins where it has them;
   - a sparkline's root is `role='group'` named by title and description;
   - Lumen writes single-quoted attributes;
