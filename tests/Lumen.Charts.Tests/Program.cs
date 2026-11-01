@@ -10657,7 +10657,8 @@ Test("Heatmap cells: a cell too short for its block gives up its note, then its 
     // Two rows: a row is (Height - 160) / 2 and the block has that less 4.
     Check(Last(288,4).SequenceEqual(["1.2","/4 starts","too few starts","to rate"]),"60: the note goes first: "+string.Join(" | ",Last(288,4)));
     Check(Last(264,3).SequenceEqual(["1.2","too few starts","to rate"]),"48: then the sub-label: "+string.Join(" | ",Last(264,3)));
-    Check(Last(240,3).SequenceEqual(["/12 starts","too few starts","to rate"]),"36: then the value: "+string.Join(" | ",Last(240,3)));
+    // 0.52.0: a kept value stays while one reason line fits under it (36 - 13 = 23 leaves one), so at 36 the reason is cut to a line instead.
+    Check(Last(240,3).SequenceEqual(["/12 starts","1.2",Last(240,1)[0]])&&Last(240,1)[0].StartsWith("too few")&&Last(240,1)[0].EndsWith("…"),"36: the value stays, with one reason line: "+string.Join(" | ",Last(240,3)));
     // Six rows of (320 - 160) / 6 = 26.7: one line, so the reason is cut at a word.
     var one=WordsAt(ChartSvg.Render(Six(spec)),175);
     Check(one.Contains("too few…")&&!one.Contains("1.2"),string.Join(" | ",one));
@@ -10775,7 +10776,14 @@ Test("Heatmap cells: a fitted heatmap writes every word the same spec writes wit
             Check(fittedWords.Length>0&&roomyWords.Length>0,$"{name} at {width}: the spec writes words");
             // The fitted drawing is shorter than the roomy one, so its rows are shorter too and the comparison is between two heights.
             Check(ChartSvg.FittedHeight(fitted)<2160,$"{name} at {width}: fitted height {ChartSvg.FittedHeight(fitted)}");
-            Check(fittedWords.SequenceEqual(roomyWords),$"{name} at {width}: fitted [{string.Join(" | ",fittedWords)}] roomy [{string.Join(" | ",roomyWords)}]");
+            if (width==24)
+            {
+                // 0.52.0: a fitted reason keeps every word where the fixed height cuts it, so at 24 the roomy words are the fitted words with some left out.
+                var at=0;
+                foreach(var word in fittedWords) if(at<roomyWords.Length&&roomyWords[at]==word) at++;
+                Check(at==roomyWords.Length,$"{name} at {width}: fitted [{string.Join(" | ",fittedWords)}] roomy [{string.Join(" | ",roomyWords)}]");
+            }
+            else Check(fittedWords.SequenceEqual(roomyWords),$"{name} at {width}: fitted [{string.Join(" | ",fittedWords)}] roomy [{string.Join(" | ",roomyWords)}]");
         }
 });
 // 0.47.0: registrations per day.
@@ -12947,6 +12955,60 @@ Test("Placings 0.52.0: the 32-line limit counts every points line",()=>{
     string msg="";
     try{PlacingsChart.Build(Enumerable.Range(0,17).Select(i=>RacedResult(i+1,9,5,i,$"S{i}")));}catch(ArgumentException e){msg=e.Message;}
     Check(msg.Contains("34")&&msg.Contains("32"),"17 scoring series: "+msg);
+});
+// 0.52.0: heatmap cell words
+ChartSpec WordGrid(int rows,Action<List<ChartSeries>>? change=null)
+{
+    // Row 0 starts with a not-rated cell that reads "too few starts to rate" and has no value; every other cell is rated.
+    var series=new List<ChartSeries>{new("Long distance",[new ChartPoint(0,null,"2025"){NotRated="too few starts to rate"},new ChartPoint(1,2,"2026")])};
+    series.AddRange(Enumerable.Range(1,rows-1).Select(i=>new ChartSeries($"Row {i}",[new ChartPoint(0,i,"2025"),new ChartPoint(1,i+1,"2026")])));
+    change?.Invoke(series);
+    return new ChartSpec{Title="Points per start",Description="Invented categories by season",Kind=ChartKind.Heatmap,Width=600,Height=320,CellText=true,Series=series};
+}
+string[] SmallWords(string svg)=>Regex.Matches(svg,"<text [^>]*font-size='10'[^>]*>([^<]*)<").Select(m=>System.Net.WebUtility.HtmlDecode(m.Groups[1].Value)).ToArray();
+Test("Heatmap 0.52.0: a fitted reason keeps every word",()=>{
+    foreach(var width in new[]{24,34,43})
+    {
+        var spec=WordGrid(8) with{CellWidth=width,FitHeight=true};
+        var svg=ChartSvg.Render(spec);
+        var lines=SmallWords(svg);
+        var tail=string.Join(" ",lines);
+        foreach(var word in new[]{"too","few","starts","to","rate"})
+            Check(lines.Any(l=>l==word||(l.EndsWith("…")&&l.Length>1&&word.StartsWith(l[..^1]))||l.Split(' ').Contains(word)),$"{word} at {width}: "+tail);
+        Check(lines.Length>=5,$"at {width}: "+tail);
+        foreach(var line in lines)
+            Check(ChartSvg.Wide(line)*10/11<=width-6+.001,$"{line} fits {width}");
+        var rect=Regex.Match(svg,"<rect [^>]*height='([^']*)'[^>]*stroke-dasharray='3 2'");
+        var need=ChartSvg.CellNeed(spec,spec.Series[0].Points[0],width);
+        Check(rect.Success&&Math.Abs(double.Parse(rect.Groups[1].Value,CultureInfo.InvariantCulture)+2-(need+4))<1,$"row {rect.Groups[1].Value} + 2 vs need {need} + 4 at {width}");
+    }
+});
+Test("Heatmap 0.52.0: at 34 the reason reads too, few, sta…, to, rate",()=>{
+    // "to rate" is wider than the 28 units a line has here, so the estimate gives "to" and "rate" two lines (the brief expected one); the cut word is "sta…".
+    var lines=SmallWords(ChartSvg.Render(WordGrid(8) with{CellWidth=34,FitHeight=true}));
+    Check(lines.SequenceEqual(["too","few","sta…","to","rate"]),string.Join(" | ",lines));
+});
+Test("Heatmap 0.52.0: without FitHeight a reason wraps as 0.51.0",()=>{
+    var lines=SmallWords(ChartSvg.Render(WordGrid(2) with{CellWidth=34}));
+    Check(lines.Contains("too")&&lines.Contains("few…"),string.Join(" | ",lines));
+});
+Test("Heatmap 0.52.0: a 40-unit row keeps the kept value and one reason line",()=>{
+    // Four rows in Height 320 are 40 apart, so a cell has 36 for its words: a value (13) and one reason line (12) fit, and the sub-label does not.
+    var spec=WordGrid(4,rows=>{
+        rows[0]=rows[0] with{Points=[new ChartPoint(0,1.2,"2025"){SubLabel="/4 starts",NotRated="too few starts to rate"},rows[0].Points[1]]};
+        rows[2]=new("Row 2",[new ChartPoint(0,null,"2025"){NotRated="too few starts to rate"},new ChartPoint(1,3,"2026")]);
+    }) with{CellWidth=90,NotRatedKeepsValue=true};
+    var svg=ChartSvg.Render(spec);
+    var words=Regex.Matches(svg,"<text x='175' y='[^']*'[^>]*font-size='1[01]'[^>]*>([^<]*)<").Select(m=>m.Groups[1].Value).ToArray();
+    // Row 0 has no cell text beyond its not-rated cell; rows 1 and 3 are rated.
+    Check(words.Length==6&&words[0]=="1.2"&&words[1].StartsWith("too few")&&words[1].EndsWith("…")&&words[2]=="1"&&words[3]=="too few starts"&&words[4]=="to rate"&&words[5]=="3",string.Join(" | ",words));
+    Check(Regex.IsMatch(svg,"font-size='11' font-weight='600'[^>]*>1.2<"),"the value is the 11 px line");
+});
+Test("Heatmap 0.52.0: kept values give way when not one reason line fits",()=>{
+    // Six rows in Height 304 are 24 apart: 20 for the words, so 20 - 13 leaves no line under a value.
+    var spec=Six(HeatGrid(s=>s with{CellWidth=90,Height=304,NotRatedKeepsValue=true}));
+    var words=WordsAt(ChartSvg.Render(spec),175);
+    Check(words.Length==6&&words[0]=="2.8"&&words[1].StartsWith("too few")&&words[1].EndsWith("…")&&!words.Contains("1.2"),string.Join(" | ",words));
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

@@ -3421,9 +3421,11 @@ public static partial class ChartSvg
     /// <paramref name="most"/> of them: wrapped at word breaks; words that do not fit cut at a word with "…", and a first word wider than a
     /// line by its characters. A word after the first line that is wider than a line ends the block before it, with "…" after the line above,
     /// and a cut first word is the whole block, so the text is always the words' start with at most one "…". Empty where not even "…" fits.
+    /// With <paramref name="keepWords"/> (0.52.0) no word is left out: a word wider than a line, first or later, takes a line of its own, cut by
+    /// its characters with "…", and the words after it go on from the next line; a reason with no such word wraps as without it.
     /// <see cref="NoteLines"/> calls it, with one line, only for a single word of a note that is wider than a line, to cut it by its
     /// characters (0.46.1; shared from 0.46.2).</summary>
-    private static List<string> CellLines(string said, double room, int most)
+    private static List<string> CellLines(string said, double room, int most, bool keepWords = false)
     {
         static double Width(string text) => Wide(text) * 10 / 11;
         string Fit(string text)
@@ -3441,11 +3443,11 @@ public static partial class ChartSvg
         {
             // A word wider than a line is cut by its characters only as the first word, and then nothing follows it: after the first line
             // the block ends before it, as it does for words that run out of lines, so the text is only ever the words' start.
-            if (lines.Count > 0 && Width(words[i]) > room) break;
+            if (lines.Count > 0 && Width(words[i]) > room && !keepWords) break;
             var line = words[i++];
             while (i < words.Length && Width(line + " " + words[i]) <= room) line += " " + words[i++];
             lines.Add(line);
-            if (Width(line) > room) break;
+            if (Width(line) > room && !keepWords) break;
         }
         if (i < words.Length && lines.Count > 0)
         {
@@ -3535,7 +3537,10 @@ public static partial class ChartSvg
     /// <item><description>any other not-rated or gap-label cell: its reason or word, then its sub-label, then its note.</description></item>
     /// </list>
     /// Where the cell is too short for them all it gives up its note, whole, then its sub-label, then its value, and last its reason's lines
-    /// from the end, the last kept ending in "…". The block's first line stands at <c>cy − 6 × lines + 9</c>, and a value alone at
+    /// from the end, the last kept ending in "…". With <see cref="ChartSpec.FitHeight"/> the reason keeps every word, a word wider than the cell
+    /// taking a line of its own, cut by its characters (<see cref="CellLines"/>, 0.52.0); and a not-rated cell that keeps its value, whose note
+    /// and sub-label are given up, keeps the value too when at least one reason line fits under it, the reason cut to the lines left (0.52.0).
+    /// The block's first line stands at <c>cy − 6 × lines + 9</c>, and a value alone at
     /// <c>cy + 4</c>, where 0.46.0 and 0.46.1 wrote them, so a cell without the 0.46.2 switches is drawn as before; so too a cell whose
     /// leading reason fits nothing, not even "…", which writes nothing. The cell's name says all of it, so none of it is read.</summary>
     private static void CellBlock(SvgWriter w, ChartSpec s, ChartPoint p, double cx, double cy, double cw, double ch, string ink)
@@ -3545,13 +3550,16 @@ public static partial class ChartSvg
         double room = cw - 6, tall = ch - 4;
         string? value = parts.Value, sub = parts.Sub;
         var note = parts.Note;
-        var reason = parts.Said is { } said ? CellLines(said, room, int.MaxValue) : [];
+        var reason = parts.Said is { } said ? CellLines(said, room, int.MaxValue, s.FitHeight) : [];
         int Count() => (value is null ? 0 : 1) + (sub is null ? 0 : 1) + note.Count + reason.Count;
         bool Fits() => 12 * Count() + (value is null ? 0 : 1) <= tall;
         if (!Fits()) note = [];
         if (!Fits()) sub = null;
+        // A kept value stays while a reason line fits under it, 12 + 1 for the 11 px value line being taken first (0.52.0).
+        if (!Fits() && parts.Kept && value is not null && parts.Said is { } said2 && (int)Math.Floor((tall - 13) / 12) is var under and >= 1)
+            reason = CellLines(said2, room, under, s.FitHeight);
         if (!Fits()) value = null;
-        if (!Fits() && parts.Said is { } cut) reason = CellLines(cut, room, (int)Math.Floor(tall / 12));
+        if (!Fits() && parts.Said is { } cut) reason = CellLines(cut, room, (int)Math.Floor(tall / 12), s.FitHeight);
         if (Count() == 0 || !Fits()) return;
         if (parts.ReasonFirst && reason.Count == 0) return;   // a reason that fits nothing, not even "…", writes nothing, sub-label and note too, as 0.46.1 did
         var block = new List<(string Text, bool IsValue)>();
@@ -3572,13 +3580,14 @@ public static partial class ChartSvg
     /// <summary>The height a heatmap cell's words take with every line kept, as <see cref="CellBlock"/> writes them in a cell tall enough: 12
     /// units a line and 1 more where it writes a value; 0 where it writes nothing, without <see cref="ChartSpec.CellText"/>, where a
     /// rated cell's value is wider than the cell, or where a leading reason fits nothing, not even "…". <see cref="FittedHeight"/> sizes a
-    /// heatmap's rows by its tallest cell (0.46.2).</summary>
+    /// heatmap's rows by its tallest cell (0.46.2); with <see cref="ChartSpec.FitHeight"/> a reason counts every word, one a line of its own
+    /// where it is wider than the cell (0.52.0).</summary>
     internal static double CellNeed(ChartSpec s, ChartPoint p, double cw)
     {
         if (!s.CellText) return 0;
         var parts = PartsOf(s, p, cw);
         if (parts.Rated && parts.Value is null) return 0;
-        var reason = parts.Said is { } said ? CellLines(said, cw - 6, int.MaxValue).Count : 0;
+        var reason = parts.Said is { } said ? CellLines(said, cw - 6, int.MaxValue, s.FitHeight).Count : 0;
         if (parts.ReasonFirst && reason == 0) return 0;
         var lines = (parts.Value is null ? 0 : 1) + (parts.Sub is null ? 0 : 1) + parts.Note.Count + reason;
         return 12 * lines + (parts.Value is null ? 0 : 1);

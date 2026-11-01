@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Lumen.Charts;
 
-if (args.FirstOrDefault() == "probe") { Probe.Run(); return; }
+if (args.FirstOrDefault() == "probe") { Probe.Run(args); return; }
 
 // "classic" draws every row in the classic finish, set on the style each chart draws with, and writes classic.txt.
 // The property is looked up by name: code without it — anything before 0.24.0 — draws every spec exactly as given, so
@@ -986,6 +986,9 @@ lines.Add($"events/spans-allday {Hash(Timeline(new EventTimelineSpec([new(EvAt(1
 // 0.52.0: places and points. Two scoring series draw two points lines; an undated result is drawn first.
 lines.Add($"placings/two-scoring {Hash(ChartSvg.Render(PlacingsChart.Build(placed.Select(p => p.Series == "Invented Open" ? p with { Points = 12 } : p).Append(new Placing(9) { Field = 20, Points = 15, Date = new(2027, 5, 15), Series = "Invented Open" }), new() { Style = Finished(null, ChartTheme.Light) })!))}");
 lines.Add($"placings/undated-first {Hash(ChartSvg.Render(PlacingsChart.Build(league.Select((p, i) => i == 2 ? p with { Date = null } : p), new() { Style = Finished(null, ChartTheme.Light) })!))}");
+// 0.52.0: heatmap cell words. A fitted reason in cells 34 wide keeps every word; a kept value stays in a 40-unit row with one reason line.
+lines.Add($"heatmap-cells/narrow-fit {Hash(Render(table with { CellWidth = 34, FitHeight = true }))}");
+lines.Add($"heatmap-cells/keeps-value-short {Hash(Render(noted with { CellWidth = 90, NotRatedKeepsValue = true }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);
