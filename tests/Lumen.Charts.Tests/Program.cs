@@ -4248,11 +4248,11 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     // readout, written last, which is never hashed, and since 0.37.0 the chart's sampling, written after its rendered points, and its pane
     // titles, written after its panes, and since 0.39.0 its bar tracks and drawn titles, and since 0.41.0 its painted background and
     // fitted height, written last, and since 0.46.0 its cell text, written after the week start (its cell width is null until set, so
-    // never written), and since 0.46.1 its labels on top, written after the cell text, and since 0.46.2 its cell notes and kept not-rated values, written after its fitted height, and since 0.47.0 each series' zero hairline, written last in the series, and since 0.52.0 its row names in the text ink and rows fitted one by one, written last.
+    // never written), and since 0.46.1 its labels on top, written after the cell text, and since 0.46.2 its cell notes and kept not-rated values, written after its fitted height, and since 0.47.0 each series' zero hairline, written last in the series, and since 0.52.0 its row names in the text ink and rows fitted one by one, and since 0.53.0 its legend flow, written last.
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false,\"CellNotes\":false,\"NotRatedKeepsValue\":false,\"RowNamesInText\":false,\"FitEachRow\":false}";
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false,\"CellNotes\":false,\"NotRatedKeepsValue\":false,\"RowNamesInText\":false,\"FitEachRow\":false,\"LegendFlow\":false}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
@@ -13237,6 +13237,100 @@ Test("Null text 0.52.0: JSON null reads as empty",()=>{
 Test("Null text 0.52.0: the planner still refuses a null Description",()=>{
     try{PlannerValidation.Validate(PlannerSpec.ForYear(2027) with{Title="Season",Description=null!});throw new Exception("accepted");}
     catch(ArgumentException e){Check(e.Message=="A planner's description may be empty but not null.",e.Message);}
+});
+// 0.53.0: legend flow. LegendFlow sets the static legend's entries along rows by their measured width and wraps a long name on two lines.
+const string LongLegend53="Midlands Women Masters Mountain Marathon";
+ChartSpec FlowSpec53(int width,params string[] names)=>Spec() with{Width=width,Height=300,
+    Series=names.Select((n,i)=>new ChartSeries(n,[new(0,2+i,"A"),new(1,5-i/2.0,"B"),new(2,3+i,"C")])).ToArray()};
+double X53(XElement e)=>double.Parse(e.Attribute("x")!.Value,CultureInfo.InvariantCulture);
+double Y53(XElement e)=>double.Parse(e.Attribute("y")!.Value,CultureInfo.InvariantCulture);
+List<XElement> LegendTexts53(ChartSpec spec,bool flow)=>
+    Svg(spec with{LegendFlow=flow}).Descendants(ns+"text").Where(t=>t.Attribute("font-size")?.Value=="11"&&t.Attribute("y") is not null&&Y53(t)>=spec.Height+10).ToList();
+double ViewHeight53(string svg)=>double.Parse(XDocument.Parse(svg).Root!.Attribute("viewBox")!.Value.Split(' ')[3],CultureInfo.InvariantCulture);
+Test("Legend 0.53.0: four short series flow onto one row",()=>{
+    var spec=FlowSpec53(340,"You","Leader","Field","Best");
+    var flowed=LegendTexts53(spec,true);
+    Check(flowed.Count==4,"four entries: "+flowed.Count);
+    Check(flowed.All(t=>Y53(t)==310),"one row at Height + 10: "+string.Join(",",flowed.Select(Y53)));
+    Check(ViewHeight53(ChartSvg.Render(spec with{LegendFlow=true}))==322,"flowed height "+ViewHeight53(ChartSvg.Render(spec with{LegendFlow=true})));
+    Check(ViewHeight53(ChartSvg.Render(spec))==388,"unflowed height");
+});
+foreach(var refined in new[]{true,false})
+Test("Legend 0.53.0: a 40-character name wraps to two lines ("+(refined?"refined":"classic")+")",()=>{
+    var spec=FlowSpec53(340,LongLegend53,"Another fairly long second name");
+    if(!refined) spec=Classic(spec);
+    Check(LongLegend53.Length==40,"40 characters");
+    var texts=LegendTexts53(spec,true);
+    Check(texts.Count==3,"two lines and one more entry: "+texts.Count);
+    Check(Y53(texts[1])-Y53(texts[0])==13,"13 apart");
+    Check(texts[0].Value+" "+texts[1].Value==LongLegend53,"every word kept: "+texts[0].Value+"|"+texts[1].Value);
+    foreach(var t in texts.Take(2)) Check(X53(t)+ChartSvg.Wide(t.Value)<=316,"inside Width - 24: "+t.Value);
+    Check(Y53(texts[2])-Y53(texts[0])==35,"next row 35 lower: "+Y53(texts[2]));
+});
+Test("Legend 0.53.0: mixed names keep series order",()=>{
+    var spec=FlowSpec53(340,"A",LongLegend53,"B","C");
+    var texts=LegendTexts53(spec,true);
+    var expected="A|"+string.Join("|",ChartSvg.Wrap(LongLegend53,340-48-20))+"|B|C";
+    Check(string.Join("|",texts.Select(t=>t.Value))==expected,"order: "+string.Join("|",texts.Select(t=>t.Value)));
+    foreach(var row in texts.GroupBy(Y53).Select(g=>g.ToList()))
+        for(var i=1;i<row.Count;i++) Check(X53(row[i])>X53(row[i-1]),"x grows within a row");
+});
+Test("Legend 0.53.0: a ring's labels with their values flow",()=>{
+    var spec=Sample(ChartKind.Ring) with{Width=340,Height=300,Series=[new("Move",[new(0,540,"kcal")]){Goal=600},new("Exercise",[new(0,24,"min")]){Goal=30},new("Stand",[new(0,9,"h")]){Goal=12}]};
+    var texts=LegendTexts53(spec,true);
+    Check(texts.Count(t=>t.Value.Contains(" of "))==3,"three labels: "+string.Join("|",texts.Select(t=>t.Value)));
+    Check(texts.Any(t=>t.Value.StartsWith("Move: 540 of 600")),"Move whole");
+    Check(texts.All(t=>!t.Value.Contains('…')),"no cut");
+});
+Test("Legend 0.53.0: both finishes keep their keys",()=>{
+    var line=FlowSpec53(340,"You","Leader");
+    Check(Svg(line with{LegendFlow=true}).Descendants(ns+"line").Any(l=>double.Parse(l.Attribute("y1")!.Value,CultureInfo.InvariantCulture)>line.Height),"a line key");
+    var dots=Svg(Spec(ChartKind.Scatter) with{Width=340,Height=300,LegendFlow=true,Series=[new("You",[new(0,2),new(1,3)]),new("Leader",[new(0,3),new(1,4)])]});
+    Check(dots.Descendants(ns+"circle").Count(c=>double.Parse(c.Attribute("cy")!.Value,CultureInfo.InvariantCulture)>300)==2,"scatter dot keys");
+    var keys=Svg(Classic(line with{LegendFlow=true})).Descendants(ns+"rect").Where(r=>r.Attribute("width")?.Value=="9"&&r.Attribute("height")?.Value=="9"&&r.Attribute("rx")?.Value=="2").ToList();
+    Check(keys.Count==2,"two classic keys: "+keys.Count);
+});
+Test("Legend 0.53.0: refused where no legend is drawn",()=>{
+    foreach(var spec in new[]{Sample(ChartKind.Donut),Sample(ChartKind.Heatmap),Spec() with{Sparkline=true,Width=120,Height=32}})
+        Check(Refused(spec with{LegendFlow=true}).Contains("LegendFlow"),"refused: "+spec.Kind);
+    Check(ChartSvg.Render(Sample(ChartKind.Histogram) with{LegendFlow=true}).Length>0,"a one-series histogram renders");
+});
+Test("Legend 0.53.0: without the legend the switch does nothing",()=>{
+    var spec=FlowSpec53(340,"You","Leader","Field","Best");
+    Check(ChartSvg.Render(spec with{LegendFlow=true},includeLegend:false)==ChartSvg.Render(spec,includeLegend:false),"same without the legend");
+});
+Test("Legend 0.53.0: the switch is hashed only when set",()=>{
+    var spec=FlowSpec53(340,"You","Leader") with{Series=[new("You",[new(0,2),new(1,3)]){Gradient=[new(2,"#2E9B58"),new(3,"#DD4B45")]},new("Leader",[new(0,3),new(1,4)])]};
+    Check(ChartSvg.IdPrefix(spec)==ChartSvg.IdPrefix(spec with{LegendFlow=false}),"false is not hashed");
+    Check(ChartSvg.IdPrefix(spec)!=ChartSvg.IdPrefix(spec with{LegendFlow=true}),"true is hashed");
+});
+Test("Legend 0.53.0: one unbreakable word wider than a row is broken between its letters, inside Width - 24",()=>{
+    var word=new string('M',40);
+    foreach(var refined in new[]{true,false})
+    {
+        var spec=FlowSpec53(320,word,"You");
+        if(!refined) spec=Classic(spec);
+        Check(ChartSvg.Wide(word)>256,"wider than the room: "+ChartSvg.Wide(word));
+        var texts=LegendTexts53(spec,true);
+        Check(texts.Count==3,"two lines and one entry: "+string.Join("|",texts.Select(t=>t.Value)));
+        foreach(var t in texts) Check(X53(t)+ChartSvg.Wide(t.Value)<=320-24+0.01,"inside Width - 24: "+t.Value+" at "+X53(t));
+        Check(texts[0].Value+texts[1].Value==word,"both lines hold every letter: "+texts[0].Value+"|"+texts[1].Value);
+        var out52=Outside52(ChartSvg.Render(spec with{LegendFlow=true}));
+        Check(out52.Count==0,string.Join("; ",out52.Take(3)));
+    }
+});
+Test("Legend 0.53.0: a flowed legend on a column chart with a wide cell runs across the drawn width",()=>{
+    var spec=Spec(ChartKind.Column) with{Width=340,Height=300,CellWidth=40,LegendFlow=true,
+        Series=Enumerable.Range(0,4).Select(s=>new ChartSeries($"Series number {s}",Enumerable.Range(0,14).Select(i=>new ChartPoint(i,2+s+i%3,$"C{i}")).ToArray())).ToArray()};
+    var svg=ChartSvg.Render(spec);
+    var drawn=double.Parse(XDocument.Parse(svg).Root!.Attribute("viewBox")!.Value.Split(' ')[2],CultureInfo.InvariantCulture);
+    Check(drawn>340,"drawn wider than Width: "+drawn);
+    var texts=XDocument.Parse(svg).Descendants(ns+"text").Where(t=>t.Value.StartsWith("Series number")).ToList();
+    Check(texts.Count==4,"four entries");
+    Check(texts.Max(X53)>340-24,"a row runs past Width: "+texts.Max(X53));
+    Check(texts.All(t=>X53(t)+ChartSvg.Wide(t.Value)<=drawn-24+0.01),"inside the drawn width less 24");
+    var out52=Outside52(svg);
+    Check(out52.Count==0,string.Join("; ",out52.Take(3)));
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

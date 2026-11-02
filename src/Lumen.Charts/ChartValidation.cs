@@ -130,6 +130,8 @@ public static partial class ChartValidation
             throw new ArgumentException("RowNamesInText and FitEachRow set how a heatmap writes and sizes its rows, so they apply to heatmaps only; the other kinds have no rows of cells.");
         if (spec.FitEachRow && !spec.FitHeight)
             throw new ArgumentException("FitEachRow makes each of a heatmap's rows as tall as its own cells' words, so it needs FitHeight, which draws the heatmap as tall as its rows.");
+        if (spec.LegendFlow && (spec.Sparkline || spec.Kind is ChartKind.Donut or ChartKind.Heatmap or ChartKind.Box or ChartKind.Violin or ChartKind.Gauge or ChartKind.Calendar or ChartKind.Strip))
+            throw new ArgumentException("LegendFlow sets out the series legend drawn under a chart, so it applies to the kinds that draw one; a sparkline, a donut, a heatmap, a box, a violin, a gauge, a calendar and a strip name what they draw in their own drawing.");
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
         foreach (var annotation in spec.Annotations)
         {

@@ -994,6 +994,10 @@ lines.Add($"heatmap-cells/row-ink {Hash(Render(noted with { CellWidth = 90, FitH
 lines.Add($"heatmap-cells/each-row {Hash(Render(noted with { CellWidth = 90, FitHeight = true, CellNotes = true, NotRatedKeepsValue = true, FitEachRow = true }))}");
 // 0.52.0: an untitled chart may be 190 tall.
 lines.Add($"titles/undrawn-190 {Hash(Render(line with { Title = "Not drawn", Description = "Named, not written", DrawTitles = false, Height = 190 }))}");
+// 0.53.0: legend flow. Four short names take one row; two long names wrap on two lines each.
+ChartSeries[] Flowed(params string[] names) => names.Select((name, i) => new ChartSeries(name, line.Series[0].Points.Select(p => p with { Y = p.Y + i * 6 }).ToArray())).ToArray();
+lines.Add($"legend/flow-short {Hash(Render(line with { Title = "Flowed legend", Width = 340, Height = 300, LegendFlow = true, Series = Flowed("You", "Leader", "Field", "Best") }))}");
+lines.Add($"legend/flow-long {Hash(Render(line with { Title = "Flowed legend", Width = 340, Height = 300, LegendFlow = true, Series = Flowed("You", "Midlands Women Masters Mountain Marathon", "Leader", "Invented Provincial Mountain Bike Marathon", "Best") }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

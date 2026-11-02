@@ -8,6 +8,7 @@ public static class Probe
     public static void Run(string[] args)
     {
         if (args.Length >= 3 && args[1] == "heatmaps") { Heatmaps(args[2]); return; }
+        if (args.Length >= 3 && args[1] == "lines") { Lines(args[2]); return; }
         var newYork = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
         var kolkata = TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
 
@@ -114,6 +115,99 @@ public static class Probe
                 output.Append(i).Append(" refused");
             }
             output.Append('\n');
+        }
+        File.WriteAllText(path, output.ToString());
+    }
+
+    // "lines <out.txt>" draws 10,000 random line, area, scatter and one-series column charts from a fixed seed with 0.52.0's API only and writes
+    // "i hash" for each, so the same file from 0.52.0's code and from newer code can be compared line by line: the options 0.53.0 adds are
+    // off in every chart, so every line must be equal. A spec that throws writes "i refused" (both runs must agree).
+    static void Lines(string path)
+    {
+        var random = new Random(53);
+        bool Flip() => random.Next(2) == 0;
+        string[] words = ["Midlands", "Women", "Masters", "Mountain", "Marathon", "Invented", "Provincial", "Open", "Club", "Leader", "Field", "You", "Best", "Rider", "Series", "Cup", "Trail", "Ridge"];
+        string Name()
+        {
+            var length = random.Next(1, 41);
+            var text = new StringBuilder();
+            while (text.Length < length)
+            {
+                if (text.Length > 0) text.Append(' ');
+                text.Append(words[random.Next(words.Length)]);
+            }
+            return text.ToString()[..length].TrimEnd();
+        }
+        var output = new StringBuilder();
+        for (var i = 0; i < 10000; i++)
+        {
+            var choice = random.Next(4);
+            var column = choice == 3;
+            var kind = choice switch { 0 => ChartKind.Line, 1 => ChartKind.Area, 2 => ChartKind.Scatter, _ => ChartKind.Column };
+            var count = random.Next(1, 9);
+            var length = random.Next(2, 31);
+            var endLabels = random.Next(3);
+            var notes = random.Next(3);
+            var markers = random.Next(4);
+            var highlight = Flip();
+            var valueLabels = Flip();
+            var series = new List<ChartSeries>();
+            for (var s = 0; s < count; s++)
+            {
+                var name = Name();
+                var points = Enumerable.Range(0, length).Select(x => new ChartPoint(x, random.Next(6) == 0 ? null : Math.Round(5 + random.NextDouble() * 40, 1), x % 4 == 0 ? $"P{x}" : null)).ToArray();
+                var mark = column ? (s == 0 ? ChartKind.Line : ChartKind.Column) : kind;
+                var lined = mark is ChartKind.Line or ChartKind.Area;
+                var item = new ChartSeries(name, points)
+                {
+                    Markers = lined || mark == ChartKind.Scatter ? (MarkerStyle)(mark == ChartKind.Scatter && markers == 1 ? 0 : markers) : MarkerStyle.Auto,
+                    HighlightLast = lined && highlight,
+                    ValueLabels = mark != ChartKind.Area && valueLabels,
+                };
+                if (column && s == 0) item = item with { Kind = ChartKind.Line };
+                if (mark != ChartKind.Column && (endLabels == 2 || (endLabels == 1 && Flip())))
+                {
+                    item = item with { EndLabel = new string('E', random.Next(1, 13)) };
+                    if (notes == 2 || (notes == 1 && Flip())) item = item with { EndNote = $"+{random.Next(0, 100)}.{random.Next(10)}s" };
+                }
+                series.Add(item);
+            }
+            var annotations = new List<ChartAnnotation>();
+            for (var a = random.Next(5); a > 0; a--)
+            {
+                var label = Flip() ? $"Mark {a}" : null;
+                var at = random.Next(0, length);
+                annotations.Add(random.Next(column ? 3 : 4) switch
+                {
+                    0 => new ChartAnnotation(AnnotationAxis.Y, 5 + random.Next(40)) { Label = label },
+                    1 => new ChartAnnotation(AnnotationAxis.Y, 5 + random.Next(20)) { To = 30 + random.Next(15), Label = label },
+                    2 => new ChartAnnotation(AnnotationAxis.Y, 10 + random.Next(30)) { Label = label },
+                    _ => new ChartAnnotation(AnnotationAxis.X, at) { Label = label },
+                });
+            }
+            var style = (random.Next(3) switch { 0 => ChartStyle.Light, 1 => ChartStyle.Dark, _ => ChartStyle.Midnight }) with { Finish = Flip() ? ChartFinish.Classic : ChartFinish.Refined };
+            var spec = new ChartSpec
+            {
+                Kind = kind,
+                Title = "Invented results",
+                Description = "A made-up season",
+                Width = random.Next(320, 1201),
+                Height = random.Next(240, 601),
+                Series = series,
+                Annotations = annotations,
+                Style = style,
+            };
+            var includeLegend = Flip();
+            try
+            {
+                var svg = ChartSvg.Render(spec, includeLegend);
+                output.Append(i).Append(' ').Append(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(svg)))[..16]);
+            }
+            catch (Exception)
+            {
+                output.Append(i).Append(" refused");
+            }
+            output.Append((char)10);
         }
         File.WriteAllText(path, output.ToString());
     }

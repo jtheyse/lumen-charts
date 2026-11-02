@@ -105,7 +105,7 @@ public static partial class ChartSvg
     /// cell text, from 0.46.0, is false by default, so it is left out unless set, as are a heatmap's labels on top, from 0.46.1, false by
     /// default, as are a heatmap's cell notes and kept not-rated values, from 0.46.2. A series' zero hairline, from 0.47.0, is false by default and
     /// left out unless set; a point's axis label and name are null unless set. A heatmap's row names in the text ink and rows fitted one by one, from
-    /// 0.52.0, are false by default and left out unless set.</summary>
+    /// 0.52.0, are false by default and left out unless set. The legend flow, end notes on a second line, annotation labels clear of the marks and padded fitted cells, from 0.53.0, are false by default and left out unless set.</summary>
     private static void Unfitted(JsonTypeInfo info)
     {
         if (info.Type == typeof(ChartSeries))
@@ -122,6 +122,7 @@ public static partial class ChartSvg
             else if (property.Name == nameof(ChartSpec.NotRatedKeepsValue)) property.ShouldSerialize = (_, kept) => kept is true;
             else if (property.Name == nameof(ChartSpec.RowNamesInText)) property.ShouldSerialize = (_, text) => text is true;
             else if (property.Name == nameof(ChartSpec.FitEachRow)) property.ShouldSerialize = (_, each) => each is true;
+            else if (property.Name == nameof(ChartSpec.LegendFlow)) property.ShouldSerialize = (_, flow) => flow is true;
     }
     /// <summary>A chart without bar tracks that draws its title and description, as every chart did before 0.39.0, is serialized for hashing
     /// as 0.38.0, which had neither setting, serialized it, so every chart drawn before them keeps its IDs.</summary>
@@ -266,7 +267,10 @@ public static partial class ChartSvg
         // A strip is drawn as tall as its content; every other chart as tall as it asks.
         var strip = spec.Kind == ChartKind.Strip ? Stripped(spec) : null;
         var height = strip?.Height ?? spec.Height;
-        Begin(w, spec.Width, height + legendRows * 22, spec.Title, spec.Description);
+        // Under LegendFlow the entries are set along rows by their measured width, so the height and the drawing take one layout.
+        var flowed = spec.LegendFlow && legendRows > 0;
+        var flow = flowed ? LegendFlowLayout(spec, w.Refined) : ([], 0);
+        Begin(w, spec.Width, height + (flowed ? (int)flow.Height : legendRows * 22), spec.Title, spec.Description);
         // The source wraps as the description does, but upward from the foot, so a second line takes 14 pixels from the bottom of the
         // body, which is laid out knowing it.
         var source = bare ? [] : Wrap(spec.Source, spec.Width - 48);
@@ -292,7 +296,16 @@ public static partial class ChartSvg
             w.Text(spec.Width - 30, 64 + w.Head, $"{Count(spec.Series.Where(series => Mark(spec, series) == ChartKind.Scatter).Sum(series => series.Points.Count(p => p.Y.HasValue)))} observations aggregated into {spec.DensityCells} cells across",
                 "text-anchor='end' class='lumen-muted' font-size='11'");
         for (var i = 0; i < source.Length; i++) w.Text(24, height - 12 - 14 * (source.Length - 1 - i), source[i], "class='lumen-muted' font-size='11'");
-        if (legendRows > 0)
+        if (flowed)
+            for (var i = 0; i < flow.Entries.Count; i++)
+            {
+                var (x, y, text) = flow.Entries[i];
+                var key = w.Refined ? 20 : 16;
+                if (w.Refined) w.Add(Key(spec, i, w.Style, x, y - 8));
+                else w.Add($"<rect x='{N(x)}' y='{N(y - 8)}' width='9' height='9' rx='2' fill='{SeriesColor(spec.Series[i], i, w.Style)}'/>");
+                for (var l = 0; l < text.Length; l++) w.Text(x + key, y + 13 * l, text[l], "font-size='11'");
+            }
+        else if (legendRows > 0)
             for (var i = 0; i < spec.Series.Count; i++)
             {
                 var x = 24 + i % legendColumns * ((spec.Width - 48d) / legendColumns);
@@ -308,6 +321,36 @@ public static partial class ChartSvg
             }
         w.Add("</svg>");
         return w.ToString();
+    }
+
+    /// <summary>Where <see cref="ChartSpec.LegendFlow"/> sets each legend entry of a spec as drawn, in series order: its x, the baseline of its first
+    /// line, its lines (a label wider than a row less its key is wrapped on two), and the legend's total height. Rows start at x = 24; an entry,
+    /// its key, label and a 16-unit space, goes on a new row where it would pass Width - 24 and the row holds one already; a row is 22 tall, or
+    /// 35 where an entry has two lines. <paramref name="refined"/> sets the label's start, 20 from the entry in the refined finish, else 16.</summary>
+    internal static (List<(double X, double Y, string[] Lines)> Entries, double Height) LegendFlowLayout(ChartSpec spec, bool refined)
+    {
+        var key = refined ? 20 : 16;
+        var room = spec.Width - 48 - key;
+        var entries = new List<(double X, double Y, string[] Lines)>();
+        var rows = new List<(int First, int Count, double Height)>();
+        double x = 24, top = 0;
+        for (var i = 0; i < spec.Series.Count; i++)
+        {
+            var label = LegendLabel(spec, i);
+            var lines = Wide(label) <= room ? [label] : Wrap(label, room);
+            var entry = key + lines.Max(Wide) + 16;
+            if (x + entry > spec.Width - 24 && rows.Count > 0 && rows[^1].Count > 0)
+            {
+                top += rows[^1].Height;
+                x = 24;
+                rows.Add((i, 0, 22));
+            }
+            else if (rows.Count == 0) rows.Add((i, 0, 22));
+            entries.Add((x, spec.Height + 10 + top, lines));
+            rows[^1] = (rows[^1].First, rows[^1].Count + 1, lines.Length > 1 ? 35 : rows[^1].Height);
+            x += entry;
+        }
+        return (entries, rows.Sum(r => r.Height));
     }
 
     /// <summary>

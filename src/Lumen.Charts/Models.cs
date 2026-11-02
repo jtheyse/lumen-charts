@@ -866,6 +866,14 @@ public sealed record ChartSpec
     /// <see cref="FitHeight"/>. Heatmaps only; false by default, and left out of the gradient-ID hash while false.
     /// </summary>
     public bool FitEachRow { get; init; }
+    /// <summary>
+    /// The series legend drawn under a chart sets its entries along rows, in series order, each as wide as its name measures, and starts a
+    /// new row only where the next entry does not fit; a name wider than a whole row is set on two lines, never cut (0.53.0). A row is 22
+    /// tall, or 35 where an entry takes two lines. It applies where the chart draws that legend, so it is refused on a sparkline, a donut,
+    /// a heatmap, a box, a violin, a gauge, a calendar and a strip, and does nothing without the legend. False by default, and left out of
+    /// the gradient-ID hash while false.
+    /// </summary>
+    public bool LegendFlow { get; init; }
 }
 
 /// <summary>
