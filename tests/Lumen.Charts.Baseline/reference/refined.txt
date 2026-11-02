@@ -431,3 +431,11 @@ heatmap-cells/keeps-value-short 4779404329BEDA3F
 heatmap-cells/row-ink D06E9BD4A4D8D9E3
 heatmap-cells/each-row 3E064F68CF4D4C65
 titles/undrawn-190 FEC0B41CA311741C
+legend/flow-short 84A02E457FE05205
+legend/flow-long 83478E9E92B22EE2
+ends/note-below-320 73E6E442EC4C85E3
+ends/note-below-crowded 730C2A4AA8DC23FD
+annotations/avoid-marks EAFB36465CD7939E
+annotations/avoid-marks-upright B36A588174E4BD63
+heatmap-cells/padded A9C199C27894808C
+heatmap-cells/padded-each-row C10AD3169014523B

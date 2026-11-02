@@ -28,6 +28,9 @@ program += 'var specs = new (string, ChartSpec)[] {' + ','.join(f'("{n}", {n})' 
 program += ('foreach (var (name, spec) in specs) { var svg = ChartSvg.Render(spec); '
             'Directory.CreateDirectory("obj/out"); File.WriteAllText(Path.Combine("obj/out", name + ".svg"), svg); '
             'Console.WriteLine($"{name}: {svg.Length} chars"); }\n')
+# Each byte[] a recipe declares, written `var xPng = …;`, is saved as a PNG for a look.
+for name in re.findall(r"\bvar (\w+Png) = ", recipes):
+    program += f'File.WriteAllBytes(Path.Combine("obj/out", "{name}.png"), {name});\n'
 program += f'Console.WriteLine("{len(specs)} charts from {len(sports)} sports and {len(race)} race recipe blocks");\n'
 program += '\n'.join(l for l in helper.splitlines() if not l.startswith('using ')) + '\n'
 

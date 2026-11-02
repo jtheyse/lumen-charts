@@ -10,7 +10,7 @@ using Lumen.Charts;
 ## What every chart here meets
 
 - **Static output is complete.** `ChartSvg.Render` writes every label, colour, tooltip (`<title>`) and accessible name into the SVG; nothing needs JavaScript, and nothing is fetched from a CDN.
-- **Phone width.** For SVG rendered on the server set `Width` to the width the card shows it at, `Width = 340` here: drawn at the width it is shown, every label is 11 px or larger (axis ticks 12, value labels and notes 11, the title 17), and none needs the 8 to 9 px text a stretched 340-unit viewBox gives. A card a little narrower, 320 px, still shows 10.4 px. On an interactive page `FitWidth="true"` redraws the chart at its card's width instead. A chart is at least 240 units tall (a sparkline at least 60 wide and 16 tall), and keeps its `Height` at any width, so choose a height that reads at a phone's width; a strip (0.39.0) is drawn as tall as its bar and key instead, and a bar chart with `FitHeight = true` (0.41.0) as tall as its rows.
+- **Phone width.** For SVG rendered on the server set `Width` to the width the card shows it at, `Width = 340` here: drawn at the width it is shown, every label is 11 px or larger (axis ticks 12, value labels and notes 11, the title 17), and none needs the 8 to 9 px text a stretched 340-unit viewBox gives. A card a little narrower, 320 px, still shows 10.4 px. For Race Face's cards set `LegendFlow`, `WrapEndNotes` and `AnnotationLabelsAvoidMarks` (0.53.0), each where it applies, and `PadFittedCells` on a fitted heatmap: they keep the legend short, a long end label whole, a reference label off the marks, and a fitted cell's words off its edges at that width. On an interactive page `FitWidth="true"` redraws the chart at its card's width instead. A chart is at least 240 units tall (a sparkline at least 60 wide and 16 tall), and keeps its `Height` at any width, so choose a height that reads at a phone's width; a strip (0.39.0) is drawn as tall as its bar and key instead, and a bar chart with `FitHeight = true` (0.41.0) as tall as its rows.
 - **Text that fits.** From 0.35.0 a description or a source too wide for the card, by the library's generous estimate of its width, goes on over a second line, between its ` · ` clauses where both lines then fit and otherwise as evenly as its words allow, and the plot gives up 14 units for it; past two lines the second ends in `…`, so put a description's key fact first: the cut takes the end of it (`Wrap`). A title stays one line, cut at a word with `…`. The whole of each stays in the drawing's `<title>`, `<desc>` and accessible name, so a long description written for a desktop no longer runs off a 340-pixel card.
 - **Accessible.** `Title` and `Description` are the drawing's accessible name; each mark is focusable and named, `Position: 16-05-2026, 24/48, better than the previous`, and the same words are its tooltip.
 - **Missing data is a gap, never a zero.** A race without a position or without points is a `null` Y: its line breaks there and no mark is drawn, unless a `GapLabel` (0.42.0) writes a word such as `absent` there, which also makes it a named mark. A race without a field size writes its place alone.
@@ -1099,9 +1099,44 @@ Over HTTP, `POST /api/charts/timeline/html` takes `{"spec":{…},"shown":4}` and
 - **Dates.** A moment is `Mon 5 Oct 2026 · 12:00`; a span in a day `Mon 5 Oct 2026 · 12:00–14:30`; an all-day span `Mon 5 – Wed 7 Oct 2026`, `Sat 31 Oct – Sun 1 Nov 2026` or `Thu 31 Dec 2026 – Fri 1 Jan 2027`. A `DateFormat` of your own is written in full at both ends. An `End` equal to the `When` is one moment; an `End` before it is refused.
 - **Limits.** At most 2,000 events; a title of 1 to 120 characters, a note of at most 200, a value of at most 40, a category of at most 24; `PageSize` 1 to 200; `TitleLevel` 2 to 5; links only http, https, mailto or relative. A timeline is read-only: no selection event, no editing, no live clock. Days and months are English.
 
+## A share card as a PNG on the server
+
+A rider shares a season arc as an image: a server renders the card and returns a PNG. Lumen draws the SVG; turning it into pixels is the host's job, with the host's own packages. Add `Svg.Skia` (MIT) to the host project, and on Linux `SkiaSharp.NativeAssets.Linux.NoDependencies`. Lumen's packages reference neither, so a host that never makes a PNG pulls in no native code.
+
+```csharp
+using SkiaSharp;
+using Svg.Skia;
+```
+
+```csharp
+// A 1080 x 1350 PNG of a chart: laid out at 360 x 450 and drawn at three times that size.
+byte[] SharePng(ChartSpec card)
+{
+    string svg = ChartSvg.Render(card with { Width = 360, Height = 450 });
+    using var skSvg = new SKSvg();
+    skSvg.FromSvg(svg);
+    using var stream = new MemoryStream();
+    skSvg.Save(stream, SKColor.Parse(card.Style.Background), SKEncodedImageFormat.Png, 100, 3f, 3f);
+    return stream.ToArray();
+}
+var shareCardPng = SharePng(seasonArc);
+```
+
+- **360 by 450, drawn at 3.** The card is laid out at 360 x 450, so its words are phone-sized (title 17, labels 11 and 12) when the image is shown at phone width. Laid out at 1080 and shown at phone width, every word would be a third of that size and unreadable. Drawing the 360 x 450 layout at a scale of 3 gives a PNG 1080 pixels wide, sharp on a high-density screen. The static legend is drawn under `Height`, not inside it, so the image is taller than 1350: the season arc's four names, one to a row, make the card 538 tall and the PNG 1080 x 1614. `LegendFlow = true` (0.53.0) sets the four names on one row, 472 tall and 1080 x 1416.
+- **A rasteriser is not a browser; check the PNG for four things.** Lumen's SVG is complete without script, but these are the rasteriser's to support:
+  - **CSS variables.** The root's `<style>` colours the gridlines and the muted text with `var(--lumen-grid)` and `var(--lumen-muted)`, and a heatmap cell's hairline is `stroke='var(--lumen-muted)'`.
+  - **`currentColor`.** Text takes `fill='currentColor'` from the `color` in the root's `style` attribute.
+  - **`paint-order='stroke'`.** Refined reference labels have a halo in the background colour, drawn under the glyphs by `paint-order='stroke'`; a rasteriser without it strokes over the glyphs and hides them.
+  - **The background.** The card's background is a `background:` rule in the root's `style` attribute, not a shape. Svg.Skia 5.2.3 does not paint it: the PNG is transparent, and the light text of a dark card vanishes on a white page. The recipe therefore passes the style's `Background` to `Save`.
+
+  Checked with Svg.Skia 5.2.3: the variables, `currentColor` and `paint-order` were all drawn as a browser draws them (gridlines and muted text coloured, titles in the style's `Text`, a heatmap's dashed cells, a reference label's halo under its glyphs); only the background needed the colour passed in.
+- **If one is missing, substitute it yourself.** If your rasteriser drops a variable or `currentColor`, replace each `var(--lumen-grid)`, `var(--lumen-muted)` and the root's `currentColor` with the style's `Grid`, `Muted` and `Text` colours in the SVG string before `FromSvg`, with `string.Replace` in your own code, and look at the PNG again. Lumen adds no helper for it.
+- **Fonts in a Linux container.** Skia draws with the fonts fontconfig finds, and a slim image has almost none, so text falls back to a default font or disappears. Install `fontconfig` and the style's first `FontFamily` (for Race Face, the font its `ChartStyle.FontFamily` names first), or copy its font files into `/usr/share/fonts` and run `fc-cache`. Lumen fits its words by its own width estimate, not by the font, so a narrower fallback font leaves gaps and a wider one can overrun its room: use the named font.
+- **The browser's PNG is another thing.** "Export PNG" in `<LumenChart>` draws at twice the chart's size, capped so the longest edge is at most 8,192 pixels, so a 360 x 450 chart saves at 720 x 900, and it needs an interactive page. The recipe above makes the 1080 x 1350 card on the server, with no page.
+
 ## Rendering notes
 
-- **Static:** `ChartSvg.Render(spec)` at `Width = 340` (or the card's own width) is the whole chart: labels, colours, tooltips and names, with no script. Write it into the page, or rasterise it on the server with an SVG library of your choice; Lumen ships no PNG or PDF renderer. Each line's value label stands on a copy of itself stroked in the background colour, not on SVG 2's `paint-order`, so rasterisers without it draw it the same.
+- **Static:** `ChartSvg.Render(spec)` at `Width = 340` (or the card's own width) is the whole chart: labels, colours, tooltips and names, with no script. Write it into the page, or rasterise it on the server as the recipe "A share card as a PNG on the server" above does; Lumen ships no PNG or PDF renderer. Each line's value label stands on a copy of itself stroked in the background colour, not on SVG 2's `paint-order`, so rasterisers without it draw it the same.
 - **Host CSS:** Lumen writes a `font-size` attribute on its title (17), description, source, legend entries, sub-labels, value labels (on each `<text>`, or on the `<g class='lumen-value'>` that holds them), gap labels (`g.lumen-gap`), reference and annotation labels (11), end labels (`g.lumen-end`, 12) and the words in heatmap cells (11 and 10), as well as the text of gauges, calendars, donuts, histogram captions and strips; text without a `font-size`, such as tick labels, axis titles and a heatmap's row names, column labels and scale line, inherits the root's 12 px. A host rule such as `svg text[font-size] { … }`, meant for the host's own SVG icons or diagrams, therefore restyles those words of every chart on the page (a rule on `[font-size]` also matches the groups). Scope the host's rules to its own SVGs, for example `svg:not(.lumen-svg) text[font-size]`, or to its own class; the chart's root carries `class='lumen-svg'`.
 - **Interactive:** `<LumenChart Spec="recommended" FitWidth="true" />` measures its card and redraws at that width, never below 320 px; before it is interactive it is drawn at `Width` and scaled to fit. `Height` is kept, so choose one that reads at a phone's width.
 - **Gaps:** a race with no place or no points is `null`, never zero: the line breaks, no mark or label is drawn, and the next race's change still compares with the last race that had a place. A `GapLabel` (0.42.0) writes a word there instead, `absent`, and names the point; a race that was not held has no point at all. A race with no field size draws its place without a note.
