@@ -672,4 +672,23 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType applica
 Verify ($r.StatusCode -eq 200) "A chart posted with a null title, source and description is drawn with 200 ($($r.StatusCode))"
 $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType application/json -Body '{"title":null,"nodes":[{"id":"a","label":"Start"},{"id":"b","label":"End"}],"edges":[{"source":"a","target":"b"}]}' -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 200) "A graph posted with a null title is drawn with 200 ($($r.StatusCode))"
+# 0.53.0: look changes. Each switch is taken under its camel-case name, and refused with its name where it cannot apply.
+$three='"series":[{"name":"A","points":[{"x":0,"y":1},{"x":1,"y":2}]},{"name":"B","points":[{"x":0,"y":2},{"x":1,"y":3}]},{"name":"C","points":[{"x":0,"y":3},{"x":1,"y":4}]}]'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body ('{"title":"Flow","kind":"Line","legendFlow":true,'+$three+'}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200) "A three-series line chart posted with legendFlow is drawn with 200 ($($r.StatusCode))"
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":"Ends","kind":"Line","wrapEndNotes":true,"series":[{"name":"Rider","endLabel":"Rider name","endNote":"+12.3s","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200) "A line chart with an end label and note posted with wrapEndNotes is drawn with 200 ($($r.StatusCode))"
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":"Marks","kind":"Line","annotationLabelsAvoidMarks":true,"annotations":[{"axis":"Y","value":1.5,"label":"Goal"}],"series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200) "A line chart with an annotation posted with annotationLabelsAvoidMarks is drawn with 200 ($($r.StatusCode))"
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":"Pad","kind":"Heatmap","cellWidth":90,"cellText":true,"fitHeight":true,"padFittedCells":true,"series":[{"name":"Sprint","points":[{"x":0,"y":2.8,"label":"2025","subLabel":"/12 starts"},{"x":1,"y":3.1,"label":"2026"}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 200) "A fitted heatmap posted with padFittedCells is drawn with 200 ($($r.StatusCode))"
+$donut='"kind":"Donut","series":[{"name":"Share","points":[{"x":0,"y":3,"label":"A"},{"x":1,"y":4,"label":"B"}]}]'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body ('{"title":"Donut",'+$donut+',"legendFlow":true}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('LegendFlow')) 'legendFlow on a donut is refused with 400 naming it'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body ('{"title":"Donut",'+$donut+',"wrapEndNotes":true}') -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('WrapEndNotes')) 'wrapEndNotes on a donut is refused with 400 naming it'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":"Heat","kind":"Heatmap","annotationLabelsAvoidMarks":true,"series":[{"name":"Sprint","points":[{"x":0,"y":2.8},{"x":1,"y":3.1}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('AnnotationLabelsAvoidMarks')) 'annotationLabelsAvoidMarks on a heatmap is refused with 400 naming it'
+$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":"Line","kind":"Line","padFittedCells":true,"series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}' -SkipHttpErrorCheck
+Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('PadFittedCells')) 'padFittedCells on a line chart is refused with 400 naming it'
 Write-Output "$checks HTTP checks passed."

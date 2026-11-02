@@ -125,6 +125,7 @@ public static partial class ChartSvg
             else if (property.Name == nameof(ChartSpec.LegendFlow)) property.ShouldSerialize = (_, flow) => flow is true;
             else if (property.Name == nameof(ChartSpec.WrapEndNotes)) property.ShouldSerialize = (_, wrap) => wrap is true;
             else if (property.Name == nameof(ChartSpec.AnnotationLabelsAvoidMarks)) property.ShouldSerialize = (_, avoid) => avoid is true;
+            else if (property.Name == nameof(ChartSpec.PadFittedCells)) property.ShouldSerialize = (_, pad) => pad is true;
     }
     /// <summary>A chart without bar tracks that draws its title and description, as every chart did before 0.39.0, is serialized for hashing
     /// as 0.38.0, which had neither setting, serialized it, so every chart drawn before them keeps its IDs.</summary>
@@ -3370,7 +3371,7 @@ public static partial class ChartSvg
     /// <summary>The widest a heatmap's name column grows for long row names (0.46.1).</summary>
     internal const double HeatmapWidest = 240;
     /// <summary>The least height <see cref="ChartSpec.FitHeight"/> gives each of a heatmap's rows (0.46.1); a row grows past it to hold its
-    /// tallest cell's words (0.46.2).</summary>
+    /// tallest cell's words (0.46.2), which with <see cref="ChartSpec.PadFittedCells"/> take 8 units more (0.53.0).</summary>
     internal const double HeatmapRow = 36;
     /// <summary>The narrowest drawing a chart may be, in SVG units, a sparkline aside.</summary>
     internal const int MinWidth = 320;
@@ -3420,13 +3421,13 @@ public static partial class ChartSvg
     internal static double HeatmapBelow(ChartSpec s) => 80 - (s.ColumnLabelsOnTop ? 26 : 0) - (s.FitHeight && string.IsNullOrWhiteSpace(s.Source) ? 24 : 0);
 
     /// <summary>The height each of a heatmap's rows needs for its words: at least <see cref="HeatmapRow"/>, and the tallest of its cells'
-    /// <see cref="CellNeed"/> plus 4, at the cells' width as <see cref="Heatmap"/> draws them (0.52.0). <paramref name="s"/> is the spec with
+    /// <see cref="CellNeed"/> plus 4, or plus 12 with <see cref="ChartSpec.PadFittedCells"/> (0.53.0), at the cells' width as <see cref="Heatmap"/> draws them (0.52.0). <paramref name="s"/> is the spec with
     /// its width as drawn. <see cref="FittedHeight"/> and <see cref="HeatmapRows"/> both read it, so the height and the rows agree.</summary>
     internal static double[] HeatmapRowNeeds(ChartSpec s)
     {
         var cats = HeatmapColumns(s);
         var cw = cats.Length == 0 ? 0 : s.CellWidth ?? (s.Width - HeatmapLeftOf(s) - 35) / cats.Length;
-        return s.Series.Select(series => Math.Max(HeatmapRow, series.Points.Select(p => CellNeed(s, p, cw) + 4).DefaultIfEmpty(0).Max())).ToArray();
+        return s.Series.Select(series => Math.Max(HeatmapRow, series.Points.Select(p => CellNeed(s, p, cw) + (s.PadFittedCells ? 12 : 4)).DefaultIfEmpty(0).Max())).ToArray();
     }
 
     /// <summary>Where each of a heatmap's rows stands between the grid's <paramref name="top"/> and <paramref name="bottom"/>: its top, its

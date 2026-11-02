@@ -136,6 +136,8 @@ public static partial class ChartValidation
             throw new ArgumentException("WrapEndNotes sets an end label's note on a second line, so it applies to charts whose series can end in a line, an area or scatter points; a sparkline writes no end labels, and donut, radar, heatmap, histogram, box, violin, gauge, ring, calendar, timeline and strip charts take none.");
         if (spec.AnnotationLabelsAvoidMarks && (spec.Sparkline || !Annotated(spec.Kind) || spec.Kind == ChartKind.Timeline))
             throw new ArgumentException("AnnotationLabelsAvoidMarks sets a reference's label clear of the data's marks, so it applies to charts drawn on an X and Y axis; a sparkline writes no annotation labels, a timeline's spans are not marks it avoids, a gauge and a calendar label their annotations in their own way, and donut, radar, heatmap, histogram, box, violin, ring and strip charts take no annotations.");
+        if (spec.PadFittedCells && (spec.Kind != ChartKind.Heatmap || !spec.FitHeight))
+            throw new ArgumentException("PadFittedCells adds room round the words in a fitted heatmap's cells, so it applies to heatmaps with FitHeight only; the other kinds have no cells, and without FitHeight a heatmap's rows take the Height they are given.");
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
         foreach (var annotation in spec.Annotations)
         {

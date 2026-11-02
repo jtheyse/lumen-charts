@@ -1011,6 +1011,9 @@ lines.Add($"annotations/avoid-marks {Hash(Render(line with { Title = "Labels cle
 lines.Add($"annotations/avoid-marks-upright {Hash(Render(line with { Title = "Upright label clear of columns", Width = 340, Height = 300, YMin = 0, YMax = 100, AnnotationLabelsAvoidMarks = true,
     Series = [new("Line", [new(0, 50), new(10, 60)]), new("Columns", new double[] { 100, 100, 100, 20, 20, 20, 100, 20, 20, 100, 100 }.Select((y, i) => new ChartPoint(i, y)).ToArray()) { Kind = ChartKind.Column }],
     Annotations = [new(AnnotationAxis.X, 5.5) { Label = "Mark" }] }))}");
+// 0.53.0: padded fitted cells. A fitted row is its cell's need plus 12; the rows of one height and the rows fitted one by one.
+lines.Add($"heatmap-cells/padded {Hash(Render(noted with { CellWidth = 90, FitHeight = true, PadFittedCells = true }))}");
+lines.Add($"heatmap-cells/padded-each-row {Hash(Render(noted with { CellWidth = 90, FitHeight = true, PadFittedCells = true, FitEachRow = true }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

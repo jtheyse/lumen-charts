@@ -893,6 +893,14 @@ public sealed record ChartSpec
     /// while false.
     /// </summary>
     public bool AnnotationLabelsAvoidMarks { get; init; }
+    /// <summary>
+    /// A fitted heatmap's rows get 8 more units round their words: each row is its tallest cell's need plus 12 instead of plus 4, never under
+    /// the 36 a row has always had, so a one-line cell's row stays 36, a cell of two lines goes from 36 to 37 and one of four from 53 to 61.
+    /// The block of words stays centred on its row, so the extra room divides above and below (0.53.0). It applies to heatmaps with
+    /// <see cref="FitHeight"/> only; without it a heatmap's rows take the <see cref="Height"/> they are given, and the other kinds have no
+    /// cells. False by default, and left out of the gradient-ID hash while false.
+    /// </summary>
+    public bool PadFittedCells { get; init; }
 }
 
 /// <summary>

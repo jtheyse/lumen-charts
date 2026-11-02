@@ -4252,7 +4252,7 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false,\"CellNotes\":false,\"NotRatedKeepsValue\":false,\"RowNamesInText\":false,\"FitEachRow\":false,\"LegendFlow\":false,\"WrapEndNotes\":false,\"AnnotationLabelsAvoidMarks\":false}";
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false,\"CellNotes\":false,\"NotRatedKeepsValue\":false,\"RowNamesInText\":false,\"FitEachRow\":false,\"LegendFlow\":false,\"WrapEndNotes\":false,\"AnnotationLabelsAvoidMarks\":false,\"PadFittedCells\":false}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
@@ -13577,6 +13577,65 @@ Test("Annotation labels 0.53.0: a level label moves below where a value label st
     var before=Svg(Labelled(false)); var after=Svg(Labelled(true));
     Check(Math.Abs(Attr(RefLabel53(before,"CP: 100"),"y")-(Near(before)-6))<1e-6,"today's label is right-above");
     Check(Math.Abs(Attr(RefLabel53(after,"CP: 100"),"y")-(Near(after)+13))<1e-6,$"right-below: {Attr(RefLabel53(after,"CP: 100"),"y")} vs {Near(after)+13}");
+});
+// 0.53.0: padded fitted cells. PadFittedCells makes a fitted heatmap row its cell's need plus 12 instead of plus 4; the 36 floor stays.
+ChartSpec PadGrid(int lines,Func<ChartSpec,ChartSpec>? change=null)
+{
+    // Every cell writes its value (one line), plus a sub-label (two lines) or, for four, a sub-label and a points note too long for one line.
+    var spec=RowGrid(3,3,s=>s with{CellNotes=lines>=3,NotRatedKeepsValue=false,Series=s.Series.Select(r=>r with{Points=r.Points.Select(p=>(p with{NotRated=null,SubLabel=lines>=2?p.SubLabel:null,ValueNote=lines>=4?p.ValueNote+" and more":lines>=3?p.ValueNote:null})).ToArray()}).ToArray()});
+    return change is null?spec:change(spec);
+}
+Test("Padded cells 0.53.0: every fitted row is its need plus 12",()=>{
+    foreach(var each in new[]{false,true})
+    {
+        var spec=RowGrid(4,3,s=>s with{PadFittedCells=true,FitEachRow=each});
+        var drawn=ChartSvg.AsDrawn(spec);
+        var cw=(double)spec.CellWidth!;
+        var needs=ChartSvg.HeatmapRowNeeds(drawn);
+        for(var r=0;r<4;r++)
+            Check(needs[r]==Math.Max(36,spec.Series[r].Points.Max(p=>ChartSvg.CellNeed(drawn,p,cw))+12),$"each={each} row {r}: {needs[r]}");
+        var frame=ChartSvg.HeatmapFrame(spec);
+        var rows=ChartSvg.HeatmapRows(drawn,frame.Top,frame.Bottom);
+        var rects=CellRows(ChartSvg.Render(spec),3);
+        Check(rects.Length==4,"four rows");
+        for(var r=0;r<4;r++) Check(Math.Abs(rects[r].Height-rows[r].Height)<.01,$"each={each} row {r}: rect {rects[r].Height} vs {rows[r].Height}");
+        if(each) Check(needs.Distinct().Count()>1,"rows differ: "+string.Join(",",needs));
+    }
+});
+Test("Padded cells 0.53.0: the rows grow as the design says",()=>{
+    double Row(int lines,bool pad)=>ChartSvg.HeatmapRowNeeds(ChartSvg.AsDrawn(PadGrid(lines,s=>s with{PadFittedCells=pad})))[0];
+    Check(Row(1,false)==36&&Row(1,true)==36,$"one line {Row(1,false)} {Row(1,true)}");
+    Check(Row(2,false)==36&&Row(2,true)==37,$"two lines {Row(2,false)} {Row(2,true)}");
+    var need=ChartSvg.CellNeed(ChartSvg.AsDrawn(PadGrid(4)),PadGrid(4).Series[0].Points[0],90);
+    Check(need==49,"a cell of four lines needs 49: "+need);
+    Check(Row(4,false)==53&&Row(4,true)==61,$"four lines {Row(4,false)} then {Row(4,true)}");
+});
+Test("Padded cells 0.53.0: the frozen band matches the drawing",()=>{
+    var spec=RowGrid(4,3,s=>s with{PadFittedCells=true,FitEachRow=true});
+    var drawn=RowNames(ChartSvg.Render(spec));
+    var banded=RowNames(ChartSvg.HeatmapNameBand(spec)!.Value.Svg);
+    Check(drawn.Length==4&&banded.Select(n=>n.Y).SequenceEqual(drawn.Select(n=>n.Y)),"band names at the drawing's places");
+});
+Test("Padded cells 0.53.0: one-line cells draw the same rows",()=>{
+    foreach(var each in new[]{false,true})
+    {
+        var a=PadGrid(1,s=>s with{FitEachRow=each});var b=a with{PadFittedCells=true};
+        var sa=ChartSvg.Render(a);var sb=ChartSvg.Render(b);
+        Check(Regex.Matches(sa,"<rect [^>]*rx='3'[^>]*>").Select(m=>m.Value).SequenceEqual(Regex.Matches(sb,"<rect [^>]*rx='3'[^>]*>").Select(m=>m.Value)),"same rects");
+        Check(RowNames(sa).Select(n=>n.Y).SequenceEqual(RowNames(sb).Select(n=>n.Y)),"same name ys");
+    }
+});
+Test("Padded cells 0.53.0: refused off a fitted heatmap",()=>{
+    Check(RowWhy(Spec() with{PadFittedCells=true}).Contains("PadFittedCells"),"a line chart");
+    var why=RowWhy(RowGrid(4,3,s=>s with{FitHeight=false,PadFittedCells=true}));
+    Check(why.Contains("FitHeight"),"without FitHeight: "+why);
+    Check(RowWhy(RowGrid(4,3,s=>s with{PadFittedCells=true}))=="","valid");
+});
+Test("Padded cells 0.53.0: the switch is hashed only when set",()=>{
+    var spec=RowGrid();
+    var id=ChartSvg.IdPrefix(spec);
+    Check(id==ChartSvg.IdPrefix(spec with{PadFittedCells=false}),"false is not hashed");
+    Check(id!=ChartSvg.IdPrefix(spec with{PadFittedCells=true}),"true is hashed");
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
