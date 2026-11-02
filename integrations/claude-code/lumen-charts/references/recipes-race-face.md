@@ -1112,9 +1112,17 @@ using Svg.Skia;
 // A 1080 x 1350 PNG of a chart: laid out at 360 x 450 and drawn at three times that size.
 byte[] SharePng(ChartSpec card)
 {
-    string svg = ChartSvg.Render(card with { Width = 360, Height = 450 });
+    // The static legend is drawn under Height, so a chart laid out at 450 comes out taller. Read the height it drew, and lay it out
+    // again that much shorter, so the card, legend included, is 450. The legend's rows depend only on the width.
+    var sized = card with { Width = 360, Height = 450 };
+    using (var probe = new SKSvg())
+    {
+        probe.FromSvg(ChartSvg.Render(sized));
+        float drawn = probe.Picture!.CullRect.Height;
+        if (drawn > 450) sized = sized with { Height = 450 - ((int)Math.Round(drawn) - 450) };
+    }
     using var skSvg = new SKSvg();
-    skSvg.FromSvg(svg);
+    skSvg.FromSvg(ChartSvg.Render(sized));
     using var stream = new MemoryStream();
     skSvg.Save(stream, SKColor.Parse(card.Style.Background), SKEncodedImageFormat.Png, 100, 3f, 3f);
     return stream.ToArray();
@@ -1122,12 +1130,12 @@ byte[] SharePng(ChartSpec card)
 var shareCardPng = SharePng(seasonArc);
 ```
 
-- **360 by 450, drawn at 3.** The card is laid out at 360 x 450, so its words are phone-sized (title 17, labels 11 and 12) when the image is shown at phone width. Laid out at 1080 and shown at phone width, every word would be a third of that size and unreadable. Drawing the 360 x 450 layout at a scale of 3 gives a PNG 1080 pixels wide, sharp on a high-density screen. The static legend is drawn under `Height`, not inside it, so the image is taller than 1350: the season arc's four names, one to a row, make the card 538 tall and the PNG 1080 x 1614. `LegendFlow = true` (0.53.0) sets the four names on one row, 472 tall and 1080 x 1416.
+- **360 by 450, drawn at 3.** The card is laid out at 360 x 450, so its words are phone-sized (title 17, labels 11 and 12) when the image is shown at phone width. Laid out at 1080 and shown at phone width, every word would be a third of that size and unreadable. Drawing the 360 x 450 layout at a scale of 3 gives a PNG 1080 pixels wide, sharp on a high-density screen. The static legend is drawn under `Height`, not inside it, and its rows depend only on the width, so `SharePng` renders twice: once at 450 to read the height the card drew, and again that much shorter, so the card is 450 with its legend and the PNG is exactly 1080 x 1350. The season arc's four names, one to a row, draw 538 tall at 450, so it is laid out again at 362; with `LegendFlow = true` (0.53.0) they share one row, 472 tall, and it is laid out at 428. Both are above the 240 floor of a titled chart. If a legend is so tall that `450 - (drawn - 450)` falls under 240 (about twelve one-line rows), Lumen refuses that height: shorten the names, set `LegendFlow`, or give the card a taller layout, and the PNG is taller than 1350 rather than losing its legend.
 - **A rasteriser is not a browser; check the PNG for four things.** Lumen's SVG is complete without script, but these are the rasteriser's to support:
   - **CSS variables.** The root's `<style>` colours the gridlines and the muted text with `var(--lumen-grid)` and `var(--lumen-muted)`, and a heatmap cell's hairline is `stroke='var(--lumen-muted)'`.
   - **`currentColor`.** Text takes `fill='currentColor'` from the `color` in the root's `style` attribute.
   - **`paint-order='stroke'`.** Refined reference labels have a halo in the background colour, drawn under the glyphs by `paint-order='stroke'`; a rasteriser without it strokes over the glyphs and hides them.
-  - **The background.** The card's background is a `background:` rule in the root's `style` attribute, not a shape. Svg.Skia 5.2.3 does not paint it: the PNG is transparent, and the light text of a dark card vanishes on a white page. The recipe therefore passes the style's `Background` to `Save`.
+  - **The background.** The card's background is a `background:` rule in the root's `style` attribute, not a shape. Svg.Skia 5.2.3 does not paint it: the PNG is transparent, and the light text of a dark card vanishes on a white page. The recipe therefore passes the style's `Background` to `Save`. That paints the background even for a chart with `PaintBackground = false` (which writes `--lumen-ground` instead, so a card on a coloured panel should pass `SKColors.Transparent`), and `SKColor.Parse` throws for a background Skia cannot parse, such as a colour name it does not know, so a host whose style uses one passes a colour it has converted.
 
   Checked with Svg.Skia 5.2.3: the variables, `currentColor` and `paint-order` were all drawn as a browser draws them (gridlines and muted text coloured, titles in the style's `Text`, a heatmap's dashed cells, a reference label's halo under its glyphs); only the background needed the colour passed in.
 - **If one is missing, substitute it yourself.** If your rasteriser drops a variable or `currentColor`, replace each `var(--lumen-grid)`, `var(--lumen-muted)` and the root's `currentColor` with the style's `Grid`, `Muted` and `Text` colours in the SVG string before `FromSvg`, with `string.Replace` in your own code, and look at the PNG again. Lumen adds no helper for it.
