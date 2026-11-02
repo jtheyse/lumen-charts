@@ -1386,7 +1386,14 @@ public static partial class ChartSvg
                 if (!s.WrapEndNotes) break;
                 var added = false;
                 for (var n = 0; n < kept.Count; n++)
-                    if (set[kept[n]].End.Series.EndNote is not null && Broad(set[kept[n]].Full) > Place(n).Room + 1e-6 && two.Add(kept[n])) added = true;
+                {
+                    if (set[kept[n]].End.Series.EndNote is null || two.Contains(kept[n]) || Broad(set[kept[n]].Full) <= Place(n).Room + 1e-6) continue;
+                    // A label takes its second line only where the labels kept, with that line, still fit the plot; else it is cut on one line as before.
+                    var withLine = kept.Select(i => two.Contains(i) || i == kept[n] ? EndWrap : 0d).ToArray();
+                    if (EndLines(kept.Count, gap, withLine) > high - low) continue;
+                    two.Add(kept[n]);
+                    added = true;
+                }
                 if (!added) break;
             }
             for (var n = 0; n < kept.Count; n++)

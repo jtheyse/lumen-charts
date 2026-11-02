@@ -13464,6 +13464,22 @@ Test("End notes 0.53.0: a second pass marks another label",()=>{
     Check(string.Join(",",blocks.Select(b=>Y53(b.Text)))=="122,150","Y values: "+string.Join(",",blocks.Select(b=>Y53(b.Text))));
     Check(Outside52(ChartSvg.Render(Second53(true))).Count==0,"inside the drawing");
 });
+Test("End notes 0.53.0: a pane too thin for a second line keeps its label on one line and renders",()=>{
+    foreach(var weight in new[]{.1,.08,.05})
+        foreach(var finish in new[]{true,false})
+        {
+            ChartSpec Thin(bool wrap){var s=new ChartSpec{Title="Thin",Kind=ChartKind.Line,Width=320,Height=300,WrapEndNotes=wrap,Panes=[new(){Weight=weight}],
+                Series=[new("Top",[new(0,10),new(1,12)]),new("Rider",[new(0,1),new(1,2)]){Pane=1,EndLabel="Rider name",EndNote="+12.3s"}]};return finish?s:Classic(s);}
+            var svg=ChartSvg.Render(Thin(true));
+            var (top,bottom)=PaneSpan(PaneClips(XDocument.Parse(svg))[1]);
+            var blocks=EndBlocks53(svg);
+            Check(blocks.Count==1,$"weight {weight}: one label");
+            Check(blocks[0].Y-4>=top-1-1e-9&&blocks[0].Y-4<=bottom+1+1e-9,$"weight {weight}: label {blocks[0].Y} within {top-1}..{bottom+1}");
+            Check(Outside52(svg).Count==0,$"weight {weight}: inside the drawing");
+            // Off, the same chart is as 0.52.0 drew it: nothing is wrapped.
+            Check(EndBlocks53(ChartSvg.Render(Thin(false))).All(b=>b.Note is null),"off: one line");
+        }
+});
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {
     var services=new ServiceCollection().AddLogging().AddSingleton<IJSRuntime,NoJs>().BuildServiceProvider();
