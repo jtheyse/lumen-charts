@@ -4252,7 +4252,7 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false,\"CellNotes\":false,\"NotRatedKeepsValue\":false,\"RowNamesInText\":false,\"FitEachRow\":false,\"LegendFlow\":false,\"WrapEndNotes\":false}";
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false,\"CellNotes\":false,\"NotRatedKeepsValue\":false,\"RowNamesInText\":false,\"FitEachRow\":false,\"LegendFlow\":false,\"WrapEndNotes\":false,\"AnnotationLabelsAvoidMarks\":false}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
@@ -13479,6 +13479,95 @@ Test("End notes 0.53.0: a pane too thin for a second line keeps its label on one
             // Off, the same chart is as 0.52.0 drew it: nothing is wrapped.
             Check(EndBlocks53(ChartSvg.Render(Thin(false))).All(b=>b.Note is null),"off: one line");
         }
+});
+// 0.53.0: annotation labels. AnnotationLabelsAvoidMarks records the marks a refined pane draws and sets a reference's label on the first of its
+// spots that meets no mark, no piece of a line and no value label; where none is clear the label keeps the spot it has without the switch.
+(double X1,double X2,double Y1,double Y2) LabelBox53(XElement t){var x=Attr(t,"x");var w=ChartSvg.Wide(t.Value);var a=t.Attribute("text-anchor")!.Value;var x1=a=="end"?x-w:a=="middle"?x-w/2:x;var y=Attr(t,"y");return (x1,x1+w,y-9,y+3);}
+XElement RefLabel53(XDocument d,string text)=>d.Descendants(ns+"text").First(t=>t.Value==text&&t.Attribute("aria-hidden")?.Value=="true"&&t.Attribute("stroke")!=null);
+(double L,double R,double T,double B) Plot53(XDocument d){var c=PaneClips(d)[0];return (Attr(c,"x")+6,Attr(c,"x")+Attr(c,"width")-6,Attr(c,"y")+6,Attr(c,"y")+Attr(c,"height")-6);}
+bool Meets53((double X1,double X2,double Y1,double Y2) a,(double X1,double X2,double Y1,double Y2) b)=>a.X2>b.X1&&a.X1<b.X2&&a.Y2>b.Y1&&a.Y1<b.Y2;
+List<(double X1,double X2,double Y1,double Y2)> Circles53(XDocument d)=>d.Descendants(ns+"g").Where(g=>g.Attribute("class")?.Value=="lumen-datum").SelectMany(g=>g.Elements(ns+"circle"))
+    .Where(c=>c.Attribute("fill-opacity")?.Value!="0"&&c.Attribute("class")?.Value!="lumen-marker").Select(c=>{var r=Attr(c,"r")+2;return (Attr(c,"cx")-r,Attr(c,"cx")+r,Attr(c,"cy")-r,Attr(c,"cy")+r);}).ToList();
+List<(double X,double Y)[]> Strokes53(XDocument d)=>d.Descendants(ns+"path").Where(p=>p.Attribute("fill")?.Value=="none"&&p.Attribute("stroke")!=null)
+    .Select(p=>System.Text.RegularExpressions.Regex.Matches(p.Attribute("d")!.Value,@"(-?[\d.]+),(-?[\d.]+)").Select(m=>(double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),double.Parse(m.Groups[2].Value,CultureInfo.InvariantCulture))).ToArray()).ToList();
+// A datum's shape as a box: a rect's own, or the span of a path's corners.
+List<(double X1,double X2,double Y1,double Y2)> Shapes53(XDocument d,int series)=>d.Descendants(ns+"g").Where(g=>g.Attribute("class")?.Value=="lumen-datum"&&g.Attribute("data-series")?.Value==series.ToString()).Select(g=>{
+    if(g.Elements(ns+"rect").FirstOrDefault() is{}r)return (Attr(r,"x"),Attr(r,"x")+Attr(r,"width"),Attr(r,"y"),Attr(r,"y")+Attr(r,"height"));
+    var pts=System.Text.RegularExpressions.Regex.Matches(g.Element(ns+"path")!.Attribute("d")!.Value,@"(?:[ML ])(-?[\d.]+),(-?[\d.]+)").Select(m=>(X:double.Parse(m.Groups[1].Value,CultureInfo.InvariantCulture),Y:double.Parse(m.Groups[2].Value,CultureInfo.InvariantCulture))).ToList();
+    return (pts.Min(p=>p.X),pts.Max(p=>p.X),pts.Min(p=>p.Y),pts.Max(p=>p.Y));}).ToList();
+ChartSpec Crowd53(bool on,bool dense=false)
+{
+    // The last points of the power line sit within 6 units of the level 255 the reference marks, so the markers crowd its right-hand spots.
+    double[] ys=dense?Enumerable.Range(0,40).Select(i=>i%2==0?254.0:256.0).ToArray():[100,120,140,170,200,225,240,250,252,258,253,256];
+    return new ChartSpec{Title="Power",Kind=ChartKind.Line,Width=340,Height=300,YMin=0,YMax=300,AnnotationLabelsAvoidMarks=on,
+        Series=[new("Power",ys.Select((y,i)=>new ChartPoint(i,y)).ToArray()){Markers=MarkerStyle.Filled}],Annotations=[new(AnnotationAxis.Y,255){Label="CP"}]};
+}
+Test("Annotation labels 0.53.0: Crosses clips the segment, not its bounding box",()=>{
+    Check(!ChartSvg.Crosses(0,0,100,100,(80,100,0,10)),"the diagonal misses a box its bounding box covers");
+    Check(ChartSvg.Crosses(0,0,100,100,(40,60,40,60)),"the diagonal crosses the box on it");
+    Check(ChartSvg.Crosses(0,50,40,50,(40,60,40,60)),"a segment ending on an edge crosses");
+    Check(ChartSvg.Crosses(50,0,50,100,(40,60,40,60))&&!ChartSvg.Crosses(70,0,70,100,(40,60,40,60)),"a vertical one");
+    Check(ChartSvg.Crosses(0,50,100,50,(40,60,40,60))&&!ChartSvg.Crosses(0,70,100,70,(40,60,40,60)),"a horizontal one");
+    Check(ChartSvg.Crosses(45,45,55,55,(40,60,40,60)),"a segment wholly inside crosses");
+});
+Test("Annotation labels 0.53.0: a level label clears the markers at the line's right end",()=>{
+    var before=Svg(Crowd53(false)); var after=Svg(Crowd53(true));
+    var b0=LabelBox53(RefLabel53(before,"CP: 255"));
+    Check(Circles53(before).Any(c=>Meets53(c,b0)),"precondition: without the switch the box meets a marker");
+    var box=LabelBox53(RefLabel53(after,"CP: 255"));
+    Check(!Circles53(after).Any(c=>Meets53(c,box)),"meets no marker: "+box);
+    foreach(var stroke in Strokes53(after))
+        for(var i=1;i<stroke.Length;i++)
+            Check(!ChartSvg.Crosses(stroke[i-1].X,stroke[i-1].Y,stroke[i].X,stroke[i].Y,box),"crosses a piece of the line");
+    var (l,r,t,bo)=Plot53(after);
+    Check(box.X1>=l&&box.X2<=r&&box.Y1>=t&&box.Y2<=bo,$"inside the plot {l},{r},{t},{bo}: {box}");
+});
+Test("Annotation labels 0.53.0: where every spot is blocked the label keeps today's",()=>{
+    var off=RefLabel53(Svg(Crowd53(false,dense:true)),"CP: 255"); var on=RefLabel53(Svg(Crowd53(true,dense:true)),"CP: 255");
+    Check(on.Attribute("x")!.Value==off.Attribute("x")!.Value&&on.Attribute("y")!.Value==off.Attribute("y")!.Value&&on.Attribute("text-anchor")!.Value==off.Attribute("text-anchor")!.Value,$"on {on.Attribute("x")},{on.Attribute("y")} off {off.Attribute("x")},{off.Attribute("y")}");
+});
+Test("Annotation labels 0.53.0: an upright label clears a column",()=>{
+    // A line chart's second series is drawn as columns on a linear X; the X reference stands between two of them, and only the one on its right reaches the top.
+    double[] heights=[100,100,100,20,20,20,100,20,20,100,100];
+    ChartSpec Up(bool on)=>new(){Title="Upright",Kind=ChartKind.Line,Width=340,Height=300,YMin=0,YMax=100,AnnotationLabelsAvoidMarks=on,
+        Series=[new("Line",[new(0,50),new(10,60)]),new("Columns",heights.Select((y,i)=>new ChartPoint(i,y)).ToArray()){Kind=ChartKind.Column}],Annotations=[new(AnnotationAxis.X,5.5){Label="Mark"}]};
+    var before=Svg(Up(false)); var after=Svg(Up(true));
+    var columns=Shapes53(after,1);
+    Check(columns.Count==11,"eleven columns: "+columns.Count);
+    Check(Shapes53(before,1).Any(c=>Meets53(c,LabelBox53(RefLabel53(before,"Mark: 5.5")))),"precondition: today's label is over a column");
+    var box=LabelBox53(RefLabel53(after,"Mark: 5.5"));
+    Check(!columns.Any(c=>Meets53(c,box)),"meets no column: "+box);
+});
+Test("Annotation labels 0.53.0: the classic finish is byte-identical",()=>{
+    Check(ChartSvg.Render(Classic(Crowd53(true)))==ChartSvg.Render(Classic(Crowd53(false))),"classic renders equal with and without the switch");
+});
+Test("Annotation labels 0.53.0: refused where it cannot apply",()=>{
+    foreach(var spec in new[]{Sample(ChartKind.Heatmap),Sample(ChartKind.Gauge),Sample(ChartKind.Timeline),Spec() with{Sparkline=true,Width=120,Height=32}})
+        Check(Refused(spec with{AnnotationLabelsAvoidMarks=true}).Contains("AnnotationLabelsAvoidMarks"),"refused: "+spec.Kind);
+});
+Test("Annotation labels 0.53.0: the switch is hashed only when set",()=>{
+    var spec=Spec() with{Series=[new("You",[new(0,2),new(1,3)]){Gradient=[new(2,"#2E9B58"),new(3,"#DD4B45")]}]};
+    Check(ChartSvg.IdPrefix(spec)==ChartSvg.IdPrefix(spec with{AnnotationLabelsAvoidMarks=false}),"false is not hashed");
+    Check(ChartSvg.IdPrefix(spec)!=ChartSvg.IdPrefix(spec with{AnnotationLabelsAvoidMarks=true}),"true is hashed");
+});
+Test("Annotation labels 0.53.0: a horizontal bar chart's value label clears the bars",()=>{
+    // The first bar runs past the reference, so today's label stands on it; the rest are short.
+    ChartSpec Bars(bool on)=>new(){Title="Bars",Kind=ChartKind.Bar,Width=340,Height=300,YMin=0,YMax=100,AnnotationLabelsAvoidMarks=on,
+        Series=[new("Rides",[new(0,90,"A"),new(1,20,"B"),new(2,20,"C"),new(3,20,"D"),new(4,20,"E")])],Annotations=[new(AnnotationAxis.Y,50){Label="Target"}]};
+    var before=Svg(Bars(false)); var after=Svg(Bars(true));
+    Check(Shapes53(before,0).Any(c=>Meets53(c,LabelBox53(RefLabel53(before,"Target: 50")))),"precondition: today's label is over a bar");
+    var box=LabelBox53(RefLabel53(after,"Target: 50"));
+    Check(!Shapes53(after,0).Any(c=>Meets53(c,box)),"meets no bar: "+box);
+    var (l,r,t,b)=Plot53(after);
+    Check(box.X1>=l&&box.X2<=r&&box.Y1>=t&&box.Y2<=b,$"inside the plot {l},{r},{t},{b}: {box}");
+});
+Test("Annotation labels 0.53.0: a level label moves below where a value label stands at its right-above spot",()=>{
+    ChartSpec Labelled(bool on)=>new(){Title="Labelled",Kind=ChartKind.Line,Width=340,Height=300,YMin=0,YMax=200,AnnotationLabelsAvoidMarks=on,
+        Series=[new("Power",[new(0,140),new(1,130),new(2,120),new(3,110),new(4,100)]){ValueLabels=true}],Annotations=[new(AnnotationAxis.Y,100){Label="CP"}]};
+    double Near(XDocument d)=>Attr(d.Descendants(ns+"line").First(l=>l.Attribute("y1")!.Value==l.Attribute("y2")!.Value&&l.Attribute("stroke-opacity")?.Value=="0"),"y1");
+    var before=Svg(Labelled(false)); var after=Svg(Labelled(true));
+    Check(Math.Abs(Attr(RefLabel53(before,"CP: 100"),"y")-(Near(before)-6))<1e-6,"today's label is right-above");
+    Check(Math.Abs(Attr(RefLabel53(after,"CP: 100"),"y")-(Near(after)+13))<1e-6,$"right-below: {Attr(RefLabel53(after,"CP: 100"),"y")} vs {Near(after)+13}");
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

@@ -1004,6 +1004,13 @@ lines.Add($"ends/note-below-320 {Hash(Render(line with { Title = "Ends below", W
 lines.Add($"ends/note-below-crowded {Hash(Render(line with { Title = "Ends crowded", Width = 340, Height = 300, WrapEndNotes = true,
     Series = new[] { ("Ann", "+1.2s"), ("Bo", "+3.4s"), ("Cy", "+12.3s behind"), ("Di", "+45.6s behind"), ("Ed", "+78.9s behind") }
         .Select((n, k) => new ChartSeries(n.Item1, [new(0, 5 * k), new(1, 50 + 2.5 * k)]) { EndLabel = n.Item1, EndNote = n.Item2 }).ToArray() }))}");
+// 0.53.0: annotation labels. A level reference's label keeps clear of the filled markers crowding its right end, and an upright one clear of the tall column on its right.
+lines.Add($"annotations/avoid-marks {Hash(Render(line with { Title = "Labels clear of marks", Width = 340, Height = 300, YMin = 0, YMax = 300, AnnotationLabelsAvoidMarks = true,
+    Series = [new("Power", new double[] { 100, 120, 140, 170, 200, 225, 240, 250, 252, 258, 253, 256 }.Select((y, i) => new ChartPoint(i, y)).ToArray()) { Markers = MarkerStyle.Filled }],
+    Annotations = [new(AnnotationAxis.Y, 255) { Label = "CP" }] }))}");
+lines.Add($"annotations/avoid-marks-upright {Hash(Render(line with { Title = "Upright label clear of columns", Width = 340, Height = 300, YMin = 0, YMax = 100, AnnotationLabelsAvoidMarks = true,
+    Series = [new("Line", [new(0, 50), new(10, 60)]), new("Columns", new double[] { 100, 100, 100, 20, 20, 20, 100, 20, 20, 100, 100 }.Select((y, i) => new ChartPoint(i, y)).ToArray()) { Kind = ChartKind.Column }],
+    Annotations = [new(AnnotationAxis.X, 5.5) { Label = "Mark" }] }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

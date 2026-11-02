@@ -124,6 +124,7 @@ public static partial class ChartSvg
             else if (property.Name == nameof(ChartSpec.FitEachRow)) property.ShouldSerialize = (_, each) => each is true;
             else if (property.Name == nameof(ChartSpec.LegendFlow)) property.ShouldSerialize = (_, flow) => flow is true;
             else if (property.Name == nameof(ChartSpec.WrapEndNotes)) property.ShouldSerialize = (_, wrap) => wrap is true;
+            else if (property.Name == nameof(ChartSpec.AnnotationLabelsAvoidMarks)) property.ShouldSerialize = (_, avoid) => avoid is true;
     }
     /// <summary>A chart without bar tracks that draws its title and description, as every chart did before 0.39.0, is serialized for hashing
     /// as 0.38.0, which had neither setting, serialized it, so every chart drawn before them keeps its IDs.</summary>
@@ -895,6 +896,11 @@ public static partial class ChartSvg
             // Every value label written in the pane, as a box round its 11 px text, so a point's label can keep clear of the ones
             // before it, columns' and bars' included.
             var written = new List<(double X1, double X2, double Y1, double Y2)>();
+            // With AnnotationLabelsAvoidMarks (0.53.0), the refined finish also records the marks it draws, as boxes and as the pieces of its lines
+            // and areas, so a reference's label can be set after them; otherwise both are null and nothing is recorded.
+            var avoid = w.Refined && s.AnnotationLabelsAvoidMarks;
+            var boxes = avoid ? new List<(double X1, double X2, double Y1, double Y2)>() : null;
+            var pieces = avoid ? new List<(double X1, double Y1, double X2, double Y2)>() : null;
             // The end labels the pane's series ask for, written once every series is drawn, so they can be moved apart.
             var endings = new List<EndMark>();
             // A value's note follows it at normal weight in the muted colour.
@@ -978,7 +984,7 @@ public static partial class ChartSvg
                 if (horizontal) references.Add(Measure(w, annotation with { Axis = AnnotationAxis.X }, value, value, ys, ys, left, right, top, bottom, inside: true));
                 else if (k == 0) references.Add(Measure(w, annotation, X, Y, xs, ys, left, right, top, bottom));
                 else if (annotation.Axis == AnnotationAxis.X) references.Add(Measure(w, annotation, X, Y, xs, ys, left, right, top, bottom, named: false));
-            if (w.Refined) Place(references, left, right, top, bottom);
+            if (w.Refined && boxes is null) Place(references, left, right, top, bottom);
             foreach (var reference in references) if (!reference.Front) Draw(w, reference);
             // Column and range series share each slot side by side. On a continuous axis a slot takes its width from the closest
             // two X values any of them in the pane has, as a candle does from its own, so no two slots overlap.
@@ -1054,6 +1060,9 @@ public static partial class ChartSvg
                                 traced[n] = run[n] with { Color = n + 1 < run.Length ? MovedOf(drawn[n + 1]) : null };
                         }
                         var (path, line) = Trace(series.Curve, traced, indices, X, At, y => scale.Invert(y, bottom, top));
+                        // A line's or an area's stroke is recorded piece by piece, a curve by its chords.
+                        if (pieces is not null && mark != ChartKind.Band)
+                            for (var n = 1; n < run.Length; n++) pieces.Add((X(run[n - 1].X), At(run[n - 1].Y!.Value), X(run[n].X), At(run[n].Y!.Value)));
                         if (mark == ChartKind.Area)
                             w.Add($"<path d='{path} L{N(X(run[^1].X))},{N(At(0))} L{N(X(run[0].X))},{N(At(0))} Z' {fill}/>");
                         if (series.Zones is null && series.ProjectedFrom is null && traced.All(p => p.Color is null))
@@ -1079,6 +1088,13 @@ public static partial class ChartSvg
                                     MarkerStyle.Auto when w.Refined && length > 1 => ($"<circle class='lumen-marker' cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", ""),
                                     _ => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", "")
                                 };
+                            // A marker that shows is a mark; the refined default ones show on hover alone, and none shows nothing.
+                            if (boxes is not null && mark != ChartKind.Band)
+                            {
+                                var reach = d.Index == last && d.Count == 1 ? 10d : p.Highlight is not null ? Highlighted
+                                    : series.Markers == MarkerStyle.None || series.Markers == MarkerStyle.Auto && length > 1 ? 0d : run.Length > 80 ? 2d : 4d;
+                                if (reach > 0) boxes.Add((X(p.X) - reach - 2, X(p.X) + reach + 2, At(p.Y!.Value) - reach - 2, At(p.Y!.Value) + reach + 2));
+                            }
                             var followed = ending is { } e && e.Index == d.Index && e.Count == d.Count && e.Point.X == p.X;
                             Datum(w, si, d.Index, PointLabel(series, p, xs, scale, d.Count > 1 ? null : changes[d.Index], Sub(p.X)) + (d.Count > 1 ? Averaged(d.Count) : Of(series, p)) + (followed ? Said(series) : ""), shape, attributes, single: d.Count <= 1);
                             if (followed) endings.Add(new(X(p.X), At(p.Y!.Value), series, color, d.Index == last && d.Count == 1 ? 10 : p.Highlight is not null ? Highlighted + 1 : series.Markers == MarkerStyle.Hollow ? 5 : 4));
@@ -1185,6 +1201,8 @@ public static partial class ChartSvg
                         // A zero drawn as a hairline: a bar 1 unit high on the baseline, in the muted colour, focusable and named as any (0.47.0).
                         var hairline = series.MarkZero && !horizontal && y == 0;
                         var shape = hairline ? $"<rect x='{N(rx)}' y='{N(At(0) - 1)}' width='{N(rw)}' height='1' fill='{w.Style.Muted}'/>{ZeroTarget(rx, rw, At(0), top, bottom)}" : Bar(w, rx, ry, rw, rh, end, Ink(p), series.Fill, outermost);
+                        if (hairline) boxes?.Add((rx, rx + rw, At(0) - 1, At(0)));
+                        else boxes?.Add((rx, rx + rw, ry, ry + rh));
                         Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + Of(series, p) + over, shape);
                         if (series.ValueLabels)
                         {
@@ -1201,6 +1219,8 @@ public static partial class ChartSvg
                         var width = slot / columns.Length;
                         var x = X(p.X) - slot / 2 + place * width;
                         var hairline = series.MarkZero && y == 0;
+                        if (hairline) boxes?.Add((x, x + width, At(0) - 1, At(0)));
+                        else boxes?.Add((x, x + width, Math.Min(At(0), At(y)), Math.Max(At(0), At(y))));
                         Datum(w, si, pi, PointLabel(series,p,xs,scale,sub: Sub(p.X)) + Of(series, p),
                             hairline ? $"<rect x='{N(x)}' y='{N(At(0) - 1)}' width='{N(width)}' height='1' fill='{w.Style.Muted}'/>{ZeroTarget(x, width, At(0), top, bottom)}"
                                 : Bar(w, x, Math.Min(At(0), At(y)), width, Math.Abs(At(y) - At(0)), y >= 0 ? End.Top : End.Bottom, Ink(p), series.Fill));
@@ -1218,6 +1238,11 @@ public static partial class ChartSvg
                             MarkerStyle.Hollow => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{w.Style.Background}'{w.Fixed}/>", $" stroke='{ink}' stroke-width='2'"),
                             _ => ($"<circle cx='{cx}' cy='{cy}' r='{N(radius)}' fill='{ink}' fill-opacity='.7' stroke='{ink}'{w.Fixed}/>", "")
                         };
+                        if (boxes is not null)
+                        {
+                            var reach = mark == ChartKind.Scatter && p.Highlight is not null ? Highlighted + 2 : radius;
+                            boxes.Add((X(p.X) - reach, X(p.X) + reach, At(y) - reach, At(y) + reach));
+                        }
                         Datum(w, si, pi, PointLabel(series,p,xs,scale,changes[pi],Sub(p.X)) + Of(series, p) + (pi == endPoint ? Said(series) : ""), shape, attributes);
                         if (pi == endPoint) endings.Add(new(X(p.X), At(y), series, color, p.Highlight is null ? radius + (series.Markers == MarkerStyle.Hollow ? 1 : 0) : Highlighted + 1));
                         if (series.ValueLabels) Over(X(p.X), At(y), p.Highlight is null ? radius : Highlighted, scale.Format(y), p.ValueNote, Lettered(Moved(pi), p));
@@ -1225,6 +1250,8 @@ public static partial class ChartSvg
                 }
                 if (series.Trend) Trend(w, series, color, X, At, left, right, scale.Reversed, s.MaxRenderedPoints);
             }
+            // Set after the data, a reference's label keeps clear of the marks and of the value labels written (0.53.0).
+            if (boxes is not null) Place(references, left, right, top, bottom, [.. boxes, .. written], pieces!);
             // A reference in front stands over the data, so columns and blocks do not hide it, and under the labels.
             foreach (var reference in references) if (reference.Front) Draw(w, reference);
             if (w.Refined) foreach (var reference in references) Label(w, reference);
@@ -2282,18 +2309,33 @@ public static partial class ChartSvg
     /// set: level lines, whose labels have two, then level bands, then the upright references, which can drop a row; each
     /// kind from the top or left of the plot. A label with no room, and the label of a band too thin or too narrow for its
     /// text, is left out; its reference keeps its name for the tooltip and assistive technology.
+    /// With <paramref name="boxes"/> and <paramref name="pieces"/> (0.53.0), the marks the pane drew and the pieces of its lines, each label
+    /// first tries its spots in turn and takes the first that meets none of them, a box widened by 2 on every side: a level line's right above,
+    /// right below, left above and left below; a level band's rows at the right, then the same rows at the left; an upright line's rows on the
+    /// side the rule above picks, then its rows on the other side where the text fits; an upright band's rows. Where no spot is clear it
+    /// is set by the rule above, clear of the labels alone. Without them this is the rule above alone.
     /// </summary>
-    private static void Place(List<Reference> references, double left, double right, double top, double bottom)
+    private static void Place(List<Reference> references, double left, double right, double top, double bottom,
+        IReadOnlyList<(double X1, double X2, double Y1, double Y2)>? boxes = null, IReadOnlyList<(double X1, double Y1, double X2, double Y2)>? pieces = null)
     {
         // An 11 px label, its baseline 9 px below its top and 3 px above its bottom, set 4 px in from an edge and 2 px from another.
         const double ascent = 9, descent = 3, inset = 4, gap = 2, row = 14;
         var taken = new List<(double X1, double X2, double Y1, double Y2)>();
         IEnumerable<(double X1, double X2, double Y1, double Y2)> Blocking(double x1, double x2, double y1, double y2) =>
             taken.Where(t => t.X2 + gap > x1 && t.X1 < x2 + gap && t.Y2 + gap > y1 && t.Y1 < y2 + gap);
-        bool Take(Reference reference, double x, double y, string anchor, double width)
+        // Whether a mark, or a piece of a line, meets the box widened by the gap.
+        bool Hit(double x1, double x2, double y1, double y2)
+        {
+            if (boxes is null || pieces is null) return false;
+            var wide = (X1: x1 - gap, X2: x2 + gap, Y1: y1 - gap, Y2: y2 + gap);
+            return boxes.Any(b => b.X2 > wide.X1 && b.X1 < wide.X2 && b.Y2 > wide.Y1 && b.Y1 < wide.Y2)
+                || pieces.Any(q => Crosses(q.X1, q.Y1, q.X2, q.Y2, wide));
+        }
+        bool Take(Reference reference, double x, double y, string anchor, double width, bool clear = false)
         {
             var x1 = anchor == "end" ? x - width : x;
             if (Blocking(x1, x1 + width, y - ascent, y + descent).Any()) return false;
+            if (clear && Hit(x1, x1 + width, y - ascent, y + descent)) return false;
             taken.Add((x1, x1 + width, y - ascent, y + descent));
             (reference.X, reference.Y, reference.Anchor) = (x, y, anchor);
             return true;
@@ -2302,13 +2344,22 @@ public static partial class ChartSvg
         {
             var x = right - inset - gap;
             if (x - width < left + inset) return false;
+            var started = left + inset + gap;
             if (!reference.Band)
-                return reference.Near >= top && reference.Near <= bottom &&
-                    (reference.Near - 6 - ascent >= top && Take(reference, x, reference.Near - 6, "end", width) ||
-                     reference.Near + 4 + ascent + descent <= bottom && Take(reference, x, reference.Near + 4 + ascent, "end", width));
+            {
+                if (reference.Near < top || reference.Near > bottom) return false;
+                bool Above(double at, string anchor, bool clear) => reference.Near - 6 - ascent >= top && Take(reference, at, reference.Near - 6, anchor, width, clear);
+                bool Below(double at, string anchor, bool clear) => reference.Near + 4 + ascent + descent <= bottom && Take(reference, at, reference.Near + 4 + ascent, anchor, width, clear);
+                if (boxes is not null && (Above(x, "end", true) || Below(x, "end", true) || Above(started, "start", true) || Below(started, "start", true))) return true;
+                return Above(x, "end", false) || Below(x, "end", false);
+            }
             double from = Math.Max(Math.Min(reference.Near, reference.Far), top), to = Math.Min(Math.Max(reference.Near, reference.Far), bottom);
             if (to - from < ascent + descent) return false;
             var pad = Math.Min(inset, (to - from - ascent - descent) / 2);
+            if (boxes is not null)
+                foreach (var (at, anchor) in new[] { (x, "end"), (started, "start") })
+                    for (var y = from + pad + ascent; y + descent <= to - pad + 1e-9; y += row)
+                        if (Take(reference, at, y, anchor, width, true)) return true;
             for (var y = from + pad + ascent; y + descent <= to - pad + 1e-9;)
             {
                 if (Take(reference, x, y, "end", width)) return true;
@@ -2318,23 +2369,47 @@ public static partial class ChartSvg
         }
         bool Upright(Reference reference, double width)
         {
-            double x; string anchor;
+            // The sides it may stand on, the one today's rule picks first; a band has its one.
+            var sides = new List<(double X, string Anchor)>();
             if (reference.Band)
             {
                 double from = Math.Max(Math.Min(reference.Near, reference.Far), left), to = Math.Min(Math.Max(reference.Near, reference.Far), right);
                 if (to - from < width + 2 * (inset + gap)) return false;
-                (x, anchor) = (from + inset + gap, "start");
+                sides.Add((from + inset + gap, "start"));
             }
             else if (reference.Near < left || reference.Near > right) return false;
-            else if (reference.Near + 6 + width <= right - gap) (x, anchor) = (reference.Near + 6, "start");
-            else if (reference.Near - 6 - width >= left + gap) (x, anchor) = (reference.Near - 6, "end");
-            else return false;
+            else
+            {
+                if (reference.Near + 6 + width <= right - gap) sides.Add((reference.Near + 6, "start"));
+                if (reference.Near - 6 - width >= left + gap) sides.Add((reference.Near - 6, "end"));
+                if (sides.Count == 0) return false;
+            }
+            if (boxes is not null)
+                foreach (var (x, anchor) in sides)
+                    for (var y = top + inset + ascent; y + descent <= bottom - inset; y += row)
+                        if (Take(reference, x, y, anchor, width, true)) return true;
             for (var y = top + inset + ascent; y + descent <= bottom - inset; y += row)
-                if (Take(reference, x, y, anchor, width)) return true;
+                if (Take(reference, sides[0].X, y, sides[0].Anchor, width)) return true;
             return false;
         }
         foreach (var reference in references.Where(r => r.Named).OrderBy(r => r.Upright).ThenBy(r => r.Band).ThenBy(r => Math.Min(r.Near, r.Far)))
             reference.Shown = reference.Upright ? Upright(reference, Wide(reference.Text)) : Level(reference, Wide(reference.Text));
+    }
+
+    /// <summary>Whether any part of the segment from (<paramref name="x1"/>, <paramref name="y1"/>) to (<paramref name="x2"/>, <paramref name="y2"/>) lies in
+    /// the box, its edges included, by Liang–Barsky clipping: the segment is cut to the box's four sides, so one that passes a corner of the
+    /// box it shares a bounding box with does not count.</summary>
+    internal static bool Crosses(double x1, double y1, double x2, double y2, (double X1, double X2, double Y1, double Y2) box)
+    {
+        double dx = x2 - x1, dy = y2 - y1, near = 0, far = 1;
+        foreach (var (p, q) in new[] { (-dx, x1 - box.X1), (dx, box.X2 - x1), (-dy, y1 - box.Y1), (dy, box.Y2 - y1) })
+        {
+            if (p == 0) { if (q < 0) return false; continue; }
+            var r = q / p;
+            if (p < 0) { if (r > far) return false; near = Math.Max(near, r); }
+            else { if (r < near) return false; far = Math.Min(far, r); }
+        }
+        return true;
     }
 
     private static void Candles(SvgWriter w, int si, ChartSeries series, Func<double, double> X, Func<double, double> Y, Axis xs, Axis ys)

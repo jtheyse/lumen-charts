@@ -883,6 +883,16 @@ public sealed record ChartSpec
     /// strip. False by default, and left out of the gradient-ID hash while false.
     /// </summary>
     public bool WrapEndNotes { get; init; }
+    /// <summary>
+    /// A reference line's or band's label is set clear of the data's marks: the pane records the markers, columns, bars, scatter and bubble
+    /// circles and the pieces of every line and area it draws, and each label then tries the right above, the right below, the left above and
+    /// the left below of a level line, the rows of a band or of an upright line on both sides, and takes the first spot that meets no mark
+    /// and no value label; where none is clear it keeps the spot it has without this switch (0.53.0). It acts in the refined finish only and
+    /// is accepted, doing nothing, in the classic one. It applies to charts drawn on an X and Y axis, so it is refused on a sparkline, a
+    /// timeline, a gauge and a calendar, and on the kinds that take no annotations. False by default, and left out of the gradient-ID hash
+    /// while false.
+    /// </summary>
+    public bool AnnotationLabelsAvoidMarks { get; init; }
 }
 
 /// <summary>

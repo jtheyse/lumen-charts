@@ -134,6 +134,8 @@ public static partial class ChartValidation
             throw new ArgumentException("LegendFlow sets out the series legend drawn under a chart, so it applies to the kinds that draw one; a sparkline, a donut, a heatmap, a box, a violin, a gauge, a calendar and a strip name what they draw in their own drawing.");
         if (spec.WrapEndNotes && (spec.Sparkline || spec.Kind is ChartKind.Donut or ChartKind.Radar or ChartKind.Heatmap or ChartKind.Histogram or ChartKind.Box or ChartKind.Violin or ChartKind.Gauge or ChartKind.Ring or ChartKind.Calendar or ChartKind.Timeline or ChartKind.Strip))
             throw new ArgumentException("WrapEndNotes sets an end label's note on a second line, so it applies to charts whose series can end in a line, an area or scatter points; a sparkline writes no end labels, and donut, radar, heatmap, histogram, box, violin, gauge, ring, calendar, timeline and strip charts take none.");
+        if (spec.AnnotationLabelsAvoidMarks && (spec.Sparkline || !Annotated(spec.Kind) || spec.Kind == ChartKind.Timeline))
+            throw new ArgumentException("AnnotationLabelsAvoidMarks sets a reference's label clear of the data's marks, so it applies to charts drawn on an X and Y axis; a sparkline writes no annotation labels, a timeline's spans are not marks it avoids, a gauge and a calendar label their annotations in their own way, and donut, radar, heatmap, histogram, box, violin, ring and strip charts take no annotations.");
         if (spec.Annotations is null || spec.Annotations.Count > 32) throw new ArgumentException("Provide at most 32 annotations.");
         foreach (var annotation in spec.Annotations)
         {
