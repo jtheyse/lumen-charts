@@ -13522,6 +13522,15 @@ Test("Annotation labels 0.53.0: a level label clears the markers at the line's r
     var (l,r,t,bo)=Plot53(after);
     Check(box.X1>=l&&box.X2<=r&&box.Y1>=t&&box.Y2<=bo,$"inside the plot {l},{r},{t},{bo}: {box}");
 });
+Test("Annotation labels 0.53.0: a band series' centre line is a mark",()=>{
+    // A band takes no marker style, and its refined default markers show on hover alone, so its drawn marks are its centre line's pieces.
+    ChartSpec Banded(bool on)=>Crowd53(on) with{Series=[new("Power",new double[]{100,120,140,170,200,225,240,250,262,270,264,268}.Select((y,i)=>ChartPoint.Interval(i,y,y-3,y+3)).ToArray()){Kind=ChartKind.Band}]};
+    bool Crossed(XDocument d,(double X1,double X2,double Y1,double Y2) box)=>Strokes53(d).Any(s=>Enumerable.Range(1,s.Length-1).Any(i=>ChartSvg.Crosses(s[i-1].X,s[i-1].Y,s[i].X,s[i].Y,box)));
+    var before=Svg(Banded(false)); var after=Svg(Banded(true));
+    Check(Crossed(before,LabelBox53(RefLabel53(before,"CP: 255"))),"precondition: today's box is crossed by the centre line");
+    var box=LabelBox53(RefLabel53(after,"CP: 255"));
+    Check(!Crossed(after,box),"crosses no piece of the centre line: "+box);
+});
 Test("Annotation labels 0.53.0: where every spot is blocked the label keeps today's",()=>{
     var off=RefLabel53(Svg(Crowd53(false,dense:true)),"CP: 255"); var on=RefLabel53(Svg(Crowd53(true,dense:true)),"CP: 255");
     Check(on.Attribute("x")!.Value==off.Attribute("x")!.Value&&on.Attribute("y")!.Value==off.Attribute("y")!.Value&&on.Attribute("text-anchor")!.Value==off.Attribute("text-anchor")!.Value,$"on {on.Attribute("x")},{on.Attribute("y")} off {off.Attribute("x")},{off.Attribute("y")}");

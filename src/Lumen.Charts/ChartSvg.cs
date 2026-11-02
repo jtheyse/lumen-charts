@@ -1061,7 +1061,7 @@ public static partial class ChartSvg
                         }
                         var (path, line) = Trace(series.Curve, traced, indices, X, At, y => scale.Invert(y, bottom, top));
                         // A line's or an area's stroke is recorded piece by piece, a curve by its chords.
-                        if (pieces is not null && mark != ChartKind.Band)
+                        if (pieces is not null)
                             for (var n = 1; n < run.Length; n++) pieces.Add((X(run[n - 1].X), At(run[n - 1].Y!.Value), X(run[n].X), At(run[n].Y!.Value)));
                         if (mark == ChartKind.Area)
                             w.Add($"<path d='{path} L{N(X(run[^1].X))},{N(At(0))} L{N(X(run[0].X))},{N(At(0))} Z' {fill}/>");
@@ -1089,7 +1089,7 @@ public static partial class ChartSvg
                                     _ => ($"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{ink}'/>", "")
                                 };
                             // A marker that shows is a mark; the refined default ones show on hover alone, and none shows nothing.
-                            if (boxes is not null && mark != ChartKind.Band)
+                            if (boxes is not null)
                             {
                                 var reach = d.Index == last && d.Count == 1 ? 10d : p.Highlight is not null ? Highlighted
                                     : series.Markers == MarkerStyle.None || series.Markers == MarkerStyle.Auto && length > 1 ? 0d : run.Length > 80 ? 2d : 4d;
