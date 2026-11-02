@@ -4252,7 +4252,7 @@ Test("A gauge's sweep left at its default is left out of the hash that names gra
     var faded=Spec(ChartKind.Area) with{Series=[new("S",[new(0,1),new(1,3)]){Fill=AreaFill.Fade}]};
     string Prefix(string svg)=>System.Text.RegularExpressions.Regex.Match(svg,"id='(lumen-[0-9a-f]{12})-0'").Groups[1].Value;
     var json=System.Text.Json.JsonSerializer.Serialize(faded with{Style=ChartSvg.ResolveStyle(faded)},new System.Text.Json.JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
-    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false,\"CellNotes\":false,\"NotRatedKeepsValue\":false,\"RowNamesInText\":false,\"FitEachRow\":false,\"LegendFlow\":false}";
+    const string defaults=",\"GaugeSweep\":270,\"TimelineConnectors\":true,\"CalendarLayout\":0,\"CalendarCell\":0,\"WeekStart\":1,\"CellText\":false,\"ColumnLabelsOnTop\":false,\"SharedReadout\":false,\"BarTrack\":false,\"DrawTitles\":true,\"PaintBackground\":true,\"FitHeight\":false,\"CellNotes\":false,\"NotRatedKeepsValue\":false,\"RowNamesInText\":false,\"FitEachRow\":false,\"LegendFlow\":false,\"WrapEndNotes\":false}";
     const string trended="\"Trend\":false,\"TrendFit\":0,\"TrendPoints\":7,\"TrendDegree\":2,";
     const string ticked="\"XLabel\":\"\",\"XTicks\":0,\"XTickLabels\":0,";const string changed="\"ValueLabels\":false,\"ChangeColors\":0";const string sparked="\"Height\":420,\"Sparkline\":false,";
     const string sampled="\"MaxRenderedPoints\":1200,\"Sampling\":0,";const string titled="\"Panes\":[],\"PaneTitles\":0,";
@@ -13331,6 +13331,138 @@ Test("Legend 0.53.0: a flowed legend on a column chart with a wide cell runs acr
     Check(texts.All(t=>X53(t)+ChartSvg.Wide(t.Value)<=drawn-24+0.01),"inside the drawn width less 24");
     var out52=Outside52(svg);
     Check(out52.Count==0,string.Join("; ",out52.Take(3)));
+});
+// 0.53.0: end notes. WrapEndNotes moves an end label's note to a second line, under the name, only where the one-line rule would cut it;
+// Spread takes each label's offset below the first, and the margin asks only for the wider of the name and the note.
+ChartSpec Wrap53(int width,bool wrap,string name="Rider name",string note="+12.3s",bool other=true)=>new ChartSpec{Title="Ends",Kind=ChartKind.Line,Width=width,Height=300,WrapEndNotes=wrap,
+    Series=[new("Rider",[new(0,1),new(1,2)]){EndLabel=name,EndNote=note},..(other?new[]{new ChartSeries("Other",[new(0,5),new(1,4)]){EndLabel="Other",EndNote="+4.1s"}}:[])]};
+double PlotRight53(string svg){var clip=PaneClips(XDocument.Parse(svg))[0];return Attr(clip,"x")+Attr(clip,"width");}
+// A label's baseline and, where it has one, the baseline of its note line, from the words' copy of each end label.
+List<(XElement Text,double Y,XElement? Note)> EndBlocks53(string svg)=>Ends38(XDocument.Parse(svg)).Select(g=>Words38(g)).Select(t=>(t,Y53(t),t.Elements(ns+"tspan").FirstOrDefault(s=>s.Attribute("dy")?.Value=="14"))).OrderBy(b=>b.Item2).ToList();
+Test("End notes 0.53.0: at 320 the note goes whole on a second line",()=>{
+    var svg=ChartSvg.Render(Wrap53(320,true));
+    var blocks=EndBlocks53(svg);
+    var rider=blocks.Single(b=>(b.Text.Attribute("aria-label")?.Value??"").StartsWith("Rider"));
+    Check((string?)rider.Text.Attribute("role")=="img"&&rider.Text.Attribute("aria-label")!.Value=="Rider name +12.3s","role and label: "+rider.Text);
+    Check(rider.Note is not null&&rider.Note.Value=="+12.3s"&&rider.Note.Attribute("x")!.Value==rider.Text.Attribute("x")!.Value,"a dy=14 tspan reading +12.3s: "+rider.Text);
+    var halo=Ends38(XDocument.Parse(svg)).Select(g=>g.Elements(ns+"text").First()).First(t=>t.Value.StartsWith("Rider"));
+    Check(halo.Elements(ns+"tspan").Any(s=>s.Attribute("dy")?.Value=="14"&&s.Value=="+12.3s"),"the halo copy carries both lines");
+    Check(blocks.Count==2&&blocks.All(b=>b.Note is not null),"both are cut at 320, so both take two lines");
+    var out52=Outside52(svg);
+    Check(out52.Count==0,string.Join("; ",out52.Take(3)));
+});
+Test("End notes 0.53.0: the plot widens where the label alone fits under the cap",()=>{
+    // At 320 the cap is 320 - 76 - 160 = 84. 'Rider' with its note asks more than that, but 'Rider' alone asks 8 + 6 + its width + 4.
+    Check(PlotRight53(ChartSvg.Render(Wrap53(320,true,"Rider",other:false)))>PlotRight53(ChartSvg.Render(Wrap53(320,false,"Rider",other:false))),"wider with 'Rider'");
+    // 'Rider name' alone asks 88.6, which meets the cap, so the plot is as wide as today.
+    Check(PlotRight53(ChartSvg.Render(Wrap53(320,true,other:false)))==PlotRight53(ChartSvg.Render(Wrap53(320,false,other:false))),"equal with 'Rider name'");
+});
+Test("End notes 0.53.0: a chart with nothing cut is byte-identical",()=>{
+    Check(ChartSvg.Render(Wrap53(640,true))==ChartSvg.Render(Wrap53(640,false)),"640 renders equal with and without the switch");
+});
+ChartSpec Crowded53(int width,bool wrap)=>new ChartSpec{Title="Crowd",Kind=ChartKind.Line,Width=width,Height=300,WrapEndNotes=wrap,
+    Series=new[]{("Ann","+1.2s"),("Bo","+3.4s"),("Cy","+12.3s behind"),("Di","+45.6s behind"),("Ed","+78.9s behind")}
+        .Select((n,k)=>new ChartSeries(n.Item1,[new(0,5*k),new(1,50+2.5*k)]){EndLabel=n.Item1,EndNote=n.Item2}).ToArray()};
+Test("End notes 0.53.0: crowded two-line labels keep a line between blocks",()=>{
+    var svg=ChartSvg.Render(Crowded53(340,true));
+    var blocks=EndBlocks53(svg);
+    var (top,bottom)=PaneSpan(PaneClips(XDocument.Parse(svg))[0]);
+    Check(blocks.Count==5,"five labels: "+blocks.Count);
+    Check(blocks.Count(b=>b.Note is not null)==3,"three take two lines: "+blocks.Count(b=>b.Note is not null));
+    for(var i=1;i<blocks.Count;i++)
+    {
+        var last=blocks[i-1].Y+(blocks[i-1].Note is not null?14:0);
+        Check(blocks[i].Y-last>=12-1e-9,$"block {i} starts {blocks[i].Y-last} below the last baseline above");
+    }
+    foreach(var b in blocks)
+        foreach(var y in b.Note is null?new[]{b.Y}:new[]{b.Y,b.Y+14})
+            Check(y-4>=top-1-1e-9&&y-4<=bottom+1+1e-9,$"baseline {y} within {top-1}..{bottom+1}");
+    var out52=Outside52(svg);
+    Check(out52.Count==0,string.Join("; ",out52.Take(3)));
+});
+Test("End notes 0.53.0: a note wider than its line is cut with …",()=>{
+    var svg=ChartSvg.Render(Wrap53(320,true,"Rider name","+12.3s behind the leader",other:false));
+    var rider=EndBlocks53(svg).Single();
+    Check(rider.Note is not null&&rider.Note.Value.EndsWith("…"),"the note ends …: "+rider.Text);
+    Check(X53(rider.Note!)+ChartSvg.Broad(rider.Note!.Value)<=316+1e-6,"inside the drawing: "+X53(rider.Note!)+" + "+ChartSvg.Broad(rider.Note!.Value));
+    Check(rider.Text.Attribute("aria-label")!.Value=="Rider name +12.3s behind the leader","the whole stays as the name");
+});
+Test("End notes 0.53.0: refused where there are no end labels",()=>{
+    Check(Refused(Spec(ChartKind.Donut) with{WrapEndNotes=true}).Contains("WrapEndNotes"),"donut");
+    Check(Refused(Spec() with{Sparkline=true,WrapEndNotes=true}).Contains("WrapEndNotes"),"sparkline");
+});
+Test("End notes 0.53.0: the switch is hashed only when set",()=>{
+    var spec=Spec() with{Series=[new("You",[new(0,2),new(1,3)]){Gradient=[new(2,"#2E9B58"),new(3,"#DD4B45")]}]};
+    Check(ChartSvg.IdPrefix(spec)==ChartSvg.IdPrefix(spec with{WrapEndNotes=false}),"false is not hashed");
+    Check(ChartSvg.IdPrefix(spec)!=ChartSvg.IdPrefix(spec with{WrapEndNotes=true}),"true is hashed");
+});
+Test("End notes 0.53.0: in a lower pane the note line stays within the pane's bottom + 1",()=>{
+    // Three labelled series end at pane 1's bottom (their data start high and fall to it); two take two lines at 320.
+    var spec=new ChartSpec{Title="Panes",Kind=ChartKind.Line,Width=320,Height=420,WrapEndNotes=true,Panes=[new(){Label="Lower",Weight=1}],
+        Series=[new("Top",[new(0,10),new(1,12)]),
+            new("Ann",[new(0,9),new(1,1.0)]){Pane=1,EndLabel="Ann",EndNote="+1s"},
+            new("Rider name",[new(0,9),new(1,1.1)]){Pane=1,EndLabel="Rider name",EndNote="+12.3s"},
+            new("Other rider",[new(0,9),new(1,1.2)]){Pane=1,EndLabel="Other rider",EndNote="+48.0s"}]};
+    var svg=ChartSvg.Render(spec);
+    var doc=XDocument.Parse(svg);
+    var (top,bottom)=PaneSpan(PaneClips(doc)[1]);
+    var blocks=EndBlocks53(svg);
+    Check(blocks.Count==3&&blocks.Count(b=>b.Note is not null)==2,"three labels, two of two lines: "+blocks.Count+"/"+blocks.Count(b=>b.Note is not null));
+    foreach(var b in blocks.Where(b=>b.Note is not null)) Check(b.Y+14-4<=bottom+1+1e-9,$"note baseline {b.Y+14} - 4 <= {bottom+1}");
+    foreach(var b in blocks) Check(b.Y-4>=top-1-1e-9,$"label {b.Y} - 4 >= {top-1}");
+    var out52=Outside52(svg);
+    Check(out52.Count==0,string.Join("; ",out52.Take(3)));
+});
+// A copy of 0.52.0's Spread (ChartSvg.cs:1234-1252 at v0.52.0), for the comparison test below.
+double[] Spread52(double[] wanted,double gap,double low,double high)
+{
+    var pools=new List<(double Sum,int Count)>();
+    for(var i=0;i<wanted.Length;i++)
+    {
+        pools.Add((wanted[i]-i*gap,1));
+        while(pools.Count>1&&pools[^2].Sum/pools[^2].Count>pools[^1].Sum/pools[^1].Count)
+        {
+            var merged=(pools[^2].Sum+pools[^1].Sum,pools[^2].Count+pools[^1].Count);
+            pools.RemoveAt(pools.Count-1);
+            pools[^1]=merged;
+        }
+    }
+    var centres=new double[wanted.Length];
+    var at=0;
+    foreach(var (sum,count) in pools)
+        for(var j=0;j<count;j++,at++) centres[at]=Math.Clamp(sum/count,low,high-(wanted.Length-1)*gap)+at*gap;
+    return centres;
+}
+Test("End notes 0.53.0: Spread with one-line offsets equals 0.52.0's",()=>{
+    var random=new Random(53);
+    for(var round=0;round<10_000;round++)
+    {
+        var count=random.Next(1,13);
+        var gap=random.Next(2)==0?12d:14d;
+        var wanted=Enumerable.Range(0,count).Select(_=>77+random.NextDouble()*150).OrderBy(v=>v).ToArray();
+        var low=77d;
+        var high=Math.Max(225d,low+(count-1)*gap+random.NextDouble()*20);
+        var offsets=Enumerable.Range(0,count).Select(i=>i*gap).ToArray();
+        var now=ChartSvg.Spread(wanted,offsets,0,low,high);
+        var then=Spread52(wanted,gap,low,high);
+        for(var i=0;i<count;i++) Check(now[i]==then[i],$"round {round}, label {i}: {now[i]} != {then[i]}");
+    }
+});
+// Two labels 16 apart at 320, the plot 146 tall from y 78 to 224 over 0..146, so a value v stands at y 224 - v. 'Other rider' asks the margin
+// its cap of 84, so a label has 72 where it stands and 66 once it has moved and stepped right.
+ChartSpec Second53(bool wrap,string aNote="+4.1s")=>new ChartSpec{Title="Second",Kind=ChartKind.Line,Width=320,Height=300,WrapEndNotes=wrap,YMin=0,YMax=146,
+    Series=[new("A",[new(0,100),new(1,100)]){EndLabel="Other rider",EndNote=aNote},new("B",[new(0,84),new(1,84)]){EndLabel="Ann",EndNote="+12.3s"}]};
+Test("End notes 0.53.0: a second pass marks another label",()=>{
+    // Ann +12.3s is 66.72 wide: it fits the 72 where it stands, but not the 66 it has once it moves and steps right. With 'Other rider'
+    // on one line (no note) Ann stands where it is and is written on one line.
+    var alone=EndBlocks53(ChartSvg.Render(Second53(true,aNote:null!)));
+    Check(alone.Count==2&&alone.All(b=>b.Note is null)&&alone.Any(b=>X53(b.Text)==244),"unmoved and on one line: "+string.Join(" ",alone.Select(b=>b.Text.ToString(SaveOptions.DisableFormatting))));
+    // Once 'Other rider' takes a second line, Ann is 12 further down than it was set, so it moves, steps right by 6 and is cut: a second pass.
+    var blocks=EndBlocks53(ChartSvg.Render(Second53(true)));
+    Check(blocks.Count==2&&blocks.All(b=>b.Note is not null),"both take two lines: "+string.Join(" ",blocks.Select(b=>b.Text.ToString(SaveOptions.DisableFormatting))));
+    Check(blocks.All(b=>X53(b.Text)==250),"both stepped right by 6: "+string.Join(",",blocks.Select(b=>X53(b.Text))));
+    Check(string.Join(",",blocks.Select(b=>Y53(b.Text)))=="122,150","Y values: "+string.Join(",",blocks.Select(b=>Y53(b.Text))));
+    Check(Outside52(ChartSvg.Render(Second53(true))).Count==0,"inside the drawing");
 });
 string ChartMarkup(ChartSpec spec,Dictionary<string,object?> parameters)
 {

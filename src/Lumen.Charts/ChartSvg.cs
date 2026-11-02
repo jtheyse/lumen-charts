@@ -123,6 +123,7 @@ public static partial class ChartSvg
             else if (property.Name == nameof(ChartSpec.RowNamesInText)) property.ShouldSerialize = (_, text) => text is true;
             else if (property.Name == nameof(ChartSpec.FitEachRow)) property.ShouldSerialize = (_, each) => each is true;
             else if (property.Name == nameof(ChartSpec.LegendFlow)) property.ShouldSerialize = (_, flow) => flow is true;
+            else if (property.Name == nameof(ChartSpec.WrapEndNotes)) property.ShouldSerialize = (_, wrap) => wrap is true;
     }
     /// <summary>A chart without bar tracks that draws its title and description, as every chart did before 0.39.0, is serialized for hashing
     /// as 0.38.0, which had neither setting, serialized it, so every chart drawn before them keeps its IDs.</summary>
@@ -1243,6 +1244,9 @@ public static partial class ChartSvg
     /// <summary>The room an end label keeps from the drawing's right edge, how far a label moved off its point steps right to make room for
     /// the line that joins them, and the height of a line of labels and the least it closes to before the lowest are left out.</summary>
     private const double EndPad = 4, EndShift = 6, EndLine = 14, EndTight = 12;
+    /// <summary>How far a note set on a second line (<see cref="ChartSpec.WrapEndNotes"/>) stands below its label's baseline, which is also the
+    /// height a label takes in addition to a line: blocks keep their gap between a note line and the next label.</summary>
+    private const double EndWrap = 14;
     /// <summary>How far an end label starts right of its point's centre: clear of a marker, or of the ring round a highlighted last point.</summary>
     private static double Lead(ChartSeries series) => series.HighlightLast ? 14 : 8;
     /// <summary>An end label and its note on one line, as the drawing writes them.</summary>
@@ -1251,14 +1255,20 @@ public static partial class ChartSvg
     private static string Said(ChartSeries series) => $", labelled {series.EndLabel}{(series.EndNote is { } note ? " · " + note : "")}";
     /// <summary>The right margin end labels ask for: the widest label and note, by the generous estimate for 12 px text, after its lead and
     /// the step a label moved off its point takes, and the room kept from the edge; capped so the plot keeps at least half the drawing's
-    /// width. None where no series has one. <see cref="Margins"/> calls it with <c>Width = MaxWidth</c> for a column chart with a
+    /// width. None where no series has one. Under <see cref="ChartSpec.WrapEndNotes"/> (0.53.0) a series whose label and note together
+    /// ask more than that cap asks only for the wider of the two, since its note goes on a second line where it would be cut. <see cref="Margins"/> calls it with <c>Width = MaxWidth</c> for a column chart with a
     /// fixed pitch, which ignores its <c>Width</c>, so the cap never bites there and that chart's end-label room does not depend on <c>Width</c>.</summary>
     private static double Ending(ChartSpec s, double left)
     {
         var need = 0d;
+        var cap = s.Width - left - s.Width / 2d;
         foreach (var series in s.Series)
-            if (series?.EndLabel is not null) need = Math.Max(need, Lead(series) + EndShift + Broad(EndText(series)) + EndPad);
-        return Math.Min(need, s.Width - left - s.Width / 2d);
+            if (series?.EndLabel is not null)
+            {
+                var one = Lead(series) + EndShift + Broad(EndText(series)) + EndPad;
+                need = Math.Max(need, !s.WrapEndNotes || one <= cap ? one : Lead(series) + EndShift + Math.Max(Broad(series.EndLabel), Broad(series.EndNote ?? "")) + EndPad);
+            }
+        return Math.Min(need, cap);
     }
     /// <summary>12 px text cut to <paramref name="room"/> pixels between its letters, with <c>…</c> after it, the spaces and punctuation the
     /// cut would leave before the ellipsis dropped; one letter at least.</summary>
@@ -1269,17 +1279,19 @@ public static partial class ChartSvg
         return text[..letters].TrimEnd(' ', ',', ';', ':', '·', '-', '—') + "…";
     }
     /// <summary>
-    /// Centres for labels one <paramref name="gap"/> apart at least, as near as they can be to <paramref name="wanted"/>, which is sorted
-    /// from the top down, all between <paramref name="low"/> and <paramref name="high"/>: the least squares of their moves, found by pooling
-    /// neighbours that would cross (isotonic regression on each centre less its place in the line) and then held within the bounds. The
-    /// bounds must hold them all.
+    /// Centres for labels set apart from the top down, as near as they can be to <paramref name="wanted"/>, which is sorted from the top
+    /// down, all between <paramref name="low"/> and <paramref name="high"/>: the least squares of their moves, found by pooling neighbours
+    /// that would cross (isotonic regression on each centre less its place in the line) and then held within the bounds. Label i stands
+    /// <paramref name="offsets"/>[i] below the first (0.53.0), which is i times the gap for labels of one line each and more where an
+    /// earlier label takes a second line; <paramref name="tail"/> is the height the last label takes below its centre, 14 where it has two
+    /// lines, else 0. The bounds must hold them all.
     /// </summary>
-    private static double[] Spread(double[] wanted, double gap, double low, double high)
+    internal static double[] Spread(double[] wanted, double[] offsets, double tail, double low, double high)
     {
         var pools = new List<(double Sum, int Count)>();
         for (var i = 0; i < wanted.Length; i++)
         {
-            pools.Add((wanted[i] - i * gap, 1));
+            pools.Add((wanted[i] - offsets[i], 1));
             while (pools.Count > 1 && pools[^2].Sum / pools[^2].Count > pools[^1].Sum / pools[^1].Count)
             {
                 var merged = (pools[^2].Sum + pools[^1].Sum, pools[^2].Count + pools[^1].Count);
@@ -1290,16 +1302,36 @@ public static partial class ChartSvg
         var centres = new double[wanted.Length];
         var at = 0;
         foreach (var (sum, count) in pools)
-            for (var j = 0; j < count; j++, at++) centres[at] = Math.Clamp(sum / count, low, high - (wanted.Length - 1) * gap) + at * gap;
+            for (var j = 0; j < count; j++, at++) centres[at] = Math.Clamp(sum / count, low, high - (offsets[^1] + tail)) + offsets[at];
         return centres;
     }
+    /// <summary>How far each of <paramref name="count"/> labels stands below the first: <paramref name="gap"/> a label, and
+    /// <see cref="EndWrap"/> more for each label above it that takes a second line (<paramref name="extras"/>[i] is that line, or 0).</summary>
+    private static double[] EndOffsets(int count, double gap, double[] extras)
+    {
+        var offsets = new double[count];
+        var above = 0d;
+        for (var i = 0; i < count; i++)
+        {
+            offsets[i] = i * gap + above;
+            above += extras[i];
+        }
+        return offsets;
+    }
+    /// <summary>The span <paramref name="count"/> labels need from the first's centre to the last's lowest line: its offset, and its second line
+    /// where it has one.</summary>
+    private static double EndLines(int count, double gap, double[] extras) => EndOffsets(count, gap, extras)[^1] + extras[count - 1];
     /// <summary>
     /// A pane's end labels, as <see cref="ChartSeries.EndLabel"/> describes them: each just right of its series' last point, centred on it,
     /// in its series' colour where that clears 4.5:1 and in the text colour where it does not, its note after it in the muted colour; where
-    /// the drawing's edge comes first the note is cut with <c>…</c>, or left out, before the label is cut. Labels whose spans across the drawing overlap are set apart from the top down,
-    /// <see cref="EndLine"/> a line, or <see cref="EndTight"/> where that does not fit, within the plot and 8 units past it, the lowest left
-    /// out where even that does not; one moved more than 3 units from its point steps right and is joined to it by a thin line. Each is
-    /// written over a copy of itself stroked in the background colour, as a value label is, so a line or a gridline under it never cuts it.
+    /// the drawing's edge comes first the note is cut with <c>…</c>, or left out, before the label is cut, or, under
+    /// <see cref="ChartSpec.WrapEndNotes"/> (0.53.0), moves whole to a second line under the name, in the same x, where the one-line rule would cut it,
+    /// cut with <c>…</c> there only where it alone is wider than the line. Labels whose spans across the drawing overlap are set apart from the top down,
+    /// <see cref="EndLine"/> a line, or <see cref="EndTight"/> where that does not fit, a label with two lines taking <see cref="EndWrap"/> more, within the
+    /// pane's bounds the caller passes and 1 unit past them, the lowest left out where even that does not; a label that takes two lines moves the
+    /// labels below it and so their rooms, so the labels are set again until no more are marked. One moved more than 3 units from its point steps
+    /// right and is joined to it by a thin line. Each is written over a copy of itself stroked in the background colour, as a value label is, so a
+    /// line or a gridline under it never cuts it.
     /// </summary>
     private static void Ends(SvgWriter w, ChartSpec s, List<EndMark> ends, double top, double bottom)
     {
@@ -1326,26 +1358,56 @@ public static partial class ChartSvg
         foreach (var group in groups)
         {
             var sorted = group.OrderBy(i => Math.Clamp(set[i].End.Y, low, high)).ThenBy(i => set[i].Order).ToList();
-            var gap = (sorted.Count - 1) * EndLine <= high - low ? EndLine : EndTight;
-            // Past what the plot holds even at the closer spacing, the lowest labels are left out; their words stay in their points' names.
-            if ((sorted.Count - 1) * gap > high - low) sorted = sorted.Take((int)Math.Floor((high - low) / gap) + 1).ToList();
-            var centres = Spread(sorted.Select(i => Math.Clamp(set[i].End.Y, low, high)).ToArray(), gap, low, high);
-            for (var n = 0; n < sorted.Count; n++)
+            // Under WrapEndNotes the labels whose notes the drawing's edge would cut take two lines, which moves the labels below them and
+            // so their rooms; the passes run until a pass marks no more, and a label once marked stays marked, so they end.
+            var two = new HashSet<int>();
+            List<int> kept;
+            double[] centres, offsets;
+            double gap, tail;
+            (double Centre, bool Moved, double X, double Room) Place(int n)
             {
-                var (end, _, full, from, _) = set[sorted[n]];
                 var centre = centres[n];
-                var moved = Math.Abs(centre - end.Y) > 3;
-                var x = from + (moved ? EndShift : 0);
+                var moved = Math.Abs(centre - set[kept[n]].End.Y) > 3;
+                var x = set[kept[n]].From + (moved ? EndShift : 0);
                 // Cut where the drawing's edge comes first, which it does only where the margin met its cap or the label moved.
-                var room = s.Width - EndPad - x;
+                return (centre, moved, x, s.Width - EndPad - x);
+            }
+            while (true)
+            {
+                var extras = sorted.Select(i => two.Contains(i) ? EndWrap : 0d).ToArray();
+                gap = EndLines(sorted.Count, EndLine, extras) <= high - low ? EndLine : EndTight;
+                // Past what the plot holds even at the closer spacing, the lowest labels are left out; their words stay in their points' names.
+                var count = sorted.Count;
+                while (count > 1 && EndLines(count, gap, extras) > high - low) count--;
+                kept = sorted.Take(count).ToList();
+                offsets = EndOffsets(count, gap, extras);
+                tail = extras[count - 1];
+                centres = Spread(kept.Select(i => Math.Clamp(set[i].End.Y, low, high)).ToArray(), offsets, tail, low, high);
+                if (!s.WrapEndNotes) break;
+                var added = false;
+                for (var n = 0; n < kept.Count; n++)
+                    if (set[kept[n]].End.Series.EndNote is not null && Broad(set[kept[n]].Full) > Place(n).Room + 1e-6 && two.Add(kept[n])) added = true;
+                if (!added) break;
+            }
+            for (var n = 0; n < kept.Count; n++)
+            {
+                var (end, _, full, _, _) = set[kept[n]];
+                var (centre, moved, x, room) = Place(n);
                 if (moved)
                     w.Line(end.X + end.Reach + 1, end.Y, x - 2, centre, $"stroke='{(Contrast.Ratio(end.Color, ground) >= 3 ? end.Color : style.Muted)}' stroke-width='1' stroke-linecap='round'{w.Fixed} aria-hidden='true'");
                 // The label names the series and the note only adds to it, so where the two do not fit the note is cut first, then left out,
                 // and only then is the label cut.
                 var label = end.Series.EndLabel!;
                 string? note = end.Series.EndNote;
+                var wrapped = two.Contains(kept[n]);
                 var cut = Broad(full) > room + 1e-6;
-                if (cut)
+                if (wrapped)
+                {
+                    // Two lines: the label on its own, and the whole note under it, each cut with … only where it alone is wider than the line.
+                    if (Broad(label) > room + 1e-6) label = Clipped(label, room);
+                    if (Broad(note!) > room + 1e-6) note = Clipped(note!, room);
+                }
+                else if (cut)
                 {
                     if (note is not null && Broad($"{label} {note[..1]}…") <= room + 1e-6) note = Clipped(note, room - Broad(label + " "));
                     else
@@ -1356,10 +1418,12 @@ public static partial class ChartSvg
                 }
                 var ink = Contrast.Ratio(end.Color, ground) >= 4.5 ? end.Color : style.Text;
                 var at = $"x='{N(x)}' y='{N(centre + 4)}'";
-                var halo = SvgWriter.E(label) + (note is null ? "" : $"<tspan font-weight='400'> {SvgWriter.E(note)}</tspan>");
-                var words = SvgWriter.E(label) + (note is null ? "" : $"<tspan font-weight='400'{noted}> {SvgWriter.E(note)}</tspan>");
+                var line = wrapped ? $"<tspan x='{N(x)}' dy='{N(EndWrap)}' font-weight='400'" : "<tspan font-weight='400'";
+                var space = wrapped ? "" : " ";
+                var halo = SvgWriter.E(label) + (note is null ? "" : $"{line}>{space}{SvgWriter.E(note)}</tspan>");
+                var words = SvgWriter.E(label) + (note is null ? "" : $"{line}{noted}>{space}{SvgWriter.E(note)}</tspan>");
                 w.Add($"<g class='lumen-end' font-size='12' font-weight='600'><text {at} fill='{ground}' stroke='{ground}' stroke-width='3' stroke-linejoin='round' aria-hidden='true' pointer-events='none'>{halo}</text>" +
-                    (!cut ? $"<text {at} fill='{ink}'>{words}</text>"
+                    (!(cut || wrapped) ? $"<text {at} fill='{ink}'>{words}</text>"
                         : $"<text {at} fill='{ink}' role='img' aria-label='{SvgWriter.E(full)}'><title>{SvgWriter.E(full)}</title>{words}</text>") + "</g>");
             }
         }

@@ -998,6 +998,12 @@ lines.Add($"titles/undrawn-190 {Hash(Render(line with { Title = "Not drawn", Des
 ChartSeries[] Flowed(params string[] names) => names.Select((name, i) => new ChartSeries(name, line.Series[0].Points.Select(p => p with { Y = p.Y + i * 6 }).ToArray())).ToArray();
 lines.Add($"legend/flow-short {Hash(Render(line with { Title = "Flowed legend", Width = 340, Height = 300, LegendFlow = true, Series = Flowed("You", "Leader", "Field", "Best") }))}");
 lines.Add($"legend/flow-long {Hash(Render(line with { Title = "Flowed legend", Width = 340, Height = 300, LegendFlow = true, Series = Flowed("You", "Midlands Women Masters Mountain Marathon", "Leader", "Invented Provincial Mountain Bike Marathon", "Best") }))}");
+// 0.53.0: end notes. A note the one-line rule would cut goes whole on a second line under the name.
+lines.Add($"ends/note-below-320 {Hash(Render(line with { Title = "Ends below", Width = 320, Height = 300, WrapEndNotes = true,
+    Series = [new("Rider", [new(0, 1), new(1, 2)]) { EndLabel = "Rider name", EndNote = "+12.3s" }, new("Other", [new(0, 5), new(1, 4)]) { EndLabel = "Other rider", EndNote = "+48.0s" }] }))}");
+lines.Add($"ends/note-below-crowded {Hash(Render(line with { Title = "Ends crowded", Width = 340, Height = 300, WrapEndNotes = true,
+    Series = new[] { ("Ann", "+1.2s"), ("Bo", "+3.4s"), ("Cy", "+12.3s behind"), ("Di", "+45.6s behind"), ("Ed", "+78.9s behind") }
+        .Select((n, k) => new ChartSeries(n.Item1, [new(0, 5 * k), new(1, 50 + 2.5 * k)]) { EndLabel = n.Item1, EndNote = n.Item2 }).ToArray() }))}");
 if (args.FirstOrDefault() == "dump-finish")
 {
     Directory.CreateDirectory(args[1]);

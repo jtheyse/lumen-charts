@@ -874,6 +874,15 @@ public sealed record ChartSpec
     /// the gradient-ID hash while false.
     /// </summary>
     public bool LegendFlow { get; init; }
+    /// <summary>
+    /// An end label's note moves to a second line under the name, in the same x, only where the one-line rule would cut it; the label keeps its
+    /// own line and its colour, and a note wider than the line is cut with an ellipsis there. Labels that take two lines are set apart
+    /// with the extra line counted, and the right margin asks for the wider of the name and the note rather than both together, where that
+    /// leaves the plot at least half the drawing (0.53.0). It applies to charts whose series can end in a line, an area or scatter points, so
+    /// it is refused on a sparkline, a donut, a radar, a heatmap, a histogram, a box, a violin, a gauge, a ring, a calendar, a timeline and a
+    /// strip. False by default, and left out of the gradient-ID hash while false.
+    /// </summary>
+    public bool WrapEndNotes { get; init; }
 }
 
 /// <summary>
