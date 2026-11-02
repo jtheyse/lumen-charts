@@ -335,7 +335,7 @@ public static partial class ChartSvg
         var key = refined ? 20 : 16;
         var room = spec.Width - 48 - key;
         var entries = new List<(double X, double Y, string[] Lines)>();
-        var rows = new List<(int First, int Count, double Height)>();
+        var rows = new List<(int Count, double Height)>();
         double x = 24, top = 0;
         for (var i = 0; i < spec.Series.Count; i++)
         {
@@ -346,11 +346,11 @@ public static partial class ChartSvg
             {
                 top += rows[^1].Height;
                 x = 24;
-                rows.Add((i, 0, 22));
+                rows.Add((0, 22));
             }
-            else if (rows.Count == 0) rows.Add((i, 0, 22));
+            else if (rows.Count == 0) rows.Add((0, 22));
             entries.Add((x, spec.Height + 10 + top, lines));
-            rows[^1] = (rows[^1].First, rows[^1].Count + 1, lines.Length > 1 ? 35 : rows[^1].Height);
+            rows[^1] = (rows[^1].Count + 1, lines.Length > 1 ? 35 : rows[^1].Height);
             x += entry;
         }
         return (entries, rows.Sum(r => r.Height));
@@ -1392,7 +1392,7 @@ public static partial class ChartSvg
             List<int> kept;
             double[] centres, offsets;
             double gap, tail;
-            (double Centre, bool Moved, double X, double Room) Place(int n)
+            (double Centre, bool Moved, double X, double Room) Slot(int n)
             {
                 var centre = centres[n];
                 var moved = Math.Abs(centre - set[kept[n]].End.Y) > 3;
@@ -1415,7 +1415,7 @@ public static partial class ChartSvg
                 var added = false;
                 for (var n = 0; n < kept.Count; n++)
                 {
-                    if (set[kept[n]].End.Series.EndNote is null || two.Contains(kept[n]) || Broad(set[kept[n]].Full) <= Place(n).Room + 1e-6) continue;
+                    if (set[kept[n]].End.Series.EndNote is null || two.Contains(kept[n]) || Broad(set[kept[n]].Full) <= Slot(n).Room + 1e-6) continue;
                     // A label takes its second line only where the labels kept, with that line, still fit the plot; else it is cut on one line as before.
                     var withLine = kept.Select(i => two.Contains(i) || i == kept[n] ? EndWrap : 0d).ToArray();
                     if (EndLines(kept.Count, gap, withLine) > high - low) continue;
@@ -1427,7 +1427,7 @@ public static partial class ChartSvg
             for (var n = 0; n < kept.Count; n++)
             {
                 var (end, _, full, _, _) = set[kept[n]];
-                var (centre, moved, x, room) = Place(n);
+                var (centre, moved, x, room) = Slot(n);
                 if (moved)
                     w.Line(end.X + end.Reach + 1, end.Y, x - 2, centre, $"stroke='{(Contrast.Ratio(end.Color, ground) >= 3 ? end.Color : style.Muted)}' stroke-width='1' stroke-linecap='round'{w.Fixed} aria-hidden='true'");
                 // The label names the series and the note only adds to it, so where the two do not fit the note is cut first, then left out,
@@ -1900,7 +1900,7 @@ public static partial class ChartSvg
     /// <summary>The height a horizontal bar chart with <see cref="ChartSpec.FitHeight"/> is drawn at: its rows, one a category, and the room
     /// round them the chart draws in, its title and description above, as <see cref="Headroom"/> moves them, and its axis or bare foot and
     /// source under, as <see cref="Floor"/> and a second source line keep them. The legend <see cref="Render"/> may add goes under that. A
-    /// heatmap is drawn at the height of its rows, each as tall as its tallest cell's written words need (<see cref="CellNeed"/>, plus 4),
+    /// heatmap is drawn at the height of its rows, each as tall as its tallest cell's written words need (<see cref="CellNeed"/>, plus 4, or plus 12 with <see cref="ChartSpec.PadFittedCells"/>),
     /// at least <see cref="HeatmapRow"/>, with <see cref="HeatmapBelow"/> under them, and no less than 240 (0.46.1; rows fitted to their
     /// words from 0.46.2). The rows are all as tall as the tallest one, or with <see cref="ChartSpec.FitEachRow"/> (0.52.0) each as tall as
     /// its own need, the heights of <see cref="HeatmapRowNeeds"/> added.</summary>

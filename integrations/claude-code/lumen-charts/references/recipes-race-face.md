@@ -1119,18 +1119,18 @@ byte[] SharePng(ChartSpec card)
     {
         probe.FromSvg(ChartSvg.Render(sized));
         float drawn = probe.Picture!.CullRect.Height;
-        if (drawn > 450) sized = sized with { Height = 450 - ((int)Math.Round(drawn) - 450) };
+        if (drawn > 450) sized = sized with { Height = Math.Max(card.DrawTitles ? 240 : 190, 450 - ((int)Math.Round(drawn) - 450)) };
     }
     using var skSvg = new SKSvg();
     skSvg.FromSvg(ChartSvg.Render(sized));
     using var stream = new MemoryStream();
-    skSvg.Save(stream, SKColor.Parse(card.Style.Background), SKEncodedImageFormat.Png, 100, 3f, 3f);
+    skSvg.Save(stream, SKColor.Parse(ChartSvg.ResolveStyle(card).Background), SKEncodedImageFormat.Png, 100, 3f, 3f);
     return stream.ToArray();
 }
 var shareCardPng = SharePng(seasonArc);
 ```
 
-- **360 by 450, drawn at 3.** The card is laid out at 360 x 450, so its words are phone-sized (title 17, labels 11 and 12) when the image is shown at phone width. Laid out at 1080 and shown at phone width, every word would be a third of that size and unreadable. Drawing the 360 x 450 layout at a scale of 3 gives a PNG 1080 pixels wide, sharp on a high-density screen. The static legend is drawn under `Height`, not inside it, and its rows depend only on the width, so `SharePng` renders twice: once at 450 to read the height the card drew, and again that much shorter, so the card is 450 with its legend and the PNG is exactly 1080 x 1350. The season arc's four names, one to a row, draw 538 tall at 450, so it is laid out again at 362; with `LegendFlow = true` (0.53.0) they share one row, 472 tall, and it is laid out at 428. Both are above the 240 floor of a titled chart. If a legend is so tall that `450 - (drawn - 450)` falls under 240 (about twelve one-line rows), Lumen refuses that height: shorten the names, set `LegendFlow`, or give the card a taller layout, and the PNG is taller than 1350 rather than losing its legend.
+- **360 by 450, drawn at 3.** The card is laid out at 360 x 450, so its words are phone-sized (title 17, labels 11 and 12) when the image is shown at phone width. Laid out at 1080 and shown at phone width, every word would be a third of that size and unreadable. Drawing the 360 x 450 layout at a scale of 3 gives a PNG 1080 pixels wide, sharp on a high-density screen. The static legend is drawn under `Height`, not inside it, and its rows depend only on the width, so `SharePng` renders twice: once at 450 to read the height the card drew, and again that much shorter, so the card is 450 with its legend and the PNG is exactly 1080 x 1350. The season arc's four names, one to a row, draw 538 tall at 450, so it is laid out again at 362; with `LegendFlow = true` (0.53.0) they share one row, 472 tall, and it is laid out at 428. Both are above the 240 floor of a titled chart. If a legend is so tall that `450 - (drawn - 450)` falls under 240 (190 with `DrawTitles` off; the legend is then taller than 210, about ten one-line rows of 22), the recipe clamps the height to that floor, so the PNG is taller than 1350 rather than losing its legend or throwing: shorten the names, set `LegendFlow`, or give the card a taller layout to keep 1350. The two-pass sizing is for a chart drawn at its `Height`; a spec with `FitHeight` overrides `Height`, so the second pass would change nothing.
 - **A rasteriser is not a browser; check the PNG for four things.** Lumen's SVG is complete without script, but these are the rasteriser's to support:
   - **CSS variables.** The root's `<style>` colours the gridlines and the muted text with `var(--lumen-grid)` and `var(--lumen-muted)`, and a heatmap cell's hairline is `stroke='var(--lumen-muted)'`.
   - **`currentColor`.** Text takes `fill='currentColor'` from the `color` in the root's `style` attribute.

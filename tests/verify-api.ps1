@@ -674,14 +674,29 @@ $r=Invoke-WebRequest "$BaseUrl/api/charts/graph/svg" -Method Post -ContentType a
 Verify ($r.StatusCode -eq 200) "A graph posted with a null title is drawn with 200 ($($r.StatusCode))"
 # 0.53.0: look changes. Each switch is taken under its camel-case name, and refused with its name where it cannot apply.
 $three='"series":[{"name":"A","points":[{"x":0,"y":1},{"x":1,"y":2}]},{"name":"B","points":[{"x":0,"y":2},{"x":1,"y":3}]},{"name":"C","points":[{"x":0,"y":3},{"x":1,"y":4}]}]'
-$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body ('{"title":"Flow","kind":"Line","legendFlow":true,'+$three+'}') -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200) "A three-series line chart posted with legendFlow is drawn with 200 ($($r.StatusCode))"
-$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":"Ends","kind":"Line","wrapEndNotes":true,"series":[{"name":"Rider","endLabel":"Rider name","endNote":"+12.3s","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}' -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200) "A line chart with an end label and note posted with wrapEndNotes is drawn with 200 ($($r.StatusCode))"
-$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":"Marks","kind":"Line","annotationLabelsAvoidMarks":true,"annotations":[{"axis":"Y","value":1.5,"label":"Goal"}],"series":[{"name":"S","points":[{"x":0,"y":1},{"x":1,"y":2}]}]}' -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200) "A line chart with an annotation posted with annotationLabelsAvoidMarks is drawn with 200 ($($r.StatusCode))"
-$r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body '{"title":"Pad","kind":"Heatmap","cellWidth":90,"cellText":true,"fitHeight":true,"padFittedCells":true,"series":[{"name":"Sprint","points":[{"x":0,"y":2.8,"label":"2025","subLabel":"/12 starts"},{"x":1,"y":3.1,"label":"2026"}]}]}' -SkipHttpErrorCheck
-Verify ($r.StatusCode -eq 200) "A fitted heatmap posted with padFittedCells is drawn with 200 ($($r.StatusCode))"
+function Post($body){Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body $body -SkipHttpErrorCheck}
+function ViewHeight($svg){[double]([regex]::Match($svg,"viewBox='[-\d.]+ [-\d.]+ [\d.]+ ([\d.]+)'").Groups[1].Value)}
+# legendFlow: four short series share a row at 340, so the legend is shorter and the drawing with it.
+$four='"series":[{"name":"A","points":[{"x":0,"y":1},{"x":1,"y":2}]},{"name":"B","points":[{"x":0,"y":2},{"x":1,"y":3}]},{"name":"C","points":[{"x":0,"y":3},{"x":1,"y":4}]},{"name":"D","points":[{"x":0,"y":4},{"x":1,"y":5}]}]'
+$flowOn=Post ('{"title":"Flow","kind":"Line","width":340,"legendFlow":true,'+$four+'}')
+$flowOff=Post ('{"title":"Flow","kind":"Line","width":340,'+$four+'}')
+Verify ($flowOn.StatusCode -eq 200 -and $flowOff.StatusCode -eq 200 -and (ViewHeight $flowOn.Content) -lt (ViewHeight $flowOff.Content)) "legendFlow with four short series at width 340 draws a shorter drawing than without it ($(ViewHeight $flowOn.Content) against $(ViewHeight $flowOff.Content))"
+# wrapEndNotes: at 320 two labelled series whose notes the edge would cut take a second line, a tspan with dy 14.
+$ends='"series":[{"name":"Rider","endLabel":"Rider name","endNote":"+12.3s","points":[{"x":0,"y":1},{"x":1,"y":2}]},{"name":"Other","endLabel":"Other","endNote":"+4.1s","points":[{"x":0,"y":5},{"x":1,"y":4}]}]'
+$wrapOn=Post ('{"title":"Ends","kind":"Line","width":320,"height":300,"wrapEndNotes":true,'+$ends+'}')
+$wrapOff=Post ('{"title":"Ends","kind":"Line","width":320,"height":300,'+$ends+'}')
+Verify ($wrapOn.StatusCode -eq 200 -and $wrapOn.Content.Contains("dy='14'") -and -not $wrapOff.Content.Contains("dy='14'") -and $wrapOn.Content -ne $wrapOff.Content) "wrapEndNotes at width 320 puts the second end-note line (dy='14') in the drawing, and the drawing differs from the one without it"
+# annotationLabelsAvoidMarks: the last points sit within 6 units of the level 255, so the label moves off today's spot.
+$power='"series":[{"name":"Power","markers":"Filled","points":['+((100,120,140,170,200,225,240,250,252,258,253,256|ForEach-Object -Begin {$i=0} -Process {"{`"x`":$i,`"y`":$_}";$i++}) -join ',')+']}]'
+$marksBody='"title":"Marks","kind":"Line","width":340,"height":300,"yMin":0,"yMax":300,"annotations":[{"axis":"Y","from":255,"label":"CP"}],'+$power
+$marksOn=Post ('{'+$marksBody+',"annotationLabelsAvoidMarks":true}')
+$marksOff=Post ('{'+$marksBody+'}')
+Verify ($marksOn.StatusCode -eq 200 -and $marksOff.StatusCode -eq 200 -and $marksOn.Content -ne $marksOff.Content) "annotationLabelsAvoidMarks with a level crowded by markers draws a different drawing from the one without it"
+# padFittedCells: a fitted heatmap row gets 8 more units round its words, so the drawing is taller.
+$padBody='"title":"Pad","kind":"Heatmap","cellWidth":90,"cellText":true,"fitHeight":true,"series":['+((1..8|ForEach-Object {'{"name":"Row '+$_+'","points":[{"x":0,"y":2.8,"label":"2025","subLabel":"/12 starts"},{"x":1,"y":3.1,"label":"2026"}]}'}) -join ',')+']'
+$padOn=Post ('{'+$padBody.Replace('"fitHeight":true,','"fitHeight":true,"padFittedCells":true,')+'}')
+$padOff=Post ('{'+$padBody+'}')
+Verify ($padOn.StatusCode -eq 200 -and $padOff.StatusCode -eq 200 -and (ViewHeight $padOn.Content) -gt (ViewHeight $padOff.Content)) "padFittedCells draws a fitted heatmap taller than without it ($(ViewHeight $padOn.Content) against $(ViewHeight $padOff.Content))"
 $donut='"kind":"Donut","series":[{"name":"Share","points":[{"x":0,"y":3,"label":"A"},{"x":1,"y":4,"label":"B"}]}]'
 $r=Invoke-WebRequest "$BaseUrl/api/charts/svg" -Method Post -ContentType application/json -Body ('{"title":"Donut",'+$donut+',"legendFlow":true}') -SkipHttpErrorCheck
 Verify ($r.StatusCode -eq 400 -and $r.RawContent.Contains('LegendFlow')) 'legendFlow on a donut is refused with 400 naming it'
