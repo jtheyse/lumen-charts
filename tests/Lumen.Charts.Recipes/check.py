@@ -23,7 +23,7 @@ makers = set(re.findall(r"\bChartSpec (\w+)\(", recipes))
 built = set(re.findall(r"\bvar (\w+) = \w+Chart\.Build\([^;]*?\)!;", recipes))
 specs = sorted(set(re.findall(r"\bvar (\w+) = new ChartSpec\b", recipes)) | {name for name, maker in re.findall(r"\bvar (\w+) = (\w+)\(", recipes) if maker in makers} | built)
 
-program = '\n'.join(usings) + '\n' + inputs + recipes
+program = '#nullable enable\n' + '\n'.join(usings) + '\n' + inputs + recipes
 program += 'var specs = new (string, ChartSpec)[] {' + ','.join(f'("{n}", {n})' for n in specs) + '};\n'
 program += ('foreach (var (name, spec) in specs) { var svg = ChartSvg.Render(spec); '
             'Directory.CreateDirectory("obj/out"); File.WriteAllText(Path.Combine("obj/out", name + ".svg"), svg); '
