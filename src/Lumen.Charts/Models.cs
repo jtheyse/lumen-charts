@@ -879,7 +879,7 @@ public sealed record ChartSpec
     /// own line and its colour, and a note wider than the line is cut with an ellipsis there. Labels that take two lines are set apart
     /// with the extra line counted, and the right margin asks for the wider of the name and the note rather than both together, where that
     /// leaves the plot at least half the drawing (0.53.0); it may rise above that half to fit the widest end-label name whole, as far as the
-    /// margin that leaves the plot two fifths of the drawing, and a note never raises it (0.53.1). It applies to charts whose series can end in a line, an area or scatter points, so
+    /// margin that leaves the plot two fifths of the drawing, and a note never raises it past that half (0.53.1). It applies to charts whose series can end in a line, an area or scatter points, so
     /// it is refused on a sparkline, a donut, a radar, a heatmap, a histogram, a box, a violin, a gauge, a ring, a calendar, a timeline and a
     /// strip. False by default, and left out of the gradient-ID hash while false.
     /// </summary>

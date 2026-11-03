@@ -1286,7 +1286,7 @@ public static partial class ChartSvg
     /// width. None where no series has one. Under <see cref="ChartSpec.WrapEndNotes"/> (0.53.0) a series whose label and note together
     /// ask more than that cap asks only for the wider of the two, since its note goes on a second line where it would be cut. Under it too
     /// (0.53.1) the cap rises to the widest name's own ask, its lead, step and pad included; it never rises past the margin that leaves the
-    /// plot two fifths of the drawing, and notes never raise it. Where no name asks more than half, the result is 0.53.0's.
+    /// plot two fifths of the drawing, and notes never raise it past the half cap. Where no name asks more than the half cap, the result is 0.53.0's.
     /// <see cref="Margins"/> calls it with <c>Width = MaxWidth</c> for a column chart with a
     /// fixed pitch, which ignores its <c>Width</c>, so the cap never bites there and that chart's end-label room does not depend on <c>Width</c>.</summary>
     private static double Ending(ChartSpec s, double left)
