@@ -9,6 +9,7 @@ public static class Probe
     {
         if (args.Length >= 3 && args[1] == "heatmaps") { Heatmaps(args[2]); return; }
         if (args.Length >= 3 && args[1] == "lines") { Lines(args[2]); return; }
+        if (args.Length >= 3 && args[1] == "ends") { Ends(args[2]); return; }
         var newYork = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
         var kolkata = TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
 
@@ -202,6 +203,94 @@ public static class Probe
             {
                 var svg = ChartSvg.Render(spec, includeLegend);
                 output.Append(i).Append(' ').Append(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(svg)))[..16]);
+            }
+            catch (Exception)
+            {
+                output.Append(i).Append(" refused");
+            }
+            output.Append((char)10);
+        }
+        File.WriteAllText(path, output.ToString());
+    }
+
+    // "ends <out.txt>" draws 10,000 random line, area, scatter and column charts from a fixed seed with 0.53.0's API only, WrapEndNotes on in every
+    // one, an end label of 1 to 24 letters on every series that can have one, and writes "i hash" for each, with " touched" after the hash where
+    // the 0.53.1 rule can apply: the chart has no CellWidth and some end label's name asks (lead, step, name, pad) more than the half cap of an
+    // upright chart with a left axis, 76 here since no chart has a right axis or a secondary series. So the same file from v0.53.0's code and
+    // from newer code can be compared line by line: every line without " touched" must be equal; touched lines may differ. A spec that throws
+    // writes "i refused" (both runs must agree).
+    static void Ends(string path)
+    {
+        var random = new Random(531);
+        bool Flip() => random.Next(2) == 0;
+        const string letters = "EaRmw ";
+        string Name()
+        {
+            var length = random.Next(1, 25);
+            var text = new StringBuilder();
+            for (var c = 0; c < length; c++)
+                text.Append(c == 0 || c == length - 1 ? letters[random.Next(letters.Length - 1)] : letters[random.Next(letters.Length)]);
+            return text.ToString();
+        }
+        // A copy of ChartSvg.Broad: .3 an em for . , : and a space, .36 for -, .9 for m M w W, .62 otherwise, at 12 px.
+        static double B(string text) => text.Sum(c => c is '.' or ',' or ':' or ' ' ? .3 : c == '-' ? .36 : c is 'm' or 'M' or 'w' or 'W' ? .9 : .62) * 12;
+        var output = new StringBuilder();
+        for (var i = 0; i < 10000; i++)
+        {
+            var choice = random.Next(4);
+            var column = choice == 3;
+            var kind = choice switch { 0 => ChartKind.Line, 1 => ChartKind.Area, 2 => ChartKind.Scatter, _ => ChartKind.Column };
+            var count = random.Next(1, 9);
+            var length = random.Next(2, 31);
+            var notes = random.Next(3);
+            var markers = random.Next(4);
+            var highlight = Flip();
+            var valueLabels = Flip();
+            var cellWidth = column && random.Next(4) == 0 ? 30 + random.Next(30) : (int?)null;
+            var series = new List<ChartSeries>();
+            var asks = new List<double>();
+            for (var s = 0; s < count; s++)
+            {
+                var points = Enumerable.Range(0, length).Select(x => new ChartPoint(x, random.Next(6) == 0 ? null : Math.Round(5 + random.NextDouble() * 40, 1), x % 4 == 0 ? $"P{x}" : null)).ToArray();
+                var mark = column ? (s == 0 ? ChartKind.Line : ChartKind.Column) : kind;
+                var lined = mark is ChartKind.Line or ChartKind.Area;
+                var item = new ChartSeries($"Series {s}", points)
+                {
+                    Markers = lined || mark == ChartKind.Scatter ? (MarkerStyle)(mark == ChartKind.Scatter && markers == 1 ? 0 : markers) : MarkerStyle.Auto,
+                    HighlightLast = lined && highlight,
+                    ValueLabels = mark != ChartKind.Area && valueLabels,
+                };
+                if (column && s == 0) item = item with { Kind = ChartKind.Line };
+                if (mark != ChartKind.Column)
+                {
+                    var name = Name();
+                    item = item with { EndLabel = name };
+                    asks.Add((item.HighlightLast ? 14 : 8) + 6 + B(name) + 4);
+                    if (notes == 2 || (notes == 1 && Flip())) item = item with { EndNote = $"+{random.Next(0, 100)}.{random.Next(10)}s" };
+                }
+                series.Add(item);
+            }
+            var style = (random.Next(3) switch { 0 => ChartStyle.Light, 1 => ChartStyle.Dark, _ => ChartStyle.Midnight }) with { Finish = Flip() ? ChartFinish.Classic : ChartFinish.Refined };
+            var width = random.Next(320, 701);
+            var spec = new ChartSpec
+            {
+                Kind = kind,
+                Title = "Invented results",
+                Description = "A made-up season",
+                Width = width,
+                Height = random.Next(240, 601),
+                Series = series,
+                Style = style,
+                WrapEndNotes = true,
+                CellWidth = cellWidth,
+            };
+            var touched = cellWidth is null && asks.Any(ask => ask > width - 76 - width / 2d);
+            var includeLegend = Flip();
+            try
+            {
+                var svg = ChartSvg.Render(spec, includeLegend);
+                output.Append(i).Append(' ').Append(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(svg)))[..16]);
+                if (touched) output.Append(" touched");
             }
             catch (Exception)
             {

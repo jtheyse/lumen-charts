@@ -1284,19 +1284,26 @@ public static partial class ChartSvg
     /// <summary>The right margin end labels ask for: the widest label and note, by the generous estimate for 12 px text, after its lead and
     /// the step a label moved off its point takes, and the room kept from the edge; capped so the plot keeps at least half the drawing's
     /// width. None where no series has one. Under <see cref="ChartSpec.WrapEndNotes"/> (0.53.0) a series whose label and note together
-    /// ask more than that cap asks only for the wider of the two, since its note goes on a second line where it would be cut. <see cref="Margins"/> calls it with <c>Width = MaxWidth</c> for a column chart with a
+    /// ask more than that cap asks only for the wider of the two, since its note goes on a second line where it would be cut. Under it too
+    /// (0.53.1) the cap rises to the widest name's own ask, its lead, step and pad included; it never rises past the margin that leaves the
+    /// plot two fifths of the drawing, and notes never raise it. Where no name asks more than half, the result is 0.53.0's.
+    /// <see cref="Margins"/> calls it with <c>Width = MaxWidth</c> for a column chart with a
     /// fixed pitch, which ignores its <c>Width</c>, so the cap never bites there and that chart's end-label room does not depend on <c>Width</c>.</summary>
     private static double Ending(ChartSpec s, double left)
     {
         var need = 0d;
+        var names = 0d;
         var cap = s.Width - left - s.Width / 2d;
         foreach (var series in s.Series)
             if (series?.EndLabel is not null)
             {
                 var one = Lead(series) + EndShift + Broad(EndText(series)) + EndPad;
                 need = Math.Max(need, !s.WrapEndNotes || one <= cap ? one : Lead(series) + EndShift + Math.Max(Broad(series.EndLabel), Broad(series.EndNote ?? "")) + EndPad);
+                names = Math.Max(names, Lead(series) + EndShift + Broad(series.EndLabel) + EndPad);
             }
-        return Math.Min(need, cap);
+        if (!s.WrapEndNotes) return Math.Min(need, cap);
+        var wide = s.Width - left - 2d * s.Width / 5;
+        return Math.Min(need, Math.Max(cap, Math.Min(names, wide)));
     }
     /// <summary>12 px text cut to <paramref name="room"/> pixels between its letters, with <c>…</c> after it, the spaces and punctuation the
     /// cut would leave before the ellipsis dropped; one letter at least.</summary>

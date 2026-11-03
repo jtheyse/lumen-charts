@@ -13337,6 +13337,8 @@ ChartSpec Wrap53(int width,bool wrap,string name="Rider name",string note="+12.3
     Series=[new("Rider",[new(0,1),new(1,2)]){EndLabel=name,EndNote=note},..(other?new[]{new ChartSeries("Other",[new(0,5),new(1,4)]){EndLabel="Other",EndNote="+4.1s"}}:[])]};
 double PlotRight53(string svg){var clip=PaneClips(XDocument.Parse(svg))[0];return Attr(clip,"x")+Attr(clip,"width");}
 // A label's baseline and, where it has one, the baseline of its note line, from the words' copy of each end label.
+// A label's own words: its text nodes, without the <title> and the note tspan.
+string L53(XElement t)=>string.Concat(t.Nodes().OfType<XText>().Select(x=>x.Value));
 List<(XElement Text,double Y,XElement? Note)> EndBlocks53(string svg)=>Ends38(XDocument.Parse(svg)).Select(g=>Words38(g)).Select(t=>(t,Y53(t),t.Elements(ns+"tspan").FirstOrDefault(s=>s.Attribute("dy")?.Value=="14"))).OrderBy(b=>b.Item2).ToList();
 Test("End notes 0.53.0: at 320 the note goes whole on a second line",()=>{
     var svg=ChartSvg.Render(Wrap53(320,true));
@@ -13346,15 +13348,18 @@ Test("End notes 0.53.0: at 320 the note goes whole on a second line",()=>{
     Check(rider.Note is not null&&rider.Note.Value=="+12.3s"&&rider.Note.Attribute("x")!.Value==rider.Text.Attribute("x")!.Value,"a dy=14 tspan reading +12.3s: "+rider.Text);
     var halo=Ends38(XDocument.Parse(svg)).Select(g=>g.Elements(ns+"text").First()).First(t=>t.Value.StartsWith("Rider"));
     Check(halo.Elements(ns+"tspan").Any(s=>s.Attribute("dy")?.Value=="14"&&s.Value=="+12.3s"),"the halo copy carries both lines");
-    Check(blocks.Count==2&&blocks.All(b=>b.Note is not null),"both are cut at 320, so both take two lines");
+    // 0.53.1: the margin rises to 91.92, so 'Rider name' is whole (room 79.92) and 'Other +4.1s' (74.16) fits its 79.92 on one line.
+    Check(blocks.Count==2&&blocks.Count(b=>b.Note is not null)==1&&ReferenceEquals(blocks.Single(b=>b.Note is not null).Text,rider.Text),"only Rider's note takes a second line");
+    Check(L53(rider.Text)=="Rider name","Rider name is whole: "+L53(rider.Text));
     var out52=Outside52(svg);
     Check(out52.Count==0,string.Join("; ",out52.Take(3)));
 });
 Test("End notes 0.53.0: the plot widens where the label alone fits under the cap",()=>{
     // At 320 the cap is 320 - 76 - 160 = 84. 'Rider' with its note asks more than that, but 'Rider' alone asks 8 + 6 + its width + 4.
     Check(PlotRight53(ChartSvg.Render(Wrap53(320,true,"Rider",other:false)))>PlotRight53(ChartSvg.Render(Wrap53(320,false,"Rider",other:false))),"wider with 'Rider'");
-    // 'Rider name' alone asks 91.9 (8 + 6 + 73.92 + 4), which meets the cap, so the plot is as wide as today.
-    Check(PlotRight53(ChartSvg.Render(Wrap53(320,true,other:false)))==PlotRight53(ChartSvg.Render(Wrap53(320,false,other:false))),"equal with 'Rider name'");
+    // 'Rider name' alone asks 91.92 (8 + 6 + 73.92 + 4). 0.53.1 lets the margin rise to it, so the plot is 7.92 narrower than with the switch off.
+    var delta=PlotRight53(ChartSvg.Render(Wrap53(320,true,other:false)))-PlotRight53(ChartSvg.Render(Wrap53(320,false,other:false)));
+    Check(Math.Abs(delta+7.92)<0.01,"7.92 narrower with 'Rider name': "+delta);
 });
 Test("End notes 0.53.0: a chart with nothing cut is byte-identical",()=>{
     Check(ChartSvg.Render(Wrap53(640,true))==ChartSvg.Render(Wrap53(640,false)),"640 renders equal with and without the switch");
@@ -13446,20 +13451,23 @@ Test("End notes 0.53.0: Spread with one-line offsets equals 0.52.0's",()=>{
         for(var i=0;i<count;i++) Check(now[i]==then[i],$"round {round}, label {i}: {now[i]} != {then[i]}");
     }
 });
-// Two labels 16 apart at 320, the plot 146 tall from y 78 to 224 over 0..146, so a value v stands at y 224 - v. 'Other rider' asks the margin
-// its cap of 84, so a label has 72 where it stands and 66 once it has moved and stepped right.
+// Two labels 16 apart at 320, the plot 146 tall from y 78 to 224 over 0..146, so a value v stands at y 224 - v. 'Other rider' (78) asks a
+// margin of 96 (0.53.1), so a label has 84 where it stands and 78 once it has moved and stepped right.
 ChartSpec Second53(bool wrap,string aNote="+4.1s")=>new ChartSpec{Title="Second",Kind=ChartKind.Line,Width=320,Height=300,WrapEndNotes=wrap,YMin=0,YMax=146,
-    Series=[new("A",[new(0,100),new(1,100)]){EndLabel="Other rider",EndNote=aNote},new("B",[new(0,84),new(1,84)]){EndLabel="Ann",EndNote="+12.3s"}]};
+    Series=[new("A",[new(0,100),new(1,100)]){EndLabel="Other rider",EndNote=aNote},new("B",[new(0,84),new(1,84)]){EndLabel="Anna",EndNote="+123.4s"}]};
 Test("End notes 0.53.0: a second pass marks another label",()=>{
-    // Ann +12.3s is 66.72 wide: it fits the 72 where it stands, but not the 66 it has once it moves and steps right. With 'Other rider'
-    // on one line (no note) Ann stands where it is and is written on one line.
+    // Anna +123.4s is 81.6 wide (29.76 + 3.6 + 48.24): it fits the 84 where it stands, but not the 78 it has once it moves and steps right.
+    // With 'Other rider' on one line (no note) Anna stands where it is and is written on one line.
     var alone=EndBlocks53(ChartSvg.Render(Second53(true,aNote:null!)));
-    Check(alone.Count==2&&alone.All(b=>b.Note is null)&&alone.Any(b=>X53(b.Text)==244),"unmoved and on one line: "+string.Join(" ",alone.Select(b=>b.Text.ToString(SaveOptions.DisableFormatting))));
-    // Once 'Other rider' takes a second line, Ann is 12 further down than it was set, so it moves, steps right by 6 and is cut: a second pass.
+    Check(alone.Count==2&&alone.All(b=>b.Note is null)&&alone.Any(b=>X53(b.Text)==232),"unmoved and on one line: "+string.Join(" ",alone.Select(b=>b.Text.ToString(SaveOptions.DisableFormatting))));
+    // Once 'Other rider' takes a second line, Anna is 12 further down than it was set, so it moves, steps right by 6 and is cut: a second pass.
     var blocks=EndBlocks53(ChartSvg.Render(Second53(true)));
     Check(blocks.Count==2&&blocks.All(b=>b.Note is not null),"both take two lines: "+string.Join(" ",blocks.Select(b=>b.Text.ToString(SaveOptions.DisableFormatting))));
-    Check(blocks.All(b=>X53(b.Text)==250),"both stepped right by 6: "+string.Join(",",blocks.Select(b=>X53(b.Text))));
+    Check(blocks.All(b=>X53(b.Text)==238),"both stepped right by 6: "+string.Join(",",blocks.Select(b=>X53(b.Text))));
     Check(string.Join(",",blocks.Select(b=>Y53(b.Text)))=="122,150","Y values: "+string.Join(",",blocks.Select(b=>Y53(b.Text))));
+    // Review focus 5: A moved off its point, so its room is margin - 18 = 78 = Broad('Other rider'); it stays whole.
+    var a=blocks.Single(b=>(b.Text.Attribute("aria-label")?.Value??"").StartsWith("Other"));
+    Check(L53(a.Text)=="Other rider","A's label is whole though it moved: "+L53(a.Text));
     Check(Outside52(ChartSvg.Render(Second53(true))).Count==0,"inside the drawing");
 });
 Test("End notes 0.53.0: a pane too thin for a second line keeps its label on one line and renders",()=>{
@@ -13477,6 +13485,87 @@ Test("End notes 0.53.0: a pane too thin for a second line keeps its label on one
             // Off, the same chart is as 0.52.0 drew it: nothing is wrapped.
             Check(EndBlocks53(ChartSvg.Render(Thin(false))).All(b=>b.Note is null),"off: one line");
         }
+});
+// 0.53.1: room for long end-label names. Under WrapEndNotes the margin may rise above the half cap to the widest name's own ask, bounded so the
+// plot keeps two fifths of the drawing. Wrap53 with other:false has one series, so its margin is that label's ask and its last point never moves.
+Test("End label room 0.53.1: at 320 'Rider name' is whole with its note under it",()=>{
+    var svg=ChartSvg.Render(Wrap53(320,true,other:false));
+    var b=EndBlocks53(svg).Single();
+    Check(L53(b.Text)=="Rider name","whole: "+L53(b.Text));
+    Check(Math.Abs(X53(b.Text)-236.08)<1e-6,"x 236.08: "+X53(b.Text));
+    Check(b.Note is not null&&b.Note.Value=="+12.3s","note under it: "+b.Text);
+    var cut=EndBlocks53(ChartSvg.Render(Wrap53(320,false,other:false))).Single();
+    Check(L53(cut.Text).StartsWith("Rider na")&&L53(cut.Text).EndsWith("…"),"off, the 0.53.0 cut: "+L53(cut.Text));
+    var out52=Outside52(svg);
+    Check(out52.Count==0,string.Join("; ",out52.Take(3)));
+});
+Test("End label room 0.53.1: at 340 and 360 'Rider name' keeps 0.53.0's margin",()=>{
+    foreach(var (w,x) in new[]{(340,256.08),(360,276.08)})
+    {
+        var b=EndBlocks53(ChartSvg.Render(Wrap53(w,true,other:false))).Single();
+        Check(Math.Abs(X53(b.Text)-x)<1e-6&&L53(b.Text)=="Rider name",$"{w}: x {X53(b.Text)}");
+    }
+});
+Test("End label room 0.53.1: a 14-letter name at 320, 340 and 360",()=>{
+    foreach(var (w,text,x,off) in new[]{(320,"Vandermeulen…",212d,"Vanderme…"),(340,"Vandermeulenko",222.48,"Vandermeu…"),(360,"Vandermeulenko",242.48,"Vandermeul…")})
+    {
+        var b=EndBlocks53(ChartSvg.Render(Wrap53(w,true,"Vandermeulenko",other:false))).Single();
+        Check(L53(b.Text)==text&&Math.Abs(X53(b.Text)-x)<1e-6,$"{w}: '{L53(b.Text)}' x {X53(b.Text)}");
+        Check(b.Note is not null&&b.Note.Value=="+12.3s","note whole under it at "+w);
+        var o=L53(EndBlocks53(ChartSvg.Render(Wrap53(w,false,"Vandermeulenko",other:false))).Single().Text);
+        Check(o==off,$"{w} off: "+o);
+    }
+});
+Test("End label room 0.53.1: the plot keeps two fifths of the drawing",()=>{
+    var name=new string('E',24);
+    var delta=PlotRight53(ChartSvg.Render(Wrap53(320,true,name,other:false)))-PlotRight53(ChartSvg.Render(Wrap53(320,false,name,other:false)));
+    Check(Math.Abs(delta+32)<0.01,"32 narrower (116 against 84): "+delta);
+    var b=EndBlocks53(ChartSvg.Render(Wrap53(320,true,name,other:false))).Single();
+    Check(L53(b.Text).EndsWith("…"),"cut: "+L53(b.Text));
+    Check(X53(b.Text)+ChartSvg.Broad(L53(b.Text))<=316+1e-6,"inside 316: "+(X53(b.Text)+ChartSvg.Broad(L53(b.Text))));
+});
+Test("End label room 0.53.1: a note never raises the margin",()=>{
+    // 'Rider name' asks 91.92 whatever its note: a note wider than the margin is cut on its own line and adds nothing to it.
+    var a=PlotRight53(ChartSvg.Render(Wrap53(320,true,"Rider name","+12.3s behind the leader",other:false)));
+    var b=PlotRight53(ChartSvg.Render(Wrap53(320,true,"Rider name","+1s",other:false)));
+    Check(a==b,$"equal: {a} {b}");
+    // A short name with a long note keeps 0.53.0's margin, the half cap: nothing rises past it.
+    var c=PlotRight53(ChartSvg.Render(Wrap53(320,true,"Ann","+12.3s behind the leader",other:false)));
+    var d=PlotRight53(ChartSvg.Render(Wrap53(320,false,"Ann","+12.3s behind the leader",other:false)));
+    Check(c==d,$"Ann: on equals off: {c} {d}");
+});
+Test("End label room 0.53.1: a highlighted last point",()=>{
+    var spec=Wrap53(320,true,other:false);
+    spec=spec with{Series=[spec.Series[0] with{HighlightLast=true}]};
+    var svg=ChartSvg.Render(spec);
+    var b=EndBlocks53(svg).Single();
+    // A highlighted last point widens its pane's clip by a bleed of 12 (ChartSvg.cs:892), so the plot's right edge is the clip's less 12.
+    var right=PlotRight53(svg)-12;
+    Check(L53(b.Text)=="Rider name","whole: "+L53(b.Text));
+    Check(Math.Abs(X53(b.Text)-(right+14))<1e-6,$"x {X53(b.Text)} = plot right {right} + 14");
+    Check(Math.Abs(320-right-97.92)<0.01,"margin 97.92: "+(320-right));
+});
+Test("End label room 0.53.1: a long name in a lower pane widens every pane",()=>{
+    ChartSpec Lower(bool wrap)=>new ChartSpec{Title="Panes",Kind=ChartKind.Line,Width=320,Height=420,WrapEndNotes=wrap,Panes=[new(){Label="Lower",Weight=1}],
+        Series=[new("Top",[new(0,10),new(1,12)]),new("Rider",[new(0,1),new(1,2)]){Pane=1,EndLabel="Rider name",EndNote="+12.3s"}]};
+    var on=PaneClips(XDocument.Parse(ChartSvg.Render(Lower(true))));
+    var off=PaneClips(XDocument.Parse(ChartSvg.Render(Lower(false))));
+    double Right(XElement c)=>Attr(c,"x")+Attr(c,"width");
+    Check(Math.Abs(Right(on[0])-Right(on[1]))<1e-6,$"clips equal: {Right(on[0])} {Right(on[1])}");
+    Check(Math.Abs(Right(on[0])-Right(off[0])+7.92)<0.01&&Math.Abs(Right(on[1])-Right(off[1])+7.92)<0.01,$"7.92 narrower: {Right(on[0])-Right(off[0])}, {Right(on[1])-Right(off[1])}");
+});
+Test("End label room 0.53.1: a thin pane keeps one line, now whole",()=>{
+    foreach(var finish in new[]{true,false})
+    {
+        ChartSpec Thin(){var s=new ChartSpec{Title="Thin",Kind=ChartKind.Line,Width=320,Height=300,WrapEndNotes=true,Panes=[new(){Weight=.05}],
+            Series=[new("Top",[new(0,10),new(1,12)]),new("Rider",[new(0,1),new(1,2)]){Pane=1,EndLabel="Rider name",EndNote="+12.3s"}]};return finish?s:Classic(s);}
+        var svg=ChartSvg.Render(Thin());
+        var b=EndBlocks53(svg).Single();
+        Check(L53(b.Text)=="Rider name"&&b.Note is null&&!b.Text.Elements(ns+"tspan").Any(),"whole on one line, note left out: "+b.Text);
+        Check((string?)b.Text.Attribute("role")=="img"&&b.Text.Attribute("aria-label")!.Value=="Rider name +12.3s","role and name: "+b.Text);
+        var out52=Outside52(svg);
+        Check(out52.Count==0,string.Join("; ",out52.Take(3)));
+    }
 });
 // 0.53.0: annotation labels. AnnotationLabelsAvoidMarks records the marks a refined pane draws and sets a reference's label on the first of its
 // spots that meets no mark, no piece of a line and no value label; where none is clear the label keeps the spot it has without the switch.
