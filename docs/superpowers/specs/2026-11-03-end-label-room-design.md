@@ -129,7 +129,7 @@ The sentence gives both: "taller than 210, about ten one-line rows of 22, or 260
       - at 360 it is whole, with `x` 242.48;
       - each note is whole under it.
     - A 24-character name at 320: the plot is exactly two fifths of the drawing. Its right edge is 32 left of the switch-off one's (the margin is 116 against 84).
-    - Notes never drive it: "Ann" with a 24-character note at 320 asks the same margin as "Ann" with "+1s". Both are under the half cap, so both equal 0.53.0's rule.
+    - Notes never raise it past the half cap: "Rider name" with a 24-character note at 320 gets the same margin as "Rider name" with "+1s" (the name's 91.92), and "Ann" with a 24-character note gets the half cap with the switch on or off, as in 0.53.0 (a note still raises the margin up to the half cap, as it always did).
     - With `HighlightLast`, "Rider name" at 320 starts 14 right of its point and is whole: the margin is 97.92.
     - In a two-pane chart, a long name in pane 1 widens pane 0's plot by the same amount: the clips' right edges are equal.
     - In a pane too thin for a second line (0.53.0's thin-pane chart), "Rider name" now reads whole on one line, its note left out.
